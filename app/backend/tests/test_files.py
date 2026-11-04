@@ -112,7 +112,7 @@ def test_docs_only_for_leads(client, fake):
 def test_objects_from_bitrix(client, fake):
     from artgame import sync_objects
     deals = [{"ID": "812", "TITLE": "Кафе Самал ", "STAGE_ID": "FINAL_INVOICE", "CATEGORY_ID": "0"},
-             {"ID": "640", "TITLE": "Школа", "STAGE_ID": "WON", "CATEGORY_ID": "0"}]
+             {"ID": "640", "TITLE": "Школа", "STAGE_ID": "WON", "CATEGORY_ID": "0", "UF_CRM_ARTGAME_PROJECT_FOLDER_ID": "fold640"}]
     with db.pool.connection() as c:
         assert sync_objects.upsert(c, deals) == [812, 640]
         assert sync_objects.upsert(c, deals) == []
@@ -121,7 +121,8 @@ def test_objects_from_bitrix(client, fake):
     assert sync_objects.split_title("525", "525 · РЕСТОРАН ВОК ШЫМПЛАЗА — ШЫМКЕНТ") == ("РЕСТОРАН ВОК ШЫМПЛАЗА", "ШЫМКЕНТ")
     assert sync_objects.split_title("1213", "1213 · AKNUR - НОВОГОДНЯЯ РОСПИСЬ ОКОН — АСТАНА") == ("AKNUR - НОВОГОДНЯЯ РОСПИСЬ ОКОН", "АСТАНА")
     with db.pool.connection() as c:
-        assert c.execute("SELECT status FROM objects WHERE id=640").fetchone()["status"] == "done"
+        o640 = c.execute("SELECT status, drive_folder FROM objects WHERE id=640").fetchone()
+        assert o640["status"] == "done" and o640["drive_folder"] == "fold640"
         o = c.execute("SELECT * FROM objects WHERE id=812").fetchone()
         drive.ensure_folders(c, o)
         assert c.execute("SELECT folders FROM objects WHERE id=812").fetchone()["folders"]["design"] == "deal-812/Дизайн"

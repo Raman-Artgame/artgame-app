@@ -13,6 +13,7 @@ from .config import settings
 CATEGORY = 0
 ACTIVE = ("FINAL_INVOICE", "UC_AV00QK", "UC_BMKDS4")
 DONE = ("WON",)
+FOLDER_FIELD = "UF_CRM_ARTGAME_PROJECT_FOLDER_ID"  # папку сделки уже создаёт DRIVE01 — берём её, не плодим вторую
 
 
 class Gateway:
@@ -68,7 +69,7 @@ def fetch_deals() -> list[dict]:
     while start is not None:
         j = g.bitrix_read("crm.deal.list", {
             "filter": {"CATEGORY_ID": CATEGORY, "STAGE_ID": list(ACTIVE + DONE)},
-            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID"], "start": start})
+            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD], "start": start})
         if isinstance(j, list):  # шлюз может вернуть сразу список
             out += j
             break
@@ -95,12 +96,13 @@ def upsert(conn, deals: list[dict]) -> list[int]:
         status = "done" if d["STAGE_ID"] in DONE else "active"
         title, city = split_title(d["ID"], d["TITLE"])
         row = conn.execute(
-            """INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, synced_at)
-               VALUES (%s,%s,%s,%s,%s,%s,now())
+            """INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,now())
                ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, city=EXCLUDED.city, bitrix_stage=EXCLUDED.bitrix_stage,
+                   drive_folder=coalesce(objects.drive_folder, EXCLUDED.drive_folder),
                    status=CASE WHEN objects.status='archived' THEN 'archived' ELSE EXCLUDED.status END, synced_at=now()
                RETURNING (xmax = 0) AS inserted""",
-            (int(d["ID"]), title, city, d["STAGE_ID"], int(d["CATEGORY_ID"]), status)).fetchone()
+            (int(d["ID"]), title, city, d["STAGE_ID"], int(d["CATEGORY_ID"]), status, d.get(FOLDER_FIELD) or None)).fetchone()
         if row["inserted"]:
             new.append(int(d["ID"]))
     return new
@@ -115,7 +117,7 @@ def main():
     with p.connection() as conn:
         new = upsert(conn, deals)
         made = 0
-        for o in conn.execute("SELECT * FROM objects WHERE status='active' AND id<>0 AND (drive_folder IS NULL OR folders='{}')").fetchall():
+        for o in conn.execute("SELECT * FROM objects WHERE status='active' AND id<>0 AND folders='{}'").fetchall():
             try:
                 drive.ensure_folders(conn, o)
                 made += 1
