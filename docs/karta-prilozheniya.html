@@ -1,0 +1,352 @@
+<title>Карта приложения ARTGAME</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: одна колонка ~760px, разделы-«уровни» с номером там, где порядок важен (план переезда) */
+:root{
+  --bg:#f6f7fb; --surface:#ffffff; --fg:#1b1d2a; --muted:#5c6178; --line:#dfe2ee;
+  --accent:#0a9f9a; --accent-soft:#e0f4f3;
+  --ok:#2f8a4a; --ok-soft:#e3f3e7; --warn:#b26a00; --warn-soft:#fbefd9; --bad:#b3363a; --bad-soft:#f8e1e2; --proto:#5b4fc4; --proto-soft:#ebe8fb;
+  --f-display:"Unbounded","Golos Text",system-ui,sans-serif;
+  --f-body:"Golos Text",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12131c; --surface:#1b1d29; --fg:#e9eaf3; --muted:#9aa0b8; --line:#2c2f40;
+  --accent:#3fd0c9; --accent-soft:#163432;
+  --ok:#6fcf8a; --ok-soft:#183322; --warn:#f0b452; --warn-soft:#3a2d14; --bad:#f08589; --bad-soft:#3b1c1e; --proto:#a99cff; --proto-soft:#26224a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12131c; --surface:#1b1d29; --fg:#e9eaf3; --muted:#9aa0b8; --line:#2c2f40;
+  --accent:#3fd0c9; --accent-soft:#163432;
+  --ok:#6fcf8a; --ok-soft:#183322; --warn:#f0b452; --warn-soft:#3a2d14; --bad:#f08589; --bad-soft:#3b1c1e; --proto:#a99cff; --proto-soft:#26224a; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:16px/1.6 var(--f-body);}
+.wrap{max-width:780px;margin:0 auto;padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:40px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;line-height:1.2;margin:0}
+h1{font-size:1.9rem;font-weight:700}
+h2{font-size:1.25rem;font-weight:700}
+h3{font-size:1rem;font-weight:500}
+p{margin:0}
+section{display:flex;flex-direction:column;gap:14px;min-width:0}
+.eyebrow{font:600 .72rem/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.lead{font-size:1.08rem;color:var(--fg)}
+.muted{color:var(--muted)}
+.verdict{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px}
+.verdict strong{color:var(--accent)}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.93rem;min-width:560px}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}
+th{font:600 .72rem/1.3 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--bg)}
+tr:last-child td{border-bottom:0}
+.chip{display:inline-block;font:600 .72rem/1 var(--f-mono);padding:5px 8px;border-radius:99px;white-space:nowrap}
+.c-ok{background:var(--ok-soft);color:var(--ok)}
+.c-tmp{background:var(--warn-soft);color:var(--warn)}
+.c-bad{background:var(--bad-soft);color:var(--bad)}
+.c-proto{background:var(--proto-soft);color:var(--proto)}
+ul,ol{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px}
+code,.mono{font-family:var(--f-mono);font-size:.86em}
+.steps{list-style:none;padding:0;gap:12px;counter-reset:s}
+.steps li{counter-increment:s;display:grid;grid-template-columns:44px 1fr;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+.steps li::before{content:counter(s);font:700 1.05rem/44px var(--f-display);text-align:center;width:44px;height:44px;border-radius:12px;background:var(--accent-soft);color:var(--accent)}
+.steps li>div{min-width:0;display:flex;flex-direction:column;gap:4px}
+.steps .when{font:500 .78rem/1.3 var(--f-mono);color:var(--muted)}
+.ask{border:2px solid var(--accent);border-radius:14px;padding:18px;background:var(--surface);display:flex;flex-direction:column;gap:10px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.check{list-style:none;padding:0;gap:8px}
+.check li{display:flex;gap:10px;align-items:flex-start}
+.check input{margin-top:5px;accent-color:var(--accent);width:16px;height:16px;flex:none}
+.check label{cursor:pointer}
+.diagram{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;overflow-x:auto}
+.diagram svg{display:block;min-width:640px;width:100%;height:auto}
+.diagram text{font-family:var(--f-body);fill:var(--fg);font-size:13px}
+.diagram .t-sm{font-size:11px;fill:var(--muted)}
+.diagram .box{fill:var(--bg);stroke:var(--line);stroke-width:1.5}
+.diagram .core{fill:var(--accent-soft);stroke:var(--accent);stroke-width:2}
+.diagram .ln{stroke:var(--muted);stroke-width:1.4;fill:none}
+.diagram .ln-gate{stroke:var(--warn);stroke-width:1.6;fill:none;stroke-dasharray:5 4}
+.diagram .arrow{fill:var(--muted)}
+.diagram .arrow-w{fill:var(--warn)}
+footer{font-size:.85rem;color:var(--muted);border-top:1px solid var(--line);padding-top:16px}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+
+<header style="display:flex;flex-direction:column;gap:12px">
+  <span class="eyebrow">ARTGAME · приложение команды · 04.11.2026</span>
+  <h1>Карта приложения ARTGAME</h1>
+  <p class="lead">Что где лежит сейчас, что временное, как сделать одно приложение-игру на своём сервере и как туда переехать, ничего не потеряв.</p>
+</header>
+
+<section>
+  <div class="verdict">
+    <h2>Коротко</h2>
+    <p><strong>Свой сервер у нас уже есть и работает.</strong> Это VPS Hoster.kz в Астане (Ubuntu 24.04, защищён: вход только по ключу, закрыты все порты кроме 22 и 443). На нём уже живут: шлюз <span class="mono">mcp.artgame.world</span> (чтение Битрикса, очередь задач, одобрения HEAD, замок записи в CRM), рабочие задачи SRC02, DRIVE01, FIN03 и сторож, который каждые 5 минут проверяет, что они живы. На 04.11 08:03 всё работает.</p>
+    <p><strong>Приложение для художников 04.11 собрали не там.</strong> Его поставили на Google Apps Script и GitHub Pages, потому что так можно было запустить за день. Данные при этом не теряются: всё пишется в Таблицу «Журнал работ» и на Диск. Но это стартовые леса, а не фундамент: Таблица не база данных, связь страницы с сервером идёт через обходной мост, адрес чужой (github.io).</p>
+    <p><strong>Моя рекомендация:</strong> перенести приложение на наш VPS, адрес <span class="mono">app.artgame.kz</span>, настоящая база данных PostgreSQL, один код на всё. Решение HEAD 04.11: данных ещё нет, поэтому Google-версию не тестируем и сразу строим на своём сервере. Google-версия остаётся прототипом. Дополнительных денег за сервер не нужно.</p>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Сейчас</span>
+  <h2>Что где лежит</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Часть</th><th>Где</th><th>Статус</th><th>Что с ним будет</th></tr></thead>
+    <tbody>
+      <tr><td>Свой сервер (VPS)</td><td>Hoster.kz, Астана, <span class="mono">109.235.116.40</span></td><td><span class="chip c-ok">фундамент</span></td><td>Сюда переезжает приложение</td></tr>
+      <tr><td>Шлюз ARTGAME</td><td><span class="mono">mcp.artgame.world</span> на VPS</td><td><span class="chip c-ok">фундамент</span></td><td>Через него приложение читает Битрикс и отправляет записи на одобрение HEAD</td></tr>
+      <tr><td>Задачи SRC02, DRIVE01, FIN03</td><td>VPS, сторож ALERT-01</td><td><span class="chip c-ok">работают</span></td><td>Не трогаем. FIN03 считает финансы сделок</td></tr>
+      <tr><td>Константы</td><td>Таблица «КОНСТАНТЫ ARTGAME KZ», лист «Значения»</td><td><span class="chip c-ok">постоянно</span></td><td>HEAD правит там же. Сервер копирует цифры к себе и в приложение</td></tr>
+      <tr><td>Бот</td><td>@artgame_team_bot</td><td><span class="chip c-ok">постоянно</span></td><td>Кнопка меню переключится на новый адрес</td></tr>
+      <tr><td>Файлы проектов</td><td>Google Диск → ПРОЕКТЫ → год → месяц → сделка</td><td><span class="chip c-ok">постоянно</span></td><td>Остаётся хранилищем фото, чеков, документов</td></tr>
+      <tr><td>Битрикс</td><td>CRM</td><td><span class="chip c-ok">постоянно</span></td><td>Клиенты, сделки, этапы. Запись только через Кодекса и «да» HEAD</td></tr>
+      <tr><td>Страница приложения</td><td>GitHub Pages, <span class="mono">raman-artgame.github.io/artgame-app</span></td><td><span class="chip c-tmp">временно</span></td><td>Переезжает на <span class="mono">app.artgame.kz</span></td></tr>
+      <tr><td>Сервер приложения</td><td>Google Apps Script (аккаунт ceo@artgame.world)</td><td><span class="chip c-tmp">временно</span></td><td>Заменяется сервером на VPS. После переезда 30 дней только чтение, потом в Архив</td></tr>
+      <tr><td>Таблица «Журнал работ»</td><td>Диск ARTGAME HEAD</td><td><span class="chip c-tmp">временно как база</span></td><td>Данные переносятся в базу. Сама Таблица остаётся отчётом, её заполняет сервер</td></tr>
+      <tr><td>Мост страница ↔ сервер</td><td>скрытое окно Apps Script</td><td><span class="chip c-bad">костыль</span></td><td>Уходит полностью</td></tr>
+      <tr><td>Рабочие места МОП, производства, дизайнера</td><td>отдельные артефакты Claude</td><td><span class="chip c-proto">прототипы</span></td><td>Переносятся в приложение разделами по ролям</td></tr>
+      <tr><td>Ночная сверка цифр в артефакты</td><td>задача 03:17 + <span class="mono">config/values</span></td><td><span class="chip c-tmp">временно</span></td><td>Станет живым чтением констант сервером</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <span class="eyebrow">Честно</span>
+  <h2>Где костыли и почему это важно</h2>
+  <ul>
+    <li><b>Таблица вместо базы.</b> Google Таблица не держит связи между записями, медленнее на тысячах строк и плохо переносит одновременную запись многих людей. Для учёта смен 5–10 человек терпимо, для всей команды, игры и финансов уже нет.</li>
+    <li><b>Ограничения Apps Script.</b> Каждый запрос живёт не дольше 6 минут, есть дневные квоты, всё привязано к одному Google-аккаунту. Если что-то сломается у Google, мы ничего не сможем сделать.</li>
+    <li><b>Обходной мост.</b> Страница и сервер живут на разных адресах, поэтому связь идёт через скрытое окно. Работает, но это лишняя деталь, которая может отвалиться при обновлении Telegram или Google.</li>
+    <li><b>Два мира.</b> Серверные задачи (Битрикс, Диск, финансы) уже на VPS, а приложение отдельно у Google. Связать их сейчас можно только через третьи руки.</li>
+    <li><b>Артефакты-острова.</b> Рабочие места не видят Таблицы напрямую, цифры к ним довозит ночная сверка. Для прототипа нормально, для работы нет.</li>
+  </ul>
+  <p class="muted">Что сделано правильно и остаётся: один источник цифр (лист «Значения»), вход по Telegram с проверкой подписи, роли и зоны, папки проектов по номеру сделки, токен бота не в коде, автоматическая выкладка, правило «Битрикс только с одобрения HEAD».</p>
+</section>
+
+<section>
+  <span class="eyebrow">Цель</span>
+  <h2>Как будет устроено</h2>
+  <div class="diagram" role="img" aria-label="Схема: телефон и бот открывают app.artgame.kz на VPS; сервер приложения с базой связан с константами, Диском, отчётами в Таблицах, и через шлюз ARTGAME с Битриксом под одобрение HEAD">
+  <svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrow"/></marker>
+      <marker id="aw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrow-w"/></marker>
+    </defs>
+    <!-- users -->
+    <rect x="20" y="30" width="170" height="64" rx="10" class="box"/>
+    <text x="105" y="56" text-anchor="middle">Команда в Telegram</text>
+    <text x="105" y="76" text-anchor="middle" class="t-sm">бот → кнопка «Открыть»</text>
+    <rect x="20" y="120" width="170" height="64" rx="10" class="box"/>
+    <text x="105" y="146" text-anchor="middle">Телефон / компьютер</text>
+    <text x="105" y="166" text-anchor="middle" class="t-sm">иконка на экране (PWA)</text>
+    <!-- VPS frame -->
+    <rect x="240" y="14" width="300" height="372" rx="14" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="3 4"/>
+    <text x="390" y="36" text-anchor="middle" class="t-sm">наш VPS, Астана</text>
+    <rect x="262" y="50" width="256" height="70" rx="10" class="core"/>
+    <text x="390" y="78" text-anchor="middle" font-weight="600">app.artgame.kz</text>
+    <text x="390" y="98" text-anchor="middle" class="t-sm">приложение-игра + сервер</text>
+    <rect x="262" y="146" width="256" height="60" rx="10" class="core"/>
+    <text x="390" y="172" text-anchor="middle" font-weight="600">База данных</text>
+    <text x="390" y="190" text-anchor="middle" class="t-sm">PostgreSQL · копия каждую ночь</text>
+    <rect x="262" y="232" width="256" height="60" rx="10" class="box"/>
+    <text x="390" y="258" text-anchor="middle">Шлюз ARTGAME</text>
+    <text x="390" y="276" text-anchor="middle" class="t-sm">mcp.artgame.world · одобрения</text>
+    <rect x="262" y="314" width="256" height="56" rx="10" class="box"/>
+    <text x="390" y="338" text-anchor="middle">FIN03 · SRC02 · DRIVE01</text>
+    <text x="390" y="356" text-anchor="middle" class="t-sm">уже работают</text>
+    <!-- right side -->
+    <rect x="590" y="30" width="150" height="56" rx="10" class="box"/>
+    <text x="665" y="54" text-anchor="middle">Константы</text>
+    <text x="665" y="72" text-anchor="middle" class="t-sm">лист «Значения»</text>
+    <rect x="590" y="110" width="150" height="56" rx="10" class="box"/>
+    <text x="665" y="134" text-anchor="middle">Google Диск</text>
+    <text x="665" y="152" text-anchor="middle" class="t-sm">фото, чеки, документы</text>
+    <rect x="590" y="190" width="150" height="56" rx="10" class="box"/>
+    <text x="665" y="214" text-anchor="middle">Таблицы-отчёты</text>
+    <text x="665" y="232" text-anchor="middle" class="t-sm">только чтение</text>
+    <rect x="590" y="270" width="150" height="56" rx="10" class="box"/>
+    <text x="665" y="294" text-anchor="middle">Битрикс</text>
+    <text x="665" y="312" text-anchor="middle" class="t-sm">CRM</text>
+    <rect x="590" y="342" width="150" height="44" rx="10" class="box"/>
+    <text x="665" y="369" text-anchor="middle">HEAD: «да»</text>
+    <!-- lines -->
+    <path d="M190 62 H262" class="ln" marker-end="url(#a)"/>
+    <path d="M190 152 C226 152 230 100 262 96" class="ln" marker-end="url(#a)"/>
+    <path d="M390 120 V146" class="ln" marker-end="url(#a)" marker-start="url(#a)"/>
+    <path d="M390 206 V232" class="ln" marker-end="url(#a)"/>
+    <path d="M590 58 H518" class="ln" marker-end="url(#a)"/>
+    <path d="M518 100 C560 100 560 138 590 138" class="ln" marker-end="url(#a)"/>
+    <path d="M518 180 C560 180 560 218 590 218" class="ln" marker-end="url(#a)"/>
+    <path d="M518 262 C556 262 560 290 590 292" class="ln" marker-end="url(#a)"/>
+    <path d="M518 276 C556 290 560 362 590 364" class="ln-gate" marker-end="url(#aw)"/>
+    <path d="M665 342 V326" class="ln-gate" marker-end="url(#aw)"/>
+  </svg>
+  </div>
+  <p class="muted">Читать Битрикс приложение может сразу. Любая запись в Битрикс сначала встаёт в очередь шлюза, HEAD нажимает «да», и только потом её выполняет Кодекс. Финансовые цифры и ставки видит только HEAD.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Рекомендация</span>
+  <h2>Стек</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Что</th><th>Выбор</th><th>Почему</th></tr></thead>
+    <tbody>
+      <tr><td>Где работает</td><td>Наш VPS Hoster.kz, отдельный пользователь и служба для приложения</td><td>Уже оплачен и защищён. Данные сотрудников хранятся в Казахстане, это удобно для закона о персональных данных</td></tr>
+      <tr><td>Адрес и HTTPS</td><td><span class="mono">app.artgame.kz</span>, сертификат автоматически (Caddy)</td><td>Свой домен, бесплатный сертификат, тот же веб-сервер, что для шлюза</td></tr>
+      <tr><td>База данных</td><td>PostgreSQL 16</td><td>Надёжная, бесплатная, держит связи «человек — смена — объект — сделка», история изменений не теряется</td></tr>
+      <tr><td>Сервер</td><td>Python 3.12 (FastAPI)</td><td>На VPS уже Python 3.12, и уже есть проверенная библиотека для Битрикса с замком записи и сверкой после записи. Берём её, а не пишем заново</td></tr>
+      <tr><td>Экран</td><td>React + Vite, одно приложение для Telegram Mini App и для телефона с иконкой (PWA)</td><td>Один код, быстрая анимация, работает и без Telegram</td></tr>
+      <tr><td>Вход</td><td>Telegram (как сейчас) + роль и зоны из базы</td><td>Без паролей. Уволенного HEAD отключает одной кнопкой</td></tr>
+      <tr><td>Выкладка</td><td>push в main → GitHub Actions → тестовый адрес → основной</td><td>HEAD ничего не вставляет руками. Сначала проверяем на <span class="mono">test.app.artgame.kz</span></td></tr>
+      <tr><td>Копии</td><td>база каждую ночь на Google Диск + снимок сервера у Hoster.kz</td><td>Восстановление проверяем раз в месяц, иначе копия ничего не значит</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">Почему не оставить Google: проще на старте, но потолок близко. Почему не Firebase или Supabase: данные уходят за границу, и снова чужая платформа. Если нагрузка вырастет, приложение переносится на второй VPS без переделки.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Кто что видит</span>
+  <h2>Роли и доступы</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Роль</th><th>Видит и делает</th></tr></thead>
+    <tbody>
+      <tr><td>Саппорт, Художник, Художник Про</td><td>свои смены, расходы, фото, свой уровень и задания, знания по росписи</td></tr>
+      <tr><td>Главный художник</td><td>то же + проверка смен и расходов по росписи, команда росписи</td></tr>
+      <tr><td>Оператор принтера, Мастер печати</td><td>смены и расход по печати; мастер проверяет печать</td></tr>
+      <tr><td>МОП, VIP МОП</td><td>рабочее место продаж: расчёт, КП, договоры, счета, сделки из Битрикса (чтение); запись в Битрикс через одобрение HEAD</td></tr>
+      <tr><td>Главный дизайнер, Помощник</td><td>рабочее место дизайна; главный проверяет дизайн</td></tr>
+      <tr><td>ГИП объекта</td><td>проверка по своему объекту</td></tr>
+      <tr><td>HEAD</td><td>всё, плюс ставки, оплата, финансы, роли, одобрения записей в Битрикс</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">Деньги (ставки, выплаты, финансы) хранятся в отдельной части базы, к которой есть доступ только у роли HEAD. Каждое действие пишется в журнал: кто, что, когда.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Игра</span>
+  <h2>Как сделать, чтобы было как игра</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Механика</h3>
+      <ul>
+        <li>Опыт за подтверждённые смены, м², чеки вовремя, сданные экзамены.</li>
+        <li>Уровни совпадают с ролями: Саппорт → Художник → Художник Про → Главный.</li>
+        <li>Задания недели и достижения («первый объект», «100 м² без замечаний»).</li>
+        <li>Рейтинг команды по опыту, без денег.</li>
+        <li>Знания и экзамены из единого реестра знаний.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Правила честной игры</h3>
+      <ul>
+        <li>Очки только за то, что проверил старший. Без подтверждения очков нет.</li>
+        <li>Игра не меняет оплату сама. Бонусы считаются по константам, HEAD видит и решает.</li>
+        <li>Все цифры игры (очки, пороги уровней) лежат в константах, а не в коде.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Дизайн-система</h3>
+      <ul>
+        <li>Один набор цветов, шрифтов, кнопок и карточек на всё приложение.</li>
+        <li>Персонажи отделов уже нарисованы (художник, дизайн, продажи, производство, управление). Берём их.</li>
+        <li>Тёмная и светлая тема, вибрация телефона на успех, короткие анимации получения опыта.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Что важно не испортить</h3>
+      <ul>
+        <li>Начать смену в 2 касания, чек в 3. Игра не должна мешать работе.</li>
+        <li>Работает при слабом интернете на объекте: запись ждёт и отправляется сама.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Связки</span>
+  <h2>Кто с кем связан и по каким правилам</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Откуда → куда</th><th>Что идёт</th><th>Правило</th></tr></thead>
+    <tbody>
+      <tr><td>Константы → приложение</td><td>цены, ставки, пороги, очки</td><td>Главная — Таблица. Сервер забирает каждые 5 минут и по кнопке, хранит историю версий. В код не вшиваем</td></tr>
+      <tr><td>Приложение → база</td><td>смены, расходы, люди, объекты, игра</td><td>База главная. Ничего не удаляется, только помечается «отменено»</td></tr>
+      <tr><td>База → Таблицы</td><td>отчёты: смены, расходы, сводки</td><td>Сервер обновляет сам. Руками в отчётах не правим</td></tr>
+      <tr><td>Приложение → Диск</td><td>фото, чеки, документы</td><td>Папка сделки по номеру. В базе только ссылка</td></tr>
+      <tr><td>Битрикс → приложение</td><td>сделки, клиенты, этапы</td><td>Чтение через шлюз. № сделки = № объекта = № договора</td></tr>
+      <tr><td>Приложение → Битрикс</td><td>новая сделка, этап, файл, запись в ленту</td><td>Только очередь шлюза → «да» HEAD → Кодекс → проверка записи</td></tr>
+      <tr><td>Финансы</td><td>поступления, долги, оплата людям</td><td>FIN03 уже считает по сделкам. В приложении раздел только для HEAD</td></tr>
+      <tr><td>Приложение → бот</td><td>уведомления: на проверку, одобрено, новый уровень</td><td>Токен бота только на сервере</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <span class="eyebrow">Переезд</span>
+  <h2>План по шагам без потери данных</h2>
+  <ol class="steps">
+    <li><div><h3>«Да» HEAD на план и домен</h3><p>Выбираем адрес и подтверждаем стек. До этого ничего не разворачиваем.</p><span class="when">сегодня–завтра</span></div></li>
+    <li><div><h3>Подготовка сервера</h3><p>Запись DNS <span class="mono">app</span> и <span class="mono">test.app</span> на наш VPS, HTTPS, база, ночные копии, отдельный пользователь для приложения. Шлюз и задачи FIN03/SRC02/DRIVE01 не трогаем. Перед началом снимок сервера.</p><span class="when">1–2 дня</span></div></li>
+    <li><div><h3>Каркас и дизайн-система</h3><p>Вход через Telegram, роли и зоны, журнал действий, чтение констант. Показываем HEAD 2–3 экрана в стиле игры, HEAD утверждает вид.</p><span class="when">3–5 дней</span></div></li>
+    <li><div><h3>Раздел «Смены и расходы»</h3><p>Те же функции, что в прототипе, сразу на базе данных. Переносить нечего: данных ещё нет. «Журнал работ» станет отчётом, который заполняет сервер.</p><span class="when">3–4 дня</span></div></li>
+    <li><div><h3>Проверка на тестовом адресе</h3><p>Сквозной тест Playwright, затем 2–3 человека пробуют на <span class="mono">test.app.artgame.kz</span>.</p><span class="when">2–3 дня</span></div></li>
+    <li><div><h3>Запуск</h3><p>Кнопка бота ведёт на <span class="mono">app.artgame.kz</span>, первые 2–3 художника и неделя работы. Прототип на Apps Script уходит в Архив (не удаляем).</p><span class="when">1 день</span></div></li>
+    <li><div><h3>Дальше разделами</h3><p>МОП (из артефакта) → производство → дизайн → игра и знания → финансы HEAD → запись в Битрикс через одобрение. Каждый раздел: тестовый адрес, «да» HEAD, переключение.</p><span class="when">по одному разделу в 1–2 недели</span></div></li>
+  </ol>
+</section>
+
+<section>
+  <div class="ask">
+    <span class="eyebrow">Что нужно от HEAD</span>
+    <ul>
+      <li><b>«Да» на план и стек</b> (или замечания).</li>
+      <li><b>Домен.</b> Вариант 1: <span class="mono">app.artgame.kz</span>. Нужен доступ к DNS домена artgame.kz или человек, который добавит одну запись. Вариант 2: <span class="mono">app.artgame.world</span>. Добавляется там же, где уже добавлен <span class="mono">mcp.artgame.world</span> (Squarespace). Поддомен бесплатный в обоих случаях.</li>
+      <li><b>Сервер.</b> Используем текущий VPS, доплат нет. Нужно включить снимки сервера в кабинете Hoster.kz (если ещё не включены) и разрешить ключ выкладки для GitHub Actions на пользователя <span class="mono">deploy-admin</span>. Если захотите приложение на отдельном сервере, это ещё один VPS Hoster.kz, ориентир 6–12 тыс. ₸ в месяц по открытому прайсу <a href="https://www.whtop.com/plans/hoster.kz/155166" target="_blank" rel="noopener">2-2-50</a> / <a href="https://www.whtop.com/plans/hoster.kz/155167" target="_blank" rel="noopener">4-4-100</a>; точную цену покажет кабинет.</li>
+      <li><b>Сеть для Claude.</b> Открыть в настройках среды проекта доступ к нашему серверу, Telegram и Google, чтобы проверять приложение вживую, а не только на моках.</li>
+      <li><b>После переключения:</b> поменять адрес кнопки меню в @BotFather (одна строка, подскажу).</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Ничего не забыть</span>
+  <h2>Чек-лист</h2>
+  <p class="muted">Можно отмечать, отметки хранятся только в вашем браузере.</p>
+  <ul class="check" id="cl">
+    <li><input type="checkbox" id="c1"><label for="c1">Снимок VPS перед любой настройкой</label></li>
+    <li><input type="checkbox" id="c2"><label for="c2">Шлюз и задачи FIN03/SRC02/DRIVE01 после настройки работают (сторож «всё работает»)</label></li>
+    <li><input type="checkbox" id="c3"><label for="c3">Ночная копия базы на Диск и одна проверка восстановления</label></li>
+    <li><input type="checkbox" id="c4"><label for="c4">Все секреты (бот, Битрикс, Google) только на сервере, в репозитории нет</label></li>
+    <li><input type="checkbox" id="c5"><label for="c5">У приложения нет прямого ключа записи в Битрикс, только очередь на одобрение</label></li>
+    <li><input type="checkbox" id="c6"><label for="c6">Ставки и финансы видит только HEAD (проверено входом под художником)</label></li>
+    <li><input type="checkbox" id="c7"><label for="c7">Ни одной цифры ARTGAME в коде, всё из «Значений»</label></li>
+    <li><input type="checkbox" id="c8"><label for="c8">Отчёты в Таблицах совпадают с базой по числу строк и суммам расходов</label></li>
+    <li><input type="checkbox" id="c9"><label for="c9">Фото и чеки: старые ссылки на Диск открываются из нового приложения</label></li>
+    <li><input type="checkbox" id="c10"><label for="c10">Сквозной тест Playwright зелёный перед каждой выкладкой</label></li>
+    <li><input type="checkbox" id="c11"><label for="c11">План возврата: кнопка бота на старый адрес, проверен</label></li>
+    <li><input type="checkbox" id="c12"><label for="c12">Отключение сотрудника: доступ закрывается сразу, история остаётся</label></li>
+    <li><input type="checkbox" id="c13"><label for="c13">Сторож следит и за приложением, сбой приходит HEAD в бот</label></li>
+    <li><input type="checkbox" id="c14"><label for="c14">Старый Apps Script 30 дней только чтение, потом в Архив (не удалять)</label></li>
+    <li><input type="checkbox" id="c15"><label for="c15">Артефакты МОП, производства, дизайна в Архив после переноса каждого раздела</label></li>
+    <li><input type="checkbox" id="c16"><label for="c16">ARCHITECTURE.md в репозитории обновлён после каждого шага</label></li>
+  </ul>
+</section>
+
+<footer>Источник фактов: отчёты сервера ARTGAME (SERVER-BOOTSTRAP 23.10, MOVE-DOMAIN 23.10, ALERT-LIVE 04.11), репозиторий artgame-app и память проекта. Сроки — моя оценка, не обещание. Ничего не развёрнуто, ждём «да» HEAD.</footer>
+</div>
+
+<script>
+(function(){
+  var KEY='artgame-karta-check';
+  var saved={};
+  try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')||{};}catch(e){saved={};}
+  document.querySelectorAll('#cl input').forEach(function(cb){
+    if(saved[cb.id])cb.checked=true;
+    cb.addEventListener('change',function(){
+      saved[cb.id]=cb.checked;
+      try{localStorage.setItem(KEY,JSON.stringify(saved));}catch(e){}
+    });
+  });
+})();
+</script>

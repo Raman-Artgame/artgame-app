@@ -1,0 +1,29 @@
+# /etc/caddy/Caddyfile (часть для приложения). Шлюз mcp.artgame.world не трогаем.
+app.artgame.world {
+	encode zstd gzip
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8100
+	}
+	handle {
+		root * /srv/artgame-app/prod/web
+		try_files {path} /index.html
+		file_server
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}
+
+test.app.artgame.world {
+	encode zstd gzip
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8101
+	}
+	handle {
+		root * /srv/artgame-app/test/web
+		try_files {path} /index.html
+		file_server
+	}
+}

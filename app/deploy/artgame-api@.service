@@ -1,0 +1,21 @@
+# /etc/systemd/system/artgame-api@.service  (экземпляры: prod → :8100, test → :8101)
+[Unit]
+Description=ARTGAME API (%i)
+After=network.target postgresql.service
+
+[Service]
+User=artgame-app
+Group=artgame-app
+WorkingDirectory=/srv/artgame-app/%i/backend
+EnvironmentFile=/etc/artgame-app/%i.env
+ExecStart=/srv/artgame-app/%i/venv/bin/uvicorn artgame.main:app --host 127.0.0.1 --port ${PORT} --workers 2
+Restart=on-failure
+MemoryMax=512M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/artgame-app
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
