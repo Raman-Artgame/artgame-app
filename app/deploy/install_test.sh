@@ -32,7 +32,7 @@ if [ ! -f "$ENVF" ]; then
     if [ -n "$FOUND" ]; then install -m 640 -o root -g artgame-app "$FOUND" "$SA"; echo "сервисный аккаунт: $(grep -o '"client_email": *"[^"]*"' "$SA")"
     else echo "ВНИМАНИЕ: JSON сервисного аккаунта не найден, константы подтянутся позже"; fi
   fi
-  umask 027
+  OLDMASK=$(umask); umask 027
   cat > "$ENVF" <<ENV
 PORT=8101
 ARTGAME_ENV_NAME=test
@@ -42,7 +42,7 @@ ARTGAME_HEAD_TG_ID=$HEAD_TG_ID
 ARTGAME_PRIVATE_KEY=$(openssl rand -hex 32)
 ARTGAME_GOOGLE_SA_FILE=$SA
 ENV
-  chown root:artgame-app "$ENVF"; chmod 640 "$ENVF"
+  chown root:artgame-app "$ENVF"; chmod 640 "$ENVF"; umask "$OLDMASK"
   unset TOKEN
 else
   echo "уже есть, не меняю"
