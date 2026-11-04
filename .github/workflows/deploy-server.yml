@@ -1,5 +1,5 @@
 # Выкладка сервера в Apps Script при каждом изменении папки server/.
-# Нужны: секрет CLASPRC_JSON (вход clasp под ceo@artgame.world) и переменная SCRIPT_ID (ID проекта Apps Script).
+# Нужен секрет CLASPRC_JSON (вход clasp под ceo@artgame.world). SCRIPT_ID — ID проекта Apps Script (не секрет).
 # Адрес /exec не меняется: обновляется существующее развёртывание DEPLOYMENT_ID.
 name: Deploy server (Apps Script)
 on:
@@ -8,6 +8,7 @@ on:
     paths: ['server/**', '.github/workflows/deploy-server.yml']
   workflow_dispatch:
 env:
+  SCRIPT_ID: 1Za8R1u2xSybF9azfjXgevD6i_qV5_T-JKcOv9JAefhylwKVsBYYTHazD
   DEPLOYMENT_ID: AKfycby48ml1Cr5RaGaZdLtTmVM2TERMi53RGiVCdBIRsTItjgFxH2CXMsbdeaDNBdlNfSzA
 jobs:
   deploy:
@@ -17,10 +18,9 @@ jobs:
       - name: Check setup
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
-          SCRIPT_ID: ${{ vars.SCRIPT_ID }}
         run: |
-          if [ -z "$CLASPRC_JSON" ] || [ -z "$SCRIPT_ID" ]; then
-            echo "::warning::Нет CLASPRC_JSON или SCRIPT_ID — выкладка пропущена"; exit 0; fi
+          if [ -z "$CLASPRC_JSON" ]; then
+            echo "::warning::Нет секрета CLASPRC_JSON — выкладка пропущена"; exit 0; fi
           echo "READY=1" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         if: env.READY == '1'
@@ -29,7 +29,6 @@ jobs:
         if: env.READY == '1'
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
-          SCRIPT_ID: ${{ vars.SCRIPT_ID }}
         run: |
           npm i -g @google/clasp@2.4.2
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
