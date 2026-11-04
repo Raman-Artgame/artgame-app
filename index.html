@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>ARTGAME</title>
+<style>
+  :root { --bg:#f4f3f0; --card:#fff; --ink:#151515; --mute:#6b6b6b; --line:#e3e1dc; --acc:#e1251b; --ok:#1f8a4c; --warn:#b26a00; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#121212; --card:#1d1d1d; --ink:#f1f1f1; --mute:#9a9a9a; --line:#2e2e2e; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding:14px 16px 6px; display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  header b { font-size:18px; letter-spacing:.5px; white-space:nowrap; } header b span { color:var(--acc); }
+  header small { color:var(--mute); text-align:right; }
+  nav { display:flex; gap:6px; padding:6px 16px 10px; overflow-x:auto; }
+  nav button { flex:none; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:20px; padding:8px 14px; font-size:14px; }
+  nav button.on { background:var(--ink); color:var(--bg); border-color:var(--ink); }
+  nav .badge { background:var(--acc); color:#fff; border-radius:9px; padding:0 6px; font-size:12px; margin-left:4px; }
+  main { padding:0 16px 40px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:12px; }
+  h2 { font-size:17px; margin:0 0 12px; }
+  label { display:block; font-size:13px; color:var(--mute); margin:12px 0 4px; }
+  select, input, textarea { width:100%; font:inherit; padding:11px 12px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--ink); }
+  textarea { min-height:60px; }
+  .btn { display:block; width:100%; margin-top:16px; padding:15px; font-family:inherit; font-weight:600; font-size:17px; line-height:1; border:0; border-radius:12px; background:var(--acc); color:#fff; }
+  .btn.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
+  .btn.ok { background:var(--ok); }
+  .btn:disabled { opacity:.5; }
+  .row { display:flex; gap:8px; } .row > * { flex:1; min-width:0; }
+  .seg { display:flex; flex-wrap:wrap; gap:6px; }
+  .seg button { border:1px solid var(--line); background:var(--bg); color:var(--ink); border-radius:10px; padding:10px 14px; font:inherit; font-size:15px; }
+  .seg button.on { background:var(--ink); color:var(--bg); border-color:var(--ink); }
+  .chk { display:flex; flex-wrap:wrap; gap:6px; }
+  .chk label { margin:0; display:flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:10px; padding:8px 10px; color:var(--ink); font-size:15px; }
+  .chk input { width:auto; }
+  .timer { font:700 40px/1 ui-monospace, Menlo, monospace; margin:6px 0; }
+  .mute { color:var(--mute); font-size:14px; }
+  .photo { display:flex; align-items:center; gap:10px; }
+  .photo img { width:64px; height:64px; object-fit:cover; border-radius:8px; }
+  .photo label.pick { margin:0; padding:11px 12px; border:1px dashed var(--mute); border-radius:10px; color:var(--ink); font-size:15px; flex:1; text-align:center; }
+  .photo input { display:none; }
+  .item { border-top:1px solid var(--line); padding:10px 0; } .item:first-child { border-top:0; }
+  .tag { display:inline-block; font-size:12px; padding:2px 8px; border-radius:10px; background:var(--line); color:var(--ink); }
+  .tag.ok { background:var(--ok); color:#fff; } .tag.back { background:var(--acc); color:#fff; } .tag.rev { background:var(--warn); color:#fff; }
+  .toast { position:fixed; left:16px; right:16px; bottom:16px; padding:14px; border-radius:12px; background:var(--ink); color:var(--bg); text-align:center; display:none; }
+  details summary { cursor:pointer; list-style:none; } details summary::-webkit-details-marker { display:none; }
+  a { color:var(--acc); }
+</style>
+</head>
+<body>
+<header><b>ART<span>GAME</span></b><small id="who"></small></header>
+<nav id="nav" hidden>
+  <button data-t="shift">Смена</button>
+  <button data-t="exp">Расход</button>
+  <button data-t="mine">Мои записи</button>
+  <button data-t="check" id="navCheck" hidden>Проверка</button>
+  <button data-t="team" id="navTeam" hidden>Команда</button>
+</nav>
+<main id="app"><div class="card">Загружаю…</div></main>
+<div class="toast" id="toast"></div>
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+// Адрес сервера (Apps Script /exec). Нужен, когда страница открыта не из Apps Script, а со своего адреса (GitHub Pages).
+const API_URL = 'https://script.google.com/macros/s/AKfycby48ml1Cr5RaGaZdLtTmVM2TERMi53RGiVCdBIRsTItjgFxH2CXMsbdeaDNBdlNfSzA/exec';
+const IN_GAS = typeof google !== 'undefined' && google.script && google.script.run;
+let INIT = '', S = {}, tab = 'shift', timerId = null, zoneSel = '';
+const $ = s => document.querySelector(s);
+const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = n => Number(n || 0).toLocaleString('ru-RU') + ' ₸';
+
+function toast(t, ms) { const el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(el._t); el._t = setTimeout(() => el.style.display = 'none', ms || 2500); }
+function call(action, payload) {
+  if (!IN_GAS) {
+    // text/plain — без предварительного CORS-запроса; Apps Script отвечает JSON
+    return fetch(API_URL, { method: 'POST', body: JSON.stringify({ action, initData: INIT, payload: payload || {} }) })
+      .then(r => r.json()).then(r => { if (r && r.ok) return r.data; throw new Error(r ? r.error : 'Нет ответа'); });
+  }
+  return new Promise((res, rej) => {
+    google.script.run.withSuccessHandler(r => r && r.ok ? res(r.data) : rej(new Error(r ? r.error : 'Нет ответа')))
+      .withFailureHandler(e => rej(e)).api(action, INIT, payload || {});
+  });
+}
+function parseInit(hash) {
+  // Apps Script может отдать фрагмент уже раскодированным — тогда initData содержит свои «&». Берём всё до следующего tgWebApp*-параметра.
+  hash = String(hash || '').replace(/^#/, '');
+  const i = hash.indexOf('tgWebAppData=');
+  if (i < 0) return '';
+  let rest = hash.slice(i + 'tgWebAppData='.length);
+  const j = rest.indexOf('&tgWebApp');
+  if (j >= 0) rest = rest.slice(0, j);
+  if (rest.indexOf('&') < 0 && /%26|%3D/i.test(rest)) rest = decodeURIComponent(rest);
+  return rest;
+}
+const initKeys = () => INIT.split('&').map(p => p.split('=')[0]).join(', ');
+function readPhoto(input, cb) {
+  const f = input.files && input.files[0]; if (!f) return;
+  const img = new Image(), url = URL.createObjectURL(f);
+  img.onload = () => {
+    const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url); cb(c.toDataURL('image/jpeg', 0.72));
+  };
+  img.src = url;
+}
+function photoField(id, title) {
+  return `<label>${title}</label><div class="photo"><img id="${id}Prev" hidden><label class="pick" for="${id}">📷 Сфотографировать</label><input type="file" accept="image/*" capture="environment" id="${id}"></div>`;
+}
+function bindPhoto(id, store) {
+  const inp = document.getElementById(id); if (!inp) return;
+  inp.onchange = () => readPhoto(inp, d => { store[id] = d; const p = document.getElementById(id + 'Prev'); p.src = d; p.hidden = false; });
+}
+const opts = (list, sel, empty) => (empty ? `<option value="">${esc(empty)}</option>` : '') + list.map(v => `<option${v === sel ? ' selected' : ''}>${esc(v)}</option>`).join('');
+const objOpts = sel => S.objects.map(o => `<option value="${esc(o.id)}"${o.id === sel ? ' selected' : ''}>${esc(o.name)}${o.city ? ' · ' + esc(o.city) : ''}</option>`).join('');
+function busy(btn, on) { btn.disabled = on; btn.dataset.label = btn.dataset.label || btn.textContent; btn.textContent = on ? 'Отправляю…' : btn.dataset.label; }
+async function run(btn, fn) { busy(btn, true); try { await fn(); } catch (err) { toast(err.message, 4000); busy(btn, false); } }
+
+// Выбор зоны, если у человека допуск к нескольким (например, печатник + роспись)
+function zoneField() {
+  const z = S.me.zones || [];
+  if (z.length <= 1) { zoneSel = z[0] || ''; return ''; }
+  if (z.indexOf(zoneSel) < 0) zoneSel = '';
+  return `<label>Чем занимаешься</label><div class="seg" id="zone">${z.map(v => `<button type="button" data-z="${esc(v)}" class="${v === zoneSel ? 'on' : ''}">${esc(v)}</button>`).join('')}</div>`;
+}
+function bindZone() {
+  document.querySelectorAll('#zone button').forEach(b => b.onclick = () => {
+    zoneSel = b.dataset.z; document.querySelectorAll('#zone button').forEach(x => x.classList.toggle('on', x === b));
+  });
+}
+
+// ─────────── Регистрация ───────────
+function vRegister() {
+  const tg = S.tg || {};
+  $('#app').innerHTML = `<div class="card"><h2>Регистрация в ARTGAME</h2>
+    <p class="mute">Заполни анкету. HEAD получит заявку и откроет доступ.</p>
+    <label>Имя и фамилия</label><input id="nm" value="${esc([tg.first, tg.last].filter(Boolean).join(' '))}">
+    <label>Телефон</label><input id="ph" inputmode="tel" placeholder="+7 7__ ___ __ __">
+    <label>Город</label><select id="ct">${opts(S.dict.cities)}</select>
+    <label>Кем работаешь</label><select id="wn">${opts(S.roles.filter(r => r !== 'HEAD'), '', 'Выбрать')}</select>
+    <button class="btn" id="go">Отправить заявку</button></div>`;
+  $('#go').onclick = e => run(e.target, async () => {
+    const r = await call('register', { name: $('#nm').value, phone: $('#ph').value, city: $('#ct').value, want: $('#wn').value });
+    toast(r.first ? 'Ты первый в системе — роль HEAD' : 'Заявка отправлена HEAD'); await reload();
+  });
+}
+
+// ─────────── Экраны ───────────
+function render() {
+  clearInterval(timerId);
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+  ({ shift: vShift, exp: vExp, mine: vMine, check: vCheck, team: vTeam })[tab]();
+}
+
+function vShift() {
+  const app = $('#app'), ph = {};
+  if (S.openShift) {
+    const o = S.openShift;
+    app.innerHTML = `<div class="card"><h2>Смена идёт</h2><div class="mute">${esc(o.zone)} · ${esc(o.obj)} · ${esc(o.role)}</div>
+      <div class="timer" id="tm">0:00</div><div class="mute">с ${new Date(o.start).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</div></div>
+      <div class="card"><h2>Закончить смену</h2>
+      <div class="row"><div><label>Сделано за смену, м²</label><input id="m2" inputmode="decimal" placeholder="0"></div>
+      <div><label>Перерыв, мин</label><input id="brk" inputmode="numeric" value="0"></div></div>
+      ${photoField('pAfter', 'Фото результата')}
+      <label>Комментарий</label><textarea id="cm" placeholder="Что сделали, что мешало"></textarea>
+      <button class="btn" id="go">Закончил смену</button></div>`;
+    const tick = () => { const m = Math.floor((Date.now() - o.start) / 60000); $('#tm').textContent = Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); };
+    tick(); timerId = setInterval(tick, 20000);
+    bindPhoto('pAfter', ph);
+    $('#go').onclick = e => {
+      if ($('#m2').value === '') return toast('Укажи, сколько м² сделано (можно 0)');
+      if (!ph.pAfter && o.zone !== 'Продажи') return toast('Сфотографируй результат');
+      run(e.target, async () => {
+        const r = await call('endShift', { m2: $('#m2').value, breakMin: $('#brk').value, comment: $('#cm').value, photo: ph.pAfter || '' });
+        toast('Смена закрыта: ' + r.hours + ' ч. Ушла на проверку'); await reload();
+      });
+    };
+    return;
+  }
+  app.innerHTML = `<div class="card"><h2>Начать смену</h2>
+    ${zoneField()}
+    <label>Объект</label><select id="obj">${objOpts()}</select>
+    ${photoField('pBefore', 'Фото до (по желанию)')}
+    <label>Комментарий</label><textarea id="cm" placeholder="Необязательно"></textarea>
+    <button class="btn" id="go">Начал смену</button></div>`;
+  bindZone(); bindPhoto('pBefore', ph);
+  $('#go').onclick = e => {
+    if (!zoneSel) return toast('Выбери, чем занимаешься');
+    run(e.target, async () => {
+      await call('startShift', { zone: zoneSel, objId: $('#obj').value, comment: $('#cm').value, photo: ph.pBefore || '' });
+      toast('Смена началась'); await reload();
+    });
+  };
+}
+
+function vExp() {
+  const app = $('#app'), ph = {};
+  if (S.openShift) zoneSel = S.openShift.zone;
+  app.innerHTML = `<div class="card"><h2>Новый расход</h2>
+    ${zoneField()}
+    <label>Объект</label><select id="obj">${objOpts(S.openShift ? S.openShift.objId : '')}</select>
+    <label>Что купили</label><select id="cat">${opts(S.dict.cats)}</select>
+    <div class="row"><div><label>Сумма, ₸</label><input id="sum" inputmode="numeric" placeholder="0"></div>
+    <div><label>Чьи деньги</label><select id="whose">${opts(S.dict.whose)}</select></div></div>
+    ${photoField('pCheck', 'Фото чека (обязательно)')}
+    <label>Комментарий</label><textarea id="cm" placeholder="Например: 3 банки белой, 10 л"></textarea>
+    <button class="btn" id="go">Отправить расход</button></div>`;
+  bindZone(); bindPhoto('pCheck', ph);
+  $('#go').onclick = e => {
+    if (!zoneSel) return toast('Выбери зону');
+    if (!(Number($('#sum').value.replace(/\s/g, '').replace(',', '.')) > 0)) return toast('Укажи сумму');
+    if (!ph.pCheck) return toast('Нужно фото чека');
+    run(e.target, async () => {
+      await call('addExpense', { zone: zoneSel, objId: $('#obj').value, cat: $('#cat').value, sum: $('#sum').value, whose: $('#whose').value, comment: $('#cm').value, photo: ph.pCheck });
+      toast('Расход отправлен на проверку'); await reload();
+    });
+  };
+}
+
+function tagFor(st) { const c = st === 'принята' ? 'ok' : st === 'возвращена' ? 'back' : st === 'на проверке' ? 'rev' : ''; return `<span class="tag ${c}">${esc(st)}</span>`; }
+
+function vMine() {
+  const m = S.mine || { shifts: [], expenses: [] };
+  const sh = m.shifts.map(r => `<div class="item"><b>${esc(r.obj)}</b> ${tagFor(r.status)}<div class="mute">${esc(r.zone)} · ${esc(r.when)}${r.hours !== '' ? ' · ' + esc(r.hours) + ' ч · ' + esc(r.m2) + ' м²' : ''}</div>${r.reason ? `<div class="mute">Причина: ${esc(r.reason)}</div>` : ''}</div>`).join('') || '<div class="mute">Пока нет</div>';
+  const ex = m.expenses.map(r => `<div class="item"><b>${money(r.sum)}</b> · ${esc(r.cat)} ${tagFor(r.status)}<div class="mute">${esc(r.obj)} · ${esc(r.when)}</div>${r.reason ? `<div class="mute">Причина: ${esc(r.reason)}</div>` : ''}</div>`).join('') || '<div class="mute">Пока нет</div>';
+  $('#app').innerHTML = `<div class="card"><h2>Мои смены</h2>${sh}</div><div class="card"><h2>Мои расходы</h2>${ex}</div>
+    <div class="card mute">Роль: ${esc(S.me.role)} · Зоны: ${esc(S.me.zones.join(', '))}${S.me.level ? ' · Уровень в росписи: ' + esc(S.me.level) : ''}</div>`;
+}
+
+async function vCheck() {
+  const app = $('#app'); app.innerHTML = '<div class="card">Загружаю…</div>';
+  let q; try { q = await call('queue'); } catch (e) { app.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
+  const link = (u, t) => u ? `<a href="${esc(u)}" target="_blank">${t}</a>` : '';
+  const card = (x, body) => `<div class="card" data-id="${esc(x.id)}" data-k="${x.kind}">${body}
+    <label>Причина, если возвращаешь</label><input class="rs" placeholder="Например: нет фото, не тот объект">
+    <div class="row"><button class="btn ghost bk">Вернуть</button><button class="btn ok ac">Принять</button></div></div>`;
+  const s = q.shifts.map(x => card(x, `<h2>Смена · ${esc(x.who)}</h2><div>${esc(x.zone)} · ${esc(x.obj)} · ${esc(x.role)}</div>
+    <div class="mute">${esc(x.when)} · перерыв ${esc(x.brk)} мин</div><div><b>${esc(x.hours)} ч · ${esc(x.m2)} м²</b></div>
+    <div class="mute">${[link(x.before, 'фото до'), link(x.after, 'фото после')].filter(Boolean).join(' · ')}</div>${x.comment ? `<div class="mute">${esc(x.comment)}</div>` : ''}`)).join('');
+  const e = q.expenses.map(x => card(x, `<h2>Расход · ${esc(x.who)}</h2><div>${esc(x.zone)} · ${esc(x.obj)}</div>
+    <div><b>${money(x.sum)}</b> · ${esc(x.cat)} · ${esc(x.whose)}</div><div class="mute">${esc(x.when)} · ${link(x.photo, 'чек')}</div>${x.comment ? `<div class="mute">${esc(x.comment)}</div>` : ''}`)).join('');
+  const empty = '<div class="card">Всё проверено 👍</div>';
+  app.innerHTML = (s + e) || empty;
+  app.querySelectorAll('.card[data-id]').forEach(c => {
+    const send = (accept, btn) => {
+      const reason = c.querySelector('.rs').value;
+      if (!accept && !reason.trim()) return toast('Напиши причину возврата');
+      run(btn, async () => {
+        await call('decide', { kind: c.dataset.k, id: c.dataset.id, accept, reason });
+        c.remove(); toast(accept ? 'Принято' : 'Возвращено, человек получит сообщение');
+        if (!app.querySelector('.card[data-id]')) app.innerHTML = empty;
+      });
+    };
+    c.querySelector('.ac').onclick = ev => send(true, ev.target);
+    c.querySelector('.bk').onclick = ev => send(false, ev.target);
+  });
+}
+
+// ─────────── Команда (HEAD) ───────────
+async function vTeam() {
+  const app = $('#app'); app.innerHTML = '<div class="card">Загружаю…</div>';
+  let list; try { list = await call('team'); } catch (e) { app.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
+  const DEF = { 'Саппорт':['Роспись'], 'Художник':['Роспись'], 'Художник Про':['Роспись'], 'Главный художник':['Роспись'],
+    'Оператор настенного принтера':['Печать'], 'Мастер настенной печати':['Печать'], 'МОП':['Продажи'], 'VIP МОП':['Продажи'],
+    'Главный дизайнер':['Дизайн'], 'Помощник дизайнера':['Дизайн'], 'HEAD': S.zones };
+  const groups = { 'ждёт': 'Ждут роли', 'активен': 'В команде', 'отключён': 'Отключены' };
+  let html = '', cur = '';
+  list.forEach((p, i) => {
+    if (p.status !== cur) { cur = p.status; html += `<h2 style="margin:18px 2px 8px">${groups[cur] || cur}</h2>`; }
+    const pending = p.status === 'ждёт';
+    const role = p.role || p.want || '';
+    html += `<details class="card" data-i="${i}" ${pending ? 'open' : ''}><summary><b>${esc(p.name)}</b> ${pending ? '<span class="tag rev">новый</span>' : ''}
+      <div class="mute">${esc(p.role || ('хочет: ' + (p.want || '—')))}${p.zones.length ? ' · ' + esc(p.zones.join(', ')) : ''}</div></summary>
+      <div class="mute" style="margin-top:8px">📞 ${esc(p.phone)} · ${esc(p.city || '')}${p.username ? ' · @' + esc(p.username) : ''} · с ${esc(p.added)}</div>
+      <label>Роль</label><select class="rl">${opts(S.roles, role, 'Выбрать')}</select>
+      <label>Допуски — зоны, где может работать</label><div class="chk">${S.zones.map(z => `<label><input type="checkbox" value="${esc(z)}" ${p.zones.indexOf(z) >= 0 ? 'checked' : ''}>${esc(z)}</label>`).join('')}</div>
+      <div class="lv"><label>Уровень в росписи</label><select class="lvl">${opts(S.levels, p.level || (S.levels.indexOf(role) >= 0 ? role : ''), 'Выбрать')}</select></div>
+      <label>Статус</label><select class="stt">${opts(['активен', 'ждёт', 'отключён'], pending ? 'активен' : p.status)}</select>
+      <button class="btn ok sv">${pending ? 'Открыть доступ' : 'Сохранить'}</button></details>`;
+  });
+  app.innerHTML = html || '<div class="card">Пока никого</div>';
+  app.querySelectorAll('details[data-i]').forEach(c => {
+    const p = list[c.dataset.i];
+    const boxes = () => [...c.querySelectorAll('.chk input')];
+    const syncLv = () => { c.querySelector('.lv').hidden = !boxes().some(b => b.checked && b.value === 'Роспись'); };
+    if (!p.zones.length && DEF[c.querySelector('.rl').value]) boxes().forEach(b => b.checked = DEF[c.querySelector('.rl').value].indexOf(b.value) >= 0);
+    syncLv();
+    c.querySelector('.rl').onchange = ev => {
+      const d = DEF[ev.target.value] || [];
+      boxes().forEach(b => { if (d.indexOf(b.value) >= 0) b.checked = true; });
+      if (S.levels.indexOf(ev.target.value) >= 0) c.querySelector('.lvl').value = ev.target.value;
+      syncLv();
+    };
+    boxes().forEach(b => b.onchange = syncLv);
+    c.querySelector('.sv').onclick = ev => run(ev.target, async () => {
+      const zones = boxes().filter(b => b.checked).map(b => b.value);
+      await call('setPerson', { id: p.id, role: c.querySelector('.rl').value, zones, level: c.querySelector('.lvl').value, status: c.querySelector('.stt').value });
+      toast('Сохранено. ' + (c.querySelector('.stt').value === 'активен' ? 'Человек получит сообщение' : ''));
+      await reload(true);
+    });
+  });
+}
+
+// ─────────── Запуск ───────────
+async function reload(keepTab) {
+  S = await call('boot');
+  const nav = $('#nav');
+  if (S.state === 'new') { nav.hidden = true; return vRegister(); }
+  if (S.state !== 'active') {
+    nav.hidden = true; $('#who').textContent = S.me.name || '';
+    $('#app').innerHTML = S.state === 'off'
+      ? '<div class="card"><h2>Доступ закрыт</h2><p>Вопросы — к HEAD.</p></div>'
+      : '<div class="card"><h2>Заявка у HEAD</h2><p>Как только HEAD назначит роль, бот пришлёт сообщение. Тогда открой журнал снова.</p></div>';
+    return;
+  }
+  $('#who').textContent = S.me.name + ' · ' + S.me.role;
+  nav.hidden = false; $('#navCheck').hidden = !S.approver; $('#navTeam').hidden = !S.admin;
+  $('#navTeam').innerHTML = 'Команда' + (S.pendingCount ? `<span class="badge">${S.pendingCount}</span>` : '');
+  if ((tab === 'check' && !S.approver) || (tab === 'team' && !S.admin)) tab = 'shift';
+  render();
+}
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b.dataset.t; render(); });
+
+function start(initData, params) {
+  INIT = initData;
+  if (params && params.tab) tab = params.tab;
+  if (!INIT) { $('#app').innerHTML = '<div class="card"><h2>Открой из Telegram</h2><p>Приложение ARTGAME открывается кнопкой в Telegram-боте.</p></div>'; return; }
+  reload().catch(e => $('#app').innerHTML = `<div class="card"><h2>Не получилось войти</h2><p>${esc(e.message)}</p><p class="mute">Поля входа: ${esc(initKeys())}</p></div>`);
+}
+const TG = window.Telegram && window.Telegram.WebApp;
+if (TG && TG.initData) {
+  // Свой адрес: Telegram отдаёт вход напрямую
+  TG.ready(); TG.expand();
+  start(TG.initData, Object.fromEntries(new URLSearchParams(location.search)));
+} else if (IN_GAS) {
+  google.script.url.getLocation(loc => start(parseInit(loc.hash), loc.parameter));
+} else {
+  start(parseInit(location.hash), Object.fromEntries(new URLSearchParams(location.search)));
+}
+</script>
+</body>
+</html>
