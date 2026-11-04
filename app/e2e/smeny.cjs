@@ -1,5 +1,5 @@
 // Сквозной тест «Смены и расходы»: API на тестовой базе + vite preview.
-// Запуск: см. app/README.md. Подпись Telegram делается тестовым токеном 123:test-token.
+// Запуск: см. app/README.md (API — e2e/fake_api.py, Диск подменён). Подпись Telegram делается тестовым токеном 123:test-token.
 const { chromium } = require('playwright')
 const { execSync } = require('child_process')
 const assert = require('assert')
@@ -31,9 +31,15 @@ async function page(b, id, name) {
   const { p: a, ctx } = await page(b, 2000, 'Дана')
   await a.getByRole('button', { name: 'Отправить' }).click()
   await a.getByText('Заявка у HEAD').waitFor()
-  const people = await call(1000, '/people')
-  const art = people.find(x => x.full_name === 'Дана')
-  await call(1000, `/people/${art.id}`, { role_code: 'artist', zones: ['mural'] })
+  // HEAD назначает роль и зону на вкладке «Команда»
+  const { p: h } = await page(b, 1000, 'HEAD')
+  await h.getByRole('button', { name: 'Команда' }).click()
+  const row = h.locator('.person', { hasText: 'Дана' })
+  await row.getByText('ждёт роли').waitFor()
+  await row.locator('select').selectOption('artist')
+  await row.getByRole('button', { name: 'Роспись' }).click()
+  await h.waitForTimeout(500)
+  await h.screenshot({ path: `${shots}/0-komanda.png` })
   await a.reload()
 
   // 2. Смена онлайн
@@ -46,6 +52,8 @@ async function page(b, id, name) {
   // 3. Расход без сети → очередь → сеть вернулась → ушёл
   await a.getByRole('button', { name: 'Расход' }).click()
   await a.locator('input[inputmode=numeric]').fill('15000')
+  await a.locator('input[type=file]').setInputFiles(__dirname + '/chek.png')
+  await a.locator('.photo img').waitFor()
   await ctx.setOffline(true)
   await a.getByRole('button', { name: 'Отправить расход' }).click()
   await a.getByText('Сохранено на телефоне').waitFor()
@@ -67,10 +75,27 @@ async function page(b, id, name) {
   await l.getByRole('button', { name: '✕' }).first().click()
   await l.getByText('Всё проверено').nth(1).waitFor()
 
+  // 5. Объекты: фото с объекта и файл дизайна (большой файл идёт прямо в Google — здесь подменён)
+  await call(1000, `/people/${(await call(1000, '/people')).find(x => x.full_name === 'Дана').id}`, { zones: ['mural', 'design'] })
+  await a.reload()
+  await a.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000001' }) }))
+  await a.getByRole('button', { name: 'Объекты' }).click()
+  await a.getByText('Офис / без объекта').click()
+  await a.locator('input[type=file]').setInputFiles([__dirname + '/chek.png', __dirname + '/chek.png'])
+  await a.locator('.grid img').nth(1).waitFor()
+  await a.getByRole('button', { name: 'Дизайн' }).click()
+  await a.locator('input[type=file]').setInputFiles({ name: 'Эскиз.psd', mimeType: 'image/vnd.adobe.photoshop', buffer: Buffer.from('PSD-DATA') })
+  await a.getByText('Эскиз.psd').waitFor()
+  await a.screenshot({ path: `${shots}/4-obekt.png` })
+  await a.getByRole('button', { name: 'Фото' }).click()
+  await a.locator('.grid img').first().waitFor()
+  await a.screenshot({ path: `${shots}/5-foto.png` })
+
   const my = await call(2000, '/my')
   assert.deepStrictEqual(my.shifts.map(s => s.status), ['approved'])
   assert.deepStrictEqual(my.expenses.map(e => [e.status, e.reason]), [['rejected', 'Нет чека']])
   assert.strictEqual(Number(my.shifts[0].area_m2), 12.5)
+  assert.match(my.expenses[0].receipt_url, /^\/api\/files\/\d+\/content\?exp=/)
   console.log('E2E OK')
   await b.close()
 })().catch(e => { console.error(e); process.exit(1) })
