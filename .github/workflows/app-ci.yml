@@ -1,0 +1,26 @@
+name: app-ci
+# Проверка приложения на своём сервере: тесты API на PostgreSQL 16 и сборка экрана.
+on:
+  push:
+    paths: ['app/**', '.github/workflows/app-ci.yml']
+  pull_request:
+    paths: ['app/**', '.github/workflows/app-ci.yml']
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: pg, POSTGRES_DB: artgame_test }
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -r app/backend/requirements.txt
+      - run: cd app/backend && pytest -q
+        env: { ARTGAME_TEST_DATABASE_URL: 'postgresql://postgres:pg@localhost:5432/artgame_test' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: cd app/frontend && npm install && npm run build

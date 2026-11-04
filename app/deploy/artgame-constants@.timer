@@ -1,0 +1,9 @@
+[Unit]
+Description=ARTGAME: константы каждые 5 минут (%i)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

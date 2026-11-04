@@ -1,0 +1,16 @@
+/* Тёмный игровой вид (HEAD 04.11). Цвета бренда. */
+:root {
+  --bg: #0D0B0C; --surface: #17141A; --line: #2A2530;
+  --text: #F1F0EC; --muted: #9C97A0; --accent: #E60041; --ok: #3DDC97;
+  --r: 16px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 Onest, system-ui, sans-serif; }
+.wrap { max-width: 480px; margin: 0 auto; padding: 24px 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 20px; margin-bottom: 12px; }
+h1 { font-size: 28px; letter-spacing: .02em; margin: 0 0 12px; }
+.muted { color: var(--muted); }
+input { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; margin: 8px 0; }
+button { width: 100%; padding: 14px; border: 0; border-radius: 12px; background: var(--accent); color: #fff; font: 600 16px Onest, system-ui; }
+.tag { display: inline-block; padding: 4px 10px; border-radius: 99px; background: var(--line); margin: 4px 4px 0 0; font-size: 14px; }
