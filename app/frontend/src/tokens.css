@@ -39,3 +39,10 @@ a { color: var(--accent); }
 .zones button { width: auto; flex: 1 0 40%; padding: 8px; font-size: 14px; }
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
 .grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; display: block; background: var(--line); }
+
+/* Рабочее место роли: страница во весь экран над меню */
+.place { display: flex; flex-direction: column; height: calc(100dvh - 62px - env(safe-area-inset-bottom)); }
+.place .chips { display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto; background: var(--surface); border-bottom: 1px solid var(--line); }
+.place .chips button { flex: none; width: auto; padding: 6px 12px; font-size: 13px; background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.place .chips button.on { color: var(--text); background: var(--line); }
+.placeframe { flex: 1; width: 100%; border: 0; background: #fff; }

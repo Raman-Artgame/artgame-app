@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     gateway_token: str = ""            # если шлюз требует токен
     drive_inbox: str = ""              # папка Диска для чеков «Офис / без объекта»
     google_sa_file: str = ""            # путь к JSON сервисного аккаунта на сервере
+    content_key: str = ""               # hex 32 байта: расшифровка рабочих мест (places/*.enc)
 
 
 settings = Settings()

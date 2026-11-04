@@ -2,7 +2,7 @@
 # Одна команда для HEAD: поставить тестовое приложение на test.app.artgame.world.
 # Запуск (PowerShell на ПК):
 #   ssh -t deploy-admin@109.235.116.40 "curl -fsSL https://raw.githubusercontent.com/Raman-Artgame/artgame-app/<коммит>/app/deploy/install_test.sh -o /tmp/artgame-install.sh && sudo bash /tmp/artgame-install.sh <коммит>"
-# Спросит только токен бота (ввод не виден). Остальное делает сам. Prod, шлюз mcp и задачи FIN03/SRC02/DRIVE01 не трогает.
+# Спросит токен бота (только в первый раз) и ключ рабочих мест (один раз; ввод не виден). Остальное делает сам. Prod, шлюз mcp и задачи FIN03/SRC02/DRIVE01 не трогает.
 set -euo pipefail
 REV=${1:?коммит}
 SRC=/srv/artgame-src
@@ -46,6 +46,15 @@ ENV
   unset TOKEN
 else
   echo "уже есть, не меняю"
+fi
+# Ключ рабочих мест (страницы из артефактов лежат в репозитории зашифрованными). Спрашивается один раз.
+if ! grep -q '^ARTGAME_CONTENT_KEY=' "$ENVF"; then
+  KEY=""
+  while ! [[ "$KEY" =~ ^[0-9a-f]{64}$ ]]; do
+    read -r -s -p "Вставьте ключ рабочих мест (64 символа из треда) и нажмите Enter: " KEY </dev/tty; echo
+  done
+  echo "ARTGAME_CONTENT_KEY=$KEY" >> "$ENVF"; unset KEY
+  echo "ключ рабочих мест записан"
 fi
 
 echo "== 4/5 выкладка test"

@@ -4,6 +4,7 @@ import { api } from './api.js'
 import { ExpenseForm, Mine, Review, ShiftForm } from './work.jsx'
 import { People } from './people.jsx'
 import { Objects } from './objects.jsx'
+import { Places, usePlaces } from './places.jsx'
 import './tokens.css'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
@@ -45,10 +46,15 @@ function App() {
 const CHECKERS = new Set(['head', 'lead_artist', 'print_master', 'lead_designer'])
 
 function Main({ me }) {
+  const places = usePlaces()
   const [tab, setTab] = useState('shift')
   const [toast, setToast] = useState('')
   const done = t => { setToast(t); setTab('mine'); setTimeout(() => setToast(''), 4000) }
-  const tabs = [['shift', 'Смена'], ['expense', 'Расход'], ['objects', 'Объекты'], ['mine', 'Мои'], ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []), ...(me.role_code === 'head' ? [['people', 'Команда']] : [])]
+  const tabs = [...(places.length ? [['place', 'Место']] : []), ['shift', 'Смена'], ['expense', 'Расход'], ['objects', 'Объекты'], ['mine', 'Мои'], ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []), ...(me.role_code === 'head' ? [['people', 'Команда']] : [])]
+  if (tab === 'place') return <>
+    <Places list={places} />
+    <Nav tabs={tabs} tab={tab} setTab={setTab} />
+  </>
   return <>
     <div className="wrap">
       <div className="card"><h1>{me.full_name}</h1><span className="tag">{ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>
@@ -56,8 +62,12 @@ function Main({ me }) {
       {tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : tab === 'objects' ? <Objects me={me} /> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
         tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <Mine /> : <Review />}
     </div>
-    <nav>{tabs.map(([k, t]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{t}</button>)}</nav>
+    <Nav tabs={tabs} tab={tab} setTab={setTab} />
   </>
+}
+
+function Nav({ tabs, tab, setTab }) {
+  return <nav>{tabs.map(([k, t]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{t}</button>)}</nav>
 }
 
 createRoot(document.getElementById('root')).render(<App />)
