@@ -44,14 +44,25 @@ function Common({ d, v, set }) {
   </>
 }
 
+const CX = [['easy', 'Лёгкий'], ['medium', 'Средний'], ['hard', 'Сложный'], ['author', 'Авторский']]
+const pct = k => Math.round(k * 100) + '%'
+const m2 = x => Number(x).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+
+function Check({ v, set, k, t }) {
+  return <label className="check"><input type="checkbox" checked={!!v[k]} onChange={e => set({ ...v, [k]: e.target.checked })} /> {t}</label>
+}
+
 export function ShiftForm({ done }) {
   const d = useDict()
   const [v, set] = useState(null)
-  useEffect(() => { if (d) set({ object_id: d.objects[0]?.id, zone_code: d.zones[0], started_at: local(Date.now() - 9 * 3600e3), ended_at: local(Date.now()), area_m2: '', note: '' }) }, [d])
+  useEffect(() => { if (d) set({ object_id: d.objects[0]?.id, zone_code: d.zones[0], started_at: local(Date.now() - 9 * 3600e3), ended_at: local(Date.now()), area_m2: '', note: '',
+    complexity: 'medium', printer: d.printer || '', at_height: false, outdoor: false, hard_surface: false }) }, [d])
   if (!d || !v) return <div className="card muted">Загрузка…</div>
   const send = async () => {
     const geo = await new Promise(r => navigator.geolocation ? navigator.geolocation.getCurrentPosition(p => r(p.coords), () => r(null), { timeout: 4000 }) : r(null))
-    const left = await enqueue('/shifts', { ...v, started_at: iso(v.started_at), ended_at: iso(v.ended_at), area_m2: v.area_m2 === '' ? null : +v.area_m2,
+    const mural = v.zone_code === 'mural', print = v.zone_code === 'print'
+    const left = await enqueue('/shifts', { ...v, complexity: mural ? v.complexity : null, printer: print ? v.printer || null : null,
+      at_height: mural && v.at_height, outdoor: mural && v.outdoor, hard_surface: mural && v.hard_surface, started_at: iso(v.started_at), ended_at: iso(v.ended_at), area_m2: v.area_m2 === '' ? null : +v.area_m2,
       geo_lat: geo?.latitude ?? null, geo_lon: geo?.longitude ?? null })
     done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Смена отправлена на проверку.')
   }
@@ -60,7 +71,17 @@ export function ShiftForm({ done }) {
     <Common d={d} v={v} set={set} />
     <label className="muted">Начало</label><input type="datetime-local" value={v.started_at} onChange={e => set({ ...v, started_at: e.target.value })} />
     <label className="muted">Конец</label><input type="datetime-local" value={v.ended_at} onChange={e => set({ ...v, ended_at: e.target.value })} />
-    <label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.') })} />
+    <label className="muted">{v.zone_code === 'print' ? 'Напечатано, м²' : 'Сделано, м²'}</label>
+    <input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.') })} />
+    {v.zone_code === 'mural' && <>
+      <label className="muted">Сложность росписи</label>
+      <div className="seg grid2">{CX.map(([k, t]) => <button key={k} className={v.complexity === k ? '' : 'ghost'} onClick={() => set({ ...v, complexity: k })}>{t}</button>)}</div>
+      <Check v={v} set={set} k="at_height" t="На высоте" />
+      <Check v={v} set={set} k="outdoor" t="Улица" />
+      <Check v={v} set={set} k="hard_surface" t="Сложная поверхность" />
+    </>}
+    {v.zone_code === 'print' && <><label className="muted">Принтер</label>
+      <input value={v.printer} onChange={e => set({ ...v, printer: e.target.value })} placeholder="Название принтера" /></>}
     <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
     <button onClick={send}>Отправить смену</button>
   </div>
@@ -110,7 +131,8 @@ export function Mine() {
     {pending() > 0 && <div className="card">Ждут сети: {pending()}</div>}
     <div className="card"><h2>Мои смены</h2>
       {m.shifts.length ? m.shifts.map(s => <div key={s.id} className="row">
-        <div><b>{s.object_title}</b><br /><span className="muted small">{new Date(s.started_at).toLocaleString('ru-RU')}{s.area_m2 ? ` · ${s.area_m2} м²` : ''}</span>
+        <div><b>{s.object_title}</b><br /><span className="muted small">{new Date(s.started_at).toLocaleString('ru-RU')}{s.area_m2 ? ` · ${+s.area_m2} м²` : ''}</span>
+          {s.plan_m2 && <div className="small">{s.zone_code === 'print' ? 'План' : 'Норма'} {m2(s.plan_m2)} м²{s.kpd != null && <> · КПД <b>{pct(s.kpd)}</b></>}{+s.bonus > 0 && <> · бонус <b>{money(s.bonus)}</b></>}</div>}
           {s.reason && <div className="small">Причина: {s.reason}</div>}</div>
         <span className={`tag st-${s.status}`}>{ST[s.status]}</span>
         {s.status === 'submitted' && <a onClick={() => cancel('shift', s.id)}>отменить</a>}
@@ -144,7 +166,7 @@ export function Review() {
   </div>
   return <>
     <div className="card"><h2>Смены на проверку</h2>
-      {r.shifts.length ? r.shifts.map(x => <Item key={x.id} k="shift" x={x}>{new Date(x.started_at).toLocaleString('ru-RU')}{x.area_m2 ? ` · ${x.area_m2} м²` : ''} · {ZONE[x.zone_code]}</Item>) : <p className="muted">Всё проверено</p>}
+      {r.shifts.length ? r.shifts.map(x => <Item key={x.id} k="shift" x={x}>{new Date(x.started_at).toLocaleString('ru-RU')}{x.area_m2 ? ` · ${+x.area_m2} м²` : ''} · {ZONE[x.zone_code]}{x.plan_m2 ? ` · ${x.zone_code === 'print' ? 'план' : 'норма'} ${m2(x.plan_m2)} м²` : ''}{x.kpd != null ? ` · КПД ${pct(x.kpd)}` : ''}{x.printer ? ` · ${x.printer}` : ''}</Item>) : <p className="muted">Всё проверено</p>}
     </div>
     <div className="card"><h2>Расходы на проверку</h2>
       {r.expenses.length ? r.expenses.map(x => <Item key={x.id} k="expense" x={x}>{money(x.amount)} · {x.paid_by === 'own' ? 'свои' : 'компании'}{x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</Item>) : <p className="muted">Всё проверено</p>}

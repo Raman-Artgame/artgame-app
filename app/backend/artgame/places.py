@@ -143,23 +143,14 @@ def shim():
 
 # ---------- цифры из «Значений» (контракт values_spec.md: config/values) ----------
 
-def _num(v: str):
-    s = str(v).replace(" ", "").replace(" ", "").replace(",", ".")
-    try:
-        x = float(s)
-    except ValueError:
-        return str(v).strip()
-    return int(x) if x.is_integer() else x
-
-
 def config_values(code: str) -> dict:
     with db.pool.connection() as conn:
         row = conn.execute("SELECT fetched_at, values FROM constants_versions ORDER BY id DESC LIMIT 1").fetchone()
     if not row:
         return {"id": "values", "exists": False, "data": None}
     aud = PLACES[code]["aud"]
-    vals = {k: _num(v["value"]) for k, v in row["values"].items()
-            if v["status"] == "Утверждено" and v["who"] in aud and str(v["value"]).strip()}
+    vals = {k: consts.num(v["value"]) for k, v in row["values"].items()
+            if v["status"] == "Утверждено" and consts.who_set(v["who"]) & aud and str(v["value"]).strip()}
     return {"id": "values", "exists": True,
             "data": {"_updated": row["fetched_at"].isoformat(), "_source": "Значения", "values": vals}}
 

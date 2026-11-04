@@ -5,6 +5,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+import math
+
+from . import constants as consts
 from . import db, drive
 from .deps import current_person
 
@@ -35,6 +38,7 @@ def work_dict(p: dict = Depends(active)):
             "objects": conn.execute("SELECT id, title, city FROM objects WHERE status='active' ORDER BY id DESC").fetchall(),
             "categories": conn.execute("SELECT code, title FROM expense_categories WHERE active ORDER BY sort").fetchall(),
             "zones": p["zones"],
+            "printer": consts.latest(conn).get("print.tech.printer"),
         }
 
 
@@ -49,6 +53,44 @@ class ShiftIn(BaseModel):
     note: str | None = None
     geo_lat: float | None = None
     geo_lon: float | None = None
+    printer: str | None = Field(default=None, max_length=100)
+    at_height: bool = False
+    outdoor: bool = False
+    hard_surface: bool = False
+
+
+COMPLEXITY = ("easy", "medium", "hard", "author")
+ROLE_NORM = {"support": "norm.role.support", "artist_pro": "norm.role.pro"}
+PRINT_BONUS = {"print_operator": "pay.print.bonus_operator", "print_master": "pay.print.bonus_master"}
+
+
+def _n(v: dict, key: str, default=None):
+    x = v.get(key, default)
+    return x if isinstance(x, (int, float)) else default
+
+
+def shift_norm(v: dict, s: ShiftIn, role: str | None) -> dict:
+    """Норма/план, КПД и бонус смены по «Значениям». Чего нет в «Значениях» — не считаем."""
+    full = _n(v, "shift.hours", 10)
+    hours = (s.ended_at - s.started_at).total_seconds() / 3600 if s.ended_at else full
+    out = {"plan_m2": None, "kpd": None, "bonus": None}
+    if s.zone_code == "mural" and s.complexity in COMPLEXITY:
+        base = _n(v, f"norm.mural.{s.complexity}")
+        if base:
+            k = 1.0
+            for flag, key in ((s.at_height, "norm.k.height"), (s.outdoor, "norm.k.outdoor"), (s.hard_surface, "norm.k.surface")):
+                if flag:
+                    k *= _n(v, key, 1)
+            k *= _n(v, ROLE_NORM.get(role, ""), 1)
+            out["plan_m2"] = round(base * k * min(hours, full * 1.5) / full, 2)
+    elif s.zone_code == "print":
+        out["plan_m2"] = _n(v, "print.plan_per_shift")
+        step, rate = _n(v, "pay.print.bonus_step_m2"), _n(v, PRINT_BONUS.get(role, ""))
+        if out["plan_m2"] and step and rate and s.area_m2:
+            out["bonus"] = max(0, math.floor((s.area_m2 - out["plan_m2"]) / step)) * rate
+    if out["plan_m2"] and s.area_m2 is not None:
+        out["kpd"] = round(s.area_m2 / out["plan_m2"], 3)
+    return out
 
 
 @router.post("/shifts")
@@ -60,13 +102,18 @@ def add_shift(s: ShiftIn, p: dict = Depends(active)):
         if dup:
             return dup
         check_zone(conn, p, s.zone_code, s.object_id)
+        if s.complexity and s.complexity not in COMPLEXITY:
+            raise HTTPException(400, "bad complexity")
+        n = shift_norm(consts.latest(conn), s, p["role_code"])
         row = conn.execute(
             """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, area_m2,
-                                   complexity, note, geo_lat, geo_lon)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                   complexity, note, geo_lat, geo_lon, printer, at_height, outdoor, hard_surface,
+                                   plan_m2, kpd, bonus)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
             (s.client_uid, p["id"], s.object_id, s.zone_code, s.started_at, s.ended_at, s.area_m2,
-             s.complexity, s.note, s.geo_lat, s.geo_lon)).fetchone()
+             s.complexity, s.note, s.geo_lat, s.geo_lon, s.printer, s.at_height, s.outdoor, s.hard_surface,
+             n["plan_m2"], n["kpd"], n["bonus"])).fetchone()
         if not row:  # параллельный повтор успел раньше
             return conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (s.client_uid,)).fetchone()
         db.audit(conn, p["id"], "shift_add", "shifts", row["id"])
@@ -177,6 +224,9 @@ def review_list(p: dict = Depends(active)):
                     FROM {t} x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id
                     WHERE x.status='submitted' AND {cond} ORDER BY x.created_at""", args).fetchall()
         out["expenses"] = [with_receipt(e) for e in out["expenses"]]
+        if p["role_code"] != "head":
+            for x in out["shifts"]:
+                x.pop("bonus", None)
         return out
 
 

@@ -40,6 +40,7 @@ def test_constants_visibility(client):
     rows = [["mural.rate.a", "Роспись", "Ставка", "17", "тыс", "все", "Утверждено"],
             ["pay.artist", "Оплата", "Оплата", "1", "", "head", "Утверждено"],
             ["mop.pct", "МОП", "%", "3", "%", "моп", "Утверждено"],
+            ["norm.mural.easy", "Нормы", "Норма", "20", "м²", "производство, моп", "Утверждено"],
             ["draft.x", "", "", "1", "", "все", "Черновик"]]
     with db.pool.connection() as c:
         assert consts.store_if_changed(c, consts.parse_rows(rows)) is True
@@ -47,5 +48,5 @@ def test_constants_visibility(client):
     client.post("/api/register", json={"full_name": "HEAD"}, headers=hdr(1000))
     a = client.post("/api/register", json={"full_name": "A"}, headers=hdr(2000)).json()
     client.post(f"/api/people/{a['id']}", json={"role_code": "artist"}, headers=hdr(1000))
-    assert set(client.get("/api/constants", headers=hdr(2000)).json()["values"]) == {"mural.rate.a"}
-    assert set(client.get("/api/constants", headers=hdr(1000)).json()["values"]) == {"mural.rate.a", "pay.artist", "mop.pct"}
+    assert set(client.get("/api/constants", headers=hdr(2000)).json()["values"]) == {"mural.rate.a", "norm.mural.easy"}
+    assert set(client.get("/api/constants", headers=hdr(1000)).json()["values"]) == {"mural.rate.a", "pay.artist", "mop.pct", "norm.mural.easy"}
