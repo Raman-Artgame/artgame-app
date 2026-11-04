@@ -49,6 +49,8 @@ def register(body: RegisterIn, user: dict = Depends(tg_user)):
             (tg_id, user.get("username"), body.full_name.strip(), body.phone,
              "head" if is_head else None, "active" if is_head else "pending"),
         ).fetchone()
+        if is_head:
+            conn.execute("INSERT INTO person_zones (person_id, zone_code) SELECT %s, code FROM zones", (row["id"],))
         db.audit(conn, row["id"], "register", "people", row["id"])
         return load_person(conn, tg_id)
 

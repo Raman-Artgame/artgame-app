@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api } from './api.js'
 import { ExpenseForm, Mine, Review, ShiftForm } from './work.jsx'
+import { People } from './people.jsx'
 import './tokens.css'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
@@ -46,12 +47,12 @@ function Main({ me }) {
   const [tab, setTab] = useState('shift')
   const [toast, setToast] = useState('')
   const done = t => { setToast(t); setTab('mine'); setTimeout(() => setToast(''), 4000) }
-  const tabs = [['shift', 'Смена'], ['expense', 'Расход'], ['mine', 'Мои'], ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : [])]
+  const tabs = [['shift', 'Смена'], ['expense', 'Расход'], ['mine', 'Мои'], ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []), ...(me.role_code === 'head' ? [['people', 'Команда']] : [])]
   return <>
     <div className="wrap">
       <div className="card"><h1>{me.full_name}</h1><span className="tag">{ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>
       {toast && <div className="toast">{toast}</div>}
-      {!me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+      {tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
         tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <Mine /> : <Review />}
     </div>
     <nav>{tabs.map(([k, t]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{t}</button>)}</nav>

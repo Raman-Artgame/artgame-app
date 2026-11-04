@@ -15,6 +15,7 @@ def test_register_and_roles(client):
     # HEAD по ARTGAME_HEAD_TG_ID сразу активен
     h = client.post("/api/register", json={"full_name": "HEAD"}, headers=hdr(1000)).json()
     assert h["role_code"] == "head" and h["status"] == "active"
+    assert h["zones"] == ["design", "mural", "print", "sales"]
     # художник регистрируется сам → ждёт роли
     a = client.post("/api/register", json={"full_name": "Художник"}, headers=hdr(2000)).json()
     assert a["status"] == "pending" and a["role_code"] is None

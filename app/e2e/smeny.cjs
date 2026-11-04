@@ -31,9 +31,15 @@ async function page(b, id, name) {
   const { p: a, ctx } = await page(b, 2000, 'Дана')
   await a.getByRole('button', { name: 'Отправить' }).click()
   await a.getByText('Заявка у HEAD').waitFor()
-  const people = await call(1000, '/people')
-  const art = people.find(x => x.full_name === 'Дана')
-  await call(1000, `/people/${art.id}`, { role_code: 'artist', zones: ['mural'] })
+  // HEAD назначает роль и зону на вкладке «Команда»
+  const { p: h } = await page(b, 1000, 'HEAD')
+  await h.getByRole('button', { name: 'Команда' }).click()
+  const row = h.locator('.person', { hasText: 'Дана' })
+  await row.getByText('ждёт роли').waitFor()
+  await row.locator('select').selectOption('artist')
+  await row.getByRole('button', { name: 'Роспись' }).click()
+  await h.waitForTimeout(500)
+  await h.screenshot({ path: `${shots}/0-komanda.png` })
   await a.reload()
 
   // 2. Смена онлайн
