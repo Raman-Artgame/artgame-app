@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Одна команда для HEAD: поставить тестовое приложение на test.app.artgame.world.
 # Запуск (PowerShell на ПК):
-#   ssh -t deploy-admin@109.235.116.40 "curl -fsSL https://raw.githubusercontent.com/Raman-Artgame/artgame-app/<коммит>/app/deploy/install_test.sh | sudo bash -s <коммит>"
+#   ssh -t deploy-admin@109.235.116.40 "curl -fsSL https://raw.githubusercontent.com/Raman-Artgame/artgame-app/<коммит>/app/deploy/install_test.sh -o /tmp/artgame-install.sh && sudo bash /tmp/artgame-install.sh <коммит>"
 # Спросит только токен бота (ввод не виден). Остальное делает сам. Prod, шлюз mcp и задачи FIN03/SRC02/DRIVE01 не трогает.
 set -euo pipefail
 REV=${1:?коммит}
