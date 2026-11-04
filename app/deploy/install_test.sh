@@ -47,6 +47,8 @@ ENV
 else
   echo "уже есть, не меняю"
 fi
+# Адрес страницы для загрузки больших файлов прямо в Google (добавляется один раз)
+grep -q '^ARTGAME_PUBLIC_ORIGIN=' "$ENVF" || echo "ARTGAME_PUBLIC_ORIGIN=https://test.app.artgame.world" >> "$ENVF"
 # Ключ рабочих мест (страницы из артефактов лежат в репозитории зашифрованными). Спрашивается один раз.
 if ! grep -q '^ARTGAME_CONTENT_KEY=' "$ENVF"; then
   KEY=""
