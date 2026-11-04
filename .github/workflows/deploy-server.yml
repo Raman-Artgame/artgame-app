@@ -34,4 +34,5 @@ jobs:
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           printf '{"scriptId":"%s","rootDir":"server"}' "$SCRIPT_ID" > .clasp.json
           clasp push -f
+          clasp deployments
           clasp deploy -i "$DEPLOYMENT_ID" -d "github ${GITHUB_SHA::7}"
