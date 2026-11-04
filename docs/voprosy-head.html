@@ -1,0 +1,239 @@
+<title>Вопросы HEAD по приложению</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: одна колонка анкеты; липкая полоса прогресса; вопросы сгруппированы, у каждого — варианты + поле ответа */
+:root{
+  --bg:#f6f7fb; --surface:#ffffff; --fg:#1b1d2a; --muted:#5c6178; --line:#dfe2ee;
+  --accent:#0a9f9a; --accent-soft:#e0f4f3; --accent-fg:#ffffff;
+  --urgent:#b3363a; --urgent-soft:#f8e1e2; --later:#5b4fc4; --later-soft:#ebe8fb; --done:#2f8a4a; --done-soft:#e3f3e7;
+  --f-display:"Unbounded","Golos Text",system-ui,sans-serif;
+  --f-body:"Golos Text",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12131c; --surface:#1b1d29; --fg:#e9eaf3; --muted:#9aa0b8; --line:#2c2f40;
+  --accent:#3fd0c9; --accent-soft:#163432; --accent-fg:#0b1f1e;
+  --urgent:#f08589; --urgent-soft:#3b1c1e; --later:#a99cff; --later-soft:#26224a; --done:#6fcf8a; --done-soft:#183322; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12131c; --surface:#1b1d29; --fg:#e9eaf3; --muted:#9aa0b8; --line:#2c2f40;
+  --accent:#3fd0c9; --accent-soft:#163432; --accent-fg:#0b1f1e;
+  --urgent:#f08589; --urgent-soft:#3b1c1e; --later:#a99cff; --later-soft:#26224a; --done:#6fcf8a; --done-soft:#183322; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:16px/1.55 var(--f-body)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:760px;margin:0 auto;padding-block:28px 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:28px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;line-height:1.2;margin:0}
+h1{font-size:1.75rem}
+h2{font-size:1.15rem}
+p{margin:0}
+.eyebrow{font:600 .72rem/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.muted{color:var(--muted)}
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:10px;display:flex;gap:12px;align-items:center;border-bottom:1px solid var(--line)}
+.track{flex:1;height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+.fill{height:100%;width:0;background:var(--accent);transition:width .3s}
+.count{font:600 .82rem/1 var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.status{font-size:.82rem;color:var(--muted)}
+details.known{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+details.known summary{cursor:pointer;font-weight:600}
+details.known ul{margin:10px 0 0;padding-left:1.2em;display:flex;flex-direction:column;gap:4px;font-size:.93rem}
+.group{display:flex;flex-direction:column;gap:12px}
+.q{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.q.answered{border-color:var(--done)}
+.qhead{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
+.qtext{font-weight:600}
+.num{font:600 .75rem/1.6 var(--f-mono);color:var(--muted);margin-right:6px}
+.tag{font:600 .68rem/1 var(--f-mono);padding:5px 8px;border-radius:99px;white-space:nowrap;flex:none}
+.t-now{background:var(--urgent-soft);color:var(--urgent)}
+.t-later{background:var(--later-soft);color:var(--later)}
+.t-done{background:var(--done-soft);color:var(--done)}
+.why{font-size:.9rem;color:var(--muted)}
+.opts{display:flex;flex-wrap:wrap;gap:8px}
+.opt{font:500 .88rem/1.3 var(--f-body);padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer;text-align:left}
+.opt.rec::after{content:" · совет";color:var(--accent);font-size:.78rem}
+.opt[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.opt[aria-pressed="true"].rec::after{color:var(--accent-fg)}
+textarea{width:100%;box-sizing:border-box;min-height:44px;resize:vertical;font:15px/1.45 var(--f-body);padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.saved{font-size:.78rem;color:var(--done);min-height:1em}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+footer{font-size:.85rem;color:var(--muted);border-top:1px solid var(--line);padding-top:14px}
+</style>
+
+<div class="wrap">
+  <header style="display:flex;flex-direction:column;gap:10px">
+    <span class="eyebrow">ARTGAME · приложение на своём сервере · 04.11.2026</span>
+    <h1>Вопросы HEAD по приложению</h1>
+    <p>Всё, что нужно от вас, чтобы собрать приложение сразу нормально. Я прошёл все треды проекта, память и отчёты сервера. То, что вы уже решили, ниже в «Уже известно», об этом не спрашиваю.</p>
+    <p class="muted">Нажмите вариант или впишите своё. Ответ сохраняется сам, я его вижу. Красные нужны до старта, остальные можно позже.</p>
+  </header>
+
+  <div class="bar" role="status">
+    <div class="track"><div class="fill" id="fill"></div></div>
+    <span class="count" id="count">0 / 0</span>
+  </div>
+  <p class="status" id="dbstatus">Загружаю сохранённые ответы…</p>
+
+  <details class="known">
+    <summary>Уже известно, не спрашиваю (15 пунктов)</summary>
+    <ul>
+      <li>Свой сервер есть: VPS Hoster.kz в Астане, защищён, на нём шлюз mcp.artgame.world и задачи FIN03, SRC02, DRIVE01.</li>
+      <li>Бот @artgame_team_bot создан, вход через Telegram.</li>
+      <li>11 ролей и 4 зоны (Роспись, Печать, Дизайн, Продажи); кто какую зону проверяет.</li>
+      <li>Главных художников несколько, не одна Анна.</li>
+      <li>Производство одно место: печать и художники вместе, доступы по ролям.</li>
+      <li>VIP МОП — отдельная страница по белому списку Telegram ID.</li>
+      <li>Все цифры только из листа «Значения», правит HEAD. Финансы и оплата видит только HEAD.</li>
+      <li>Запись в Битрикс только через Кодекса и «да» HEAD. № сделки = № объекта = № договора.</li>
+      <li>Фото и чеки: Диск → ПРОЕКТЫ → год → месяц → папка сделки.</li>
+      <li>Смена: начало и конец по объекту, фото до и после, м², роль. Расход: категория, сумма, чек, объект, чьи деньги. Проверяют ГИП, главный по зоне, HEAD.</li>
+      <li>Порядок разделов: учёт смен и расходов → МОП → производство → дизайн → бухгалтер → маркетинг.</li>
+      <li>PDF только клиентские (КП, прайс, каталог, договор, счёт). Внутреннее живёт в приложении.</li>
+      <li>Города базирования: Астана, Шымкент. НДС 16%, исполнитель ИП Яковлев.</li>
+      <li>Ничего не удаляем, старое в Архив. Файлы называем латиницей.</li>
+      <li>Данных в приложении пока нет: строим сразу на своём сервере, Google-версию не тестируем.</li>
+    </ul>
+  </details>
+
+  <div id="groups"></div>
+
+  <footer>Ваши ответы хранятся в этой странице и видны мне. По ним я соберу точный план и покажу вам на «да». Ничего не разворачиваю до вашего «да».</footer>
+</div>
+
+<script>
+const GROUPS = [
+ {t:"1. Сервер, домен, доступы", qs:[
+  {id:"domain", now:1, q:"Какой адрес у приложения?", why:"Поддомен бесплатный. Для .kz нужен доступ к DNS домена artgame.kz, для .world — туда же, где добавлен mcp.artgame.world (Squarespace).", o:["app.artgame.kz","app.artgame.world"], rec:0},
+  {id:"dns_owner", now:1, q:"Кто может добавить запись DNS для artgame.kz (где куплен домен, есть ли у вас вход)?", why:"Нужна одна запись A на наш сервер. Если доступа нет, проще взять app.artgame.world.", o:["Вход есть у меня","Знаю, у кого","Не знаю"]},
+  {id:"vps", now:1, q:"Ставим приложение на текущий VPS или берём отдельный?", why:"Текущий: без доплат, уже защищён. Отдельный: ещё один VPS Hoster.kz, ориентир 6–12 тыс. ₸ в месяц, полная изоляция от задач Битрикса и финансов.", o:["Текущий VPS","Отдельный VPS"], rec:0},
+  {id:"snapshots", now:1, q:"Снимки сервера в кабинете Hoster.kz включены?", why:"Перед любой настройкой делаем снимок, чтобы можно было вернуть всё как было. По отчёту 23.10 включаете их вы.", o:["Включены","Не включены","Не знаю, как проверить"]},
+  {id:"deploy_key", now:1, q:"Разрешаете автовыкладку на сервер из GitHub (отдельный ключ, только для папки приложения)?", why:"Тогда вы ничего не вставляете руками: правка в репозитории → тест → сервер обновился сам.", o:["Да","Нет, выкладывать через Codex на ПК"], rec:0},
+  {id:"network", now:1, q:"Откроете мне сеть в настройках среды проекта до нашего сервера и Telegram?", why:"Чтобы я сам проверял вход и работу до вас, а не вы на скриншотах. Список адресов пришлю одной строкой.", o:["Да, пришли список","Позже"], rec:0},
+  {id:"google_acc", now:1, q:"От какого Google-аккаунта сервер пишет фото на Диск и обновляет Таблицы-отчёты?", why:"Задача DRIVE01 уже пишет на Диск с сервера. Проще всего дать приложению тот же доступ, но только к папке ПРОЕКТЫ и отчётам.", o:["Тот же доступ, что у DRIVE01","ceo@artgame.world","Отдельный сервисный аккаунт"], rec:0},
+ ]},
+ {t:"2. Люди и роли", qs:[
+  {id:"team_start", now:1, q:"Как заводим команду на старте?", why:"Вариант 1: каждый сам регистрируется по ссылке из бота, вы назначаете роль. Вариант 2: вы присылаете список (имя, роль, зоны, телефон), я заношу заранее.", o:["Сами по ссылке","Пришлю список"], rec:0},
+  {id:"leads", now:1, q:"Кто главные художники и кураторы/ГИП сейчас (имена)?", why:"Они проверяют смены и расходы. Без них проверку видит только HEAD.", o:[]},
+  {id:"admins", now:1, q:"Кто кроме вас может назначать роли и отключать людей?", why:"Если никто, все заявки ждут только вас.", o:["Только HEAD","Ещё один человек (впишу)"], rec:0},
+  {id:"rates_visible", now:1, q:"Кто видит ставки художников и печати?", why:"Открытый вопрос с 03.11. В приложении есть вход по Telegram, поэтому возможен вариант «каждый свою».", o:["Каждый только свою + общая лестница ставок","Всё производство видит всё","Только HEAD"], rec:0},
+  {id:"extra_roles", now:0, q:"Нужны ли роли Бухгалтер и Маркетолог (их нет среди 11)?", why:"Бухгалтер и маркетинг стоят в порядке разделов. Бухгалтер, видимо, видит финансы: это отдельное решение, сейчас финансы только у HEAD.", o:["Да, обе","Только Бухгалтер","Пока нет"]},
+  {id:"offboard", now:0, q:"Что происходит, когда человек уходит?", why:"Совет: вход закрывается сразу, его смены и расходы остаются в истории и отчётах.", o:["Как в совете","Иначе (впишу)"], rec:0},
+  {id:"personal", now:0, q:"Какие личные данные сотрудника храним?", why:"Совет: имя, телефон, Telegram, город. ИИН и паспорт не храним в приложении, они в HR-папке.", o:["Как в совете","Ещё ИИН и реквизиты для выплат"], rec:0},
+ ]},
+ {t:"3. Объекты и сделки", qs:[
+  {id:"object_source", now:1, q:"Откуда появляется объект в приложении?", why:"Совет: сам из сделки Битрикса, когда она доходит до нужного этапа (ID объекта = № сделки). Иначе HEAD или МОП заводит вручную.", o:["Сам из Битрикса по этапу","Вручную"], rec:0},
+  {id:"object_stage", now:1, q:"На каком этапе сделки объект становится «в работе» для художников и печати?", why:"Нужно название этапа в Битриксе. Например «Предоплата получена».", o:[]},
+  {id:"funnels", now:0, q:"Какие воронки Битрикса относятся к производству (роспись, печать, холсты, дизайн)?", why:"В Битриксе есть несколько категорий сделок. Скажите, какие брать, остальные приложение не видит.", o:[]},
+  {id:"deal_sum", now:0, q:"Показывать художникам и ГИП сумму сделки?", why:"Совет: нет. Им видно название, адрес, площадь, сроки, бюджет материалов.", o:["Не показывать","Показывать ГИП"], rec:0},
+ ]},
+ {t:"4. Смены и расходы (первый раздел)", qs:[
+  {id:"exp_cats", now:1, q:"Подходит этот список категорий расходов?", why:"Краска · Кисти и валики · Лак · Малярный скотч и плёнка · Грунт · Растворитель · Чернила/расходники принтера · Такси/доставка · Аренда (вышка, леса) · Другое. Категории будут в константах.", o:["Подходит","Поправлю (впишу)"], rec:0},
+  {id:"whose_money", now:1, q:"Чьи деньги бывают и как возвращаем?", why:"Сейчас: «Свои (вернуть)», «Подотчёт», «Карта компании». Кто и когда возвращает свои, есть ли лимит подотчёта на человека?", o:["Варианты верные, правила впишу","Поправлю"]},
+  {id:"check_deadline", now:1, q:"За сколько проверяющий должен принять смену или чек?", why:"Совет: 24 часа, потом напоминание ему в бот, через 48 часов — вам.", o:["24 часа","48 часов","Без срока"], rec:0},
+  {id:"geo", now:0, q:"Отмечать место начала смены (геолокация телефона)?", why:"Защищает от смен «из дома». Минус: телефон спрашивает разрешение, у части людей не сработает.", o:["Да, но не обязательно","Нет"], rec:0},
+  {id:"norm10", now:0, q:"Норма «от 10 м² средней сложности в день»: вносим в константы?", why:"Есть в Стандартах и вакансиях, нет в константах. Нужна для КПД и очков игры.", o:["Да, 10 м²","Другая (впишу)","Не вносим"]},
+  {id:"gip_bonus", now:0, q:"Доплата Куратору/ГИП за объект: какая верная?", why:"В вакансиях от 5 000 до 100 000 ₸, в константах доплаты нет.", o:["Без доплаты","Есть (впишу правило)"]},
+  {id:"offline", now:0, q:"На объектах бывает слабый интернет?", why:"Если да, делаем запись без сети: смена и чек сохраняются в телефоне и уходят сами, когда появится связь.", o:["Да, часто","Редко"], rec:0},
+ ]},
+ {t:"5. Финансы и выплаты (видит только HEAD)", qs:[
+  {id:"fin_table", now:0, q:"Какая финансовая таблица главная (название или ссылка)?", why:"В отчётах сервера есть FIN2025 и FIN2026. Нужно знать, с какой связывать приложение.", o:[]},
+  {id:"fin_write", now:0, q:"Принятые расходы с объектов писать в финансовую таблицу автоматически?", why:"Совет: да, отдельной вкладкой «Из приложения», с № сделки. Ваши строки не трогаем.", o:["Да, отдельной вкладкой","Нет, только показывать мне"], rec:0},
+  {id:"payout", now:0, q:"Приложение считает «к выплате» по сменам и ставкам из констант?", why:"Вы видите сумму по каждому, отмечаете «выплачено». Сам перевод денег приложение не делает.", o:["Да","Пока нет"], rec:0},
+  {id:"payer", now:0, q:"Кто отмечает выплаты: только вы или ещё бухгалтер?", why:"От этого зависит, кому открыть раздел финансов.", o:["Только HEAD","HEAD и бухгалтер"]},
+ ]},
+ {t:"6. Битрикс", qs:[
+  {id:"bx_first", now:0, q:"Что приложение первым должно делать в Битриксе (через одобрение)?", why:"Варианты: двигать этап сделки, прикладывать фото и акты, писать отчёт смены в ленту сделки. Чтение работает и без одобрения.", o:["Отчёт в ленту сделки","Файлы в сделку","Этапы","Пока только чтение"], rec:3},
+  {id:"bx_approve", now:0, q:"Одобрять каждую запись или пачкой раз в день?", why:"Совет: пачкой. Утром одна карточка «вот 12 записей», вы нажимаете «да» или убираете лишнее.", o:["Пачкой раз в день","Каждую"], rec:0},
+ ]},
+ {t:"7. Игра", qs:[
+  {id:"game_points", now:0, q:"За что начислять опыт?", why:"Совет: принятая смена, м² без замечаний, чек вовремя, сданный экзамен, помощь новичку. Очки и пороги уровней будут в константах.", o:["Как в совете","Поправлю (впишу)"], rec:0},
+  {id:"game_prizes", now:0, q:"Будут ли реальные призы за уровни и рейтинг?", why:"Например бонус, выходной, мерч, обучение. Если да — суммы в константах, решает HEAD.", o:["Да (впишу какие)","Пока только уровни и значки"]},
+  {id:"game_rating", now:0, q:"Рейтинг команды видят все?", why:"Совет: все видят топ-10 и своё место, без денег.", o:["Да, топ-10 и своё место","Каждый только своё","Только HEAD"], rec:0},
+  {id:"game_world", now:0, q:"Как называется игровой мир?", why:"Например «ARTGAME WORLD» (так вы думали назвать YouTube). Персонажи отделов уже нарисованы: художник, дизайн, продажи, производство, управление.", o:["ARTGAME WORLD","Другое (впишу)"], rec:0},
+  {id:"exam_support", now:0, q:"Экзамен Саппорт → Художник из места художников утверждаете?", why:"Его составил я, он помечен как предложение. Экзамены будут частью игры.", o:["Да","Поправлю"]},
+ ]},
+ {t:"8. Дизайн приложения", qs:[
+  {id:"look", now:1, q:"Какой вид ближе?", why:"Покажу 2–3 экрана перед сборкой. Цвета и шрифты беру из книги бренда v0.7.", o:["Тёмный «игровой» в цветах бренда","Светлый, как книга бренда","Покажи оба"], rec:2},
+  {id:"refs", now:0, q:"Есть приложения или игры, которые нравятся по виду?", why:"Пара названий или скринов сильно ускорит.", o:[]},
+  {id:"lang", now:0, q:"Языки интерфейса?", why:"Казахский можно добавить позже без переделки, если заложить сразу.", o:["Только русский","Русский + казахский"], rec:0},
+ ]},
+];
+
+const ALL = GROUPS.flatMap(g => g.qs);
+const state = {}; // id -> {choice, note}
+let db = null, canWrite = true;
+
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
+function render(){
+  const root = document.getElementById('groups');
+  let n = 0;
+  root.innerHTML = GROUPS.map(g => `<section class="group"><h2>${esc(g.t)}</h2>${g.qs.map(q=>{n++;return `
+    <div class="q" id="q-${q.id}">
+      <div class="qhead"><div class="qtext"><span class="num">${n}</span>${esc(q.q)}</div><span class="tag ${q.now?'t-now':'t-later'}" data-tag="${q.id}">${q.now?'до старта':'позже'}</span></div>
+      <p class="why">${esc(q.why)}</p>
+      ${q.o.length?`<div class="opts">${q.o.map((o,i)=>`<button type="button" class="opt${q.rec===i?' rec':''}" data-q="${q.id}" data-v="${esc(o)}" aria-pressed="false">${esc(o)}</button>`).join('')}</div>`:''}
+      <textarea id="note-${q.id}" data-q="${q.id}" rows="1" placeholder="${q.o.length?'Комментарий, если нужно':'Ваш ответ'}"></textarea>
+      <div class="saved" id="saved-${q.id}"></div>
+    </div>`}).join('')}</section>`).join('');
+  root.querySelectorAll('.opt').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.q; const cur = state[id] || {};
+    const choice = cur.choice === b.dataset.v ? '' : b.dataset.v;
+    state[id] = {...cur, choice}; paint(id); save(id);
+  }));
+  const timers = {};
+  root.querySelectorAll('textarea').forEach(t => t.addEventListener('input', () => {
+    const id = t.dataset.q; state[id] = {...(state[id]||{}), note: t.value}; paint(id);
+    clearTimeout(timers[id]); timers[id] = setTimeout(() => save(id), 900);
+  }));
+}
+
+function answered(id){const s=state[id];return !!(s && ((s.choice||'').trim() || (s.note||'').trim()));}
+
+function paint(id){
+  const s = state[id] || {};
+  document.querySelectorAll(`.opt[data-q="${id}"]`).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === s.choice)));
+  const box = document.getElementById('q-'+id); if (box) box.classList.toggle('answered', answered(id));
+  const tag = document.querySelector(`[data-tag="${id}"]`); const q = ALL.find(x=>x.id===id);
+  if (tag && q){ if (answered(id)){tag.className='tag t-done';tag.textContent='отвечено';} else {tag.className='tag '+(q.now?'t-now':'t-later');tag.textContent=q.now?'до старта':'позже';} }
+  const done = ALL.filter(q=>answered(q.id)).length;
+  document.getElementById('count').textContent = done+' / '+ALL.length;
+  document.getElementById('fill').style.width = (100*done/ALL.length)+'%';
+}
+
+const writing = {};
+async function save(id){
+  const el = document.getElementById('saved-'+id);
+  if (!db){ el.textContent = 'Не сохранено: хранилище недоступно в этом просмотре.'; el.style.color='var(--urgent)'; return; }
+  if (!canWrite){ el.textContent = 'Отвечать может только владелец страницы.'; el.style.color='var(--urgent)'; return; }
+  if (writing[id]){ writing[id] = 'again'; return; }
+  writing[id] = true;
+  try{
+    const s = state[id] || {};
+    await db.doc('answers/'+id).set({choice: s.choice||'', note: s.note||'', at: new Date().toISOString()});
+    el.style.color=''; el.textContent = 'Сохранено';
+  }catch(e){ el.style.color='var(--urgent)'; el.textContent = 'Не сохранилось ('+(e&&e.code||'ошибка')+'). Попробуйте ещё раз.'; }
+  const again = writing[id] === 'again'; writing[id] = false; if (again) save(id);
+}
+
+render(); ALL.forEach(q=>paint(q.id));
+
+(async () => {
+  const st = document.getElementById('dbstatus');
+  const timer = setTimeout(()=>{ st.textContent = 'Хранилище не ответило. Ответы можно вписать, но они могут не сохраниться.'; }, 10000);
+  try{
+    db = await (window.claude && window.claude.use ? window.claude.use('db') : null);
+    const user = await (window.claude && window.claude.use ? window.claude.use('user') : null);
+    if (user && user.can){ const c = await user.can('data.write'); if (c === false) canWrite = false; }
+    if (!db){ clearTimeout(timer); st.textContent = 'Хранилище недоступно в этом просмотре: ответы не сохранятся. Откройте страницу в claude.ai.'; return; }
+    db.collection('answers').onSnapshot(snap => {
+      clearTimeout(timer);
+      snap.docs.forEach(d => { const v = d.data()||{}; if (!ALL.find(q=>q.id===d.id)) return;
+        const ta = document.getElementById('note-'+d.id);
+        if (document.activeElement !== ta){ state[d.id] = {choice: v.choice||'', note: v.note||''}; if (ta) ta.value = v.note||''; }
+        else state[d.id] = {...(state[d.id]||{}), choice: v.choice||''};
+        paint(d.id); });
+      st.textContent = canWrite ? 'Ответы сохраняются автоматически.' : 'Режим просмотра: отвечает владелец страницы.';
+    }, err => { clearTimeout(timer); st.textContent = 'Не удалось загрузить ответы ('+(err&&err.code||'ошибка')+'). Обновите страницу.'; });
+  }catch(e){ clearTimeout(timer); st.textContent = 'Хранилище недоступно: '+(e&&e.code||e); }
+})();
+</script>
