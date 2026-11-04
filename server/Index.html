@@ -72,11 +72,36 @@ const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp
 const money = n => Number(n || 0).toLocaleString('ru-RU') + ' ₸';
 
 function toast(t, ms) { const el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(el._t); el._t = setTimeout(() => el.style.display = 'none', ms || 2500); }
+// Со своего адреса страница говорит с сервером через невидимое окно Google (мост), без ограничений CORS.
+let bridge = null, bridgeOrigin = '', bridgeWait = null, seq = 0;
+const pending = {};
+const googleOrigin = o => { try { const h = new URL(o).hostname; return /\.googleusercontent\.com$/.test(h) || h === 'script.google.com'; } catch (e) { return false; } };
+window.addEventListener('message', ev => {
+  if (!googleOrigin(ev.origin)) return;
+  const m = ev.data || {};
+  if (m.type === 'artgame-bridge-ready') { bridge = ev.source; bridgeOrigin = ev.origin; if (bridgeWait) bridgeWait.done(); }
+  if (m.type === 'artgame-reply' && pending[m.id]) { pending[m.id](m.r); delete pending[m.id]; }
+});
+function openBridge() {
+  if (bridge) return Promise.resolve();
+  if (bridgeWait) return bridgeWait.p;
+  let done, fail;
+  const p = new Promise((res, rej) => { done = res; fail = rej; });
+  bridgeWait = { p, done };
+  const f = document.createElement('iframe');
+  f.style.cssText = 'position:absolute;width:1px;height:1px;border:0;opacity:0';
+  f.src = API_URL + '?bridge=1';
+  document.body.appendChild(f);
+  setTimeout(() => { if (!bridge) { bridgeWait = null; f.remove(); fail(new Error('Сервер не ответил. Проверь интернет и открой приложение заново.')); } }, 25000);
+  return p;
+}
 function call(action, payload) {
   if (!IN_GAS) {
-    // text/plain — без предварительного CORS-запроса; Apps Script отвечает JSON
-    return fetch(API_URL, { method: 'POST', body: JSON.stringify({ action, initData: INIT, payload: payload || {} }) })
-      .then(r => r.json()).then(r => { if (r && r.ok) return r.data; throw new Error(r ? r.error : 'Нет ответа'); });
+    return openBridge().then(() => new Promise((res, rej) => {
+      const id = ++seq;
+      pending[id] = r => r && r.ok ? res(r.data) : rej(new Error(r ? r.error : 'Нет ответа'));
+      bridge.postMessage({ type: 'artgame-call', id, action, initData: INIT, payload: payload || {} }, bridgeOrigin);
+    }));
   }
   return new Promise((res, rej) => {
     google.script.run.withSuccessHandler(r => r && r.ok ? res(r.data) : rej(new Error(r ? r.error : 'Нет ответа')))

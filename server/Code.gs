@@ -131,7 +131,20 @@ function appUrl_() {
   return String(PropertiesService.getScriptProperties().getProperty('APP_URL') || '').trim() || ScriptApp.getService().getUrl();
 }
 
-function doGet() {
+// Мост для страницы на GitHub Pages: невидимое окно Google принимает запросы через postMessage и вызывает api().
+const APP_ORIGIN = 'https://raman-artgame.github.io';
+const BRIDGE_HTML = '<!DOCTYPE html><html><body><script>' +
+  'var A=' + JSON.stringify(APP_ORIGIN) + ';' +
+  'window.addEventListener("message",function(ev){if(ev.origin!==A)return;var m=ev.data||{};if(m.type!=="artgame-call")return;' +
+  'var send=function(r){ev.source.postMessage({type:"artgame-reply",id:m.id,r:r},A);};' +
+  'google.script.run.withSuccessHandler(send).withFailureHandler(function(e){send({ok:false,error:String(e&&e.message||e)});}).api(m.action,m.initData,m.payload);});' +
+  'window.top.postMessage({type:"artgame-bridge-ready"},A);' +
+  '<\/script></body></html>';
+
+function doGet(e) {
+  if (e && e.parameter && e.parameter.bridge) {
+    return HtmlService.createHtmlOutput(BRIDGE_HTML).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('ARTGAME')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1')
