@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 env:
   SCRIPT_ID: 1Za8R1u2xSybF9azfjXgevD6i_qV5_T-JKcOv9JAefhylwKVsBYYTHazD
-  DEPLOYMENT_ID: AKfycby48ml1Cr5RaGaZdLtTmVM2TERMi53RGiVCdBIRsTItjgFxH2CXMsbdeaDNBdlNfSzA
+  DEPLOYMENT_ID: AKfycby48ml1Cr5RaGaZdLtTmVM2TERMi53RGiVCdBIRsTItjgFxH2cXMsbdeaDNBdlNfSzA
 jobs:
   deploy:
     runs-on: ubuntu-latest
