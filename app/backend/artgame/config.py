@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     initdata_max_age: int = 24 * 3600   # сек, сколько живёт подпись Telegram
     private_key: str = ""               # ключ шифрования ИИН/реквизитов (pgcrypto)
     env_name: str = "test"              # test | prod
+    drive_inbox: str = ""              # папка Диска для чеков «Офис / без объекта»
     google_sa_file: str = ""            # путь к JSON сервисного аккаунта на сервере
 
 

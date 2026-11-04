@@ -1,5 +1,5 @@
 // Сквозной тест «Смены и расходы»: API на тестовой базе + vite preview.
-// Запуск: см. app/README.md. Подпись Telegram делается тестовым токеном 123:test-token.
+// Запуск: см. app/README.md (API — e2e/fake_api.py, Диск подменён). Подпись Telegram делается тестовым токеном 123:test-token.
 const { chromium } = require('playwright')
 const { execSync } = require('child_process')
 const assert = require('assert')
@@ -46,6 +46,8 @@ async function page(b, id, name) {
   // 3. Расход без сети → очередь → сеть вернулась → ушёл
   await a.getByRole('button', { name: 'Расход' }).click()
   await a.locator('input[inputmode=numeric]').fill('15000')
+  await a.locator('input[type=file]').setInputFiles(__dirname + '/chek.png')
+  await a.locator('.photo img').waitFor()
   await ctx.setOffline(true)
   await a.getByRole('button', { name: 'Отправить расход' }).click()
   await a.getByText('Сохранено на телефоне').waitFor()
@@ -71,6 +73,7 @@ async function page(b, id, name) {
   assert.deepStrictEqual(my.shifts.map(s => s.status), ['approved'])
   assert.deepStrictEqual(my.expenses.map(e => [e.status, e.reason]), [['rejected', 'Нет чека']])
   assert.strictEqual(Number(my.shifts[0].area_m2), 12.5)
+  assert.match(my.expenses[0].receipt_url, /^https:\/\/drive\.example\/0\//)
   console.log('E2E OK')
   await b.close()
 })().catch(e => { console.error(e); process.exit(1) })

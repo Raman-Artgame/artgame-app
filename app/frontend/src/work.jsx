@@ -8,6 +8,21 @@ const local = d => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getT
 const iso = v => new Date(v).toISOString()
 const money = n => Number(n).toLocaleString('ru-RU') + ' ₸'
 
+// Чек сжимаем на телефоне (до 1600 px, JPEG): быстрее уходит при плохой сети и помещается в офлайн-очередь.
+function shrink(file) {
+  return new Promise((ok, fail) => {
+    const img = new Image()
+    img.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(img.width, img.height))
+      const c = document.createElement('canvas'); c.width = img.width * k; c.height = img.height * k
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+      URL.revokeObjectURL(img.src); ok(c.toDataURL('image/jpeg', 0.75))
+    }
+    img.onerror = fail
+    img.src = URL.createObjectURL(file)
+  })
+}
+
 function useDict() {
   const [d, setD] = useState(null)
   useEffect(() => { api('/work/dict').then(d => { setD(d); localStorage.setItem('artgame.dict', JSON.stringify(d)) },
@@ -73,7 +88,10 @@ export function ExpenseForm({ done }) {
       <button className={v.paid_by === 'company' ? '' : 'ghost'} onClick={() => set({ ...v, paid_by: 'company' })}>Компании</button>
     </div>
     <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
-    <p className="muted small">Фото чека — следующим шагом (папка сделки на Диске).</p>
+    <label className="photo">
+      {v.receipt ? <img src={v.receipt} alt="чек" /> : <span>📷 Фото чека</span>}
+      <input type="file" accept="image/*" capture="environment" hidden onChange={async e => e.target.files[0] && set({ ...v, receipt: await shrink(e.target.files[0]) })} />
+    </label>
     <button disabled={!v.amount} onClick={send}>Отправить расход</button>
   </div>
 }
@@ -101,6 +119,7 @@ export function Mine() {
     <div className="card"><h2>Мои расходы</h2>
       {m.expenses.length ? m.expenses.map(e => <div key={e.id} className="row">
         <div><b>{money(e.amount)}</b> · {e.object_title}<br /><span className="muted small">{e.payout_status === 'to_pay' ? 'к выплате' : e.payout_status === 'paid' ? 'выплачено' : ''}</span>
+          {e.receipt_url && <a href={e.receipt_url} target="_blank" rel="noreferrer"> чек</a>}
           {e.reason && <div className="small">Причина: {e.reason}</div>}</div>
         <span className={`tag st-${e.status}`}>{ST[e.status]}</span>
         {e.status === 'submitted' && <a onClick={() => cancel('expense', e.id)}>отменить</a>}
@@ -128,7 +147,7 @@ export function Review() {
       {r.shifts.length ? r.shifts.map(x => <Item key={x.id} k="shift" x={x}>{new Date(x.started_at).toLocaleString('ru-RU')}{x.area_m2 ? ` · ${x.area_m2} м²` : ''} · {ZONE[x.zone_code]}</Item>) : <p className="muted">Всё проверено</p>}
     </div>
     <div className="card"><h2>Расходы на проверку</h2>
-      {r.expenses.length ? r.expenses.map(x => <Item key={x.id} k="expense" x={x}>{money(x.amount)} · {x.paid_by === 'own' ? 'свои' : 'компании'}</Item>) : <p className="muted">Всё проверено</p>}
+      {r.expenses.length ? r.expenses.map(x => <Item key={x.id} k="expense" x={x}>{money(x.amount)} · {x.paid_by === 'own' ? 'свои' : 'компании'}{x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</Item>) : <p className="muted">Всё проверено</p>}
     </div>
   </>
 }

@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from . import db
+from . import db, drive
 from .deps import current_person
 
 router = APIRouter(prefix="/api")
@@ -80,7 +80,7 @@ class ExpenseIn(BaseModel):
     category: str
     amount: float = Field(ge=0)
     paid_by: str = "own"
-    receipt_url: str | None = None
+    receipt: str | None = Field(default=None, max_length=8_000_000)  # data:image/jpeg;base64,… (сжато на телефоне)
     note: str | None = None
 
 
@@ -95,11 +95,21 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
         check_zone(conn, p, e.zone_code, e.object_id)
         if not conn.execute("SELECT 1 FROM expense_categories WHERE code=%s AND active", (e.category,)).fetchone():
             raise HTTPException(400, "bad category")
+        url = None
+        if e.receipt:
+            if not e.receipt.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
+                raise HTTPException(400, "bad receipt")
+            obj = conn.execute("SELECT * FROM objects WHERE id=%s", (e.object_id,)).fetchone()
+            name = f"Чек {datetime.now():%Y-%m-%d %H-%M} {p['full_name']} {e.amount:.0f}"
+            try:
+                url = drive.save_photo(conn, obj, name, e.receipt)
+            except Exception as ex:  # Диск недоступен — телефон повторит позже
+                raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         row = conn.execute(
             """INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, paid_by, receipt_url, note)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
-            (e.client_uid, p["id"], e.object_id, e.zone_code, e.category, e.amount, e.paid_by, e.receipt_url, e.note)).fetchone()
+            (e.client_uid, p["id"], e.object_id, e.zone_code, e.category, e.amount, e.paid_by, url, e.note)).fetchone()
         if not row:
             return conn.execute("SELECT * FROM expenses WHERE client_uid=%s", (e.client_uid,)).fetchone()
         db.audit(conn, p["id"], "expense_add", "expenses", row["id"])
