@@ -6,3 +6,5 @@
 
 Локально: `cd backend && python -m venv .venv && .venv/bin/pip install -r requirements.txt && ARTGAME_TEST_DATABASE_URL=postgresql://… .venv/bin/pytest`.
 Секреты только в `/etc/artgame-app/*.env` на сервере (см. `deploy/env.example`).
+
+Сквозной тест экрана: поднять API на пустой базе (`ARTGAME_BOT_TOKEN=123:test-token ARTGAME_HEAD_TG_ID=1000`) на :8100 и `npx vite preview --port 4173` в `frontend/`, затем `node e2e/smeny.cjs`.

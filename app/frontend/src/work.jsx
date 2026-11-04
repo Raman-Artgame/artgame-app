@@ -1,0 +1,134 @@
+import React, { useEffect, useState } from 'react'
+import { api } from './api.js'
+import { enqueue, flush, pending } from './queue.js'
+
+const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
+const ST = { submitted: 'на проверке', approved: 'принято', rejected: 'отказ', cancelled: 'отменено' }
+const local = d => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 16) }
+const iso = v => new Date(v).toISOString()
+const money = n => Number(n).toLocaleString('ru-RU') + ' ₸'
+
+function useDict() {
+  const [d, setD] = useState(null)
+  useEffect(() => { api('/work/dict').then(d => { setD(d); localStorage.setItem('artgame.dict', JSON.stringify(d)) },
+    () => setD(JSON.parse(localStorage.getItem('artgame.dict') || 'null'))) }, [])
+  return d
+}
+
+function Common({ d, v, set }) {
+  return <>
+    <label className="muted">Объект</label>
+    <select value={v.object_id} onChange={e => set({ ...v, object_id: +e.target.value })}>
+      {d.objects.map(o => <option key={o.id} value={o.id}>{o.id ? `№${o.id} · ` : ''}{o.title}{o.city ? ` — ${o.city}` : ''}</option>)}
+    </select>
+    {d.zones.length > 1 && <>
+      <label className="muted">Зона</label>
+      <select value={v.zone_code} onChange={e => set({ ...v, zone_code: e.target.value })}>
+        {d.zones.map(z => <option key={z} value={z}>{ZONE[z]}</option>)}
+      </select></>}
+  </>
+}
+
+export function ShiftForm({ done }) {
+  const d = useDict()
+  const [v, set] = useState(null)
+  useEffect(() => { if (d) set({ object_id: d.objects[0]?.id, zone_code: d.zones[0], started_at: local(Date.now() - 9 * 3600e3), ended_at: local(Date.now()), area_m2: '', note: '' }) }, [d])
+  if (!d || !v) return <div className="card muted">Загрузка…</div>
+  const send = async () => {
+    const geo = await new Promise(r => navigator.geolocation ? navigator.geolocation.getCurrentPosition(p => r(p.coords), () => r(null), { timeout: 4000 }) : r(null))
+    const left = await enqueue('/shifts', { ...v, started_at: iso(v.started_at), ended_at: iso(v.ended_at), area_m2: v.area_m2 === '' ? null : +v.area_m2,
+      geo_lat: geo?.latitude ?? null, geo_lon: geo?.longitude ?? null })
+    done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Смена отправлена на проверку.')
+  }
+  return <div className="card">
+    <h2>Смена</h2>
+    <Common d={d} v={v} set={set} />
+    <label className="muted">Начало</label><input type="datetime-local" value={v.started_at} onChange={e => set({ ...v, started_at: e.target.value })} />
+    <label className="muted">Конец</label><input type="datetime-local" value={v.ended_at} onChange={e => set({ ...v, ended_at: e.target.value })} />
+    <label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.') })} />
+    <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
+    <button onClick={send}>Отправить смену</button>
+  </div>
+}
+
+export function ExpenseForm({ done }) {
+  const d = useDict()
+  const [v, set] = useState(null)
+  useEffect(() => { if (d) set({ object_id: d.objects[0]?.id, zone_code: d.zones[0], category: d.categories[0]?.code, amount: '', paid_by: 'own', note: '' }) }, [d])
+  if (!d || !v) return <div className="card muted">Загрузка…</div>
+  const send = async () => {
+    const left = await enqueue('/expenses', { ...v, amount: +v.amount })
+    done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Расход отправлен на проверку.')
+  }
+  return <div className="card">
+    <h2>Расход</h2>
+    <Common d={d} v={v} set={set} />
+    <label className="muted">Категория</label>
+    <select value={v.category} onChange={e => set({ ...v, category: e.target.value })}>
+      {d.categories.map(c => <option key={c.code} value={c.code}>{c.title}</option>)}
+    </select>
+    <label className="muted">Сумма, ₸</label><input inputMode="numeric" value={v.amount} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} />
+    <div className="seg">
+      <button className={v.paid_by === 'own' ? '' : 'ghost'} onClick={() => set({ ...v, paid_by: 'own' })}>Свои деньги</button>
+      <button className={v.paid_by === 'company' ? '' : 'ghost'} onClick={() => set({ ...v, paid_by: 'company' })}>Компании</button>
+    </div>
+    <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
+    <p className="muted small">Фото чека — следующим шагом (папка сделки на Диске).</p>
+    <button disabled={!v.amount} onClick={send}>Отправить расход</button>
+  </div>
+}
+
+export function Mine() {
+  const [m, setM] = useState(null)
+  const load = () => api('/my').then(setM, () => {})
+  useEffect(() => {
+    flush(); load()
+    window.addEventListener('artgame:queue', load)
+    return () => window.removeEventListener('artgame:queue', load)
+  }, [])
+  if (!m) return <div className="card muted">Загрузка…</div>
+  const cancel = (k, id) => api(`/${k}/${id}/cancel`, { method: 'POST' }).then(load)
+  return <>
+    {pending() > 0 && <div className="card">Ждут сети: {pending()}</div>}
+    <div className="card"><h2>Мои смены</h2>
+      {m.shifts.length ? m.shifts.map(s => <div key={s.id} className="row">
+        <div><b>{s.object_title}</b><br /><span className="muted small">{new Date(s.started_at).toLocaleString('ru-RU')}{s.area_m2 ? ` · ${s.area_m2} м²` : ''}</span>
+          {s.reason && <div className="small">Причина: {s.reason}</div>}</div>
+        <span className={`tag st-${s.status}`}>{ST[s.status]}</span>
+        {s.status === 'submitted' && <a onClick={() => cancel('shift', s.id)}>отменить</a>}
+      </div>) : <p className="muted">Пока нет</p>}
+    </div>
+    <div className="card"><h2>Мои расходы</h2>
+      {m.expenses.length ? m.expenses.map(e => <div key={e.id} className="row">
+        <div><b>{money(e.amount)}</b> · {e.object_title}<br /><span className="muted small">{e.payout_status === 'to_pay' ? 'к выплате' : e.payout_status === 'paid' ? 'выплачено' : ''}</span>
+          {e.reason && <div className="small">Причина: {e.reason}</div>}</div>
+        <span className={`tag st-${e.status}`}>{ST[e.status]}</span>
+        {e.status === 'submitted' && <a onClick={() => cancel('expense', e.id)}>отменить</a>}
+      </div>) : <p className="muted">Пока нет</p>}
+    </div>
+  </>
+}
+
+export function Review() {
+  const [r, setR] = useState(null)
+  const load = () => api('/review').then(setR, () => setR({ shifts: [], expenses: [] }))
+  useEffect(() => { load() }, [])
+  if (!r) return <div className="card muted">Загрузка…</div>
+  const decide = (k, id, approve) => {
+    const reason = approve ? null : prompt('Причина отказа')
+    if (!approve && !reason) return
+    api(`/${k}/${id}/review`, { method: 'POST', body: { approve, reason } }).then(load)
+  }
+  const Item = ({ k, x, children }) => <div className="row">
+    <div><b>{x.person_name}</b> · {x.object_title}<br /><span className="muted small">{children}</span></div>
+    <div className="seg"><button onClick={() => decide(k, x.id, true)}>✓</button><button className="ghost" onClick={() => decide(k, x.id, false)}>✕</button></div>
+  </div>
+  return <>
+    <div className="card"><h2>Смены на проверку</h2>
+      {r.shifts.length ? r.shifts.map(x => <Item key={x.id} k="shift" x={x}>{new Date(x.started_at).toLocaleString('ru-RU')}{x.area_m2 ? ` · ${x.area_m2} м²` : ''} · {ZONE[x.zone_code]}</Item>) : <p className="muted">Всё проверено</p>}
+    </div>
+    <div className="card"><h2>Расходы на проверку</h2>
+      {r.expenses.length ? r.expenses.map(x => <Item key={x.id} k="expense" x={x}>{money(x.amount)} · {x.paid_by === 'own' ? 'свои' : 'компании'}</Item>) : <p className="muted">Всё проверено</p>}
+    </div>
+  </>
+}

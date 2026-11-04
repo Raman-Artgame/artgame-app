@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api } from './api.js'
+import { ExpenseForm, Mine, Review, ShiftForm } from './work.jsx'
 import './tokens.css'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
@@ -34,15 +35,27 @@ function App() {
   if (err) return <div className="wrap"><div className="card"><h1>ARTGAME</h1><p className="muted">Открой приложение из бота @artgame_team_bot. ({err})</p></div></div>
   if (me === undefined) return <div className="wrap muted">Загрузка…</div>
   if (me === null) return <div className="wrap"><Register onDone={setMe} /></div>
-  return <div className="wrap">
-    <div className="card">
-      <h1>{me.full_name}</h1>
-      {me.status === 'pending'
-        ? <p className="muted">Заявка у HEAD. Как только назначат роль, откроются разделы.</p>
-        : <><span className="tag">{ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</>}
+  if (me.status !== 'active') return <div className="wrap"><div className="card"><h1>{me.full_name}</h1>
+    <p className="muted">{me.status === 'pending' ? 'Заявка у HEAD. Как только назначат роль, откроются разделы.' : 'Вход закрыт.'}</p></div></div>
+  return <Main me={me} />
+}
+
+const CHECKERS = new Set(['head', 'lead_artist', 'print_master', 'lead_designer'])
+
+function Main({ me }) {
+  const [tab, setTab] = useState('shift')
+  const [toast, setToast] = useState('')
+  const done = t => { setToast(t); setTab('mine'); setTimeout(() => setToast(''), 4000) }
+  const tabs = [['shift', 'Смена'], ['expense', 'Расход'], ['mine', 'Мои'], ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : [])]
+  return <>
+    <div className="wrap">
+      <div className="card"><h1>{me.full_name}</h1><span className="tag">{ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>
+      {toast && <div className="toast">{toast}</div>}
+      {!me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <Mine /> : <Review />}
     </div>
-    <div className="card muted">Смены и расходы — следующий раздел.</div>
-  </div>
+    <nav>{tabs.map(([k, t]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{t}</button>)}</nav>
+  </>
 }
 
 createRoot(document.getElementById('root')).render(<App />)

@@ -63,9 +63,12 @@ def add_shift(s: ShiftIn, p: dict = Depends(active)):
         row = conn.execute(
             """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, area_m2,
                                    complexity, note, geo_lat, geo_lon)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
             (s.client_uid, p["id"], s.object_id, s.zone_code, s.started_at, s.ended_at, s.area_m2,
              s.complexity, s.note, s.geo_lat, s.geo_lon)).fetchone()
+        if not row:  # параллельный повтор успел раньше
+            return conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (s.client_uid,)).fetchone()
         db.audit(conn, p["id"], "shift_add", "shifts", row["id"])
         return row
 
@@ -94,8 +97,11 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
             raise HTTPException(400, "bad category")
         row = conn.execute(
             """INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, paid_by, receipt_url, note)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
             (e.client_uid, p["id"], e.object_id, e.zone_code, e.category, e.amount, e.paid_by, e.receipt_url, e.note)).fetchone()
+        if not row:
+            return conn.execute("SELECT * FROM expenses WHERE client_uid=%s", (e.client_uid,)).fetchone()
         db.audit(conn, p["id"], "expense_add", "expenses", row["id"])
         return row
 

@@ -14,3 +14,19 @@ h1 { font-size: 28px; letter-spacing: .02em; margin: 0 0 12px; }
 input { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; margin: 8px 0; }
 button { width: 100%; padding: 14px; border: 0; border-radius: 12px; background: var(--accent); color: #fff; font: 600 16px Onest, system-ui; }
 .tag { display: inline-block; padding: 4px 10px; border-radius: 99px; background: var(--line); margin: 4px 4px 0 0; font-size: 14px; }
+h2 { font-size: 20px; margin: 0 0 12px; }
+label { display: block; font-size: 14px; margin-top: 8px; }
+select { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; margin: 6px 0; }
+button:disabled { opacity: .4; }
+button.ghost { background: var(--line); }
+.seg { display: flex; gap: 8px; margin: 8px 0; }
+.seg button { flex: 1; padding: 10px; }
+.small { font-size: 13px; }
+.row { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--line); }
+.row a { color: var(--muted); font-size: 13px; cursor: pointer; }
+.st-approved { background: color-mix(in srgb, var(--ok) 25%, transparent); }
+.st-rejected { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+nav { position: sticky; bottom: 0; display: flex; gap: 6px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); max-width: 480px; margin: 0 auto; }
+nav button { padding: 10px 4px; font-size: 13px; background: transparent; color: var(--muted); }
+nav button.on { color: var(--text); background: var(--line); }
+.toast { background: var(--ok); color: #0D0B0C; padding: 12px; border-radius: 12px; margin-bottom: 12px; }
