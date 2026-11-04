@@ -118,6 +118,40 @@ def test_objects_from_bitrix(client, fake):
         assert sync_objects.upsert(c, deals) == []
         o = c.execute("SELECT * FROM objects WHERE id=812").fetchone()
         assert o["title"] == "Кафе Самал" and o["status"] == "active"
+    assert sync_objects.split_title("525", "525 · РЕСТОРАН ВОК ШЫМПЛАЗА — ШЫМКЕНТ") == ("РЕСТОРАН ВОК ШЫМПЛАЗА", "ШЫМКЕНТ")
+    assert sync_objects.split_title("1213", "1213 · AKNUR - НОВОГОДНЯЯ РОСПИСЬ ОКОН — АСТАНА") == ("AKNUR - НОВОГОДНЯЯ РОСПИСЬ ОКОН", "АСТАНА")
+    with db.pool.connection() as c:
         assert c.execute("SELECT status FROM objects WHERE id=640").fetchone()["status"] == "done"
+        o = c.execute("SELECT * FROM objects WHERE id=812").fetchone()
         drive.ensure_folders(c, o)
         assert c.execute("SELECT folders FROM objects WHERE id=812").fetchone()["folders"]["design"] == "deal-812/Дизайн"
+
+
+def test_gateway_client(monkeypatch):
+    """Шлюз отвечает SSE, сессия передаётся в заголовке, страницы идут по next."""
+    import json as _j
+
+    import httpx
+
+    from artgame import sync_objects
+    seen = []
+
+    def post(url, json, headers, timeout):
+        seen.append((json["method"], headers.get("Mcp-Session-Id")))
+        req = httpx.Request("POST", url)
+        if json["method"] == "initialize":
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": json["id"], "result": {}}, headers={"mcp-session-id": "S1"}, request=req)
+        if "id" not in json:
+            return httpx.Response(202, request=req)
+        start = json["params"]["arguments"]["params"]["start"]
+        page = {"result": [{"ID": str(100 + start), "TITLE": "T", "STAGE_ID": "UC_AV00QK", "CATEGORY_ID": "0"}],
+                "next": 50 if start == 0 else None}
+        res = {"content": [{"type": "text", "text": _j.dumps(page)}]}
+        body = "event: message\ndata: " + _j.dumps({"jsonrpc": "2.0", "id": json["id"], "result": res}) + "\n\n"
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"}, request=req)
+
+    monkeypatch.setattr(sync_objects.httpx, "post", post)
+    monkeypatch.setattr(sync_objects.settings, "gateway_url", "http://127.0.0.1:9/mcp")
+    deals = sync_objects.fetch_deals()
+    assert [d["ID"] for d in deals] == ["100", "150"]
+    assert seen[0] == ("initialize", None) and seen[-1] == ("tools/call", "S1")
