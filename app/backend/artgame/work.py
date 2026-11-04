@@ -95,25 +95,38 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
         check_zone(conn, p, e.zone_code, e.object_id)
         if not conn.execute("SELECT 1 FROM expense_categories WHERE code=%s AND active", (e.category,)).fetchone():
             raise HTTPException(400, "bad category")
-        url = None
+        drive_id = None
         if e.receipt:
             if not e.receipt.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
                 raise HTTPException(400, "bad receipt")
             obj = conn.execute("SELECT * FROM objects WHERE id=%s", (e.object_id,)).fetchone()
             name = f"Чек {datetime.now():%Y-%m-%d %H-%M} {p['full_name']} {e.amount:.0f}"
             try:
-                url = drive.save_photo(conn, obj, name, e.receipt)
+                drive_id = drive.save_photo(conn, obj, name, e.receipt, kind="receipt")
             except Exception as ex:  # Диск недоступен — телефон повторит позже
                 raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         row = conn.execute(
             """INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, paid_by, receipt_url, note)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
-            (e.client_uid, p["id"], e.object_id, e.zone_code, e.category, e.amount, e.paid_by, url, e.note)).fetchone()
+            (e.client_uid, p["id"], e.object_id, e.zone_code, e.category, e.amount, e.paid_by, None, e.note)).fetchone()
         if not row:
-            return conn.execute("SELECT * FROM expenses WHERE client_uid=%s", (e.client_uid,)).fetchone()
+            return with_receipt(conn.execute("SELECT * FROM expenses WHERE client_uid=%s", (e.client_uid,)).fetchone())
+        if drive_id:
+            data, mime = drive.decode_data_url(e.receipt)
+            f = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by)
+                                VALUES (gen_random_uuid(), %s, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",
+                             (e.object_id, name, mime, len(data), drive_id, p["id"])).fetchone()
+            row = conn.execute("UPDATE expenses SET receipt_file_id=%s WHERE id=%s RETURNING *", (f["id"], row["id"])).fetchone()
         db.audit(conn, p["id"], "expense_add", "expenses", row["id"])
-        return row
+        return with_receipt(row)
+
+
+def with_receipt(e: dict) -> dict:
+    """Подписанная ссылка на чек (живёт 12 ч)."""
+    from .files import sign
+    e["receipt_url"] = sign(e["receipt_file_id"], "content") if e.get("receipt_file_id") else None
+    return e
 
 
 @router.get("/my")
@@ -122,8 +135,8 @@ def my(p: dict = Depends(active)):
         return {
             "shifts": conn.execute("""SELECT s.*, o.title AS object_title FROM shifts s JOIN objects o ON o.id=s.object_id
                                       WHERE person_id=%s ORDER BY started_at DESC LIMIT 100""", (p["id"],)).fetchall(),
-            "expenses": conn.execute("""SELECT e.*, o.title AS object_title FROM expenses e JOIN objects o ON o.id=e.object_id
-                                        WHERE person_id=%s ORDER BY created_at DESC LIMIT 100""", (p["id"],)).fetchall(),
+            "expenses": [with_receipt(e) for e in conn.execute("""SELECT e.*, o.title AS object_title FROM expenses e JOIN objects o ON o.id=e.object_id
+                                        WHERE person_id=%s ORDER BY created_at DESC LIMIT 100""", (p["id"],)).fetchall()],
         }
 
 
@@ -163,6 +176,7 @@ def review_list(p: dict = Depends(active)):
                 f"""SELECT x.*, o.title AS object_title, pe.full_name AS person_name
                     FROM {t} x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id
                     WHERE x.status='submitted' AND {cond} ORDER BY x.created_at""", args).fetchall()
+        out["expenses"] = [with_receipt(e) for e in out["expenses"]]
         return out
 
 

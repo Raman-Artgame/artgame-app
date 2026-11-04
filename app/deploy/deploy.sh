@@ -26,7 +26,7 @@ chmod 755 /srv/artgame-app "$DST"; chmod -R a+rX "$DST/web"   # Caddy читае
 
 install -m 644 "$SRC"/deploy/artgame-*.service "$SRC"/deploy/artgame-*.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now "artgame-api@$ENV" "artgame-constants@$ENV.timer"
+systemctl enable --now "artgame-api@$ENV" "artgame-constants@$ENV.timer" "artgame-objects@$ENV.timer"
 systemctl restart "artgame-api@$ENV"
 if [ "$ENV" = prod ]; then systemctl enable --now artgame-backup.timer; fi
 

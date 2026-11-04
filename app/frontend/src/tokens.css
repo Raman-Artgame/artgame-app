@@ -37,3 +37,5 @@ a { color: var(--accent); }
 .person a { color: var(--muted); font-size: 13px; cursor: pointer; }
 .zones { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .zones button { width: auto; flex: 1 0 40%; padding: 8px; font-size: 14px; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; display: block; background: var(--line); }

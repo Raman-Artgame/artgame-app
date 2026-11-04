@@ -1,5 +1,8 @@
-"""Фото и чеки → Google Диск, в папку сделки: ПРОЕКТЫ → год → «ММ МЕСЯЦ» → «№ · НАЗВАНИЕ — ГОРОД» → «Журнал работ (фото и чеки)».
-Та же раскладка, что в прототипе. Папка сделки запоминается в objects.drive_folder. Офис — в ARTGAME_DRIVE_INBOX."""
+"""Google Диск — хранилище файлов объектов. Команда работает только через приложение (HEAD 04.11).
+
+Раскладка как в прототипе: ПРОЕКТЫ → год → «ММ МЕСЯЦ» → «№ · НАЗВАНИЕ — ГОРОД» → подпапки SUBFOLDERS.
+ID папок запоминаются в objects.drive_folder и objects.folders. Офис (объект 0) — папка ARTGAME_DRIVE_INBOX.
+"""
 import base64
 import json
 from datetime import datetime
@@ -9,9 +12,10 @@ import httpx
 from .config import settings
 
 PROJECTS_ROOT_ID = "1_33LDppwOu02ToP4c3uUS-mPux5mPIJf"
-PHOTO_SUBFOLDER = "Журнал работ (фото и чеки)"
+SUBFOLDERS = {"photo": "Фото объекта", "design": "Дизайн", "receipt": "Чеки", "doc": "Документы"}
 MONTHS = ["ЯНВАРЬ", "ФЕВРАЛЬ", "МАРТ", "АПРЕЛЬ", "МАЙ", "ИЮНЬ", "ИЮЛЬ", "АВГУСТ", "СЕНТЯБРЬ", "ОКТЯБРЬ", "НОЯБРЬ", "ДЕКАБРЬ"]
 API = "https://www.googleapis.com/drive/v3/files"
+UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 ALL = {"supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
 FOLDER = "application/vnd.google-apps.folder"
 
@@ -61,24 +65,65 @@ class Drive:
 
     def upload(self, parent: str, name: str, data: bytes, mime: str) -> str:
         meta = {"name": name, "parents": [parent]}
-        r = httpx.post("https://www.googleapis.com/upload/drive/v3/files", headers=self.h, timeout=120,
-                       params={"uploadType": "multipart", "supportsAllDrives": "true", "fields": "id,webViewLink"},
+        r = httpx.post(UPLOAD, headers=self.h, timeout=120,
+                       params={"uploadType": "multipart", "supportsAllDrives": "true", "fields": "id"},
                        files={"metadata": ("metadata", json.dumps(meta), "application/json"), "file": (name, data, mime)})
         r.raise_for_status()
-        return r.json()["webViewLink"]
+        return r.json()["id"]
+
+    def resumable(self, parent: str, name: str, mime: str, size: int, origin: str) -> str:
+        """Ссылка для загрузки большого файла прямо из браузера в Google (сервер файл не пропускает)."""
+        r = httpx.post(UPLOAD, timeout=30, params={"uploadType": "resumable", "supportsAllDrives": "true", "fields": "id,size"},
+                       headers={**self.h, "X-Upload-Content-Type": mime, "X-Upload-Content-Length": str(size), "Origin": origin},
+                       json={"name": name, "parents": [parent]})
+        r.raise_for_status()
+        return r.headers["Location"]
+
+    def meta(self, file_id: str) -> dict:
+        r = httpx.get(f"{API}/{file_id}", headers=self.h, timeout=30,
+                      params={"supportsAllDrives": "true", "fields": "id,name,size,mimeType,parents,thumbnailLink"})
+        r.raise_for_status()
+        return r.json()
+
+    def stream(self, file_id: str):
+        """Отдаёт содержимое файла кусками (для просмотра в приложении)."""
+        with httpx.stream("GET", f"{API}/{file_id}", headers=self.h, timeout=120,
+                          params={"alt": "media", "supportsAllDrives": "true"}) as r:
+            r.raise_for_status()
+            yield from r.iter_bytes(256 * 1024)
+
+    def thumbnail(self, file_id: str) -> bytes | None:
+        link = self.meta(file_id).get("thumbnailLink")
+        if not link:
+            return None
+        r = httpx.get(link.replace("=s220", "=s480"), headers=self.h, timeout=30)
+        return r.content if r.status_code == 200 else None
 
 
-def save_photo(conn, obj: dict, name: str, data_url: str) -> str:
-    """Возвращает ссылку на файл. Папку сделки запоминает в objects.drive_folder."""
+def ensure_folders(conn, obj: dict, d: Drive | None = None) -> dict:
+    """Папка сделки и подпапки; создаёт недостающие, запоминает ID в базе."""
+    if obj["id"] == 0:
+        return {k: settings.drive_inbox for k in SUBFOLDERS}
+    folders = dict(obj.get("folders") or {})
+    if all(k in folders for k in SUBFOLDERS) and obj.get("drive_folder"):
+        return folders
+    d = d or Drive()
+    root = obj.get("drive_folder") or d.project_folder(obj)
+    for k, name in SUBFOLDERS.items():
+        folders.setdefault(k, d.child(root, name))
+    conn.execute("UPDATE objects SET drive_folder=%s, folders=%s WHERE id=%s", (root, json.dumps(folders), obj["id"]))
+    return folders
+
+
+def decode_data_url(data_url: str) -> tuple[bytes, str]:
     head, _, b64 = data_url.partition(",")
     mime = head.removeprefix("data:").removesuffix(";base64") or "image/jpeg"
-    data = base64.b64decode(b64)
+    return base64.b64decode(b64), mime
+
+
+def save_photo(conn, obj: dict, name: str, data_url: str, kind: str = "receipt") -> str:
+    """Сохраняет сжатое фото (чек или фото объекта) в подпапку. Возвращает ID файла на Диске."""
+    data, mime = decode_data_url(data_url)
     d = Drive()
-    if obj["id"] == 0:
-        parent = settings.drive_inbox
-    else:
-        folder = obj.get("drive_folder") or d.project_folder(obj)
-        if not obj.get("drive_folder"):
-            conn.execute("UPDATE objects SET drive_folder=%s WHERE id=%s", (folder, obj["id"]))
-        parent = d.child(folder, PHOTO_SUBFOLDER)
-    return d.upload(parent, name + (".png" if mime == "image/png" else ".jpg"), data, mime)
+    folders = ensure_folders(conn, obj, d)
+    return d.upload(folders[kind], name + (".png" if mime == "image/png" else ".jpg"), data, mime)

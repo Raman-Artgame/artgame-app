@@ -9,7 +9,7 @@ const iso = v => new Date(v).toISOString()
 const money = n => Number(n).toLocaleString('ru-RU') + ' ₸'
 
 // Чек сжимаем на телефоне (до 1600 px, JPEG): быстрее уходит при плохой сети и помещается в офлайн-очередь.
-function shrink(file) {
+export function shrink(file) {
   return new Promise((ok, fail) => {
     const img = new Image()
     img.onload = () => {

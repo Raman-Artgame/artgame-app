@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from . import constants as consts
-from . import db, work
+from . import db, files, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
 
@@ -20,6 +20,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ARTGAME", lifespan=lifespan)
 app.include_router(work.router)
+app.include_router(files.router)
 
 
 @app.get("/api/health")

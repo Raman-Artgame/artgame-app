@@ -1,0 +1,9 @@
+[Unit]
+Description=ARTGAME: объекты из Битрикса каждые 10 минут (%i)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target
