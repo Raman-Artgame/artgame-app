@@ -26,6 +26,7 @@ LEADS = {
              "DATE_CREATE": "2026-11-04T09:00:00+05:00", "DATE_MODIFY": "2026-11-04T09:00:00+05:00", "PHONE": []},
 }
 CALLS = []
+PHONE_CALLS = []   # звонки за двое суток для calls.missed (новые сверху)
 
 
 def fake(method, params):
@@ -82,6 +83,8 @@ def fake(method, params):
                                                                   {"STAGE_ID": "NEW", "CREATED_TIME": "2026-11-04T10:00:00+03:00"}]}
     if method == "crm.timeline.comment.list":
         return {"result": [{"ID": "1", "AUTHOR_ID": "4565", "CREATED": "2026-11-04T14:00:00+03:00", "COMMENT": "Отправил КП"}]}
+    if method == "crm.activity.list" and ">=CREATED" in params["filter"]:
+        return {"result": PHONE_CALLS}
     if method == "crm.activity.list":
         return {"result": [{"ID": "7", "SUBJECT": "Звонок клиенту", "TYPE_ID": "2", "COMPLETED": "Y", "CREATED": "2026-11-04T12:00:00+03:00", "RESPONSIBLE_ID": "4565"}]}
     if method == "tasks.task.list":
@@ -440,3 +443,36 @@ def test_rows_shapes():
     assert bx._rows({"result": [{"ID": 2}]}) == [{"ID": 2}]
     assert bx._rows([{"ID": 3}]) == [{"ID": 3}]
     assert bx._rows({"result": {"something": 1}}) == []
+
+
+def test_missed_calls(bxc):
+    """Пропущенный входящий без перезвона — наверх «Горит»; после перезвона — пропадает. Чужие — не видно."""
+    from datetime import datetime, timezone
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    miss = lambda oid, tid="2": {"ID": "9", "OWNER_TYPE_ID": tid, "OWNER_ID": oid, "DIRECTION": "1", "SETTINGS": {"MISSED_CALL": True},  # noqa: E731
+                                 "CREATED": now, "START_TIME": now, "END_TIME": now, "SUBJECT": "Входящий от +7 700", "RESPONSIBLE_ID": "4693"}
+    PHONE_CALLS[:] = [miss("1601"), miss("1651"), miss("3001", "1")]
+    try:
+        t = c.get("/api/bx/today?fresh=1", headers=hdr(6000)).json()["queue"]
+        hot = [(x["entity"], x["id"]) for x in t["hot"] if x["why"].startswith("пропущенный звонок")]
+        assert hot == [("deal", 1601), ("lead", 3001)]          # 1651 — чужая сделка
+        assert sum((x["entity"], x["id"]) == ("deal", 1601) for b in t.values() for x in b) == 1   # без дублей
+        # перезвонили (последний звонок исходящий) — пропал
+        PHONE_CALLS.insert(0, {**miss("1601"), "ID": "10", "DIRECTION": "2", "SETTINGS": {}})
+        t = c.get("/api/bx/today?fresh=1", headers=hdr(6000)).json()["queue"]
+        assert not any(x["why"].startswith("пропущенный") and x["id"] == 1601 for x in t["hot"])
+        # HEAD видит все
+        t = c.get("/api/bx/today?fresh=1", headers=hdr(1000)).json()["queue"]
+        assert {x["id"] for x in t["hot"] if x["why"].startswith("пропущенный")} == {1651, 3001}
+    finally:
+        PHONE_CALLS.clear()
+
+
+def test_call_label():
+    from artgame import calls
+    a = {"SUBJECT": "Исходящий на +7 701", "DIRECTION": "2", "START_TIME": "2026-11-05T11:29:01+03:00", "END_TIME": "2026-11-05T11:31:55+03:00"}
+    assert calls.label(a) == "Исходящий на +7 701 · 2:54"
+    assert calls.label({**a, "END_TIME": a["START_TIME"]}) == "Исходящий на +7 701 · не соединился"
+    assert calls.label({"SUBJECT": "Входящий", "DIRECTION": "1", "SETTINGS": {"MISSED_CALL": True}}) == "Входящий · пропущен"

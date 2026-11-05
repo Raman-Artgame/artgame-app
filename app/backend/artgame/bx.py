@@ -396,9 +396,12 @@ def today(p: dict, fresh: bool = False) -> dict:
             out["idle"].append(d)
             q["later"].append(item("deal", d, ("дизайн: " if not sales else "") + f"без движения {int(age)} дн." +
                                    (" в «Взаимном информировании»" if sales and code == "NEW" else "")))
+    leads_by_id = {}
     try:
         from .leads import my_leads
-        for l in my_leads(p, fresh)["leads"]:
+        lst = my_leads(p, fresh)["leads"]
+        leads_by_id = {l["id"]: l for l in lst}
+        for l in lst:
             age = _days(l["created"] if l["new"] else l["modified"])
             if l["id"] in lead_due:
                 n = lead_due[l["id"]]["note"]
@@ -411,6 +414,19 @@ def today(p: dict, fresh: bool = False) -> dict:
                 q["later"].append(item("lead", l, f"лид без движения {int(age)} дн.", action="call"))
     except HTTPException:
         pass
+    # пропущенные входящие без перезвона — наверх «Горит» (calls.py; резюме разговоров делает CoPilot в Битриксе).
+    # Чей звонок — по своим сделкам и лидам (у HEAD — все).
+    from . import calls
+    deals_by_id = {d["id"]: d for d in deals}
+    seen = set()
+    for m in calls.missed(fresh):
+        src = (deals_by_id if m["entity"] == "deal" else leads_by_id).get(m["id"])
+        if not src or (m["entity"], m["id"]) in seen:
+            continue
+        seen.add((m["entity"], m["id"]))
+        for b in q.values():
+            b[:] = [x for x in b if (x["entity"], x["id"]) != (m["entity"], m["id"])]
+        q["hot"].insert(len(seen) - 1, item(m["entity"], src, f"пропущенный звонок {calls.hhmm(m['at'])} — перезвонить", action="call"))
     uid = bx_id(p)
     if uid:
         try:

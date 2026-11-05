@@ -9,7 +9,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from . import bx, bxw, db
+from . import bx, bxw, calls, db
 from .work import active
 
 router = APIRouter(prefix="/api")
@@ -116,11 +116,13 @@ def feed(entity: str, eid: int, names: dict, fresh: bool = False) -> list:
     try:
         for a in bx._rows(bx.read("crm.activity.list", {"filter": {"OWNER_ID": eid, "OWNER_TYPE_ID": tid}, "order": {"ID": "DESC"},
                                                          "select": ["ID", "SUBJECT", "TYPE_ID", "PROVIDER_ID", "COMPLETED", "DEADLINE", "CREATED",
-                                                                    "RESPONSIBLE_ID", "DIRECTION"]}, fresh=fresh))[:30]:
+                                                                    "RESPONSIBLE_ID", "DIRECTION", "SETTINGS", "START_TIME", "END_TIME"]},
+                                                         fresh=fresh))[:30]:
             prov = str(a.get("PROVIDER_ID") or "")
             kind = "chat" if prov in ("IMOPENLINES_SESSION", "CRM_WHATSAPP") or str(a.get("TYPE_ID")) == "6" else \
                 {"1": "meeting", "2": "call", "3": "task", "4": "email"}.get(str(a.get("TYPE_ID")), "activity")
-            out.append({"at": a.get("CREATED"), "who": names.get(int(a.get("RESPONSIBLE_ID") or 0), ""), "text": a.get("SUBJECT") or "",
+            text = calls.label(a) if kind == "call" else a.get("SUBJECT") or ""   # длительность / «пропущен»
+            out.append({"at": a.get("CREATED"), "who": names.get(int(a.get("RESPONSIBLE_ID") or 0), ""), "text": text,
                         "kind": kind, "dir": {"1": "in", "2": "out"}.get(str(a.get("DIRECTION")), ""),
                         "done": a.get("COMPLETED") == "Y", "deadline": a.get("DEADLINE")})
     except Exception as ex:
