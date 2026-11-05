@@ -6,6 +6,7 @@ import { People } from './people.jsx'
 import { Objects } from './objects.jsx'
 import { Places, usePlaces } from './places.jsx'
 import { DEAL_ROLES, Deals } from './deals.jsx'
+import { Journal } from './journal.jsx'
 import './tokens.css'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
@@ -51,7 +52,7 @@ function Main({ me }) {
   const [tab, setTab] = useState('shift')
   const [toast, setToast] = useState('')
   const done = t => { setToast(t); setTab('mine'); setTimeout(() => setToast(''), 4000) }
-  const tabs = [...(places.length ? [['place', 'Место']] : []), ...(DEAL_ROLES.has(me.role_code) ? [['deals', 'Сделки']] : []), ['shift', 'Смена'], ['expense', 'Расход'], ['objects', 'Объекты'], ['mine', 'Мои'], ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []), ...(me.role_code === 'head' ? [['people', 'Команда']] : [])]
+  const tabs = [...(places.length ? [['place', 'Место']] : []), ...(DEAL_ROLES.has(me.role_code) ? [['deals', 'Сделки']] : []), ['shift', 'Смена'], ['expense', 'Расход'], ['objects', 'Объекты'], ['mine', 'Мои'], ...(DEAL_ROLES.has(me.role_code) ? [['journal', 'Журнал']] : []), ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []), ...(me.role_code === 'head' ? [['people', 'Команда']] : [])]
   if (tab === 'place') return <>
     <Places list={places} />
     <Nav tabs={tabs} tab={tab} setTab={setTab} />
@@ -60,7 +61,7 @@ function Main({ me }) {
     <div className="wrap">
       <div className="card"><h1>{me.full_name}</h1><span className="tag">{ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>
       {toast && <div className="toast">{toast}</div>}
-      {tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : tab === 'deals' ? <Deals me={me} openPlace={() => setTab('place')} /> : tab === 'objects' ? <Objects me={me} /> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+      {tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : tab === 'deals' ? <Deals me={me} openPlace={() => setTab('place')} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'objects' ? <Objects me={me} /> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
         tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <Mine /> : <Review />}
     </div>
     <Nav tabs={tabs} tab={tab} setTab={setTab} />

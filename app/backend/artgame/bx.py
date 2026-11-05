@@ -216,6 +216,8 @@ def requisites(company_id) -> dict | None:
 
 def deal_card(p: dict, deal_id: int, fresh: bool = False) -> dict:
     d = _deal(p, deal_id, fresh)
+    with db.pool.connection() as conn:
+        db.audit(conn, p["id"], "deal_open", "deal", deal_id, {"title": d.get("TITLE") or "", "stage": d["STAGE_ID"]})
     comp = _entity("crm.company.get", d.get("COMPANY_ID"))
     cont = _entity("crm.contact.get", d.get("CONTACT_ID"))
     if comp:
@@ -261,6 +263,8 @@ def crm_tool(p: dict, tool: str, args: dict, allowed: set) -> dict:
     ent, eid = args.get("entity"), int(args.get("id") or 0)
     if ent == "deal":
         d = _deal(p, eid)
+        with db.pool.connection() as conn:
+            db.audit(conn, p["id"], "deal_open", "deal", eid, {"title": d.get("TITLE") or "", "stage": d["STAGE_ID"], "via": "kp"})
         allowed.update({("company", int(d.get("COMPANY_ID") or 0)), ("contact", int(d.get("CONTACT_ID") or 0))})
         out = {_camel(k): v for k, v in d.items()}
         out["id"] = int(d["ID"])
@@ -285,6 +289,38 @@ def api_deals(fresh: int = 0, manager: int | None = None, p: dict = Depends(acti
 @router.get("/bx/deals/{deal_id}")
 def api_deal(deal_id: int, fresh: int = 0, p: dict = Depends(active)):
     return deal_card(p, deal_id, bool(fresh))
+
+
+# ---------- журнал действий ----------
+
+JOURNAL_ACTIONS = ("deal_open", "place_download", "shift_add", "expense_add", "shift_cancel", "expense_cancel",
+                   "bx_write", "place_doc_set", "file_add")
+
+
+@router.get("/journal")
+def api_journal(person: int | None = None, days: int = 30, p: dict = Depends(active)):
+    """Свои действия по дням (HEAD — любого человека и сводку). Ничего не удаляется: это тот же audit_log."""
+    pid = p["id"]
+    if person and person != pid:
+        if p["role_code"] != "head":
+            raise HTTPException(403, "только свой журнал")
+        pid = person
+    with db.pool.connection() as conn:
+        rows = conn.execute(
+            """SELECT a.id, a.at, a.action, a.entity, a.entity_id, a.data, p.full_name
+               FROM audit_log a LEFT JOIN people p ON p.id=a.person_id
+               WHERE a.person_id=%s AND a.at > now() - make_interval(days => %s) AND a.action = ANY(%s)
+               ORDER BY a.at DESC LIMIT 500""", (pid, min(max(days, 1), 365), list(JOURNAL_ACTIONS))).fetchall()
+        summary = None
+        if p["role_code"] == "head":
+            summary = conn.execute(
+                """SELECT p.id, p.full_name, p.role_code, count(*) FILTER (WHERE a.at > now() - interval '1 day') AS today,
+                          count(*) FILTER (WHERE a.action='deal_open' AND a.at > now() - interval '1 day') AS deals_today,
+                          count(*) FILTER (WHERE a.action='place_download' AND a.at > now() - interval '1 day') AS files_today,
+                          max(a.at) AS last_at
+                   FROM people p JOIN audit_log a ON a.person_id=p.id
+                   WHERE p.role_code IN ('mop','mop_vip') GROUP BY p.id ORDER BY p.full_name""").fetchall()
+    return {"items": rows, "summary": summary}
 
 
 @router.get("/bx/users")

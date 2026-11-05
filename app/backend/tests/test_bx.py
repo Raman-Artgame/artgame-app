@@ -133,3 +133,17 @@ def test_place_page_crm_get(bxc, tmp_path, monkeypatch):
     assert f["ufCrm_6881101914D8D"]["items"] == [{"id": "12077", "value": "Казахстан, Астана"}]
     assert [x["id"] for x in c.post(base + "/_bx/my_deals", json={}).json()["deals"]] == [1601]
     assert c.get("/api/p/_bx.js").status_code == 200
+
+
+def test_journal(bxc):
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    c.get("/api/bx/deals/1601", headers=hdr(6000))
+    j = c.get("/api/journal", headers=hdr(6000)).json()
+    assert [x["action"] for x in j["items"]] == ["deal_open"] and j["items"][0]["entity_id"] == "1601" and j["summary"] is None
+    # чужой журнал — только HEAD
+    assert c.get(f"/api/journal?person={ids[6000]}", headers=hdr(6100)).status_code == 403
+    h = c.get(f"/api/journal?person={ids[6000]}", headers=hdr(1000)).json()
+    assert len(h["items"]) == 1 and [s["deals_today"] for s in h["summary"] if s["id"] == ids[6000]] == [1]
+    # у художника свой журнал тоже есть (вкладка только у МОП, данные — у всех)
+    assert c.get("/api/journal", headers=hdr(2000)).json()["items"] == []
