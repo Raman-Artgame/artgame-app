@@ -29,16 +29,25 @@ export function MonthStrip({ onOpen }) {
   </div>
 }
 
-// Позвонить / WhatsApp — с телефона менеджера. Звонок через телефонию Битрикса — следующим этапом.
-export function Contact({ phone, name }) {
-  if (!phone) return <p className="small muted">Телефона нет — добавьте в Битриксе.</p>
+// Связь с клиентом. Главная кнопка — карточка в Битриксе: там телефония и чат WhatsApp (Wazzup) с записью в сделку.
+// Напрямую звонить через телефонию Битрикса из другого приложения нельзя. Запасные: со своего телефона и wa.me.
+let portalCache = null
+export function usePortal() {
+  const [p, setP] = useState(portalCache)
+  useEffect(() => { if (portalCache === null) api('/bx/status').then(s => { portalCache = s.portal || ''; setP(portalCache) }, () => setP('')) }, [])
+  return p || ''
+}
+export const bxLink = (portal, entity, id) => portal ? `${portal}/crm/${entity}/details/${id}/` : ''
+export function Contact({ phone, name, entity, id }) {
+  const portal = usePortal()
+  const link = bxLink(portal, entity, id)
   const wa = digits(phone)
   return <div className="contact">
-    <div><b>{name}</b><div className="small muted">{phone}</div></div>
+    <div><b>{name || '—'}</b><div className="small muted">{phone || 'телефона нет — добавьте в Битриксе'}</div></div>
     <div className="dealbtns">
-      <a className="btn" href={`tel:${phone.replace(/[^\d+]/g, '')}`}>Позвонить</a>
-      {wa && <a className="btn ghost" href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer">WhatsApp</a>}
+      {link && <a className="btn" href={link} target="_blank" rel="noreferrer">В Битриксе</a>}
     </div>
+    {phone && <div className="small muted alt">со своего телефона: <a href={`tel:${phone.replace(/[^\d+]/g, '')}`}>позвонить</a>{wa && <> · <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer">WhatsApp</a></>}</div>}
   </div>
 }
 
@@ -77,6 +86,7 @@ export function Feed({ items }) {
 
 const BUCKETS = [['hot', 'Горит', 'Просрочено или ждёт ответа дольше нормы'], ['today', 'Сегодня', 'Сделать сегодня'], ['later', 'Можно позже', 'Без движения, задачи без срока']]
 export function Today({ openDeal, openLead, openMonth }) {
+  const portal = usePortal()
   const [t, setT] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -101,7 +111,7 @@ export function Today({ openDeal, openLead, openMonth }) {
             {x.entity === 'task' ? x.title : <><b>№ {x.id}</b> {x.entity === 'lead' ? (x.name || x.title) : cleanTitle(x.title, x.id)}</>}</div>
           <div className="small why">{x.why}{x.sum ? ' · ' + money(x.sum) : ''}</div>
         </div>
-        {x.action === 'call' && x.phone ? <a className="btn mini" href={`tel:${x.phone.replace(/[^\d+]/g, '')}`}>Позвонить</a>
+        {x.action === 'call' && x.entity !== 'task' && portal ? <a className="btn mini" href={bxLink(portal, x.entity, x.id)} target="_blank" rel="noreferrer">Позвонить</a>
           : <button className="ghost mini" onClick={() => open(x)}>Открыть</button>}
       </div>)}
     </div> : null)}
@@ -165,7 +175,7 @@ export function LeadCard({ id, back, openDeal }) {
       <h2>{l.name} <span className="muted small">лид № {l.id}</span></h2>
       <span className="tag">{l.status_name}</span>{l.manager && <span className="tag">{l.manager}</span>}
       {l.title && l.title !== l.name && <p className="small muted">{l.title}</p>}
-      <Contact phone={l.phone} name={l.name} />
+      <Contact phone={l.phone} name={l.name} entity="lead" id={l.id} />
       <CallOutcome path={`/bx/leads/${id}`} done={() => load(true)} />
     </div>
     <div className="card"><h3>Что нужно для сделки</h3>

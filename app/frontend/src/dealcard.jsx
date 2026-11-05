@@ -51,7 +51,7 @@ export function DealCard({ id, back, open }) {
         <div><span className="muted small">Город</span><b>{d.city || '—'}</b></div>
       </div>
       {d.address && <p className="small">{d.address}</p>}
-      <Contact phone={c.phone} name={[c.name, d.contact && d.contact !== c.name ? d.contact : ''].filter(Boolean).join(' · ')} />
+      <Contact phone={c.phone} name={[c.name, d.contact && d.contact !== c.name ? d.contact : ''].filter(Boolean).join(' · ')} entity="deal" id={d.id} />
       <CallOutcome path={`/bx/deals/${id}`} done={() => load(true)} />
       <div className="dealbtns wrapbtns">
         <button className="ghost" onClick={() => open(d.id, 'kp')}>КП</button>

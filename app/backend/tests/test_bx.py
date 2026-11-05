@@ -10,6 +10,8 @@ DEALS = {
              "UF_CRM_1753294730602": "19285", "UF_CRM_ARTGAME_ADVANCE_PERCENT": 50},
     "1651": {"ID": "1651", "TITLE": "Школа", "STAGE_ID": "NEW", "CATEGORY_ID": "0", "OPPORTUNITY": "0", "ASSIGNED_BY_ID": "4693",
              "CONTACT_ID": "2215", "COMPANY_ID": "0", "DATE_MODIFY": "2026-11-04T11:00:00+03:00", "UF_CRM_6881101914D8D": None},
+    "1647": {"ID": "1647", "TITLE": "Дизайн кафе", "STAGE_ID": "C13:NEW", "CATEGORY_ID": "13", "OPPORTUNITY": "0", "ASSIGNED_BY_ID": "4565",
+             "CONTACT_ID": "0", "COMPANY_ID": "0", "DATE_MODIFY": "2026-10-20T11:00:00+03:00", "DATE_CREATE": "2026-10-20T11:00:00+03:00"},
     "1590": {"ID": "1590", "TITLE": "1590 · ОФИС — ШЫМКЕНТ", "STAGE_ID": "WON", "CATEGORY_ID": "0", "OPPORTUNITY": "2900000.00",
              "ASSIGNED_BY_ID": "4565", "CONTACT_ID": "0", "COMPANY_ID": "0", "DATE_MODIFY": "2026-11-03T10:00:00+03:00",
              "CLOSEDATE": "2026-11-03T10:00:00+03:00", "UF_CRM_6881101914D8D": None},
@@ -32,6 +34,7 @@ def fake(method, params):
         f = params["filter"]
         rows = [d for d in DEALS.values() if "ASSIGNED_BY_ID" not in f or int(d["ASSIGNED_BY_ID"]) == f["ASSIGNED_BY_ID"]]
         rows = [d for d in rows if SEMANTIC.get(d["STAGE_ID"].split(":")[-1], "P") == f.get("STAGE_SEMANTIC_ID", "P")]
+        rows = [d for d in rows if "CATEGORY_ID" not in f or int(d["CATEGORY_ID"]) in f["CATEGORY_ID"]]
         if ">=CLOSEDATE" in f:
             rows = [d for d in rows if f[">=CLOSEDATE"] <= d.get("CLOSEDATE", "")[:10] < f["<CLOSEDATE"]]
         return {"result": rows, "total": len(rows)}
@@ -52,6 +55,8 @@ def fake(method, params):
     if method == "crm.lead.fields":
         return {"result": {"UF_CRM_1753202309": {"type": "enumeration", "items": [{"ID": "5501", "VALUE": "Казахстан, Астана"}]},
                            "UF_CRM_ARTGAME_LEAD_AREA": {"type": "double"}}}
+    if method == "crm.status.list" and params["filter"]["ENTITY_ID"] == "DEAL_STAGE_13":
+        return {"result": [{"STATUS_ID": "C13:NEW", "NAME": "Новая задача", "SORT": "10"}, {"STATUS_ID": "C13:EXECUTING", "NAME": "В работе", "SORT": "20"}]}
     if method == "crm.status.list":
         return {"result": [{"STATUS_ID": "NEW", "NAME": "Взаимное информирование", "SORT": "10"},
                            {"STATUS_ID": "PREPARATION", "NAME": "Встреча/Отправка КП", "SORT": "60"},
@@ -110,12 +115,13 @@ def test_link_and_my_deals(bxc):
     assert [u["name"] for u in c.get("/api/bx/users", headers=hdr(1000)).json()] == ["Ануар Минкеев", "Тимур Жандосов"]
     assert c.get("/api/bx/users", headers=hdr(6000)).status_code == 403
     r = c.get("/api/bx/deals", headers=hdr(6000)).json()
-    assert [d["id"] for d in r["deals"]] == [1601] and not r["all"]
+    assert [d["id"] for d in r["deals"]] == [1601, 1647] and not r["all"]   # продажи и дизайн, воронку выбирает экран
     d = r["deals"][0]
     assert d["stage_name"] == "Встреча/Отправка КП" and d["city"] == "Астана" and d["sum"] == 589250 and d["area"] == 25
     # HEAD видит всех и имя менеджера; художник — нет доступа
     h = c.get("/api/bx/deals", headers=hdr(1000)).json()
-    assert {x["id"] for x in h["deals"]} == {1601, 1651} and h["all"]
+    assert {x["id"] for x in h["deals"]} == {1601, 1651, 1647} and h["all"]
+    assert h["funnels"] == {"0": "Продажи", "13": "Дизайн"} and [n for _, n in h["managers"]] == ["Ануар Минкеев", "Тимур Жандосов"]
     assert {x["manager"] for x in h["deals"]} == {"Ануар Минкеев", "Тимур Жандосов"}
     assert c.get("/api/bx/deals", headers=hdr(2000)).status_code == 403
     # снять связку
@@ -175,7 +181,7 @@ def test_place_page_crm_get(bxc, tmp_path, monkeypatch):
     assert c.post(base + "/_bx/crm_get", json={"entity": "deal", "id": 1651}).status_code == 403
     f = c.post(base + "/_bx/crm_fields", json={"entity": "deal"}).json()
     assert f["ufCrm_6881101914D8D"]["items"] == [{"id": "12077", "value": "Казахстан, Астана"}]
-    assert [x["id"] for x in c.post(base + "/_bx/my_deals", json={}).json()["deals"]] == [1601]
+    assert [x["id"] for x in c.post(base + "/_bx/my_deals", json={}).json()["deals"]] == [1601, 1647]
     assert c.get("/api/p/_bx.js").status_code == 200
 
 
@@ -271,6 +277,8 @@ def test_full_and_today(bxc):
     t = c.get("/api/bx/today", headers=hdr(6000)).json()
     assert t["tasks"] == [{"id": 501, "title": "Перезвонить по КП", "deadline": "2026-11-06T10:00:00+03:00", "deal": 1601}]
     assert [x["id"] for x in t["kp"]] == [1601] and t["limits"]["kp_days"] == 2   # сделка на КП с 04.11 — без ответа
+    # дизайн-сделка в C13:NEW — не «новая заявка», а «без движения» в «позже»
+    assert [x["id"] for x in t["new"]] == [] and any(x["id"] == 1647 and x["why"].startswith("дизайн: без движения") for x in t["queue"]["later"])
 
 
 def test_month(bxc):

@@ -26,7 +26,8 @@ AREA = "UF_CRM_ARTGAME_AREA_M2"
 F_LEVEL, F_SHIFTS, F_CREW, F_TERM = "UF_CRM_ARTGAME_COMPLEXITY", "UF_CRM_ARTGAME_NORM_SHIFTS", "UF_CRM_ARTGAME_NORM_CREW", "UF_CRM_ARTGAME_TERM_DAYS"
 LEVELS = {"easy": "Лёгкий", "medium": "Средний", "hard": "Сложный", "author": "Авторский"}
 LIST_SELECT = ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", "OPPORTUNITY", "ASSIGNED_BY_ID", "CONTACT_ID", "COMPANY_ID",
-               "DATE_MODIFY", CITY, AREA]
+               "DATE_MODIFY", "DATE_CREATE", "LAST_ACTIVITY_TIME", CITY, AREA]
+FUNNELS = {0: "Продажи", 13: "Дизайн"}
 TTL, TTL_DICT, MAX_PAGES = 120, 3600, 10
 
 _cache: dict = {}
@@ -182,8 +183,11 @@ def my_deals(p: dict, fresh: bool = False, manager: int | None = None) -> dict:
               "stage_sort": (st.get(d["STAGE_ID"]) or {}).get("sort", 0),
               "category": int(d.get("CATEGORY_ID") or 0), "sum": _num(d.get("OPPORTUNITY")),
               "area": _num(d.get(AREA)), "city": city_name(d.get(CITY)), "modified": d.get("DATE_MODIFY"),
+              "created": d.get("DATE_CREATE"), "active": d.get("LAST_ACTIVITY_TIME") or d.get("DATE_MODIFY"),
+              "manager_id": int(d.get("ASSIGNED_BY_ID") or 0),
               "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), "") if uid is None else ""} for d in rows]
-    return {"deals": deals, "all": uid is None, "updated": time.time()}
+    return {"deals": deals, "all": uid is None, "updated": time.time(), "funnels": FUNNELS,
+            "managers": sorted({(d["manager_id"], d["manager"]) for d in deals if d["manager"]}, key=lambda x: x[1]) if uid is None else []}
 
 
 def _deal(p: dict, deal_id: int, fresh: bool = False) -> dict:
@@ -373,22 +377,25 @@ def today(p: dict, fresh: bool = False) -> dict:
                                        "sum": d.get("sum") or 0, "stage": d.get("stage_name") or d.get("status_name") or "",
                                        "phone": d.get("phone") or "", "name": d.get("name") or "", **kw}
     for d in deals:
-        age = _days(d["modified"])
+        # «новая заявка» — только недавно созданная сделка на первой стадии продаж; старые в NEW — «стоит»
+        age, since_new = _days(d["active"]), _days(d["created"])
+        code, sales = d["stage"].split(":")[-1], d["category"] == 0
         if d["id"] in due:
             r = due[d["id"]]
             out["back"].append({**d, "due": r["due"].isoformat(), "note": r["note"]})
             q["hot"].append(item("deal", d, "пора вернуться" + (f": {r['note']}" if r["note"] else "")))
-        elif d["stage"] == "NEW" and age * 24 >= new_h:
+        elif sales and code == "NEW" and since_new <= kp_d and since_new * 24 >= new_h:
             out["new"].append(d)
-            q["hot"].append(item("deal", d, f"новая заявка без ответа {int(age * 24)} ч", action="call"))
-        elif d["stage"] == "NEW":
+            q["hot"].append(item("deal", d, f"новая заявка без ответа {int(since_new * 24)} ч", action="call"))
+        elif sales and code == "NEW" and since_new <= kp_d:
             q["today"].append(item("deal", d, "новая заявка", action="call"))
-        elif d["stage"] == "PREPARATION" and age >= kp_d:
+        elif sales and code == "PREPARATION" and age >= kp_d:
             out["kp"].append(d)
             q["today"].append(item("deal", d, f"КП без ответа {int(age)} дн.", action="call"))
-        elif d["stage"] not in ("NEW", "PREPARATION", "UC_VCP4VO") and age >= idle_d:
+        elif code != "UC_VCP4VO" and age >= idle_d:
             out["idle"].append(d)
-            q["later"].append(item("deal", d, f"без движения {int(age)} дн."))
+            q["later"].append(item("deal", d, ("дизайн: " if not sales else "") + f"без движения {int(age)} дн." +
+                                   (" в «Взаимном информировании»" if sales and code == "NEW" else "")))
     try:
         from .leads import my_leads
         for l in my_leads(p, fresh)["leads"]:

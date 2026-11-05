@@ -275,6 +275,13 @@ def api_stages(p: dict = Depends(active)):
     return [{"id": k, **v} for k, v in bx.stages().items() if not k.startswith("C")]
 
 
+def portal() -> str:
+    """Адрес портала из вебхука: https://artgame.bitrix24.kz — для ссылок «открыть в Битриксе» (звонок, Wazzup — там)."""
+    from urllib.parse import urlsplit
+    u = urlsplit(settings.bitrix_webhook or "")
+    return f"{u.scheme}://{u.netloc}" if u.netloc else ""
+
+
 @router.get("/bx/status")
 def api_status(p: dict = Depends(active)):
-    return {"write": enabled()}
+    return {"write": enabled(), "portal": portal()}

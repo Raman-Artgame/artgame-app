@@ -104,3 +104,10 @@ a.btn.ghost { background: var(--line); color: var(--text); }
 .feed .ic { flex: none; width: 22px; text-align: center; }
 .card > button { margin-top: 8px; }
 .contact > div:first-child { flex: 1 1 150px; min-width: 0; overflow-wrap: anywhere; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 4px; }
+.chips button { width: auto; flex: none; padding: 7px 12px; font-size: 13px; background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.chips button.on { color: var(--text); background: var(--line); border-color: var(--line); }
+.chips button span { opacity: .7; margin-left: 4px; }
+.chips.sub button { padding: 5px 10px; font-size: 12px; border-radius: 99px; }
+.contact .alt { flex-basis: 100%; }
+.contact .alt a { color: var(--muted); text-decoration: underline; }
