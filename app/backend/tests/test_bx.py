@@ -395,3 +395,10 @@ def test_leads(bxc, monkeypatch):
     assert calls[2][1]["fields"] == {"STATUS_ID": "CONVERTED"}
     LEADS["3001"].update({"STATUS_ID": "UC_93GBZP", "UF_CRM_1753202309": None})
     LEADS["3001"].pop("UF_CRM_ARTGAME_LEAD_AREA", None)
+
+
+def test_rows_shapes():
+    assert bx._rows({"result": {"items": [{"ID": 1}]}}) == [{"ID": 1}]
+    assert bx._rows({"result": [{"ID": 2}]}) == [{"ID": 2}]
+    assert bx._rows([{"ID": 3}]) == [{"ID": 3}]
+    assert bx._rows({"result": {"something": 1}}) == []

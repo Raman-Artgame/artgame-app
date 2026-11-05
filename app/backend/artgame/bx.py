@@ -84,7 +84,11 @@ def read(method: str, params: dict, ttl: int = TTL, fresh: bool = False):
 
 
 def _rows(j):
-    return j if isinstance(j, list) else (j or {}).get("result", [])
+    """Список строк из ответа Битрикса: [..] | {"result": [..]} | {"result": {"items": [..]}} (crm.stagehistory, crm.item)."""
+    r = j if isinstance(j, list) else (j or {}).get("result", [])
+    if isinstance(r, dict):
+        r = r.get("items") or r.get("tasks") or []
+    return r if isinstance(r, list) else []
 
 
 def read_all(method: str, params: dict, fresh: bool = False) -> list:
@@ -278,8 +282,8 @@ def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
     try:
         for h in _rows(read("crm.stagehistory.list", {"entityTypeId": 2, "filter": {"OWNER_ID": deal_id}, "order": {"ID": "DESC"}}, fresh=fresh))[:20]:
             hist.append({"at": h.get("CREATED_TIME"), "stage": (st.get(h.get("STAGE_ID")) or {}).get("name", h.get("STAGE_ID"))})
-    except HTTPException:
-        pass
+    except Exception as ex:  # история — не главное, карточка открывается и без неё
+        print(f"stagehistory {deal_id}: {ex}")
     feed = _feed("deal", deal_id, names, fresh)
     for k, title in FILES.items():
         v = d.get(k)

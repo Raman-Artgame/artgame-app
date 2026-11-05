@@ -111,8 +111,8 @@ def feed(entity: str, eid: int, names: dict, fresh: bool = False) -> list:
     try:
         for c in bx._rows(bx.read("crm.timeline.comment.list", {"filter": {"ENTITY_ID": eid, "ENTITY_TYPE": entity}, "order": {"ID": "DESC"}}, fresh=fresh))[:30]:
             out.append({"at": c.get("CREATED"), "who": names.get(int(c.get("AUTHOR_ID") or 0), ""), "text": c.get("COMMENT") or "", "kind": "comment"})
-    except HTTPException:
-        pass
+    except Exception as ex:
+        print(f"timeline {entity} {eid}: {ex}")
     try:
         for a in bx._rows(bx.read("crm.activity.list", {"filter": {"OWNER_ID": eid, "OWNER_TYPE_ID": tid}, "order": {"ID": "DESC"},
                                                          "select": ["ID", "SUBJECT", "TYPE_ID", "PROVIDER_ID", "COMPLETED", "DEADLINE", "CREATED",
@@ -123,8 +123,8 @@ def feed(entity: str, eid: int, names: dict, fresh: bool = False) -> list:
             out.append({"at": a.get("CREATED"), "who": names.get(int(a.get("RESPONSIBLE_ID") or 0), ""), "text": a.get("SUBJECT") or "",
                         "kind": kind, "dir": {"1": "in", "2": "out"}.get(str(a.get("DIRECTION")), ""),
                         "done": a.get("COMPLETED") == "Y", "deadline": a.get("DEADLINE")})
-    except HTTPException:
-        pass
+    except Exception as ex:
+        print(f"activity {entity} {eid}: {ex}")
     out.sort(key=lambda x: x["at"] or "", reverse=True)
     return out[:40]
 

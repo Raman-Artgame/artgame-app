@@ -27,6 +27,15 @@ app.include_router(bxw.router)
 app.include_router(leads.router)
 
 
+@app.exception_handler(Exception)
+async def _crash(request, ex: Exception):
+    """Непредвиденная ошибка: в журнал службы полный текст, на экран — коротко, чтобы было что прислать."""
+    import traceback
+    from fastapi.responses import JSONResponse
+    traceback.print_exc()
+    return JSONResponse({"detail": f"Ошибка сервера ({type(ex).__name__}: {str(ex)[:160]}). Пришлите это сообщение в тред."}, status_code=500)
+
+
 @app.get("/api/health")
 def health():
     with db.pool.connection() as conn:
