@@ -27,6 +27,7 @@ LEADS = {
 }
 CALLS = []
 PHONE_CALLS = []   # звонки за двое суток для calls.missed (новые сверху)
+DIALOGS, HISTORY = [], {}   # открытые диалоги WhatsApp и их переписка (chats.waiting)
 
 
 def fake(method, params):
@@ -83,6 +84,13 @@ def fake(method, params):
                                                                   {"STAGE_ID": "NEW", "CREATED_TIME": "2026-11-04T10:00:00+03:00"}]}
     if method == "crm.timeline.comment.list":
         return {"result": [{"ID": "1", "AUTHOR_ID": "4565", "CREATED": "2026-11-04T14:00:00+03:00", "COMMENT": "Отправил КП"}]}
+    if method == "crm.activity.list" and params["filter"].get("PROVIDER_ID") == "IMOPENLINES_SESSION":
+        return {"result": DIALOGS}
+    if method == "imopenlines.session.history.get":
+        h = HISTORY.get(params["SESSION_ID"])
+        if h is None:
+            raise bx.HTTPException(502, "Битрикс: insufficient_scope")
+        return {"result": h}
     if method == "crm.activity.list" and ">=CREATED" in params["filter"]:
         return {"result": PHONE_CALLS}
     if method == "crm.activity.list":
@@ -476,3 +484,38 @@ def test_call_label():
     assert calls.label(a) == "Исходящий на +7 701 · 2:54"
     assert calls.label({**a, "END_TIME": a["START_TIME"]}) == "Исходящий на +7 701 · не соединился"
     assert calls.label({"SUBJECT": "Входящий", "DIRECTION": "1", "SETTINGS": {"MISSED_CALL": True}}) == "Входящий · пропущен"
+
+
+def test_chat_waiting(bxc):
+    """Клиент написал последним в WhatsApp дольше 30 мин назад — «Горит», кнопка «Ответить»; ответили — пропало."""
+    from datetime import datetime, timedelta, timezone
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    t0 = lambda m: (datetime.now(timezone.utc) - timedelta(minutes=m)).isoformat(timespec="seconds")  # noqa: E731
+    users = {"15": {"id": "15", "connector": False, "type": "user"}, "4995": {"id": "4995", "connector": True, "type": "extranet"}}
+    msg = lambda i, sid, text, m: {"id": str(i), "senderid": sid, "date": t0(m), "text": text}  # noqa: E731
+    DIALOGS[:] = [{"ID": "1", "OWNER_TYPE_ID": "2", "OWNER_ID": "1601", "ASSOCIATED_ENTITY_ID": "71", "LAST_UPDATED": t0(5)},
+                  {"ID": "2", "OWNER_TYPE_ID": "1", "OWNER_ID": "3001", "ASSOCIATED_ENTITY_ID": "72", "LAST_UPDATED": t0(5)},
+                  {"ID": "3", "OWNER_TYPE_ID": "2", "OWNER_ID": "1647", "ASSOCIATED_ENTITY_ID": "73", "LAST_UPDATED": t0(5)}]
+    HISTORY.clear()
+    HISTORY.update({
+        # сделка 1601: клиент спросил 2 ч назад, потом ещё раз; системное сообщение не в счёт
+        71: {"users": users, "message": {"1": msg(1, "15", "Здравствуйте", 200), "2": msg(2, "4995", "Сколько стоит?", 120),
+                                         "3": msg(3, "4995", "Ау", 60), "4": msg(4, "0", "Анна начала работу с диалогом", 50)}},
+        # лид 3001: менеджер ответил с телефона через Wazzup — от имени клиента, но с пометкой
+        72: {"users": users, "message": {"1": msg(1, "4995", "Привет", 120), "2": msg(2, "4995", "=== Исходящее сообщение, автор: Тимур ===\nДобрый день", 100)}},
+        # сделка 1647: клиент написал 10 мин назад — ещё в норме
+        73: {"users": users, "message": {"1": msg(1, "4995", "Ок", 10)}},
+    })
+    try:
+        t = c.get("/api/bx/today?fresh=1", headers=hdr(6000)).json()
+        hot = [(x["entity"], x["id"], x["action"]) for x in t["queue"]["hot"] if x["why"].startswith("клиент ждёт")]
+        assert hot == [("deal", 1601, "chat")] and t["warn"] == ""
+        assert "2 ч" in next(x["why"] for x in t["queue"]["hot"] if x["id"] == 1601)
+        # без права «Открытые линии» — предупреждение, «Сегодня» работает
+        HISTORY.clear()
+        t = c.get("/api/bx/today?fresh=1", headers=hdr(6000)).json()
+        assert "Открытые линии" in t["warn"] and t["queue"]["hot"] is not None
+    finally:
+        DIALOGS.clear()
+        HISTORY.clear()

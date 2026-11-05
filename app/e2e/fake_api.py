@@ -38,6 +38,14 @@ from artgame import bx  # noqa: E402
 from test_bx import fake as fake_bx  # noqa: E402
 bx.READ = fake_bx
 
+# WhatsApp: клиентка лида 3001 (Дана) написала 2 ч назад и ждёт ответа
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from test_bx import DIALOGS, HISTORY  # noqa: E402
+DIALOGS.append({"ID": "1", "OWNER_TYPE_ID": "1", "OWNER_ID": "3001", "ASSOCIATED_ENTITY_ID": "71",
+                "LAST_UPDATED": datetime.now(timezone.utc).isoformat()})
+HISTORY[71] = {"users": {"4995": {"connector": True}}, "message": {"1": {"id": "1", "senderid": "4995", "text": "Сколько стоит роспись?",
+                                                                        "date": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()}}}
+
 # Запись в Битрикс: вебхук подменён, вызовы складываются в BX_CALLS (смотрит тест через /api/_e2e/bx_calls)
 from artgame import bxw  # noqa: E402
 from artgame.config import settings  # noqa: E402

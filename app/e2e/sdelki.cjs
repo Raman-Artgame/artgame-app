@@ -57,15 +57,15 @@ async function card(p, id) {
   await dealsOpen(h)
   assert.strictEqual(await h.locator('.stage .qrow').count(), 2, 'HEAD видит все открытые сделки')
 
-  // МОП: «Сегодня» — очередь: новый лид горит, КП без ответа — сегодня; полоска месяца сверху
+  // МОП: «Сегодня» — очередь: лид, где клиентка ждёт ответа в WhatsApp, горит; КП без ответа — сегодня; полоска месяца сверху
   const p = await open(b, 6000)
   await p.locator('.bucket.hot').waitFor()
-  assert.match(await p.locator('.bucket.hot').textContent(), /Дана.*новый лид без ответа/)
+  assert.match(await p.locator('.bucket.hot').textContent(), /Дана.*клиент ждёт ответа в WhatsApp 2 ч/)
   assert.match(await p.locator('.tiles').textContent(), /1.*Горит.*1.*Сегодня.*2.*Можно позже/)
   assert.match(await p.locator('nav button', { hasText: 'Сегодня' }).textContent(), /2$/, 'счётчик в меню')
   assert.strictEqual(await p.locator('nav button').count(), 5, 'у МОП пять кнопок меню')
   assert.match(await p.locator('.bucket.today').textContent(), /№ 1601.*КП без ответа/)
-  assert.strictEqual(await p.locator('.bucket.hot a.btn', { hasText: 'Позвонить' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/lead/details/3001/', '«Позвонить» ведёт в карточку Битрикса (телефония, Wazzup)')
+  assert.strictEqual(await p.locator('.bucket.hot a.btn', { hasText: 'Ответить' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/lead/details/3001/', '«Ответить» ведёт в карточку Битрикса (Wazzup там)')
   await p.locator('.strip').waitFor()
   assert.match(await p.locator('.strip').textContent(), /Месяц: 2,9 млн/)
   await p.screenshot({ path: `${shots}/mop-today.png`, fullPage: true })
