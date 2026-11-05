@@ -72,7 +72,7 @@ async function card(p, id) {
   assert.match(await p.locator('.steps').textContent(), /Клиент.*Расчёт.*КП.*Договор.*Оплата/)
   assert.match(await p.locator('.contact').textContent(), /Ромашка.*\+77001112233/)
   assert.strictEqual(await p.locator('.contact a.btn', { hasText: 'В Битриксе' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/deal/details/1601/')
-  assert.strictEqual(await p.locator('.contact .alt a', { hasText: 'WhatsApp' }).getAttribute('href'), 'https://wa.me/77001112233')
+  assert.strictEqual(await p.locator('.contact .alt').count(), 0)   // HEAD 05.11: связь только через карточку Битрикса
   await p.getByRole('button', { name: 'Сделать расчёт' }).click()
   await p.locator('.dealedit input[type=number]').fill('60')
   await p.getByRole('button', { name: 'Посчитать и записать в сделку' }).click()

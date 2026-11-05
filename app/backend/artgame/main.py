@@ -66,7 +66,15 @@ def register(body: RegisterIn, user: dict = Depends(tg_user)):
         if is_head:
             conn.execute("INSERT INTO person_zones (person_id, zone_code) SELECT %s, code FROM zones", (row["id"],))
         db.audit(conn, row["id"], "register", "people", row["id"])
-        return load_person(conn, tg_id)
+        p = load_person(conn, tg_id)
+    if not is_head and settings.head_tg_id and settings.bot_token:
+        try:   # HEAD узнаёт о заявке сразу, роль назначает во вкладке «Команда»
+            from . import notify
+            who = body.full_name.strip() + (f" (@{user['username']})" if user.get("username") else "")
+            notify.SEND(settings.head_tg_id, f"Новый человек в приложении: {who}. Назначьте роль во вкладке «Команда».")
+        except Exception as e:  # noqa: BLE001
+            print("register notify:", e)
+    return p
 
 
 @app.get("/api/me")

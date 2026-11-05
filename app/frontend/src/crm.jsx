@@ -9,7 +9,6 @@ export const strip = s => (s || '').replace(/<[^>]+>/g, '').replace(/\[\/?[A-Za-
 export const cleanTitle = (title, id) => (title || '').replace(new RegExp(`^№?\\s*${id}\\s*·?\\s*`), '')
 export const ageDays = s => s ? Math.floor((Date.now() - new Date(s).getTime()) / 86400000) : 0
 const tomorrow = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10)
-const digits = p => (p || '').replace(/\D/g, '').replace(/^8(?=\d{10}$)/, '7')
 
 // Полоска месяца сверху: сколько закрыла компания и сколько до следующей ступени %. Один запрос на сеанс.
 let monthCache = null
@@ -30,7 +29,7 @@ export function MonthStrip({ onOpen }) {
 }
 
 // Связь с клиентом. Главная кнопка — карточка в Битриксе: там телефония и чат WhatsApp (Wazzup) с записью в сделку.
-// Напрямую звонить через телефонию Битрикса из другого приложения нельзя. Запасные: со своего телефона и wa.me.
+// Звонок и WhatsApp — только в карточке Битрикса (телефония и Wazzup там), решение HEAD 05.11.
 let portalCache = null
 export function usePortal() {
   const [p, setP] = useState(portalCache)
@@ -41,13 +40,11 @@ export const bxLink = (portal, entity, id) => portal ? `${portal}/crm/${entity}/
 export function Contact({ phone, name, entity, id }) {
   const portal = usePortal()
   const link = bxLink(portal, entity, id)
-  const wa = digits(phone)
   return <div className="contact">
     <div><b>{name || '—'}</b><div className="small muted">{phone || 'телефона нет — добавьте в Битриксе'}</div></div>
     <div className="dealbtns">
-      {link && <a className="btn" href={link} target="_blank" rel="noreferrer">В Битриксе</a>}
+      {link && <a className="btn" href={link} target="_blank" rel="noreferrer">Позвонить · WhatsApp в Битриксе</a>}
     </div>
-    {phone && <div className="small muted alt">со своего телефона: <a href={`tel:${phone.replace(/[^\d+]/g, '')}`}>позвонить</a>{wa && <> · <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer">WhatsApp</a></>}</div>}
   </div>
 }
 

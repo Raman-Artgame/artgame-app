@@ -72,4 +72,9 @@ curl -fsS -o /dev/null "https://api.telegram.org/bot$ARTGAME_BOT_TOKEN/sendMessa
   -H 'Content-Type: application/json' \
   -d "{\"chat_id\":$ARTGAME_HEAD_TG_ID,\"text\":\"ARTGAME — тест обновлён ($(git -C "$SRC" log -1 --format=%h\ %s))\",\"reply_markup\":{\"inline_keyboard\":[[{\"text\":\"ARTGAME — тест\",\"web_app\":{\"url\":\"https://test.app.artgame.world/\"}}]]}}" \
   && echo "кнопка отправлена в Telegram"
+# Кнопка меню бота для всей команды (HEAD 05.11: запускаем команду на test). Бот сам ничего не пишет людям.
+curl -fsS -o /dev/null "https://api.telegram.org/bot$ARTGAME_BOT_TOKEN/setChatMenuButton" \
+  -H 'Content-Type: application/json' \
+  -d '{"menu_button":{"type":"web_app","text":"ARTGAME","web_app":{"url":"https://test.app.artgame.world/"}}}' \
+  && echo "кнопка меню бота: test.app"
 echo "ГОТОВО: https://test.app.artgame.world"
