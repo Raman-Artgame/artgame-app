@@ -30,7 +30,10 @@ jobs:
           k = os.environ["KEY"].replace("\r", "").strip()
           m = re.search(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", k, re.S)
           if not m:
-              raise SystemExit("::error::TEST_DEPLOY_KEY: нет строк BEGIN/END — вставьте ключ целиком")
+              kind = ("открытый ключ (ssh-…), а нужен закрытый" if k.startswith(("ssh-", "command=")) else
+                      "отпечаток сервера, а нужен ключ" if "SHA256:" in k else
+                      "ссылка" if k.startswith("http") else f"текст длиной {len(k)} символов без BEGIN/END")
+              raise SystemExit(f"::error::TEST_DEPLOY_KEY: в секрете {kind}. Вставьте всё от -----BEGIN до -----END из вывода setup_ci_deploy.sh")
           body = re.sub(r"\s+", "", m.group(2))
           lines = [body[i:i + 70] for i in range(0, len(body), 70)]
           out = f"-----BEGIN {m.group(1)}-----\n" + "\n".join(lines) + f"\n-----END {m.group(1)}-----\n"
