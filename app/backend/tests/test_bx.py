@@ -322,6 +322,8 @@ def test_month_from_sheet(bxc, monkeypatch):
     assert m["company"]["count"] == 2 and m["company"]["gross"] == 1740000 and m["company"]["net"] == 1500000
     assert [(d["id"], d["closed"], d["city"], d["manager"]) for d in m["mine"]["deals"]] == [(1590, "2026-11-03", "Шымкент", "Ануар Минкеев"), (1601, "2026-11-01", "Астана", "Ануар Минкеев")]
     assert c.get("/api/bx/month?ym=2026-10", headers=hdr(1000)).json()["company"]["gross"] == 100
+    d = c.get("/api/bx/month?ym=2026-12", headers=hdr(1000)).json()   # месяца в листе нет — по Битриксу, без тревоги
+    assert d["source"] == "bitrix" and not d["warn"]
     monkeypatch.setattr(fin, "sheet_values", lambda sid, rng: (_ for _ in ()).throw(RuntimeError("таблица не открыта сервисному аккаунту приложения")))
     fin._cache.clear()
     h = c.get("/api/bx/month?ym=2026-11&fresh=1", headers=hdr(1000)).json()

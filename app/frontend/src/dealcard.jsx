@@ -120,7 +120,7 @@ export function Month({ openDeal }) {
   const [err, setErr] = useState('')
   useEffect(() => { setM(null); api(`/bx/month?ym=${ym}`).then(setM, e => setErr(e.message)) }, [ym])
   const cur = ym >= `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  const nav = <div className="seg"><button className="ghost" onClick={() => setYm(ymShift(ym, -1))}>←</button><button className="ghost" disabled>{ymName(ym)}</button><button className="ghost" disabled={cur} onClick={() => setYm(ymShift(ym, 1))}>→</button></div>
+  const nav = <div className="seg"><button className="ghost" disabled={ym <= '2026-11'} onClick={() => setYm(ymShift(ym, -1))}>←</button><button className="ghost" disabled>{ymName(ym)}</button><button className="ghost" disabled={cur} onClick={() => setYm(ymShift(ym, 1))}>→</button></div>
   if (err) return <div className="card"><h2>Мой месяц</h2>{nav}<p className="muted">{err}</p></div>
   if (!m) return <div className="card"><h2>Мой месяц</h2>{nav}<p className="muted">Считаю…</p></div>
   const steps = m.steps.filter(s => s.from)
@@ -136,7 +136,7 @@ export function Month({ openDeal }) {
       </div>
       {co.next && <p className="small muted">До ступени {co.next.step} ({steps[co.next.step - 1]?.pct}%) не хватает {money(co.next.left)} без НДС.</p>}
       {!!m.salary && <p className="small muted">Оклад {money(m.salary)} + процент от всей выручки компании за месяц без НДС{steps.length ? ': ' + steps.map(s => `${s.pct}% от ${money(s.from)}`).join(', ') : ''}. Выплаты отмечает HEAD.</p>}
-      <p className="small muted">{m.source === 'sheet' ? 'Выручка — по листу «Проекты» финансовой таблицы (дата завершения работ, с НДС).' : 'Выручка — по дате закрытия сделок в Битриксе.'}</p>
+      <p className="small muted">{m.source === 'sheet' ? 'Выручка — по листу «Проекты» финансовой таблицы (дата завершения работ, с НДС).' : 'Выручка — по дате закрытия сделок в Битриксе (пока в листе «Проекты» нет строк за этот месяц).'}</p>
       {m.warn && <p className="small" style={{ color: 'var(--hot)' }}>{m.warn}</p>}
     </div>
     {m.all && m.managers.map(x => <div key={x.id} className="card"><h3>{x.name} <span className="muted small">{x.count}</span></h3>

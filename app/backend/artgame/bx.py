@@ -455,6 +455,8 @@ def month(p: dict, fresh: bool = False, ym: str | None = None) -> dict:
     source, warn = "sheet", ""
     try:
         rows = fin.month_rows(y, m, fresh)
+        if not rows:
+            raise LookupError("в листе за этот месяц пока нет строк")
         ids = [r["id"] for r in rows]
         who = {}
         for i in range(0, len(ids), 50):
@@ -463,7 +465,7 @@ def month(p: dict, fresh: bool = False, ym: str | None = None) -> dict:
         deals = [{"id": r["id"], "title": r["title"], "sum": r["sum"], "closed": r["closed"], "city": r["city"],
                   "manager_id": who.get(r["id"], 0), "manager": names.get(who.get(r["id"], 0), "")} for r in rows]
     except Exception as e:  # noqa: BLE001 — лист недоступен: считаем по Битриксу и говорим об этом
-        source, warn = "bitrix", f"Лист «Проекты {y}» не прочитан ({e}); цифры по дате закрытия сделок в Битриксе."
+        source, warn = "bitrix", "" if isinstance(e, LookupError) else f"Лист «Проекты {y}» не прочитан ({e}); цифры по дате закрытия сделок в Битриксе."
         start, end = date(y, m, 1), date(y + (m == 12), m % 12 + 1, 1)
         flt = {"CATEGORY_ID": list(CATEGORIES), "STAGE_SEMANTIC_ID": "S", ">=CLOSEDATE": start.isoformat(), "<CLOSEDATE": end.isoformat()}
         rows = read_all("crm.deal.list", {"filter": flt, "select": ["ID", "TITLE", "OPPORTUNITY", "CLOSEDATE", "ASSIGNED_BY_ID", "CATEGORY_ID"],
