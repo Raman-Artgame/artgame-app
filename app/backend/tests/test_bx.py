@@ -5,7 +5,7 @@ from conftest import hdr
 
 DEALS = {
     "1601": {"ID": "1601", "TITLE": "1601 · КАФЕ — АСТАНА", "STAGE_ID": "PREPARATION", "CATEGORY_ID": "0", "OPPORTUNITY": "589250.00",
-             "ASSIGNED_BY_ID": "4565", "CONTACT_ID": "2223", "COMPANY_ID": "77", "DATE_MODIFY": "2026-11-04T13:51:28+03:00",
+             "ASSIGNED_BY_ID": "4565", "CONTACT_ID": "2223", "COMPANY_ID": "77", "DATE_MODIFY": "2026-11-01T13:51:28+03:00",
              "UF_CRM_6881101914D8D": "12077", "UF_CRM_ARTGAME_AREA_M2": "25", "UF_CRM_1755520919823": "ул. Достык 5|51.1;71.4|1947",
              "UF_CRM_1753294730602": "19285", "UF_CRM_ARTGAME_ADVANCE_PERCENT": 50},
     "1651": {"ID": "1651", "TITLE": "Школа", "STAGE_ID": "NEW", "CATEGORY_ID": "0", "OPPORTUNITY": "0", "ASSIGNED_BY_ID": "4693",
@@ -38,6 +38,15 @@ def fake(method, params):
         return {"result": {"ID": "77", "TITLE": "ТОО «Ромашка»", "PHONE": [{"VALUE": "+77001112233"}]}}
     if method == "crm.contact.get":
         return {"result": {"ID": params["id"], "NAME": "Айгерим", "LAST_NAME": "Сеитова", "EMAIL": [{"VALUE": "a@x.kz"}]}}
+    if method == "crm.stagehistory.list":
+        return {"result": {"items": []}} if False else {"result": [{"STAGE_ID": "PREPARATION", "CREATED_TIME": "2026-11-04T13:51:28+03:00"},
+                                                                  {"STAGE_ID": "NEW", "CREATED_TIME": "2026-11-04T10:00:00+03:00"}]}
+    if method == "crm.timeline.comment.list":
+        return {"result": [{"ID": "1", "AUTHOR_ID": "4565", "CREATED": "2026-11-04T14:00:00+03:00", "COMMENT": "Отправил КП"}]}
+    if method == "crm.activity.list":
+        return {"result": [{"ID": "7", "SUBJECT": "Звонок клиенту", "TYPE_ID": "2", "COMPLETED": "Y", "CREATED": "2026-11-04T12:00:00+03:00", "RESPONSIBLE_ID": "4565"}]}
+    if method == "tasks.task.list":
+        return {"result": {"tasks": [{"id": "501", "title": "Перезвонить по КП", "deadline": "2026-11-06T10:00:00+03:00", "ufCrmTask": ["D_1601"]}]}}
     if method == "crm.requisite.list":
         raise bx.HTTPException(502, "method not allowed")
     raise AssertionError(method)
@@ -196,3 +205,14 @@ def test_write_off_and_on(bxc, monkeypatch, tmp_path):
     j = c.get("/api/journal", headers=hdr(6000)).json()
     assert [x["data"]["bx"] for x in j["items"] if x["action"] == "bx_write"][:2] == ["ok", "ok"]
     DEALS["1601"]["STAGE_ID"] = "PREPARATION"
+
+
+def test_full_and_today(bxc):
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    d = c.get("/api/bx/deals/1601/full", headers=hdr(6000)).json()
+    assert d["manager"] == "Ануар Минкеев" and [h["stage"] for h in d["history"]] == ["Встреча/Отправка КП", "Взаимное информирование"]
+    assert {f["kind"] for f in d["feed"]} == {"comment", "звонок"} and d["feed"][0]["who"] == "Ануар Минкеев"
+    t = c.get("/api/bx/today", headers=hdr(6000)).json()
+    assert t["tasks"] == [{"id": 501, "title": "Перезвонить по КП", "deadline": "2026-11-06T10:00:00+03:00", "deal": 1601}]
+    assert [x["id"] for x in t["kp"]] == [1601] and t["limits"]["kp_days"] == 2   # сделка на КП с 04.11 — без ответа

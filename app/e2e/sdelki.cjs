@@ -66,6 +66,14 @@ const mopFrame = p => p.frames().find(f => f.url().includes('/api/p/mop/'))
   await p.screenshot({ path: `${shots}/sdelki-kp.png` })
   // в КП есть выбор из своих сделок
   assert.ok(await mopFrame(p).locator('#kpgen .agbx select option').count() >= 2)
+  // «Сегодня» и карточка сделки
+  await p.getByRole('button', { name: 'Сегодня' }).click()
+  await p.locator('.card', { hasText: 'КП без ответа' }).locator('.row', { hasText: '1601' }).click()
+  await p.locator('h3', { hasText: 'Лента' }).waitFor()
+  assert.match(await p.locator('.card', { hasText: 'Клиент' }).first().textContent(), /Ромашка/)
+  await p.screenshot({ path: `${shots}/sdelki-card.png`, fullPage: true })
+  await p.getByRole('button', { name: 'Сегодня' }).click()
+  await p.screenshot({ path: `${shots}/sdelki-today.png` })
   // Запись в Битрикс: заметка и стадия из «Сделок»
   await p.getByRole('button', { name: 'Сделки' }).click()
   await p.locator('.deal').first().getByRole('button', { name: 'Заметка' }).click()

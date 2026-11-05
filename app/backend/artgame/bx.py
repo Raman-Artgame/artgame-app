@@ -239,6 +239,115 @@ def deal_card(p: dict, deal_id: int, fresh: bool = False) -> dict:
             "requisites": requisites(d.get("COMPANY_ID")) if comp else None}
 
 
+# ---------- карточка сделки в приложении: история стадий, лента, файлы, оплаты ----------
+
+FIN = {"received": "UF_CRM_ARTGAME_FIN03_RECEIVED", "debt": "UF_CRM_ARTGAME_FIN03_DEBT", "next": "UF_CRM_ARTGAME_FIN03_NEXT",
+       "net": "UF_CRM_ARTGAME_FIN03_NET"}
+FILES = {"UF_CRM_1753202415": "КП", "UF_CRM_1753202391": "Договор подписанный", "UF_CRM_ARTGAME_DOC05_INVOICES": "Счета",
+         "UF_CRM_ARTGAME_DOC05_ACTS": "АВР", "UF_CRM_ARTGAME_DOC05_OTHER": "Прочие документы", "UF_CRM_ARTGAME_APPROVED_LAYOUT": "Эскиз"}
+
+
+def _money(v) -> float:
+    return _num(str(v or "").split("|")[0])
+
+
+def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
+    card = deal_card(p, deal_id, fresh)
+    d = _deal(p, deal_id)
+    st = stages()
+    names = {u["id"]: u["name"] for u in users()}
+    hist, feed, files = [], [], []
+    try:
+        for h in _rows(read("crm.stagehistory.list", {"entityTypeId": 2, "filter": {"OWNER_ID": deal_id}, "order": {"ID": "DESC"}}, fresh=fresh))[:20]:
+            hist.append({"at": h.get("CREATED_TIME"), "stage": (st.get(h.get("STAGE_ID")) or {}).get("name", h.get("STAGE_ID"))})
+    except HTTPException:
+        pass
+    try:
+        for c in _rows(read("crm.timeline.comment.list", {"filter": {"ENTITY_ID": deal_id, "ENTITY_TYPE": "deal"}, "order": {"ID": "DESC"}}, fresh=fresh))[:30]:
+            feed.append({"at": c.get("CREATED"), "who": names.get(int(c.get("AUTHOR_ID") or 0), ""), "text": c.get("COMMENT") or "", "kind": "comment"})
+    except HTTPException:
+        pass
+    try:
+        for a in _rows(read("crm.activity.list", {"filter": {"OWNER_ID": deal_id, "OWNER_TYPE_ID": 2}, "order": {"ID": "DESC"},
+                                                  "select": ["ID", "SUBJECT", "TYPE_ID", "COMPLETED", "DEADLINE", "CREATED", "RESPONSIBLE_ID", "DIRECTION"]}, fresh=fresh))[:30]:
+            feed.append({"at": a.get("CREATED"), "who": names.get(int(a.get("RESPONSIBLE_ID") or 0), ""), "text": a.get("SUBJECT") or "",
+                         "kind": {"1": "встреча", "2": "звонок", "3": "задача", "4": "письмо", "6": "чат"}.get(str(a.get("TYPE_ID")), "дело"),
+                         "done": a.get("COMPLETED") == "Y", "deadline": a.get("DEADLINE")})
+    except HTTPException:
+        pass
+    feed.sort(key=lambda x: x["at"] or "", reverse=True)
+    for k, title in FILES.items():
+        v = d.get(k)
+        if not v:
+            continue
+        items = v if isinstance(v, list) else [v]
+        for it in items:
+            if isinstance(it, dict):
+                files.append({"title": title, "url": it.get("downloadUrl") or it.get("url") or "", "id": it.get("id")})
+            elif isinstance(it, str) and it.startswith("http"):
+                files.append({"title": title, "url": it})
+    card.update({"history": hist, "feed": feed[:40], "files": files, "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), ""),
+                 "created": d.get("DATE_CREATE"), "modified": d.get("DATE_MODIFY"), "comments": d.get("COMMENTS") or "",
+                 "pay": {k: (_money(d.get(f)) if k != "next" else d.get(f)) for k, f in FIN.items()}, "category": int(d.get("CATEGORY_ID") or 0)})
+    return card
+
+
+# ---------- «Сегодня»: что требует действия ----------
+
+def _days(iso: str | None) -> float:
+    from datetime import datetime, timezone
+    if not iso:
+        return 0.0
+    try:
+        return (datetime.now(timezone.utc) - datetime.fromisoformat(iso)).total_seconds() / 86400
+    except ValueError:
+        return 0.0
+
+
+def today(p: dict, fresh: bool = False) -> dict:
+    """Сделки, по которым пора действовать. Сроки — из «Значений» (mop.today.*), иначе по умолчанию."""
+    from . import constants as consts
+    with db.pool.connection() as conn:
+        row = conn.execute("SELECT values FROM constants_versions ORDER BY id DESC LIMIT 1").fetchone()
+    vals = {k: consts.num(v["value"]) for k, v in (row["values"] if row else {}).items() if str(v.get("value", "")).strip()}
+    new_h = float(vals.get("mop.today.new_hours") or 4)
+    kp_d = float(vals.get("mop.today.kp_days") or 2)
+    idle_d = float(vals.get("mop.today.idle_days") or 3)
+    deals = my_deals(p, fresh)["deals"]
+    out = {"new": [], "kp": [], "idle": [], "tasks": [], "limits": {"new_hours": new_h, "kp_days": kp_d, "idle_days": idle_d}}
+    for d in deals:
+        age = _days(d["modified"])
+        if d["stage"] == "NEW" and age * 24 >= new_h:
+            out["new"].append(d)
+        elif d["stage"] == "PREPARATION" and age >= kp_d:
+            out["kp"].append(d)
+        elif d["stage"] not in ("NEW", "PREPARATION", "UC_VCP4VO") and age >= idle_d:
+            out["idle"].append(d)
+    uid = bx_id(p)
+    if uid:
+        try:
+            j = read("tasks.task.list", {"filter": {"RESPONSIBLE_ID": uid, "<REAL_STATUS": 5}, "order": {"DEADLINE": "asc"},
+                                         "select": ["ID", "TITLE", "DEADLINE", "UF_CRM_TASK"]}, fresh=fresh)
+            res = j.get("result", j) if isinstance(j, dict) else {}
+            for t in (res.get("tasks") if isinstance(res, dict) else res) or []:
+                deal = next((int(x[2:]) for x in (t.get("ufCrmTask") or t.get("UF_CRM_TASK") or []) if str(x).startswith("D_")), None)
+                out["tasks"].append({"id": int(t.get("id") or t.get("ID")), "title": t.get("title") or t.get("TITLE") or "",
+                                     "deadline": t.get("deadline") or t.get("DEADLINE"), "deal": deal})
+        except HTTPException:
+            pass
+    return out
+
+
+@router.get("/bx/today")
+def api_today(fresh: int = 0, p: dict = Depends(active)):
+    return today(p, bool(fresh))
+
+
+@router.get("/bx/deals/{deal_id}/full")
+def api_deal_full(deal_id: int, fresh: int = 0, p: dict = Depends(active)):
+    return deal_full(p, deal_id, bool(fresh))
+
+
 # ---------- совместимость со страницей КП (раньше ходила в Битрикс через коннектор Claude: crm_get / crm_fields) ----------
 
 def _camel(code: str) -> str:

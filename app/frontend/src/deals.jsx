@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
+import { DealCard } from './dealcard.jsx'
 
 export const DEAL_ROLES = new Set(['mop', 'mop_vip', 'head'])
 const money = n => n ? Math.round(n).toLocaleString('ru-RU') + ' ₸' : '—'
@@ -7,7 +8,8 @@ const when = s => s ? new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', 
 
 // Мои открытые сделки из Битрикса (ответственный — я; HEAD видит всех). Только чтение.
 // «КП» / «Документы» открывают место МОП, и страница сама подтягивает сделку.
-export function Deals({ me, openPlace }) {
+export function Deals({ me, openPlace, initial }) {
+  const [card, setCard] = useState(initial || null)
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
@@ -25,6 +27,7 @@ export function Deals({ me, openPlace }) {
   }
   const send = (id, path, body) => api(`/bx/deals/${id}/${path}`, { method: 'POST', body })
     .then(r => { setEdit(null); setMsg(r.bx === 'off' ? 'Сохранено в журнал. В Битрикс не записано: ключ записи ещё не задан.' : 'Записано в Битрикс.'); load(true) }, e => setMsg('Не записалось: ' + e.message))
+  if (card) return <DealCard id={card} back={() => setCard(null)} open={open} />
   if (err) return <div className="card"><h2>Мои сделки</h2><p className="muted">{err}</p></div>
   if (!data) return <div className="card muted">Загружаю сделки из Битрикса…</div>
   const s = q.trim().toLowerCase()
@@ -40,7 +43,7 @@ export function Deals({ me, openPlace }) {
     {Object.entries(groups).sort((a, b) => a[1].sort - b[1].sort).map(([name, g]) => <div key={name}>
       <div className="dealstage">{name} <span className="muted">· {g.items.length}</span></div>
       {g.items.map(d => <div key={d.id} className="deal">
-        <div><b>№ {d.id}</b> {d.title.replace(new RegExp(`^№?\\s*${d.id}\\s*·?\\s*`), '')}</div>
+        <div onClick={() => setCard(d.id)}><b>№ {d.id}</b> {d.title.replace(new RegExp(`^№?\\s*${d.id}\\s*·?\\s*`), '')} <a>открыть</a></div>
         <div className="muted small">{[d.city, d.area ? d.area + ' м²' : '', money(d.sum), d.manager, when(d.modified)].filter(Boolean).join(' · ')}</div>
         <div className="dealbtns"><button className="ghost" onClick={() => open(d.id, 'kp')}>КП</button>
           <button className="ghost" onClick={() => open(d.id, 'docs')}>Документы</button>

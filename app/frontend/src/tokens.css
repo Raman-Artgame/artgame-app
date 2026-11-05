@@ -60,3 +60,6 @@ a { color: var(--accent); }
 .dealbtns button { width: auto; padding: 6px 14px; font-size: 13px; }
 .dealedit { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .dealedit input, .dealedit select { margin: 0; }
+.kv { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin: 10px 0; }
+.kv > div { display: flex; flex-direction: column; }
+.card h3 { margin: 0 0 6px; font-size: 16px; }
