@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 
-import { CallOutcome, Contact, Feed, cleanTitle, dt, money, strip } from './crm.jsx'
+import { CallOutcome, Contact, Feed, bxLink, cleanTitle, dt, money, strip, usePortal } from './crm.jsx'
 
-// Карточка сделки: шаги клиент → расчёт → КП → договор → оплата, следующий подсвечен. Битрикс — источник правды.
+// Карточка сделки (HEAD 05.11): шапка с шагами и ОДНОЙ кнопкой следующего шага, ниже три раздела —
+// «Действия», «Срок и деньги», «История», чтобы не листать одну длинную простыню. Битрикс — источник правды.
 const LEVELS = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный', author: 'Авторский' }
 const POSTPONED = 'UC_VCP4VO'   // «Отложено»: только с датой возврата
 const KP_ON = new Set(['PREPARATION', 'UC_VZFPUP', 'UC_YV66BV', 'UC_1EXUAC', 'FINAL_INVOICE', 'UC_AV00QK'])
@@ -22,6 +23,8 @@ export function DealCard({ id, back, open }) {
   const [stages, setStages] = useState([])
   const [msg, setMsg] = useState('')
   const [calcMsg, setCalcMsg] = useState('')
+  const [view, setView] = useState('act')   // act | money | hist
+  const portal = usePortal()
   const load = fresh => api(`/bx/deals/${id}/full${fresh ? '?fresh=1' : ''}`).then(setD, e => setErr(e.message))
   useEffect(() => { load(false); api('/bx/stages').then(setStages, () => {}) }, [id])
   const said = r => r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Записано в Битрикс.'
@@ -37,13 +40,21 @@ export function DealCard({ id, back, open }) {
   const st = steps(d)
   const next = st.findIndex(x => !x[1])
   const stSel = stages.find(s => s.id === edit?.stage)
+  const startCalc = () => { setView('money'); setCalc({ area: d.area || '', level: d.level || 'medium', service: 'mural', height: false, outdoor: false }) }
+  const NEXT = { 'Клиент': { label: 'Позвонить', href: bxLink(portal, 'deal', d.id) }, 'Расчёт': { label: 'Сделать расчёт', run: startCalc },
+    'КП': { label: 'Сделать КП', run: () => open(d.id, 'kp') }, 'Договор': { label: 'Договор и счёт', run: () => open(d.id, 'docs') },
+    'Оплата': { label: 'Оплаты', run: () => setView('money') } }
+  const na = next >= 0 ? NEXT[st[next][0]] : null
+  const VIEWS = [['act', 'Действия'], ['money', 'Срок и деньги'], ['hist', 'История']]
   return <>
     <div className="card">
       <a onClick={back}>← к сделкам</a>
       <h2>№ {d.id} · {cleanTitle(d.title, d.id)}</h2>
       <span className="tag">{d.stage_name}</span>{d.manager && <span className="tag">{d.manager}</span>}
       <div className="steps">{st.map(([t, ok], i) => <div key={t} className={ok ? 'done' : i === next ? 'next' : ''}><i />{t}</div>)}</div>
-      {next >= 0 && <p className="small">Следующий шаг: <b>{st[next][0]}</b></p>}
+      <div className="nextstep">{na ? <><div><span className="small muted">Следующий шаг</span><b>{st[next][0]}</b></div>
+        {na.href ? <a className="btn mini" href={na.href} target="_blank" rel="noreferrer">{na.label}</a> : <button className="mini" onClick={na.run}>{na.label}</button>}</>
+        : <div><b>Все шаги пройдены</b><span className="small muted">оплата получена</span></div>}</div>
       <div className="kv">
         <div><span className="muted small">Сумма</span><b>{money(d.sum)}</b></div>
         <div><span className="muted small">Площадь</span><b>{d.area ? d.area + ' м²' : '—'}</b></div>
@@ -52,6 +63,9 @@ export function DealCard({ id, back, open }) {
       </div>
       {d.address && <p className="small">{d.address}</p>}
       <Contact phone={c.phone} name={[c.name, d.contact && d.contact !== c.name ? d.contact : ''].filter(Boolean).join(' · ')} entity="deal" id={d.id} />
+      <div className="segf">{VIEWS.map(([k, t]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}</div>
+    </div>
+    {view === 'act' && <div className="card">
       <CallOutcome path={`/bx/deals/${id}`} done={() => load(true)} />
       <div className="dealbtns wrapbtns">
         <button className="ghost" onClick={() => open(d.id, 'kp')}>КП</button>
@@ -71,7 +85,8 @@ export function DealCard({ id, back, open }) {
         <input value={edit.text} onChange={e => setEdit({ ...edit, text: e.target.value })} placeholder="Заметка в ленту сделки" />
         <button disabled={!edit.text.trim()} onClick={() => send('note', { text: edit.text })}>Записать</button></div>}
       {msg && <p className="small muted">{msg}</p>}
-    </div>
+    </div>}
+    {view === 'money' && <>
     <div className="card"><h3>Срок и ресурсы <span className="muted small">считает приложение</span></h3>
       {d.norm.shifts ? <div className="kv">
         <div><span className="muted small">Смен по норме</span><b>{d.norm.shifts}</b></div>
@@ -80,7 +95,7 @@ export function DealCard({ id, back, open }) {
         <div><span className="muted small">Сложность</span><b>{LEVELS[d.level] || '—'}</b></div>
       </div> : <p className="small muted">Расчёта ещё не было: смены, люди и срок появятся после расчёта, руками не вводятся.</p>}
       {calcMsg && <p className="small muted">{calcMsg}</p>}
-      {!calc ? <button className="ghost" onClick={() => setCalc({ area: d.area || '', level: d.level || 'medium', service: 'mural', height: false, outdoor: false })}>{d.norm.shifts ? 'Пересчитать' : 'Сделать расчёт'}</button>
+      {!calc ? <button className="ghost" onClick={startCalc}>{d.norm.shifts ? 'Пересчитать' : 'Сделать расчёт'}</button>
       : <div className="dealedit">
         <div className="seg"><button className={calc.service === 'mural' ? '' : 'ghost'} onClick={() => setCalc({ ...calc, service: 'mural' })}>Роспись</button><button className={calc.service === 'print' ? '' : 'ghost'} onClick={() => setCalc({ ...calc, service: 'print' })}>Печать</button></div>
         <input type="number" min="1" value={calc.area} onChange={e => setCalc({ ...calc, area: e.target.value })} placeholder="Площадь, м²" />
@@ -101,11 +116,14 @@ export function DealCard({ id, back, open }) {
     {!!d.files.length && <div className="card"><h3>Документы в сделке</h3>
       {d.files.map((f, i) => <div key={i} className="row"><span>{f.title}</span>{f.url ? <a href={f.url} target="_blank" rel="noreferrer">открыть</a> : <span className="muted small">в Битриксе</span>}</div>)}
     </div>}
+    </>}
+    {view === 'hist' && <>
     {d.comments && <div className="card"><h3>Комментарий сделки</h3><p className="small">{strip(d.comments)}</p></div>}
     <Feed items={d.feed} />
     {!!d.history.length && <div className="card"><h3>Стадии</h3>
       {d.history.map((h, i) => <div key={i} className="row"><span>{h.stage}</span><span className="muted small">{dt(h.at)}</span></div>)}
     </div>}
+    </>}
   </>
 }
 

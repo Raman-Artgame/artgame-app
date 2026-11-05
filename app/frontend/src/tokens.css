@@ -26,9 +26,16 @@ button.ghost { background: var(--line); }
 .row a { color: var(--muted); font-size: 13px; cursor: pointer; }
 .st-approved { background: color-mix(in srgb, var(--ok) 25%, transparent); }
 .st-rejected { background: color-mix(in srgb, var(--accent) 35%, transparent); }
-nav { position: sticky; bottom: 0; display: flex; gap: 6px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); max-width: 480px; margin: 0 auto; overflow-x: auto; scrollbar-width: none; }
-nav button { padding: 10px 8px; font-size: 13px; background: transparent; color: var(--muted); flex: none; width: auto; }
+nav { position: sticky; bottom: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); max-width: 480px; margin: 0 auto; z-index: 10; }
+nav button { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 2px; font-size: 11px; font-weight: 500; background: transparent; color: var(--muted); width: auto; border-radius: 10px; white-space: nowrap; }
 nav button.on { color: var(--text); background: var(--line); }
+nav svg { width: 22px; height: 22px; }
+nav .cnt { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 99px; background: var(--accent); color: #fff; font: 600 10px/16px Onest, system-ui; font-style: normal; }
+.sheet { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); z-index: 20; display: flex; align-items: flex-end; }
+.sheetbox { width: 100%; max-width: 480px; margin: 0 auto; background: var(--surface); border-radius: 16px 16px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sheetbox button { display: flex; align-items: center; gap: 10px; padding: 12px 14px; font-size: 15px; }
+.sheetbox button.on { background: var(--accent); }
+.sheetbox svg { width: 20px; height: 20px; }
 .toast { background: var(--ok); color: #0D0B0C; padding: 12px; border-radius: 12px; margin-bottom: 12px; }
 .photo { display: flex; align-items: center; justify-content: center; min-height: 72px; border: 1px dashed var(--line); border-radius: 12px; margin: 8px 0; color: var(--muted); cursor: pointer; overflow: hidden; }
 .photo img { max-width: 100%; max-height: 220px; display: block; }
@@ -109,5 +116,28 @@ a.btn.ghost { background: var(--line); color: var(--text); }
 .chips button.on { color: var(--text); background: var(--line); border-color: var(--line); }
 .chips button span { opacity: .7; margin-left: 4px; }
 .chips.sub button { padding: 5px 10px; font-size: 12px; border-radius: 99px; }
-.contact .alt { flex-basis: 100%; }
-.contact .alt a { color: var(--muted); text-decoration: underline; }
+
+/* Механика экранов (HEAD 05.11, «не терять в едином списке»): плитки-счётчики, переключатели, значки типов, следующий шаг */
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0 8px; }
+.tile { display: flex; flex-direction: column; align-items: flex-start; gap: 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; color: var(--muted); font: 500 12px Onest, system-ui; width: auto; }
+.tile b { font-size: 24px; line-height: 1.1; color: var(--text); }
+.tile.hot b { color: var(--hot); }
+.tile.today b { color: var(--warn); }
+.tile.on { border-color: var(--text); }
+.segf { display: flex; gap: 4px; padding: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; margin: 10px 0; }
+.segf button { flex: 1; width: auto; padding: 8px 4px; font-size: 13px; background: transparent; color: var(--muted); border-radius: 9px; white-space: nowrap; }
+.segf button.on { background: var(--line); color: var(--text); }
+.segf button span { opacity: .65; margin-left: 3px; font-weight: 400; }
+.qrow .ic { flex: none; width: 36px; height: 36px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font: 600 14px Onest, system-ui; background: var(--line); color: var(--text); }
+.qrow .ic.lead { border-radius: 50%; background: color-mix(in srgb, var(--ok) 22%, transparent); color: var(--ok); }
+.qrow .ic.deal { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+.qrow .ic.task { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+.qt { overflow-wrap: anywhere; }
+.subhead { margin: 12px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.chips.scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px 12px; padding: 2px 16px 4px; }
+.chips.scroll button { white-space: nowrap; position: relative; }
+.chips .dot { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--hot); border: 2px solid var(--bg); }
+.nextstep { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 12%, var(--bg)); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.nextstep > div { display: flex; flex-direction: column; min-width: 0; }
+.nextstep b { font-size: 17px; }
+.nextstep .mini { white-space: nowrap; flex: none; }

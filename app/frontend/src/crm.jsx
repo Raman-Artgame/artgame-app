@@ -79,70 +79,109 @@ export function Feed({ items }) {
   </div>
 }
 
-// ---------- «Сегодня»: одна очередь, три корзины ----------
+// ---------- «Сегодня»: очередь дня ----------
+// Один запрос на сеанс: экран «Сегодня» и счётчики в меню читают один и тот же ответ.
+let todayCache = null
+const todayWatchers = new Set()
+export function loadToday(fresh) {
+  return api(`/bx/today${fresh ? '?fresh=1' : ''}`).then(r => { todayCache = r; todayWatchers.forEach(f => f(r)); return r })
+}
+export function useToday(enabled = true) {
+  const [t, setT] = useState(todayCache)
+  useEffect(() => {
+    if (!enabled) return undefined
+    todayWatchers.add(setT)
+    if (!todayCache) loadToday(false).catch(() => {})
+    return () => todayWatchers.delete(setT)
+  }, [enabled])
+  return enabled ? t : null
+}
 
 const BUCKETS = [['hot', 'Горит', 'Просрочено или ждёт ответа дольше нормы'], ['today', 'Сегодня', 'Сделать сегодня'], ['later', 'Можно позже', 'Без движения, задачи без срока']]
+const KINDS = { lead: 'Лиды', deal: 'Сделки', task: 'Задачи' }
+const initial = s => ((s || '?').trim()[0] || '?').toUpperCase()
+const dayName = () => { const d = new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }); return d[0].toUpperCase() + d.slice(1) }
 export function Today({ openDeal, openLead, openMonth }) {
   const portal = usePortal()
-  const [t, setT] = useState(null)
+  const t = useToday()
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const load = fresh => { setBusy(true); return api(`/bx/today${fresh ? '?fresh=1' : ''}`).then(setT, e => setErr(e.message)).finally(() => setBusy(false)) }
-  useEffect(() => { load(false) }, [])
-  if (err) return <div className="card"><h2>Сегодня</h2><p className="muted">{err}</p></div>
+  const [only, setOnly] = useState('')
+  useEffect(() => { if (!t) loadToday(false).catch(e => setErr(e.message)) }, [])
+  const reload = () => { setBusy(true); loadToday(true).catch(e => setErr(e.message)).finally(() => setBusy(false)) }
+  if (err && !t) return <div className="card"><h2>Сегодня</h2><p className="muted">{err}</p></div>
   if (!t) return <div className="card muted">Смотрю, что срочно…</div>
   const q = t.queue
   const open = x => x.entity === 'lead' ? openLead(x.id) : x.entity === 'deal' ? openDeal(x.id) : x.deal && openDeal(x.deal)
   const total = q.hot.length + q.today.length
+  const row = x => <div key={x.entity + x.id} className={'qrow ' + x.entity}>
+    <span className={'ic ' + x.entity}>{x.entity === 'lead' ? initial(x.name || x.title) : x.entity === 'deal' ? '№' : '✓'}</span>
+    <div className="qmain" onClick={() => open(x)}>
+      <div className="qt">{x.entity === 'task' ? x.title : x.entity === 'lead' ? <b>{x.name || x.title}</b> : <><b>№ {x.id}</b> {cleanTitle(x.title, x.id)}</>}</div>
+      <div className="small why">{x.why}</div>
+      {(x.stage || x.sum) ? <div className="small muted">{[x.stage, x.sum ? money(x.sum) : ''].filter(Boolean).join(' · ')}</div> : null}
+    </div>
+    {x.action === 'call' && x.entity !== 'task' && portal ? <a className="btn mini" href={bxLink(portal, x.entity, x.id)} target="_blank" rel="noreferrer">Позвонить</a>
+      : <button className="ghost mini" onClick={() => open(x)}>Открыть</button>}
+  </div>
   return <>
     <MonthStrip onOpen={openMonth} />
-    <div className="card"><div className="head"><h2>Сегодня</h2><button className="ghost mini" disabled={busy} onClick={() => load(true)}>{busy ? '…' : 'Обновить'}</button></div>
-      <p className="muted">{total ? `Сделать: ${total}` : 'Срочного нет. Можно заняться тем, что «позже».'}</p></div>
-    {BUCKETS.map(([k, title, hint]) => (k !== 'later' || q[k].length) ? <div key={k} className={'card bucket ' + k}>
-      <h3>{title} <span className="muted small">{q[k].length}</span></h3>
-      {!q[k].length && <p className="muted small">{k === 'hot' ? 'Ничего не горит.' : 'Пусто.'}</p>}
-      {q[k].length > 0 && <p className="small muted">{hint}</p>}
-      {q[k].map(x => <div key={x.entity + x.id} className="qrow">
-        <div className="qmain" onClick={() => open(x)}>
-          <div><span className="kind">{x.entity === 'lead' ? 'лид' : x.entity === 'deal' ? 'сделка' : 'задача'}</span>
-            {x.entity === 'task' ? x.title : x.entity === 'lead' ? <b>{x.name || x.title}</b> : <><b>№ {x.id}</b> {cleanTitle(x.title, x.id)}</>}</div>
-          <div className="small why">{x.why}{x.sum ? ' · ' + money(x.sum) : ''}</div>
-        </div>
-        {x.action === 'call' && x.entity !== 'task' && portal ? <a className="btn mini" href={bxLink(portal, x.entity, x.id)} target="_blank" rel="noreferrer">Позвонить</a>
-          : <button className="ghost mini" onClick={() => open(x)}>Открыть</button>}
-      </div>)}
-    </div> : null)}
+    <div className="card">
+      <div className="head"><div><h2>Сегодня</h2><div className="small muted">{dayName()}</div></div>
+        <button className="ghost mini" disabled={busy} onClick={reload}>{busy ? '…' : 'Обновить'}</button></div>
+      <div className="tiles">{BUCKETS.map(([k, title]) => <button key={k} className={'tile ' + k + (only === k ? ' on' : '')} onClick={() => setOnly(only === k ? '' : k)}><b>{q[k].length}</b><span>{title}</span></button>)}</div>
+      <p className="small muted">{total ? `Сделать сегодня: ${total}.` : 'Срочного нет.'} {only ? 'Показан один раздел, нажмите цифру ещё раз — все.' : 'Нажмите на цифру, чтобы оставить один раздел.'}</p>
+    </div>
+    {BUCKETS.filter(([k]) => !only || only === k).map(([k, title, hint]) => {
+      const items = q[k]
+      const kinds = Object.keys(KINDS).filter(e => items.some(x => x.entity === e))
+      if (k === 'later' && !items.length && !only) return null
+      return <div key={k} className={'card bucket ' + k}>
+        <h3>{title} <span className="muted small">{items.length}</span></h3>
+        <p className="small muted">{items.length ? hint : k === 'hot' ? 'Ничего не горит.' : 'Пусто.'}</p>
+        {kinds.map(e => <div key={e}>
+          {kinds.length > 1 && <div className="subhead">{KINDS[e]} · {items.filter(x => x.entity === e).length}</div>}
+          {items.filter(x => x.entity === e).map(row)}
+        </div>)}
+      </div>
+    })}
   </>
 }
 
 // ---------- Лиды ----------
 
-export function Leads({ openLead, openMonth }) {
+export function Leads({ openLead }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
-  const load = fresh => { setBusy(true); return api(`/bx/leads${fresh ? '?fresh=1' : ''}`).then(setD, e => setErr(e.message)).finally(() => setBusy(false)) }
+  const [seg, setSeg] = useState(null)   // new | work | all
+  const load = fresh => { setBusy(true); setErr(''); return api(`/bx/leads${fresh ? '?fresh=1' : ''}`).then(setD, e => setErr(e.message)).finally(() => setBusy(false)) }
   useEffect(() => { load(false) }, [])
   if (err) return <div className="card"><h2>Лиды</h2><p className="muted">{err}</p></div>
   if (!d) return <div className="card muted">Загружаю лиды из Битрикса…</div>
+  const news = d.leads.filter(l => l.new), work = d.leads.filter(l => !l.new)
+  const cur = seg || (news.length ? 'new' : 'work')
   const s = q.trim().toLowerCase()
-  const list = d.leads.filter(l => !s || String(l.id).includes(s) || (l.name + ' ' + l.title + ' ' + l.phone + ' ' + (l.manager || '')).toLowerCase().includes(s))
-  const groups = [['Новые', list.filter(l => l.new)], ['В работе', list.filter(l => !l.new)]]
+  const base = s ? d.leads : cur === 'new' ? news : cur === 'work' ? work : d.leads
+  const list = base.filter(l => !s || (l.name + ' ' + l.title + ' ' + l.phone + ' ' + (l.manager || '')).toLowerCase().includes(s))
+  const hours = l => Math.max(0, Math.round((Date.now() - new Date(l.created)) / 3600000))
   return <>
-    <MonthStrip onOpen={openMonth} />
-    <div className="card"><div className="head"><h2>{d.all ? 'Лиды' : 'Мои лиды'} <span className="muted small">{d.leads.length}</span></h2>
+    <div className="card"><div className="head"><h2>{d.all ? 'Лиды' : 'Мои лиды'}</h2>
       <button className="ghost mini" disabled={busy} onClick={() => load(true)}>{busy ? '…' : 'Обновить'}</button></div>
-      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Имя, телефон, номер" />
-      {groups.map(([name, items]) => <div key={name}>
-        <div className="dealstage">{name} <span className="muted">· {items.length}</span></div>
-        {!items.length && <p className="muted small">Нет.</p>}
-        {items.map(l => <div key={l.id} className="qrow" onClick={() => openLead(l.id)}>
-          <div className="qmain"><div><b>{l.name}</b></div>
-            <div className="small muted">{[l.phone, l.city, l.manager, l.new ? `${Math.max(0, Math.round((Date.now() - new Date(l.created)) / 3600000))} ч назад` : `${ageDays(l.modified)} дн. без движения`].filter(Boolean).join(' · ')}</div>
-            {!!l.missing.length && <div>{l.missing.map(m => <span key={m} className="miss">нет: {m}</span>)}</div>}</div>
-          <span className="muted">›</span>
-        </div>)}
+      <div className="segf">
+        <button className={cur === 'new' && !s ? 'on' : ''} onClick={() => setSeg('new')}>Новые <span>{news.length}</span></button>
+        <button className={cur === 'work' && !s ? 'on' : ''} onClick={() => setSeg('work')}>В работе <span>{work.length}</span></button>
+        <button className={cur === 'all' || s ? 'on' : ''} onClick={() => setSeg('all')}>Все <span>{d.leads.length}</span></button>
+      </div>
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Имя или телефон" />
+      {!list.length && <p className="muted">{cur === 'new' && !s ? 'Новых лидов нет.' : 'Пусто.'}</p>}
+      {list.map(l => <div key={l.id} className="qrow lead" onClick={() => openLead(l.id)}>
+        <span className="ic lead">{initial(l.name)}</span>
+        <div className="qmain"><div className="qt"><b>{l.name}</b></div>
+          <div className="small muted">{[l.phone, l.city, l.manager, l.new ? `${hours(l)} ч назад` : `${ageDays(l.modified)} дн. без движения`].filter(Boolean).join(' · ')}</div>
+          {!!l.missing.length && <div>{l.missing.map(m => <span key={m} className="miss">нет: {m}</span>)}</div>}</div>
+        <span className="muted">›</span>
       </div>)}
     </div>
   </>

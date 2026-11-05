@@ -22,11 +22,19 @@ async function open(b, id, vp) {
   return p
 }
 const mopFrame = p => p.frames().find(f => f.url().includes('/api/p/mop/'))
-const tab = (p, name) => p.locator('nav').getByRole('button', { name, exact: true }).click()
+// Меню: до пяти кнопок, остальное в листе «Ещё» (HEAD 05.11)
+async function tab(p, name) {
+  const nav = p.locator('nav')
+  const re = new RegExp(`^${name}\\s*\\d*$`)   // у кнопки может быть счётчик: «Лиды1»
+  if (await nav.getByRole('button', { name: re }).count()) return nav.getByRole('button', { name: re }).click()
+  await nav.getByRole('button', { name: 'Ещё' }).click()
+  await p.locator('.sheetbox').getByRole('button', { name, exact: true }).click()
+}
 async function dealsOpen(p) {
   await tab(p, 'Сделки')
+  await p.locator('.chips.scroll').waitFor()
+  await p.locator('.chips.scroll button', { hasText: 'Все' }).click()
   await p.locator('.stagehead').first().waitFor()
-  for (const h of await p.locator('.stagehead').all()) if ((await h.textContent()).includes('▸')) await h.click()
 }
 async function card(p, id) {
   await dealsOpen(p)
@@ -52,7 +60,10 @@ async function card(p, id) {
   // МОП: «Сегодня» — очередь: новый лид горит, КП без ответа — сегодня; полоска месяца сверху
   const p = await open(b, 6000)
   await p.locator('.bucket.hot').waitFor()
-  assert.match(await p.locator('.bucket.hot').textContent(), /лид.*Дана.*новый лид без ответа/)
+  assert.match(await p.locator('.bucket.hot').textContent(), /Дана.*новый лид без ответа/)
+  assert.match(await p.locator('.tiles').textContent(), /1.*Горит.*1.*Сегодня.*2.*Можно позже/)
+  assert.match(await p.locator('nav button', { hasText: 'Сегодня' }).textContent(), /2$/, 'счётчик в меню')
+  assert.strictEqual(await p.locator('nav button').count(), 5, 'у МОП пять кнопок меню')
   assert.match(await p.locator('.bucket.today').textContent(), /№ 1601.*КП без ответа/)
   assert.strictEqual(await p.locator('.bucket.hot a.btn', { hasText: 'Позвонить' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/lead/details/3001/', '«Позвонить» ведёт в карточку Битрикса (телефония, Wazzup)')
   await p.locator('.strip').waitFor()
@@ -67,18 +78,21 @@ async function card(p, id) {
   await p.screenshot({ path: `${shots}/mop-deals.png` })
 
   // Карточка: шаги, контакт, расчёт
-  await p.locator('.bucket.today, .stage .qrow').first().click()
+  await p.locator('.stage .qrow').first().click()
   await p.locator('.steps').waitFor()
+  assert.match(await p.locator('.nextstep').textContent(), /Следующий шаг.*Договор.*Договор и счёт/)   // площадь есть, КП на стадии «Отправка КП»
   assert.match(await p.locator('.steps').textContent(), /Клиент.*Расчёт.*КП.*Договор.*Оплата/)
   assert.match(await p.locator('.contact').textContent(), /Ромашка.*\+77001112233/)
   assert.strictEqual(await p.locator('.contact a.btn', { hasText: 'В Битриксе' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/deal/details/1601/')
   assert.strictEqual(await p.locator('.contact .alt').count(), 0)   // HEAD 05.11: связь только через карточку Битрикса
+  await p.locator('.segf').getByRole('button', { name: 'Срок и деньги' }).click()
   await p.getByRole('button', { name: 'Сделать расчёт' }).click()
   await p.locator('.dealedit input[type=number]').fill('60')
   await p.getByRole('button', { name: 'Посчитать и записать в сделку' }).click()
   await p.locator('text=По норме: 6 смен, 3 чел., 4 раб. дн.').waitFor()
   await p.locator('.kv', { hasText: 'Смен по норме' }).waitFor()
   // итог звонка с перезвоном → комментарий и задача
+  await p.locator('.segf').getByRole('button', { name: 'Действия' }).click()
   await p.getByRole('button', { name: 'Итог звонка' }).click()
   await p.locator('.dealedit').getByRole('button', { name: 'Перезвонить' }).click()
   await p.locator('.dealedit input[placeholder="О чём договорились"]').fill('ждёт эскиз')
@@ -127,6 +141,7 @@ async function card(p, id) {
   // Лиды: список с недостающими полями → карточка → город и площадь → «В сделку» → карточка новой сделки
   await tab(p, 'Лиды')
   await p.locator('.qrow', { hasText: 'Дана' }).waitFor()
+  assert.match(await p.locator('.segf').textContent(), /Новые.*1.*В работе.*0.*Все.*1/)
   assert.match(await p.locator('.qrow', { hasText: 'Дана' }).textContent(), /нет: город.*нет: площадь/)
   await p.screenshot({ path: `${shots}/mop-leads.png` })
   await p.locator('.qrow', { hasText: 'Дана' }).click()
@@ -147,7 +162,8 @@ async function card(p, id) {
 
   // HEAD: «Журнал» со сводкой по МОП (у МОП этой вкладки нет)
   assert.strictEqual(await p.locator('nav').getByRole('button', { name: 'Журнал' }).count(), 0)
-  await tab(h, 'Журнал')
+  assert.strictEqual(await p.locator('nav').getByRole('button', { name: 'Ещё' }).count(), 0)
+  await tab(h, 'Журнал')   // у HEAD — через «Ещё»
   await h.locator('.row', { hasText: 'Ануар' }).first().waitFor()
   console.log('OK: «Сегодня» очередью, лиды → сделка, воронка, карточка шагами, итог звонка, запись в Битрикс, КП и «Документы», месяц')
   await b.close()
