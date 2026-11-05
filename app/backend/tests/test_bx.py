@@ -33,8 +33,9 @@ def fake(method, params):
     if method == "crm.deal.list":
         f = params["filter"]
         rows = [d for d in DEALS.values() if "ASSIGNED_BY_ID" not in f or int(d["ASSIGNED_BY_ID"]) == f["ASSIGNED_BY_ID"]]
-        rows = [d for d in rows if SEMANTIC.get(d["STAGE_ID"].split(":")[-1], "P") == f.get("STAGE_SEMANTIC_ID", "P")]
+        rows = [d for d in rows if "ID" in f or SEMANTIC.get(d["STAGE_ID"].split(":")[-1], "P") == f.get("STAGE_SEMANTIC_ID", "P")]
         rows = [d for d in rows if "CATEGORY_ID" not in f or int(d["CATEGORY_ID"]) in f["CATEGORY_ID"]]
+        rows = [d for d in rows if "ID" not in f or int(d["ID"]) in f["ID"]]
         if ">=CLOSEDATE" in f:
             rows = [d for d in rows if f[">=CLOSEDATE"] <= d.get("CLOSEDATE", "")[:10] < f["<CLOSEDATE"]]
         return {"result": rows, "total": len(rows)}
@@ -298,6 +299,33 @@ def test_month(bxc):
     h = c.get("/api/bx/month?ym=2026-11", headers=hdr(1000)).json()
     assert h["all"] and h["managers"][0]["name"] == "Ануар Минкеев" and h["managers"][0]["net"] == 2500000
     assert c.get("/api/bx/month?ym=2026-10", headers=hdr(6000)).json()["company"]["count"] == 0
+    assert m["source"] == "bitrix" and not m["warn"] and "ARTGAME_GOOGLE_SA_FILE" in h["warn"]   # без листа — по Битриксу, HEAD видит почему
+
+
+def test_month_from_sheet(bxc, monkeypatch):
+    """HEAD 05.11: выручка месяца — по листу «Проекты <год>» (дата завершения работ), менеджер — из Битрикса по номеру."""
+    from psycopg.types.json import Jsonb
+    from artgame import fin
+    c, ids = bxc
+    with db.pool.connection() as conn:
+        conn.execute("INSERT INTO constants_versions (checksum, values) VALUES ('t2', %s)", (Jsonb({"vat": {"value": "16", "status": "Утверждено"}}),))
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    seen = {}
+    rows = [["1590", "Ноябрь", "Офис", "Шымкент"] + [""] * 9 + ["03.11.2026", "1 160 000"],
+            ["1601", "Ноябрь", "Школа", "Астана"] + [""] * 9 + ["", "580 000"],          # без даты — по колонке «Месяц»
+            ["999", "Октябрь", "Старое", ""] + [""] * 9 + ["20.10.2026", "100"],          # другой месяц
+            ["Итого", "", "", ""] + [""] * 9 + ["", "9 999 999"]]                          # не сделка
+    monkeypatch.setattr(fin, "sheet_values", lambda sid, rng: seen.update(rng=rng) or rows)
+    fin._cache.clear()
+    m = c.get("/api/bx/month?ym=2026-11", headers=hdr(6000)).json()
+    assert seen["rng"] == "Проекты 2026!A2:O" and m["source"] == "sheet"
+    assert m["company"]["count"] == 2 and m["company"]["gross"] == 1740000 and m["company"]["net"] == 1500000
+    assert [(d["id"], d["closed"], d["city"], d["manager"]) for d in m["mine"]["deals"]] == [(1590, "2026-11-03", "Шымкент", "Ануар Минкеев"), (1601, "2026-11-01", "Астана", "Ануар Минкеев")]
+    assert c.get("/api/bx/month?ym=2026-10", headers=hdr(1000)).json()["company"]["gross"] == 100
+    monkeypatch.setattr(fin, "sheet_values", lambda sid, rng: (_ for _ in ()).throw(RuntimeError("таблица не открыта сервисному аккаунту приложения")))
+    fin._cache.clear()
+    h = c.get("/api/bx/month?ym=2026-11&fresh=1", headers=hdr(1000)).json()
+    assert h["source"] == "bitrix" and "не открыта сервисному аккаунту" in h["warn"] and h["company"]["gross"] == 2900000
 
 
 def test_notify(bxc, monkeypatch):

@@ -442,25 +442,41 @@ def _vals() -> dict:
 
 
 def month(p: dict, fresh: bool = False, ym: str | None = None) -> dict:
-    """Выигранные сделки месяца (по дате закрытия) и процент МОП по «Значениям» (pay.mop.*).
+    """Выручка месяца и процент МОП по «Значениям» (pay.mop.*).
+    Источник (HEAD 05.11): лист «Проекты <год>» финансовой таблицы — по дате завершения работ, с НДС; менеджер — из
+    Битрикса по номеру сделки. Если лист недоступен — выигранные сделки Битрикса по CLOSEDATE (хуже: дата перевода в «успех»).
     Решение HEAD 03.11: ступень 3/4/5% определяется по ВСЕЙ выручке компании за месяц без НДС и считается от всей
     выручки, не от превышения; бонус за план — при 3-й ступени. Свои сделки МОП видит отдельно, HEAD — всех менеджеров."""
     from datetime import date
+    from . import fin
     uid = need_bx(p)
     y, m = (int(x) for x in ym.split("-")) if ym else (date.today().year, date.today().month)
-    start, end = date(y, m, 1), date(y + (m == 12), m % 12 + 1, 1)
-    flt = {"CATEGORY_ID": list(CATEGORIES), "STAGE_SEMANTIC_ID": "S", ">=CLOSEDATE": start.isoformat(), "<CLOSEDATE": end.isoformat()}
-    rows = read_all("crm.deal.list", {"filter": flt, "select": ["ID", "TITLE", "OPPORTUNITY", "CLOSEDATE", "ASSIGNED_BY_ID", "CATEGORY_ID"],
-                                      "order": {"CLOSEDATE": "DESC"}}, fresh=fresh)
+    names = {u["id"]: u["name"] for u in users()}
+    source, warn = "sheet", ""
+    try:
+        rows = fin.month_rows(y, m, fresh)
+        ids = [r["id"] for r in rows]
+        who = {}
+        for i in range(0, len(ids), 50):
+            for d in read_all("crm.deal.list", {"filter": {"ID": ids[i:i + 50]}, "select": ["ID", "ASSIGNED_BY_ID"]}, fresh=fresh):
+                who[int(d["ID"])] = int(d.get("ASSIGNED_BY_ID") or 0)
+        deals = [{"id": r["id"], "title": r["title"], "sum": r["sum"], "closed": r["closed"], "city": r["city"],
+                  "manager_id": who.get(r["id"], 0), "manager": names.get(who.get(r["id"], 0), "")} for r in rows]
+    except Exception as e:  # noqa: BLE001 — лист недоступен: считаем по Битриксу и говорим об этом
+        source, warn = "bitrix", f"Лист «Проекты {y}» не прочитан ({e}); цифры по дате закрытия сделок в Битриксе."
+        start, end = date(y, m, 1), date(y + (m == 12), m % 12 + 1, 1)
+        flt = {"CATEGORY_ID": list(CATEGORIES), "STAGE_SEMANTIC_ID": "S", ">=CLOSEDATE": start.isoformat(), "<CLOSEDATE": end.isoformat()}
+        rows = read_all("crm.deal.list", {"filter": flt, "select": ["ID", "TITLE", "OPPORTUNITY", "CLOSEDATE", "ASSIGNED_BY_ID", "CATEGORY_ID"],
+                                          "order": {"CLOSEDATE": "DESC"}}, fresh=fresh)
+        deals = [{"id": int(d["ID"]), "title": d.get("TITLE") or "", "sum": _num(d.get("OPPORTUNITY")), "closed": (d.get("CLOSEDATE") or "")[:10],
+                  "city": "", "manager_id": int(d.get("ASSIGNED_BY_ID") or 0), "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), "")} for d in rows]
+    deals.sort(key=lambda d: d["closed"], reverse=True)
     v = _vals()
     vat = float(v.get("vat") or 0)
     steps = [(float(v.get(f"pay.mop.step{i}.from") or 0), float(v.get(f"pay.mop.step{i}.pct") or 0)) for i in (1, 2, 3)]
     salary, bonus_plan = float(v.get("pay.mop.salary") or 0), float(v.get("pay.mop.bonus_plan") or 0)
-    names = {u["id"]: u["name"] for u in users()}
     net_of = lambda ds: sum(d["sum"] for d in ds) / (1 + vat / 100)  # noqa: E731
 
-    deals = [{"id": int(d["ID"]), "title": d.get("TITLE") or "", "sum": _num(d.get("OPPORTUNITY")), "closed": (d.get("CLOSEDATE") or "")[:10],
-              "manager_id": int(d.get("ASSIGNED_BY_ID") or 0), "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), "")} for d in rows]
     net = net_of(deals)
     step = max([i for i, (frm, _) in enumerate(steps, 1) if frm and net > frm] or [0])
     pct = steps[step - 1][1] if step else 0.0
@@ -469,12 +485,12 @@ def month(p: dict, fresh: bool = False, ym: str | None = None) -> dict:
                "bonus": round(net * pct / 100), "plan_bonus": bonus_plan if step == 3 else 0,
                "next": {"step": nxt[0], "from": nxt[1], "left": round(nxt[1] - net)} if nxt else None}
     out = {"month": f"{y}-{m:02d}", "vat": vat, "salary": salary, "steps": [{"from": f, "pct": c} for f, c in steps],
-           "all": uid is None, "company": company}
+           "all": uid is None, "company": company, "source": source, "warn": warn if uid is None else ""}
     if uid is None:
         by: dict = {}
         for d in deals:
             by.setdefault(d["manager_id"], []).append(d)
-        out["managers"] = sorted([{"id": k, "name": names.get(k, str(k)), "deals": ds, "count": len(ds),
+        out["managers"] = sorted([{"id": k, "name": names.get(k, "без менеджера" if not k else str(k)), "deals": ds, "count": len(ds),
                                    "gross": round(sum(d["sum"] for d in ds)), "net": round(net_of(ds))} for k, ds in by.items()],
                                  key=lambda x: -x["net"])
     else:
