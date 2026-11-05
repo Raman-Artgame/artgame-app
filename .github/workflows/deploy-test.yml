@@ -28,6 +28,8 @@ jobs:
           python3 - <<'PY'
           import os, re
           k = os.environ["KEY"].replace("\r", "").strip()
+          if "-----BEGIN" not in k and re.sub(r"\s+", "", k).startswith("b3BlbnNzaC1rZXktdjE"):   # вставили без строк BEGIN/END
+              k = f"-----BEGIN OPENSSH PRIVATE KEY-----\n{k}\n-----END OPENSSH PRIVATE KEY-----"
           m = re.search(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", k, re.S)
           if not m:
               kind = ("открытый ключ (ssh-…), а нужен закрытый" if k.startswith(("ssh-", "command=")) else
