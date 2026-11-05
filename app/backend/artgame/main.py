@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from . import constants as consts
-from . import db, files, places, work
+from . import bx, db, files, places, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
 
@@ -22,6 +22,7 @@ app = FastAPI(title="ARTGAME", lifespan=lifespan)
 app.include_router(work.router)
 app.include_router(files.router)
 app.include_router(places.router)
+app.include_router(bx.router)
 
 
 @app.get("/api/health")
@@ -66,7 +67,7 @@ def me(p: dict = Depends(current_person)):
 def people(_: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         return conn.execute(
-            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status,
+            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id,
                       coalesce(array_agg(z.zone_code ORDER BY z.zone_code) FILTER (WHERE z.zone_code IS NOT NULL), '{}') AS zones
                FROM people p LEFT JOIN person_zones z ON z.person_id = p.id
                GROUP BY p.id ORDER BY p.created_at""").fetchall()
@@ -76,6 +77,7 @@ class AssignIn(BaseModel):
     role_code: str | None = None
     zones: list[str] | None = None
     status: str | None = None   # active | blocked (уход: вход закрыт, история остаётся)
+    bitrix_user_id: int | None = None   # пользователь Битрикса (0 — снять связку): по нему МОП видит свои сделки
 
 
 @app.post("/api/people/{person_id}")
@@ -92,6 +94,11 @@ def assign(person_id: int, body: AssignIn, head: dict = Depends(require_head)):
             if body.status not in ("active", "blocked"):
                 raise HTTPException(400, "bad status")
             conn.execute("UPDATE people SET status=%s, updated_at=now() WHERE id=%s", (body.status, person_id))
+        if body.bitrix_user_id is not None:
+            uid = body.bitrix_user_id or None
+            if uid and conn.execute("SELECT 1 FROM people WHERE bitrix_user_id=%s AND id<>%s", (uid, person_id)).fetchone():
+                raise HTTPException(409, "этот пользователь Битрикса уже связан с другим человеком")
+            conn.execute("UPDATE people SET bitrix_user_id=%s, updated_at=now() WHERE id=%s", (uid, person_id))
         if body.zones is not None:
             conn.execute("DELETE FROM person_zones WHERE person_id=%s", (person_id,))
             for z in body.zones:

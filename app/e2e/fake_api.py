@@ -31,5 +31,12 @@ class FakeDrive:
 
 drive.Drive = FakeDrive
 
+# Битрикс: те же ответы шлюза, что в tests/test_bx.py (только чтение)
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend", "tests"))
+from artgame import bx  # noqa: E402
+from test_bx import fake as fake_bx  # noqa: E402
+bx.READ = fake_bx
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8100)

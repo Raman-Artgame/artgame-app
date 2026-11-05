@@ -1,6 +1,7 @@
 /* ARTGAME: замена window.claude для рабочих мест внутри приложения.
    db → /api/p/<место>/<ссылка>/_db, downloads → файл через сервер (в Telegram — downloadFile),
-   user.canEdit → редактор места. sample (ИИ), mcp (Битрикс), permissions пока нет — страница сама прячет эти кнопки. */
+   user.canEdit → редактор места. mcp → сделки Битрикса через сервер (только чтение, только свои сделки; места МОП и Калькулятор).
+   sample (ИИ) и permissions пока нет — страница сама прячет эти кнопки. */
 (function () {
   var P = window.ARTGAME_PLACE || {}
   var m = location.pathname.match(/^(\/api\/p\/[^/]+\/[^/]+)\//)
@@ -75,7 +76,20 @@
     },
   }
   var user = { canEdit: function () { return Promise.resolve(!!P.editor) } }
+  // Битрикс: страница КП зовёт callTool(сервер, 'crm_get' | 'crm_fields', args) — отвечает наш сервер через шлюз ARTGAME.
+  function bx(tool, args) {
+    return fetch(BASE + '/_bx/' + tool, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args || {}) })
+      .then(function (r) {
+        return r.json().catch(function () { return {} }).then(function (d) {
+          if (!r.ok) { var e = new Error(d.detail || String(r.status)); e.code = r.status >= 500 ? 'upstream_error' : 'tool_error'; throw e }
+          return d
+        })
+      })
+  }
+  var mcp = { callTool: function (server, tool, args) { return bx(tool, args).then(function (d) { return { structuredContent: d } }) } }
+  window.ARTGAME_BX = bx
   var caps = { db: db, downloads: downloads, user: user }
+  if (P.bx) caps.mcp = mcp
   window.claude = { use: function (n) { return Promise.resolve(caps[n] || null) } }
 
   // Ссылки на другие артефакты → открыть место в приложении.

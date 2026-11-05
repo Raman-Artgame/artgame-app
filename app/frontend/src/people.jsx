@@ -4,12 +4,14 @@ import { api } from './api.js'
 // Только HEAD: назначить роль и зоны, закрыть вход ушедшему (история остаётся).
 export function People({ ROLE, ZONE }) {
   const [list, setList] = useState(null)
+  const [bx, setBx] = useState(null)
+  const [err, setErr] = useState('')
   const load = () => api('/people').then(setList, () => setList([]))
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(); api('/bx/users').then(setBx, () => setBx([])) }, [])
   if (!list) return <div className="card muted">Загрузка…</div>
-  const save = (id, body) => api(`/people/${id}`, { method: 'POST', body }).then(load)
+  const save = (id, body) => api(`/people/${id}`, { method: 'POST', body }).then(load, e => setErr(e.message))
   const pendingFirst = [...list].sort((a, b) => (a.status === 'pending' ? -1 : 0) - (b.status === 'pending' ? -1 : 0))
-  return <div className="card"><h2>Команда</h2>
+  return <div className="card"><h2>Команда</h2>{err && <p className="muted">{err}</p>}
     {pendingFirst.map(p => <div key={p.id} className="person">
       <div><b>{p.full_name}</b> {p.tg_username && <span className="muted small">@{p.tg_username}</span>}
         {p.status === 'pending' && <span className="tag st-rejected">ждёт роли</span>}
@@ -22,6 +24,11 @@ export function People({ ROLE, ZONE }) {
         const on = p.zones.includes(z)
         return <button key={z} className={on ? '' : 'ghost'} onClick={() => save(p.id, { zones: on ? p.zones.filter(x => x !== z) : [...p.zones, z] })}>{t}</button>
       })}</div>
+      {['mop', 'mop_vip'].includes(p.role_code) && <label className="small muted">В Битриксе (его сделки увидит в «Сделках»)
+        <select value={p.bitrix_user_id || 0} onChange={e => save(p.id, { bitrix_user_id: +e.target.value })}>
+          <option value={0}>— не связан —</option>
+          {(bx || []).map(u => <option key={u.id} value={u.id}>{u.name}{u.position ? ` · ${u.position}` : ''}</option>)}
+        </select></label>}
       {p.role_code !== 'head' && (p.status === 'blocked'
         ? <a onClick={() => save(p.id, { status: 'active' })}>открыть вход</a>
         : p.status === 'active' && <a onClick={() => confirm(`Закрыть вход: ${p.full_name}?`) && save(p.id, { status: 'blocked' })}>закрыть вход</a>)}

@@ -49,3 +49,12 @@ a { color: var(--accent); }
 .check { display: flex; align-items: center; gap: 10px; padding: 8px 0; color: var(--text); }
 .check input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
 .seg.grid2 { display: grid; grid-template-columns: 1fr 1fr; }
+
+/* Сделки Битрикса (МОП) */
+.dealbar { display: flex; gap: 8px; margin: 8px 0; }
+.dealbar input { flex: 1; margin: 0; }
+.dealbar button { width: auto; flex: none; }
+.dealstage { margin: 14px 0 4px; font-weight: 600; font-size: 14px; }
+.deal { padding: 10px 0; border-top: 1px solid var(--line); }
+.dealbtns { display: flex; gap: 8px; margin-top: 6px; }
+.dealbtns button { width: auto; padding: 6px 14px; font-size: 13px; }

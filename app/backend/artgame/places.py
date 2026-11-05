@@ -42,6 +42,7 @@ PLACES = {
     "dz":    {"title": "Дизайн", "roles": DZ | {"head"}, "aud": {"все", "дизайн"}, "shared": {"projects"}},
 }
 ORDER = ["art", "print", "mop", "calc", "dz"]
+BX_PLACES = {"mop", "calc"}  # на этих страницах работает подтяжка сделок Битрикса (bx.py, place_bx.js)
 # Ссылки между артефактами → места приложения (переписывает place_shim.js).
 ARTIFACTS = {"AUsM36vXPoSqk6J4LQUZqj": "art", "QvriqYAuWNEvypeNKAVAcE": "print", "8uecjatZFajVxKQwneyYQp": "mop",
              "BGKMEr5zCyQxr2pgWXs8oZ": "calc", "73RaYPuD5WLq43NsvkJFVm": "dz"}
@@ -49,6 +50,7 @@ ARTIFACTS = {"AUsM36vXPoSqk6J4LQUZqj": "art", "QvriqYAuWNEvypeNKAVAcE": "print",
 TTL = 12 * 3600
 ROOT = Path(__file__).resolve().parent.parent / "places"
 SHIM = Path(__file__).resolve().parent / "place_shim.js"
+BX_JS = Path(__file__).resolve().parent / "place_bx.js"
 DL_DIR = Path(tempfile.gettempdir()) / "artgame-dl"
 DL_TTL = 15 * 60
 MAX_DL = 50_000_000
@@ -139,6 +141,11 @@ def places(p: dict = Depends(active)):
 @router.get("/p/_shim.js")
 def shim():
     return FileResponse(SHIM, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/p/_bx.js")
+def bx_js():
+    return FileResponse(BX_JS, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
 # ---------- цифры из «Значений» (контракт values_spec.md: config/values) ----------
@@ -264,9 +271,10 @@ def dl_get(code: str, tok: str, fid: str):
 
 def inject(html: bytes, code: str, p: dict) -> bytes:
     cfg = {"code": code, "editor": is_editor(p, code), "artifacts": ARTIFACTS,
-           "titles": {c: PLACES[c]["title"] for c in ORDER}}
+           "titles": {c: PLACES[c]["title"] for c in ORDER}, "bx": code in BX_PLACES}
     tag = (f'<script>window.ARTGAME_PLACE={json.dumps(cfg, ensure_ascii=False)}</script>'
-           '<script src="/api/p/_shim.js"></script>').encode()
+           '<script src="/api/p/_shim.js"></script>'
+           + ('<script src="/api/p/_bx.js" defer></script>' if code in BX_PLACES else '')).encode()
     head = html.lstrip()[:200].lower()
     if head.startswith(b"<!doctype") or head.startswith(b"<html"):
         i = html[:4000].lower().find(b"<head")
