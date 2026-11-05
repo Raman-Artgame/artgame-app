@@ -105,7 +105,7 @@ export function Today({ openDeal, openLead, openMonth }) {
       {q[k].map(x => <div key={x.entity + x.id} className="qrow">
         <div className="qmain" onClick={() => open(x)}>
           <div><span className="kind">{x.entity === 'lead' ? 'лид' : x.entity === 'deal' ? 'сделка' : 'задача'}</span>
-            {x.entity === 'task' ? x.title : <><b>№ {x.id}</b> {x.entity === 'lead' ? (x.name || x.title) : cleanTitle(x.title, x.id)}</>}</div>
+            {x.entity === 'task' ? x.title : x.entity === 'lead' ? <b>{x.name || x.title}</b> : <><b>№ {x.id}</b> {cleanTitle(x.title, x.id)}</>}</div>
           <div className="small why">{x.why}{x.sum ? ' · ' + money(x.sum) : ''}</div>
         </div>
         {x.action === 'call' && x.entity !== 'task' && portal ? <a className="btn mini" href={bxLink(portal, x.entity, x.id)} target="_blank" rel="noreferrer">Позвонить</a>
@@ -138,7 +138,7 @@ export function Leads({ openLead, openMonth }) {
         <div className="dealstage">{name} <span className="muted">· {items.length}</span></div>
         {!items.length && <p className="muted small">Нет.</p>}
         {items.map(l => <div key={l.id} className="qrow" onClick={() => openLead(l.id)}>
-          <div className="qmain"><div><b>{l.name}</b> <span className="muted small">№ {l.id}</span></div>
+          <div className="qmain"><div><b>{l.name}</b></div>
             <div className="small muted">{[l.phone, l.city, l.manager, l.new ? `${Math.max(0, Math.round((Date.now() - new Date(l.created)) / 3600000))} ч назад` : `${ageDays(l.modified)} дн. без движения`].filter(Boolean).join(' · ')}</div>
             {!!l.missing.length && <div>{l.missing.map(m => <span key={m} className="miss">нет: {m}</span>)}</div>}</div>
           <span className="muted">›</span>
@@ -160,7 +160,7 @@ export function LeadCard({ id, back, openDeal }) {
   }, e => setErr(e.message))
   useEffect(() => { load(false); api('/bx/leads/cities').then(setCities, () => {}) }, [id])
   if (err) return <div className="card"><a onClick={back}>← назад</a><p className="muted">{err}</p></div>
-  if (!l) return <div className="card muted">Загружаю лид № {id}…</div>
+  if (!l) return <div className="card muted">Загружаю лид…</div>
   const say = p => p.then(r => { setMsg(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Записано в Битрикс.'); return load(true) }, e => setMsg('Не записалось: ' + e.message))
   const pickCity = v => { const c = cities.find(x => x.name.toLowerCase() === v.trim().toLowerCase()); setF({ ...f, cityName: v, city: c ? c.id : '' }) }
   const save = () => say(api(`/bx/leads/${id}`, { method: 'POST', body: { city: f.city || null, service: f.service || null, area: +f.area || null, sum: +f.sum || null } }))
@@ -169,7 +169,7 @@ export function LeadCard({ id, back, openDeal }) {
   return <>
     <div className="card">
       <a onClick={back}>← к лидам</a>
-      <h2>{l.name} <span className="muted small">лид № {l.id}</span></h2>
+      <h2>{l.name} <span className="muted small">лид</span></h2>
       <span className="tag">{l.status_name}</span>{l.manager && <span className="tag">{l.manager}</span>}
       {l.title && l.title !== l.name && <p className="small muted">{l.title}</p>}
       <Contact phone={l.phone} name={l.name} entity="lead" id={l.id} />

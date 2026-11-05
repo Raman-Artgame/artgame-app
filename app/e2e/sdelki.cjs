@@ -52,7 +52,7 @@ async function card(p, id) {
   // МОП: «Сегодня» — очередь: новый лид горит, КП без ответа — сегодня; полоска месяца сверху
   const p = await open(b, 6000)
   await p.locator('.bucket.hot').waitFor()
-  assert.match(await p.locator('.bucket.hot').textContent(), /лид.*№ 3001.*Дана.*новый лид без ответа/)
+  assert.match(await p.locator('.bucket.hot').textContent(), /лид.*Дана.*новый лид без ответа/)
   assert.match(await p.locator('.bucket.today').textContent(), /№ 1601.*КП без ответа/)
   assert.strictEqual(await p.locator('.bucket.hot a.btn', { hasText: 'Позвонить' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/lead/details/3001/', '«Позвонить» ведёт в карточку Битрикса (телефония, Wazzup)')
   await p.locator('.strip').waitFor()

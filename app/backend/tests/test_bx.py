@@ -348,7 +348,7 @@ def test_notify(bxc, monkeypatch):
     assert notify.run(datetime(2026, 11, 6, 3, 0, tzinfo=ZoneInfo("Asia/Almaty"))) == 0   # ночью молчим
     n = notify.run(datetime(2026, 11, 6, 10, 0, tzinfo=ZoneInfo("Asia/Almaty")))
     assert n == 3 and sent[0][0] == 6000 and "Пора вернуться к сделке № 1601" in sent[0][1] and "ждут бюджет" in sent[0][1]
-    assert "Задача на сегодня: Перезвонить по КП" in sent[0][1] and "Лид № 3001 Дана: новый лид без ответа" in sent[0][1]
+    assert "Задача на сегодня: Перезвонить по КП" in sent[0][1] and "Лид Дана: новый лид без ответа" in sent[0][1]
     assert notify.run(datetime(2026, 11, 6, 10, 30, tzinfo=ZoneInfo("Asia/Almaty"))) == 0 and len(sent) == 1   # повторно не шлём
     with db.pool.connection() as conn:
         assert conn.execute("SELECT count(*) AS n FROM bx_reminders WHERE sent_at IS NULL").fetchone()["n"] == 0

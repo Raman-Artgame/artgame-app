@@ -41,7 +41,7 @@ def events(p: dict, today: str) -> list[tuple[str, str]]:
         ev.append((f"kp:{d['id']}:{today}", f"📄 КП без ответа {t['limits']['kp_days']:g}+ дня: {_title(d)}"))
     for x in t.get("queue", {}).get("hot", []):
         if x["entity"] == "lead":
-            ev.append((f"lead:{x['id']}:{today}", f"📞 Лид № {x['id']} {x['name'] or x['title']}: {x['why']}"))
+            ev.append((f"lead:{x['id']}:{today}", f"📞 Лид {x['name'] or x['title']}: {x['why']}"))
     for x in t["tasks"]:
         if (x.get("deadline") or "")[:10] == today:
             ev.append((f"task:{x['id']}:{today}", f"✅ Задача на сегодня: {x['title']}" + (f" (сделка № {x['deal']})" if x.get("deal") else "")))
