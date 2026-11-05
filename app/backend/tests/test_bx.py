@@ -37,7 +37,10 @@ def fake(method, params):
     if method == "crm.deal.fields":
         return {"result": {"UF_CRM_6881101914D8D": {"type": "enumeration", "items": [{"ID": "12077", "VALUE": "Казахстан, Астана"}]},
                            "UF_CRM_1753294730602": {"items": [{"ID": "19285", "VALUE": "Художественная роспись стен"}]},
-                           "OPPORTUNITY": {"title": "Сумма"}}}
+                           "UF_CRM_ARTGAME_COMPLEXITY": {"type": "enumeration", "items": [{"ID": "901", "VALUE": "Лёгкий"}, {"ID": "902", "VALUE": "Средний"},
+                                                                                           {"ID": "903", "VALUE": "Сложный"}, {"ID": "904", "VALUE": "Авторский"}]},
+                           "UF_CRM_ARTGAME_NORM_SHIFTS": {"type": "double"}, "UF_CRM_ARTGAME_NORM_CREW": {"type": "integer"},
+                           "UF_CRM_ARTGAME_TERM_DAYS": {"type": "integer"}, "OPPORTUNITY": {"title": "Сумма"}}}
     if method == "user.get":
         return {"result": [{"ID": "4565", "NAME": "Ануар", "LAST_NAME": "Минкеев", "USER_TYPE": "employee"},
                            {"ID": "4693", "NAME": "Тимур", "LAST_NAME": "Жандосов", "USER_TYPE": "employee"}]}
@@ -215,6 +218,16 @@ def test_write_off_and_on(bxc, monkeypatch, tmp_path):
     f = calls[0][1]["fields"]
     assert r["bx"] == "ok" and f["OPPORTUNITY"] == 589250 and f["UF_CRM_ARTGAME_AREA_M2"] == 25 and f["STAGE_ID"] == "PREPARATION"
     assert f[bxw.F_KP][0]["fileData"][0].startswith("КП ARTGAME") and r["stage"] == "PREPARATION"
+    # расчёт из карточки: площадь + сложность → смены, люди, срок по нормам → в сделку (МОП руками не вводит)
+    calls.clear()
+    r = c.post("/api/bx/deals/1601/calc", json={"area": 60, "level": "medium"}, headers=hdr(6000)).json()
+    assert r["calc"] == {"shifts": 6, "crew": 3, "prep": 1, "work": 2, "days": 3, "client": 4, "ink": 0, "level": "medium", "service": "mural"}
+    f = calls[0][1]["fields"]
+    assert f[bx.F_SHIFTS] == 6 and f[bx.F_CREW] == 3 and f[bx.F_TERM] == 4 and f[bx.F_LEVEL] == "902" and f[bx.AREA] == 60 and r["norm_fields"]
+    assert "расчёт: 60 м² Средний: 6 смен, 3 чел., 4 раб. дн." in calls[1][1]["fields"]["COMMENT"]
+    full = c.get("/api/bx/deals/1601/full", headers=hdr(6000)).json()
+    assert full["level"] == "medium" and full["norm"] == {"shifts": 6, "crew": 3, "term": 4} and full["norm_fields"]
+    assert c.post("/api/bx/deals/1601/calc", json={"area": 120, "service": "print"}, headers=hdr(6000)).json()["calc"]["crew"] == 6
     # договор из «Выполнения проекта» стадию назад не двигает
     DEALS["1601"]["STAGE_ID"] = "UC_AV00QK"
     bx._cache.clear()

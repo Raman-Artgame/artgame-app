@@ -23,6 +23,9 @@ CITY = "UF_CRM_6881101914D8D"
 ADDR = "UF_CRM_1755520919823"
 SERVICE = "UF_CRM_1753294730602"
 AREA = "UF_CRM_ARTGAME_AREA_M2"
+# Срок и ресурсы — считает приложение по нормам «Значений», МОП руками не вводит (HEAD 05.11). Поля создаёт Кодекс.
+F_LEVEL, F_SHIFTS, F_CREW, F_TERM = "UF_CRM_ARTGAME_COMPLEXITY", "UF_CRM_ARTGAME_NORM_SHIFTS", "UF_CRM_ARTGAME_NORM_CREW", "UF_CRM_ARTGAME_TERM_DAYS"
+LEVELS = {"easy": "Лёгкий", "medium": "Средний", "hard": "Сложный", "author": "Авторский"}
 LIST_SELECT = ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", "OPPORTUNITY", "ASSIGNED_BY_ID", "CONTACT_ID", "COMPANY_ID",
                "DATE_MODIFY", CITY, AREA]
 TTL, TTL_DICT, MAX_PAGES = 120, 3600, 10
@@ -288,8 +291,49 @@ def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
                 files.append({"title": title, "url": it})
     card.update({"history": hist, "feed": feed[:40], "files": files, "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), ""),
                  "created": d.get("DATE_CREATE"), "modified": d.get("DATE_MODIFY"), "comments": d.get("COMMENTS") or "",
-                 "pay": {k: (_money(d.get(f)) if k != "next" else d.get(f)) for k, f in FIN.items()}, "category": int(d.get("CATEGORY_ID") or 0)})
+                 "pay": {k: (_money(d.get(f)) if k != "next" else d.get(f)) for k, f in FIN.items()}, "category": int(d.get("CATEGORY_ID") or 0),
+                 "level": level_key(d.get(F_LEVEL)), "norm": {"shifts": _num(d.get(F_SHIFTS)), "crew": _num(d.get(F_CREW)), "term": _num(d.get(F_TERM))},
+                 "norm_fields": all(k in deal_fields() for k in (F_SHIFTS, F_CREW, F_TERM))})
     return card
+
+
+# ---------- срок и ресурсы по нормам ----------
+
+def level_key(name) -> str:
+    """«Средний» / ID пункта списка / ключ → ключ нормы (easy|medium|hard|author) или ''."""
+    n = str(name or "").strip().lower()
+    if n in LEVELS:
+        return n
+    n = enum_map(F_LEVEL).get(n, n).lower() if n else n
+    return next((k for k, v in LEVELS.items() if v.lower() == n), "")
+
+
+def resources(area: float, level: str = "medium", service: str = "mural", height: bool = False, outdoor: bool = False,
+              surface: bool = False, white: bool = False) -> dict:
+    """Смены, люди, дни — по norm.* и print.* из «Значений» (утверждены 04–05.11). Нулевая площадь → пусто."""
+    import math
+    v = _vals()
+    area = float(area or 0)
+    if area <= 0:
+        return {}
+    crew_m2 = float(v.get("norm.crew_per_m2") or 20)
+    crew = int(min(12, max(2, math.ceil(area / crew_m2))))
+    ink = 0.0
+    if service == "print":
+        shifts = area / float(v.get("print.plan_per_shift") or 18)
+        ink = area * float(v.get("print.ink.white_ml" if white else "print.ink.cmyk_ml") or (30 if white else 15))
+    else:
+        lk = level_key(level) or "medium"
+        k = (float(v.get("norm.k.height") or 0.8) if height else 1) * (float(v.get("norm.k.outdoor") or 0.9) if outdoor else 1) \
+            * (float(v.get("norm.k.surface") or 0.85) if surface else 1)
+        shifts = area / (float(v.get(f"norm.mural.{lk}") or {"easy": 20, "medium": 10, "hard": 5, "author": 2}[lk]) * k)
+    shifts = math.ceil(shifts * 10) / 10
+    prep = int(v.get("norm.prep_days.big") or 2) if area > float(v.get("norm.prep_threshold") or 100) else int(v.get("norm.prep_days.small") or 1)
+    work = math.ceil(shifts / crew)
+    days = prep + work
+    client = math.ceil(days * (1 + float(v.get("norm.client_reserve") or 20) / 100))
+    return {"shifts": shifts, "crew": crew, "prep": prep, "work": work, "days": days, "client": client, "ink": round(ink),
+            "level": level_key(level) if service != "print" else "", "service": service}
 
 
 # ---------- «Сегодня»: что требует действия ----------

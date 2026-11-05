@@ -6,11 +6,19 @@ const dt = s => s ? new Date(s).toLocaleString('ru-RU', { day: 'numeric', month:
 const strip = s => (s || '').replace(/<[^>]+>/g, '').replace(/\[\/?[A-Za-z]+\]/g, '')
 
 // Карточка сделки в приложении: всё из Битрикса на одном экране. Битрикс — источник правды, здесь только показ и действия.
+const LEVELS = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный', author: 'Авторский' }
 export function DealCard({ id, back, open }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
+  const [calc, setCalc] = useState(null)   // форма расчёта: {area, level, service, height, outdoor}
+  const [msg, setMsg] = useState('')
   const load = fresh => api(`/bx/deals/${id}/full${fresh ? '?fresh=1' : ''}`).then(setD, e => setErr(e.message))
   useEffect(() => { load(false) }, [id])
+  const runCalc = () => api(`/bx/deals/${id}/calc`, { method: 'POST', body: { ...calc, area: +calc.area } }).then(r => {
+    setCalc(null); const c = r.calc
+    setMsg(`По норме: ${c.shifts} смен, ${c.crew} чел., ${c.client} раб. дн. клиенту. ` + (r.bx === 'off' ? 'В Битрикс не записано: ключ записи ещё не задан.' : !r.norm_fields ? 'В Битриксе ещё нет полей для смен и срока (задание Кодексу), записаны площадь и комментарий.' : 'Записано в сделку.'))
+    load(true)
+  }, e => setMsg('Не записалось: ' + e.message))
   if (err) return <div className="card"><a onClick={back}>← назад</a><p className="muted">{err}</p></div>
   if (!d) return <div className="card muted">Загружаю сделку № {id}…</div>
   const c = d.client || {}
@@ -29,6 +37,24 @@ export function DealCard({ id, back, open }) {
       <div className="dealbtns"><button className="ghost" onClick={() => open(d.id, 'kp')}>КП</button>
         <button className="ghost" onClick={() => open(d.id, 'docs')}>Документы</button>
         <button className="ghost" onClick={() => load(true)}>Обновить</button></div>
+    </div>
+    <div className="card"><h3>Срок и ресурсы <span className="muted small">считает приложение</span></h3>
+      {d.norm.shifts ? <div className="kv">
+        <div><span className="muted small">Смен по норме</span><b>{d.norm.shifts}</b></div>
+        <div><span className="muted small">Художников</span><b>{d.norm.crew}</b></div>
+        <div><span className="muted small">Срок клиенту</span><b>{d.norm.term} раб. дн.</b></div>
+        <div><span className="muted small">Сложность</span><b>{LEVELS[d.level] || '—'}</b></div>
+      </div> : <p className="small muted">Расчёта ещё не было: смены, люди и срок появятся после расчёта, руками не вводятся.</p>}
+      {msg && <p className="small muted">{msg}</p>}
+      {!calc ? <div className="dealbtns"><button className="ghost" onClick={() => setCalc({ area: d.area || '', level: d.level || 'medium', service: 'mural', height: false, outdoor: false })}>{d.norm.shifts ? 'Пересчитать' : 'Сделать расчёт'}</button></div>
+      : <div className="dealedit">
+        <div className="seg"><button className={calc.service === 'mural' ? '' : 'ghost'} onClick={() => setCalc({ ...calc, service: 'mural' })}>Роспись</button><button className={calc.service === 'print' ? '' : 'ghost'} onClick={() => setCalc({ ...calc, service: 'print' })}>Печать</button></div>
+        <input type="number" min="1" value={calc.area} onChange={e => setCalc({ ...calc, area: e.target.value })} placeholder="Площадь, м²" />
+        {calc.service === 'mural' && <select value={calc.level} onChange={e => setCalc({ ...calc, level: e.target.value })}>{Object.entries(LEVELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>}
+        {calc.service === 'mural' && <div className="dealbtns"><button className={calc.height ? '' : 'ghost'} onClick={() => setCalc({ ...calc, height: !calc.height })}>Высота</button><button className={calc.outdoor ? '' : 'ghost'} onClick={() => setCalc({ ...calc, outdoor: !calc.outdoor })}>Улица</button></div>}
+        <button disabled={!(+calc.area > 0)} onClick={runCalc}>Посчитать и записать в сделку</button>
+        <p className="small muted">Нормы из «Значений»: м² за смену по сложности, 1 человек на 20 м², подготовка, запас 20% клиенту.</p>
+      </div>}
     </div>
     <div className="card"><h3>Клиент</h3>
       <div><b>{c.name || '—'}</b> <span className="muted small">{c.type}</span></div>

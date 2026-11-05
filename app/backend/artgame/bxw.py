@@ -25,7 +25,7 @@ F_KP, F_CONTRACT, F_INVOICES, F_OTHER = "UF_CRM_1753202415", "UF_CRM_1753202391"
 F_ADV, F_DAYS, F_WARR = "UF_CRM_ARTGAME_ADVANCE_PERCENT", "UF_CRM_1753295493279", "UF_CRM_ARTGAME_WARRANTY_MONTHS"
 F_INV_SUM, F_INV_PURPOSE, F_REASON = "UF_CRM_ARTGAME_INVOICE_AMOUNT", "UF_CRM_ARTGAME_INVOICE_PURPOSE", "UF_CRM_1753381316974"
 WRITABLE = {"OPPORTUNITY", "STAGE_ID", bx.AREA, bx.SERVICE, bx.ADDR, F_ADV, F_DAYS, F_WARR, F_INV_SUM, F_INV_PURPOSE, F_REASON,
-            F_KP, F_CONTRACT, F_INVOICES, F_OTHER}
+            F_KP, F_CONTRACT, F_INVOICES, F_OTHER, bx.F_LEVEL, bx.F_SHIFTS, bx.F_CREW, bx.F_TERM}
 MULTI_FILE = {F_KP, F_CONTRACT, F_INVOICES, F_OTHER}
 # Переходы по документам: двигаем только вперёд и только из перечисленных стадий.
 STAGE_FLOW = {
@@ -128,6 +128,23 @@ def kind_of(name: str) -> str | None:
     return None
 
 
+def norm_fields(area, level, service="mural", height=False, outdoor=False) -> tuple[dict, dict]:
+    """Поля сделки «Сложность / Смен по норме / Художников по норме / Срок» из расчёта. Пишем только те поля,
+    что уже созданы в Битриксе (до задания Кодексу BX-MOP-FIELDS-20261105 их нет)."""
+    r = bx.resources(area, level, service, height, outdoor)
+    if not r:
+        return {}, {}
+    have = bx.deal_fields()
+    fields = {}
+    if bx.F_SHIFTS in have:
+        fields.update({bx.F_SHIFTS: r["shifts"], bx.F_CREW: r["crew"], bx.F_TERM: r["client"]})
+    if r["level"] and bx.F_LEVEL in have:
+        lid = next((i for i, v in bx.enum_map(bx.F_LEVEL).items() if v == bx.LEVELS[r["level"]]), None)
+        if lid:
+            fields[bx.F_LEVEL] = lid
+    return fields, r
+
+
 def doc_saved(p: dict, deal_id: int, name: str, fid: str, f: dict) -> dict:
     from .places import DL_DIR
     kind = kind_of(name)
@@ -143,6 +160,10 @@ def doc_saved(p: dict, deal_id: int, name: str, fid: str, f: dict) -> dict:
     if kind in ("kp", "dogovor") and area:
         fields[bx.AREA] = area
         parts.append(f"{area:g} м²")
+        nf, r = norm_fields(area, f.get("level") or "", f.get("service") or "mural", bool(f.get("height")), bool(f.get("outdoor")))
+        fields.update(nf)
+        if r:
+            parts.append(f"по норме {r['shifts']:g} смен, {r['crew']} чел., срок {r['client']} дн.")
     if kind == "dogovor":
         fields.update({F_ADV: int(f.get("adv") or 0) or None, F_DAYS: str(f.get("days") or "") or None,
                        F_WARR: int(f.get("warr") or 0) or None, bx.ADDR: f.get("objAddr") or None})
@@ -205,6 +226,33 @@ def api_stage(deal_id: int, body: StageIn, p: dict = Depends(active)):
     if body.stage == POSTPONED:
         r.update(postpone(p, deal_id, body.until, body.reason))
     return r
+
+
+class CalcIn(BaseModel):
+    area: float
+    level: str = "medium"
+    service: str = "mural"
+    height: bool = False
+    outdoor: bool = False
+
+
+@router.post("/bx/deals/{deal_id}/calc")
+def api_calc(deal_id: int, body: CalcIn, p: dict = Depends(active)):
+    """Расчёт из карточки: площадь и сложность → смены, люди, срок по нормам → в сделку. МОП руками не вводит."""
+    if body.area <= 0:
+        raise HTTPException(400, "укажите площадь")
+    fields, r = norm_fields(body.area, body.level, body.service, body.height, body.outdoor)
+    if not r:
+        raise HTTPException(400, "нечего считать")
+    fields[bx.AREA] = body.area
+    lvl = bx.LEVELS.get(r["level"], "") if r["level"] else "печать"
+    out = write(p, deal_id, "расчёт срока и ресурсов", fields,
+                f"расчёт: {body.area:g} м² {lvl}: {r['shifts']:g} смен, {r['crew']} чел., {r['client']} раб. дн. клиенту")
+    if out["bx"] == "error":
+        raise HTTPException(502, out["error"])
+    out["calc"] = r
+    out["norm_fields"] = bx.F_SHIFTS in fields
+    return out
 
 
 class NoteIn(BaseModel):

@@ -118,8 +118,13 @@
   function kpFields() {
     var its = (typeof items !== 'undefined' && items) || []
     var total = 0, area = 0
-    its.forEach(function (i) { var q = +String(i.qty).replace(',', '.') || 0, pr = +String(i.price).replace(/\s/g, '') || 0; total += q * pr; if (!area) area = q })
-    return { total: total, area: area }
+    var level = '', service = 'mural', height = false
+    its.forEach(function (i) { var q = +String(i.qty).replace(',', '.') || 0, pr = +String(i.price).replace(/\s/g, '') || 0; total += q * pr; if (!area) area = q
+      var m = /(Лёгкий|Средний|Сложный|Авторский)/.exec(i.name || ''); if (m && !level) level = m[1]
+      if (/печат/i.test(i.name || '')) service = 'print' })
+    // калькулятор места (rm_extra.js): уровень и надбавки точнее, чем по названию строки КП
+    try { if (typeof S !== 'undefined' && S && S.paint) { level = level || S.paint.level; height = !!(S.ex && S.ex.height); if (S.tab === 'print') service = 'print' } } catch (e) { /* нет калькулятора */ }
+    return { total: total, area: area, level: level, service: service, height: height }
   }
   window.ARTGAME_ON_DOWNLOAD = function (f) {
     var n = f.name || '', deal = 0, fields = {}, st = null
