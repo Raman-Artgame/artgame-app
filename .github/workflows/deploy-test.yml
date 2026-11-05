@@ -43,6 +43,7 @@ jobs:
           open(path, "w").write(out)
           os.chmod(path, 0o600)
           PY
-          ssh-keygen -y -f ~/.ssh/key > /dev/null || { echo "::error::TEST_DEPLOY_KEY повреждён — вставьте ключ из setup_ci_deploy.sh заново"; exit 1; }
+          ssh-keygen -y -f ~/.ssh/key > ~/.ssh/key.pub || { echo "::error::TEST_DEPLOY_KEY повреждён — вставьте ключ из setup_ci_deploy.sh заново"; exit 1; }
+          echo "Ключ в секрете (отпечаток, не секрет): $(ssh-keygen -lf ~/.ssh/key.pub)"
           ssh-keyscan -t ed25519 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
           ssh -i ~/.ssh/key -o BatchMode=yes -o ConnectTimeout=20 "artgame-ci@$HOST" "deploy $GITHUB_SHA"
