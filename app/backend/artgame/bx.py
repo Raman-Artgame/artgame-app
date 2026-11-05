@@ -306,18 +306,20 @@ def _days(iso: str | None) -> float:
 
 def today(p: dict, fresh: bool = False) -> dict:
     """Сделки, по которым пора действовать. Сроки — из «Значений» (mop.today.*), иначе по умолчанию."""
-    from . import constants as consts
-    with db.pool.connection() as conn:
-        row = conn.execute("SELECT values FROM constants_versions ORDER BY id DESC LIMIT 1").fetchone()
-    vals = {k: consts.num(v["value"]) for k, v in (row["values"] if row else {}).items() if str(v.get("value", "")).strip()}
+    vals = _vals()
     new_h = float(vals.get("mop.today.new_hours") or 4)
     kp_d = float(vals.get("mop.today.kp_days") or 2)
     idle_d = float(vals.get("mop.today.idle_days") or 3)
     deals = my_deals(p, fresh)["deals"]
-    out = {"new": [], "kp": [], "idle": [], "tasks": [], "limits": {"new_hours": new_h, "kp_days": kp_d, "idle_days": idle_d}}
+    out = {"new": [], "kp": [], "idle": [], "back": [], "tasks": [], "limits": {"new_hours": new_h, "kp_days": kp_d, "idle_days": idle_d}}
+    with db.pool.connection() as conn:
+        due = {r["deal_id"]: r for r in conn.execute(
+            "SELECT deal_id, due, note FROM bx_reminders WHERE person_id=%s AND due <= current_date ORDER BY due", (p["id"],)).fetchall()}
     for d in deals:
         age = _days(d["modified"])
-        if d["stage"] == "NEW" and age * 24 >= new_h:
+        if d["id"] in due:
+            out["back"].append({**d, "due": due[d["id"]]["due"].isoformat(), "note": due[d["id"]]["note"]})
+        elif d["stage"] == "NEW" and age * 24 >= new_h:
             out["new"].append(d)
         elif d["stage"] == "PREPARATION" and age >= kp_d:
             out["kp"].append(d)
@@ -336,6 +338,62 @@ def today(p: dict, fresh: bool = False) -> dict:
         except HTTPException:
             pass
     return out
+
+
+# ---------- «Мой месяц»: выручка и ступень МОП ----------
+
+def _vals() -> dict:
+    from . import constants as consts
+    with db.pool.connection() as conn:
+        row = conn.execute("SELECT values FROM constants_versions ORDER BY id DESC LIMIT 1").fetchone()
+    return {k: consts.num(v["value"]) for k, v in (row["values"] if row else {}).items() if str(v.get("value", "")).strip()}
+
+
+def month(p: dict, fresh: bool = False, ym: str | None = None) -> dict:
+    """Выигранные сделки месяца (по дате закрытия) и процент МОП по «Значениям» (pay.mop.*).
+    Решение HEAD 03.11: ступень 3/4/5% определяется по ВСЕЙ выручке компании за месяц без НДС и считается от всей
+    выручки, не от превышения; бонус за план — при 3-й ступени. Свои сделки МОП видит отдельно, HEAD — всех менеджеров."""
+    from datetime import date
+    uid = need_bx(p)
+    y, m = (int(x) for x in ym.split("-")) if ym else (date.today().year, date.today().month)
+    start, end = date(y, m, 1), date(y + (m == 12), m % 12 + 1, 1)
+    flt = {"CATEGORY_ID": list(CATEGORIES), "STAGE_SEMANTIC_ID": "S", ">=CLOSEDATE": start.isoformat(), "<CLOSEDATE": end.isoformat()}
+    rows = read_all("crm.deal.list", {"filter": flt, "select": ["ID", "TITLE", "OPPORTUNITY", "CLOSEDATE", "ASSIGNED_BY_ID", "CATEGORY_ID"],
+                                      "order": {"CLOSEDATE": "DESC"}}, fresh=fresh)
+    v = _vals()
+    vat = float(v.get("vat") or 0)
+    steps = [(float(v.get(f"pay.mop.step{i}.from") or 0), float(v.get(f"pay.mop.step{i}.pct") or 0)) for i in (1, 2, 3)]
+    salary, bonus_plan = float(v.get("pay.mop.salary") or 0), float(v.get("pay.mop.bonus_plan") or 0)
+    names = {u["id"]: u["name"] for u in users()}
+    net_of = lambda ds: sum(d["sum"] for d in ds) / (1 + vat / 100)  # noqa: E731
+
+    deals = [{"id": int(d["ID"]), "title": d.get("TITLE") or "", "sum": _num(d.get("OPPORTUNITY")), "closed": (d.get("CLOSEDATE") or "")[:10],
+              "manager_id": int(d.get("ASSIGNED_BY_ID") or 0), "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), "")} for d in rows]
+    net = net_of(deals)
+    step = max([i for i, (frm, _) in enumerate(steps, 1) if frm and net > frm] or [0])
+    pct = steps[step - 1][1] if step else 0.0
+    nxt = next(((i, frm) for i, (frm, _) in enumerate(steps, 1) if frm and net <= frm), None)
+    company = {"count": len(deals), "gross": round(sum(d["sum"] for d in deals)), "net": round(net), "step": step, "pct": pct,
+               "bonus": round(net * pct / 100), "plan_bonus": bonus_plan if step == 3 else 0,
+               "next": {"step": nxt[0], "from": nxt[1], "left": round(nxt[1] - net)} if nxt else None}
+    out = {"month": f"{y}-{m:02d}", "vat": vat, "salary": salary, "steps": [{"from": f, "pct": c} for f, c in steps],
+           "all": uid is None, "company": company}
+    if uid is None:
+        by: dict = {}
+        for d in deals:
+            by.setdefault(d["manager_id"], []).append(d)
+        out["managers"] = sorted([{"id": k, "name": names.get(k, str(k)), "deals": ds, "count": len(ds),
+                                   "gross": round(sum(d["sum"] for d in ds)), "net": round(net_of(ds))} for k, ds in by.items()],
+                                 key=lambda x: -x["net"])
+    else:
+        mine = [d for d in deals if d["manager_id"] == uid]
+        out["mine"] = {"deals": mine, "count": len(mine), "gross": round(sum(d["sum"] for d in mine)), "net": round(net_of(mine))}
+    return out
+
+
+@router.get("/bx/month")
+def api_month(fresh: int = 0, ym: str | None = None, p: dict = Depends(active)):
+    return month(p, bool(fresh), ym)
 
 
 @router.get("/bx/today")

@@ -49,6 +49,8 @@ BX_CALLS = []
 def fake_write(method, params):
     BX_CALLS.append({"method": method, "params": {k: v for k, v in params.items() if k != "fields"} | {"fields": {
         k: ("файл" if isinstance(v, (dict, list)) else v) for k, v in (params.get("fields") or {}).items()}}})
+    if method == "tasks.task.add":
+        return {"result": {"task": {"id": "777"}}}
     if method == "crm.deal.update":
         DEALS[str(params["id"])].update({k: v for k, v in params["fields"].items() if not isinstance(v, (dict, list))})
     return {"result": True}

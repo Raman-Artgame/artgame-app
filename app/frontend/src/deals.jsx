@@ -4,6 +4,8 @@ import { DealCard } from './dealcard.jsx'
 
 export const DEAL_ROLES = new Set(['mop', 'mop_vip', 'head'])
 const money = n => n ? Math.round(n).toLocaleString('ru-RU') + ' ₸' : '—'
+const POSTPONED = 'UC_VCP4VO'   // «Отложено»: только с датой возврата
+const tomorrow = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10)
 const when = s => s ? new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : ''
 
 // Мои открытые сделки из Битрикса (ответственный — я; HEAD видит всех). Только чтение.
@@ -47,13 +49,17 @@ export function Deals({ me, openPlace, initial }) {
         <div className="muted small">{[d.city, d.area ? d.area + ' м²' : '', money(d.sum), d.manager, when(d.modified)].filter(Boolean).join(' · ')}</div>
         <div className="dealbtns"><button className="ghost" onClick={() => open(d.id, 'kp')}>КП</button>
           <button className="ghost" onClick={() => open(d.id, 'docs')}>Документы</button>
-          <button className="ghost" onClick={() => setEdit(edit?.id === d.id && edit.kind === 'stage' ? null : { id: d.id, kind: 'stage', stage: d.stage, reason: '' })}>Стадия</button>
+          <button className="ghost" onClick={() => setEdit(edit?.id === d.id && edit.kind === 'stage' ? null : { id: d.id, kind: 'stage', stage: d.stage, reason: '', until: '' })}>Стадия</button>
           <button className="ghost" onClick={() => setEdit(edit?.id === d.id && edit.kind === 'note' ? null : { id: d.id, kind: 'note', text: '' })}>Заметка</button></div>
         {edit?.id === d.id && edit.kind === 'stage' && <div className="dealedit">
           <select value={edit.stage} onChange={e => setEdit({ ...edit, stage: e.target.value })}>
             {stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
           {['failure', 'apology'].includes(stages.find(s => s.id === edit.stage)?.semantic) && <input value={edit.reason} onChange={e => setEdit({ ...edit, reason: e.target.value })} placeholder="Причина отказа (обязательно)" />}
-          <button disabled={edit.stage === d.stage} onClick={() => send(d.id, 'stage', { stage: edit.stage, reason: edit.reason || null })}>Перевести</button></div>}
+          {edit.stage === POSTPONED && <>
+            <label>Вернуться к сделке<input type="date" value={edit.until || ''} min={tomorrow()} onChange={e => setEdit({ ...edit, until: e.target.value })} /></label>
+            <input value={edit.reason} onChange={e => setEdit({ ...edit, reason: e.target.value })} placeholder="Почему отложили (в ленту и в напоминание)" />
+            <p className="small muted">В Битриксе появится задача с этой датой, бот напомнит утром.</p></>}
+          <button disabled={edit.stage === d.stage || (edit.stage === POSTPONED && !edit.until)} onClick={() => send(d.id, 'stage', { stage: edit.stage, reason: edit.reason || null, until: edit.stage === POSTPONED ? edit.until : null })}>Перевести</button></div>}
         {edit?.id === d.id && edit.kind === 'note' && <div className="dealedit">
           <input value={edit.text} onChange={e => setEdit({ ...edit, text: e.target.value })} placeholder="Заметка в ленту сделки" />
           <button disabled={!edit.text.trim()} onClick={() => send(d.id, 'note', { text: edit.text })}>Записать</button></div>}

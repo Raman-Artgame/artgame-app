@@ -71,9 +71,13 @@ export function Today({ openDeal }) {
     {!items.length && <p className="muted small">Ничего.</p>}
     {items.map(d => <div key={d.id} className="row" onClick={() => openDeal(d.id)}><div><b>№ {d.id}</b> {d.title.replace(new RegExp(`^№?\\s*${d.id}\\s*·?\\s*`), '')}<div className="muted small">{d.stage_name}{d.sum ? ' · ' + money(d.sum) : ''}</div></div><a>открыть</a></div>)}
   </div>
-  const total = t.new.length + t.kp.length + t.idle.length + t.tasks.length
+  const total = t.back.length + t.new.length + t.kp.length + t.idle.length + t.tasks.length
   return <>
     <div className="card"><h2>Сегодня</h2><p className="muted">{total ? `Требуют действия: ${total}` : 'Всё в порядке, срочного нет.'}</p></div>
+    {!!t.back.length && <div className="card"><h3>Пора вернуться <span className="muted small">{t.back.length}</span></h3>
+      <p className="small muted">Отложенные сделки, у которых подошла дата возврата.</p>
+      {t.back.map(d => <div key={d.id} className="row" onClick={() => openDeal(d.id)}><div><b>№ {d.id}</b> {d.title.replace(new RegExp(`^№?\\s*${d.id}\\s*·?\\s*`), '')}<div className="muted small">до {d.due.split('-').reverse().join('.')}{d.note ? ' · ' + d.note : ''}</div></div><a>открыть</a></div>)}
+    </div>}
     {block('Новые заявки без ответа', t.new, `В «Взаимном информировании» дольше ${L.new_hours} ч.`)}
     {block('КП без ответа', t.kp, `После отправки КП прошло ${L.kp_days}+ дня.`)}
     {block('Сделки без движения', t.idle, `Нет изменений ${L.idle_days}+ дня (кроме «Отложено»).`)}
@@ -81,5 +85,44 @@ export function Today({ openDeal }) {
       {!t.tasks.length && <p className="muted small">Открытых задач нет.</p>}
       {t.tasks.map(x => <div key={x.id} className="row" onClick={() => x.deal && openDeal(x.deal)}><div>{x.title}{x.deal && <div className="muted small">сделка № {x.deal}</div>}</div><span className="muted small">{x.deadline ? x.deadline.slice(0, 10) : ''}</span></div>)}
     </div>
+  </>
+}
+
+// «Мой месяц»: выигранные сделки месяца из Битрикса, выручка без НДС, ступень и % по «Значениям» (pay.mop.*). HEAD видит всех.
+const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
+const ymName = ym => { const [y, m] = ym.split('-'); return `${MONTHS[+m - 1]} ${y}` }
+const ymShift = (ym, k) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + k, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
+export function Month({ openDeal }) {
+  const now = new Date()
+  const [ym, setYm] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
+  const [m, setM] = useState(null)
+  const [err, setErr] = useState('')
+  useEffect(() => { setM(null); api(`/bx/month?ym=${ym}`).then(setM, e => setErr(e.message)) }, [ym])
+  const cur = ym >= `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const nav = <div className="seg"><button className="ghost" onClick={() => setYm(ymShift(ym, -1))}>←</button><button className="ghost" disabled>{ymName(ym)}</button><button className="ghost" disabled={cur} onClick={() => setYm(ymShift(ym, 1))}>→</button></div>
+  if (err) return <div className="card"><h2>Мой месяц</h2>{nav}<p className="muted">{err}</p></div>
+  if (!m) return <div className="card"><h2>Мой месяц</h2>{nav}<p className="muted">Считаю по Битриксу…</p></div>
+  const steps = m.steps.filter(s => s.from)
+  const co = m.company
+  const deals = (ds, showMgr) => ds.map(d => <div key={d.id} className="row" onClick={() => openDeal(d.id)}><div><b>№ {d.id}</b> {d.title.replace(new RegExp(`^№?\\s*${d.id}\\s*·?\\s*`), '')}<div className="muted small">{[d.closed.split('-').reverse().join('.'), showMgr && d.manager].filter(Boolean).join(' · ')}</div></div><b>{money(d.sum)}</b></div>)
+  return <>
+    <div className="card"><h2>{m.all ? 'Месяц команды' : 'Мой месяц'}</h2>{nav}
+      <div className="kv">
+        <div><span className="muted small">Выручка компании без НДС</span><b>{money(co.net)}</b></div>
+        <div><span className="muted small">С НДС{m.vat ? ` ${m.vat}%` : ''}</span><b>{money(co.gross)}</b></div>
+        <div><span className="muted small">Ступень</span><b>{co.step ? `${co.step} · ${co.pct}%` : steps.length ? 'пока нет' : '—'}</b></div>
+        <div><span className="muted small">Процент МОП</span><b>{money(co.bonus)}{co.plan_bonus ? ` + ${money(co.plan_bonus)}` : ''}</b></div>
+      </div>
+      {co.next && <p className="small muted">До ступени {co.next.step} ({steps[co.next.step - 1]?.pct}%) не хватает {money(co.next.left)} без НДС.</p>}
+      {!!m.salary && <p className="small muted">Оклад {money(m.salary)} + процент от всей выручки компании за месяц без НДС{steps.length ? ': ' + steps.map(s => `${s.pct}% от ${money(s.from)}`).join(', ') : ''}. Считает сервер по закрытым сделкам Битрикса, выплаты отмечает HEAD.</p>}
+    </div>
+    {m.all && m.managers.map(x => <div key={x.id} className="card"><h3>{x.name} <span className="muted small">{x.count}</span></h3>
+      <div className="kv"><div><span className="muted small">Без НДС</span><b>{money(x.net)}</b></div><div><span className="muted small">С НДС</span><b>{money(x.gross)}</b></div></div>
+      {deals(x.deals, false)}</div>)}
+    {!m.all && <div className="card"><h3>Мои закрытые сделки <span className="muted small">{m.mine.count}</span></h3>
+      <div className="kv"><div><span className="muted small">Без НДС</span><b>{money(m.mine.net)}</b></div><div><span className="muted small">С НДС</span><b>{money(m.mine.gross)}</b></div></div>
+      {!m.mine.count && <p className="muted small">В этом месяце пока нет.</p>}
+      {deals(m.mine.deals, false)}
+    </div>}
   </>
 }

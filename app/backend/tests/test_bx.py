@@ -10,7 +10,11 @@ DEALS = {
              "UF_CRM_1753294730602": "19285", "UF_CRM_ARTGAME_ADVANCE_PERCENT": 50},
     "1651": {"ID": "1651", "TITLE": "Школа", "STAGE_ID": "NEW", "CATEGORY_ID": "0", "OPPORTUNITY": "0", "ASSIGNED_BY_ID": "4693",
              "CONTACT_ID": "2215", "COMPANY_ID": "0", "DATE_MODIFY": "2026-11-04T11:00:00+03:00", "UF_CRM_6881101914D8D": None},
+    "1590": {"ID": "1590", "TITLE": "1590 · ОФИС — ШЫМКЕНТ", "STAGE_ID": "WON", "CATEGORY_ID": "0", "OPPORTUNITY": "2900000.00",
+             "ASSIGNED_BY_ID": "4565", "CONTACT_ID": "0", "COMPANY_ID": "0", "DATE_MODIFY": "2026-11-03T10:00:00+03:00",
+             "CLOSEDATE": "2026-11-03T10:00:00+03:00", "UF_CRM_6881101914D8D": None},
 }
+SEMANTIC = {"WON": "S", "LOSE": "F"}
 CALLS = []
 
 
@@ -19,6 +23,9 @@ def fake(method, params):
     if method == "crm.deal.list":
         f = params["filter"]
         rows = [d for d in DEALS.values() if "ASSIGNED_BY_ID" not in f or int(d["ASSIGNED_BY_ID"]) == f["ASSIGNED_BY_ID"]]
+        rows = [d for d in rows if SEMANTIC.get(d["STAGE_ID"].split(":")[-1], "P") == f.get("STAGE_SEMANTIC_ID", "P")]
+        if ">=CLOSEDATE" in f:
+            rows = [d for d in rows if f[">=CLOSEDATE"] <= d.get("CLOSEDATE", "")[:10] < f["<CLOSEDATE"]]
         return {"result": rows, "total": len(rows)}
     if method == "crm.deal.get":
         return {"result": DEALS.get(str(params["id"]))}
@@ -177,6 +184,8 @@ def test_write_off_and_on(bxc, monkeypatch, tmp_path):
         calls.append((method, params))
         if method == "crm.deal.update":
             DEALS["1601"].update({k: v for k, v in params["fields"].items() if not isinstance(v, (dict, list))})
+        if method == "tasks.task.add":
+            return {"result": {"task": {"id": "777"}}}
         return {"result": True}
     monkeypatch.setattr(bxw, "CALL", fake_call)
     # чужая сделка — нельзя даже с ключом
@@ -186,6 +195,16 @@ def test_write_off_and_on(bxc, monkeypatch, tmp_path):
     r = c.post("/api/bx/deals/1601/stage", json={"stage": "NEW"}, headers=hdr(6000)).json()
     assert r["bx"] == "ok" and DEALS["1601"]["STAGE_ID"] == "NEW" and calls[0][0] == "crm.deal.update" and calls[1][0] == "crm.timeline.comment.add"
     assert "P6000 (приложение)" in calls[1][1]["fields"]["COMMENT"]
+    # «Отложено» — только с датой возврата: задача в Битриксе + напоминание
+    assert c.post("/api/bx/deals/1601/stage", json={"stage": "UC_VCP4VO"}, headers=hdr(6000)).status_code == 400
+    calls.clear()
+    r = c.post("/api/bx/deals/1601/stage", json={"stage": "UC_VCP4VO", "until": "2027-01-15", "reason": "ждут бюджет"}, headers=hdr(6000)).json()
+    assert r["bx"] == "ok" and r["task"] == 777 and "отложил до 15.01.2027: ждут бюджет" in calls[1][1]["fields"]["COMMENT"]
+    tk = calls[2][1]["fields"]
+    assert calls[2][0] == "tasks.task.add" and tk["RESPONSIBLE_ID"] == 4565 and tk["UF_CRM_TASK"] == ["D_1601"] and tk["DEADLINE"].startswith("2027-01-15")
+    with db.pool.connection() as conn:
+        assert conn.execute("SELECT due::text, note FROM bx_reminders WHERE deal_id=1601").fetchone() == {"due": "2027-01-15", "note": "ждут бюджет"}
+    DEALS["1601"]["STAGE_ID"] = "NEW"
     # документ скачан на странице: КП → сумма, площадь, файл, стадия NEW → PREPARATION
     (tmp_path / "abc1.bin").write_bytes(b"%PDF")
     calls.clear()
@@ -216,3 +235,43 @@ def test_full_and_today(bxc):
     t = c.get("/api/bx/today", headers=hdr(6000)).json()
     assert t["tasks"] == [{"id": 501, "title": "Перезвонить по КП", "deadline": "2026-11-06T10:00:00+03:00", "deal": 1601}]
     assert [x["id"] for x in t["kp"]] == [1601] and t["limits"]["kp_days"] == 2   # сделка на КП с 04.11 — без ответа
+
+
+def test_month(bxc):
+    from psycopg.types.json import Jsonb
+    c, ids = bxc
+    vals = {k: {"value": v, "status": "Утверждено"} for k, v in {"vat": "16", "pay.mop.salary": "200 000", "pay.mop.bonus_plan": "100 000",
+            "pay.mop.step1.from": "2 000 000", "pay.mop.step1.pct": "3", "pay.mop.step2.from": "7 000 000", "pay.mop.step2.pct": "4",
+            "pay.mop.step3.from": "15 000 000", "pay.mop.step3.pct": "5"}.items()}
+    with db.pool.connection() as conn:
+        conn.execute("INSERT INTO constants_versions (checksum, values) VALUES ('t', %s)", (Jsonb(vals),))
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    m = c.get("/api/bx/month?ym=2026-11", headers=hdr(6000)).json()
+    assert [d["id"] for d in m["mine"]["deals"]] == [1590] and m["mine"]["gross"] == 2900000 and m["mine"]["net"] == 2500000   # / 1,16
+    co = m["company"]   # ступень и % — по всей выручке компании (HEAD 03.11)
+    assert co["net"] == 2500000 and co["step"] == 1 and co["pct"] == 3 and co["bonus"] == 75000
+    assert co["next"] == {"step": 2, "from": 7000000, "left": 4500000} and m["salary"] == 200000
+    h = c.get("/api/bx/month?ym=2026-11", headers=hdr(1000)).json()
+    assert h["all"] and h["managers"][0]["name"] == "Ануар Минкеев" and h["managers"][0]["net"] == 2500000
+    assert c.get("/api/bx/month?ym=2026-10", headers=hdr(6000)).json()["company"]["count"] == 0
+
+
+def test_notify(bxc, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from artgame import notify
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    sent = []
+    monkeypatch.setattr(notify, "SEND", lambda tg, text: sent.append((tg, text)))
+    with db.pool.connection() as conn:
+        conn.execute("INSERT INTO bx_reminders (person_id, deal_id, due, note) VALUES (%s, 1601, current_date, 'ждут бюджет')", (ids[6000],))
+    t = c.get("/api/bx/today", headers=hdr(6000)).json()
+    assert [d["id"] for d in t["back"]] == [1601] and t["kp"] == []   # отложенная — в «пора вернуться», не в «КП без ответа»
+    assert notify.run(datetime(2026, 11, 6, 3, 0, tzinfo=ZoneInfo("Asia/Almaty"))) == 0   # ночью молчим
+    n = notify.run(datetime(2026, 11, 6, 10, 0, tzinfo=ZoneInfo("Asia/Almaty")))
+    assert n == 2 and sent[0][0] == 6000 and "Пора вернуться к сделке № 1601" in sent[0][1] and "ждут бюджет" in sent[0][1]
+    assert "Задача на сегодня: Перезвонить по КП" in sent[0][1]
+    assert notify.run(datetime(2026, 11, 6, 10, 30, tzinfo=ZoneInfo("Asia/Almaty"))) == 0 and len(sent) == 1   # повторно не шлём
+    with db.pool.connection() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM bx_reminders WHERE sent_at IS NULL").fetchone()["n"] == 0

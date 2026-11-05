@@ -8,6 +8,7 @@
 """
 import base64
 import json
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -34,6 +35,7 @@ STAGE_FLOW = {
     "signed": ("UC_AV00QK", {"NEW", "PREPARATION", "UC_VZFPUP", "UC_YV66BV", "UC_1EXUAC", "FINAL_INVOICE"}),
 }
 KIND_FIELD = {"kp": F_KP, "dogovor": F_OTHER, "eskiz": F_OTHER, "invoice": F_INVOICES, "avr": F_OTHER, "signed": F_CONTRACT}
+POSTPONED = "UC_VCP4VO"   # «Отложено»: только с датой возврата — задача в Битриксе и напоминание бота
 KIND_TITLE = {"kp": "КП", "dogovor": "договор", "eskiz": "договор на эскиз", "invoice": "счёт", "avr": "акт", "signed": "подписанный договор"}
 
 
@@ -158,6 +160,26 @@ def doc_saved(p: dict, deal_id: int, name: str, fid: str, f: dict) -> dict:
 class StageIn(BaseModel):
     stage: str
     reason: str | None = None
+    until: date | None = None   # для «Отложено»: когда вернуться к сделке
+
+
+def postpone(p: dict, deal_id: int, until: date, reason: str | None) -> dict:
+    """«Отложено до…»: в Битриксе — задача ответственному с дедлайном (если вебхук с правом «Задачи»),
+    в приложении — напоминание бота в этот день и строка в «Сегодня»."""
+    out = {"task": None}
+    uid = bx.bx_id(p)
+    if enabled() and uid:
+        try:
+            j = CALL("tasks.task.add", {"fields": {"TITLE": f"Вернуться к сделке № {deal_id}", "RESPONSIBLE_ID": uid,
+                                                   "CREATED_BY": uid, "DEADLINE": f"{until.isoformat()}T10:00:00+05:00",
+                                                   "DESCRIPTION": reason or "", "UF_CRM_TASK": [f"D_{deal_id}"]}})
+            out["task"] = int(((j.get("result") or {}).get("task") or {}).get("id") or 0) or None
+        except Exception as ex:
+            out["task_error"] = str(ex)[:200]
+    with db.pool.connection() as conn:
+        conn.execute("INSERT INTO bx_reminders (person_id, deal_id, due, note) VALUES (%s, %s, %s, %s)",
+                     (p["id"], deal_id, until, reason))
+    return out
 
 
 @router.post("/bx/deals/{deal_id}/stage")
@@ -170,10 +192,18 @@ def api_stage(deal_id: int, body: StageIn, p: dict = Depends(active)):
         if not body.reason:
             raise HTTPException(400, "укажите причину отказа")
         fields[F_REASON] = body.reason
-    r = write(p, deal_id, f"стадия → {st[body.stage]['name']}", fields,
-              f"перевёл в «{st[body.stage]['name']}»" + (f": {body.reason}" if body.reason else ""))
+    note = f"перевёл в «{st[body.stage]['name']}»"
+    if body.stage == POSTPONED:
+        if not body.until or body.until <= date.today():
+            raise HTTPException(400, "укажите дату возврата к сделке (позже сегодня)")
+        note = f"отложил до {body.until:%d.%m.%Y}"
+    if body.reason:
+        note += f": {body.reason}"
+    r = write(p, deal_id, f"стадия → {st[body.stage]['name']}", fields, note)
     if r["bx"] == "error":
         raise HTTPException(502, r["error"])
+    if body.stage == POSTPONED:
+        r.update(postpone(p, deal_id, body.until, body.reason))
     return r
 
 
