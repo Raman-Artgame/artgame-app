@@ -24,6 +24,20 @@ jobs:
         run: |
           if [ -z "$KEY" ]; then echo "::warning::Нет секрета TEST_DEPLOY_KEY — выкладка на test пропущена"; exit 0; fi
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$KEY" > ~/.ssh/key; chmod 600 ~/.ssh/key
+          # ключ могли вставить одной строкой или с переносами Windows — собираем обратно в формат OpenSSH
+          python3 - <<'PY'
+          import os, re
+          k = os.environ["KEY"].replace("\r", "").strip()
+          m = re.search(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", k, re.S)
+          if not m:
+              raise SystemExit("::error::TEST_DEPLOY_KEY: нет строк BEGIN/END — вставьте ключ целиком")
+          body = re.sub(r"\s+", "", m.group(2))
+          lines = [body[i:i + 70] for i in range(0, len(body), 70)]
+          out = f"-----BEGIN {m.group(1)}-----\n" + "\n".join(lines) + f"\n-----END {m.group(1)}-----\n"
+          path = os.path.expanduser("~/.ssh/key")
+          open(path, "w").write(out)
+          os.chmod(path, 0o600)
+          PY
+          ssh-keygen -y -f ~/.ssh/key > /dev/null || { echo "::error::TEST_DEPLOY_KEY повреждён — вставьте ключ из setup_ci_deploy.sh заново"; exit 1; }
           ssh-keyscan -t ed25519 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
           ssh -i ~/.ssh/key -o BatchMode=yes -o ConnectTimeout=20 "artgame-ci@$HOST" "deploy $GITHUB_SHA"
