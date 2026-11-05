@@ -27,7 +27,7 @@ async function tab(p, name) {
   const nav = p.locator('nav')
   const re = new RegExp(`^${name}\\s*\\d*$`)   // у кнопки может быть счётчик: «Лиды1»
   if (await nav.getByRole('button', { name: re }).count()) return nav.getByRole('button', { name: re }).click()
-  await nav.getByRole('button', { name: 'Ещё' }).click()
+  await nav.locator('button').last().click()   // «Ещё» (или имя открытой оттуда вкладки)
   await p.locator('.sheetbox').getByRole('button', { name, exact: true }).click()
 }
 async function dealsOpen(p) {
@@ -137,6 +137,24 @@ async function card(p, id) {
   await tab(p, 'Месяц')
   await p.locator('h3', { hasText: 'Мои закрытые сделки' }).waitFor()
   assert.match(await p.locator('.card', { hasText: 'Мои закрытые сделки' }).textContent(), /1590/)
+  // Траты отдела продаж: лимит не задан → трата с чеком уходит HEAD; без чека кнопка закрыта
+  const spend = p.locator('.card', { hasText: 'Мои траты' })
+  await spend.waitFor()
+  assert.match(await spend.textContent(), /Лимит на месяц ещё не задан/)
+  await spend.getByRole('button', { name: '+ Трата' }).click()
+  await spend.locator('.chips button', { hasText: 'Выезды и транспорт' }).click()
+  await spend.locator('input[placeholder="Сумма, ₸"]').fill('3500')
+  await spend.locator('input[placeholder^="На что"]').fill('такси на замер')
+  await spend.locator('input[placeholder^="№ сделки"]').fill('1601')
+  assert.ok(await spend.getByRole('button', { name: 'Записать трату' }).isDisabled(), 'без фото чека не записать')
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  await spend.locator('input[type=file]').setInputFiles({ name: 'chek.png', mimeType: 'image/png', buffer: PNG })
+  await spend.locator('.photo img').waitFor()
+  await spend.getByRole('button', { name: 'Записать трату' }).click()
+  await p.locator('text=Трата ушла на одобрение HEAD.').waitFor()
+  await spend.locator('.row', { hasText: '3 500' }).waitFor()
+  assert.match(await spend.locator('.row', { hasText: '3 500' }).textContent(), /Выезды и транспорт.*такси на замер.*сделка № 1601.*ждёт HEAD/)
+  await p.screenshot({ path: `${shots}/mop-spend.png`, fullPage: true })
 
   // Лиды: список с недостающими полями → карточка → город и площадь → «В сделку» → карточка новой сделки
   await tab(p, 'Лиды')
@@ -163,6 +181,9 @@ async function card(p, id) {
   // HEAD: «Журнал» со сводкой по МОП (у МОП этой вкладки нет)
   assert.strictEqual(await p.locator('nav').getByRole('button', { name: 'Журнал' }).count(), 0)
   assert.strictEqual(await p.locator('nav').getByRole('button', { name: 'Ещё' }).count(), 0)
+  // HEAD: трата сверх лимита — во «Проверке», понятная строка вместо «Офис / без объекта»
+  await tab(h, 'Проверка')
+  await h.locator('.row', { hasText: 'Отдел продаж · Выезды и транспорт · сделка № 1601 · сверх лимита' }).waitFor()
   await tab(h, 'Журнал')   // у HEAD — через «Ещё»
   await h.locator('.row', { hasText: 'Ануар' }).first().waitFor()
   console.log('OK: «Сегодня» очередью, лиды → сделка, воронка, карточка шагами, итог звонка, запись в Битрикс, КП и «Документы», месяц')

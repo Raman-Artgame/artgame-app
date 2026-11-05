@@ -36,7 +36,7 @@ def work_dict(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         return {
             "objects": conn.execute("SELECT id, title, city FROM objects WHERE status='active' ORDER BY id DESC").fetchall(),
-            "categories": conn.execute("SELECT code, title FROM expense_categories WHERE active ORDER BY sort").fetchall(),
+            "categories": conn.execute("SELECT code, title FROM expense_categories WHERE active AND article='project' ORDER BY sort").fetchall(),
             "zones": p["zones"],
             "printer": consts.latest(conn).get("print.tech.printer"),
         }
@@ -140,7 +140,7 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
         if dup:
             return dup
         check_zone(conn, p, e.zone_code, e.object_id)
-        if not conn.execute("SELECT 1 FROM expense_categories WHERE code=%s AND active", (e.category,)).fetchone():
+        if not conn.execute("SELECT 1 FROM expense_categories WHERE code=%s AND active AND article='project'", (e.category,)).fetchone():
             raise HTTPException(400, "bad category")
         drive_id = None
         if e.receipt:
@@ -223,6 +223,12 @@ def review_list(p: dict = Depends(active)):
                 f"""SELECT x.*, o.title AS object_title, pe.full_name AS person_name
                     FROM {t} x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id
                     WHERE x.status='submitted' AND {cond} ORDER BY x.created_at""", args).fetchall()
+        cats = {c["code"]: c for c in conn.execute("SELECT code, title, article FROM expense_categories").fetchall()}
+        for e in out["expenses"]:   # трата отдела продаж: вместо «Офис / без объекта» — статья и сделка
+            c = cats.get(e["category"]) or {}
+            e["category_title"] = c.get("title", e["category"])
+            if c.get("article") == "sales":
+                e["object_title"] = "Отдел продаж · " + e["category_title"] + (f" · сделка № {e['deal_id']}" if e.get("deal_id") else "") + (" · сверх лимита" if e.get("over_limit") else "")
         out["expenses"] = [with_receipt(e) for e in out["expenses"]]
         if p["role_code"] != "head":
             for x in out["shifts"]:

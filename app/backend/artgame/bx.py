@@ -304,6 +304,8 @@ def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
                  "pay": {k: (_money(d.get(f)) if k != "next" else d.get(f)) for k, f in FIN.items()}, "category": int(d.get("CATEGORY_ID") or 0),
                  "level": level_key(d.get(F_LEVEL)), "norm": {"shifts": _num(d.get(F_SHIFTS)), "crew": _num(d.get(F_CREW)), "term": _num(d.get(F_TERM))},
                  "norm_fields": all(k in deal_fields() for k in (F_SHIFTS, F_CREW, F_TERM))})
+    from .sales_exp import for_deal
+    card["acq"] = for_deal(deal_id)   # траты отдела продаж по сделке — стоимость привлечения
     return card
 
 

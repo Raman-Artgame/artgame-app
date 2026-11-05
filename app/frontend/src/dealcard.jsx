@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 
+import { SalesSpend } from './salesexp.jsx'
 import { CallOutcome, Contact, Feed, bxLink, cleanTitle, dt, money, strip, usePortal } from './crm.jsx'
 
 // Карточка сделки (HEAD 05.11): шапка с шагами и ОДНОЙ кнопкой следующего шага, ниже три раздела —
@@ -113,6 +114,7 @@ export function DealCard({ id, back, open }) {
       </div>
       <p className="small muted">Считает сервер по поступлениям, отмечает HEAD.</p>
     </div>
+    <SalesSpend dealId={d.id} />
     {!!d.files.length && <div className="card"><h3>Документы в сделке</h3>
       {d.files.map((f, i) => <div key={i} className="row"><span>{f.title}</span>{f.url ? <a href={f.url} target="_blank" rel="noreferrer">открыть</a> : <span className="muted small">в Битриксе</span>}</div>)}
     </div>}
@@ -157,6 +159,7 @@ export function Month({ openDeal }) {
       <p className="small muted">{m.source === 'sheet' ? 'Выручка — по листу «Проекты» финансовой таблицы (дата завершения работ, с НДС).' : 'Выручка — по дате закрытия сделок в Битриксе (пока в листе «Проекты» нет строк за этот месяц).'}</p>
       {m.warn && <p className="small" style={{ color: 'var(--hot)' }}>{m.warn}</p>}
     </div>
+    {cur && <SalesSpend won={co.count} />}
     {m.all && m.managers.map(x => <div key={x.id} className="card"><h3>{x.name} <span className="muted small">{x.count}</span></h3>
       <div className="kv"><div><span className="muted small">Без НДС</span><b>{money(x.net)}</b></div><div><span className="muted small">С НДС</span><b>{money(x.gross)}</b></div></div>
       {deals(x.deals, false)}</div>)}

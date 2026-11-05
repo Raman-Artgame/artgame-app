@@ -169,7 +169,7 @@ export function Review() {
       {r.shifts.length ? r.shifts.map(x => <Item key={x.id} k="shift" x={x}>{new Date(x.started_at).toLocaleString('ru-RU')}{x.area_m2 ? ` · ${+x.area_m2} м²` : ''} · {ZONE[x.zone_code]}{x.plan_m2 ? ` · ${x.zone_code === 'print' ? 'план' : 'норма'} ${m2(x.plan_m2)} м²` : ''}{x.kpd != null ? ` · КПД ${pct(x.kpd)}` : ''}{x.printer ? ` · ${x.printer}` : ''}</Item>) : <p className="muted">Всё проверено</p>}
     </div>
     <div className="card"><h2>Расходы на проверку</h2>
-      {r.expenses.length ? r.expenses.map(x => <Item key={x.id} k="expense" x={x}>{money(x.amount)} · {x.paid_by === 'own' ? 'свои' : 'компании'}{x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</Item>) : <p className="muted">Всё проверено</p>}
+      {r.expenses.length ? r.expenses.map(x => <Item key={x.id} k="expense" x={x}>{money(x.amount)} · {x.paid_by === 'own' ? 'свои' : 'компании'}{x.note ? ' · ' + x.note : ''}{x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</Item>) : <p className="muted">Всё проверено</p>}
     </div>
   </>
 }
