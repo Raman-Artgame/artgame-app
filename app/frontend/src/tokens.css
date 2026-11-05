@@ -26,8 +26,8 @@ button.ghost { background: var(--line); }
 .row a { color: var(--muted); font-size: 13px; cursor: pointer; }
 .st-approved { background: color-mix(in srgb, var(--ok) 25%, transparent); }
 .st-rejected { background: color-mix(in srgb, var(--accent) 35%, transparent); }
-nav { position: sticky; bottom: 0; display: flex; gap: 6px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); max-width: 480px; margin: 0 auto; }
-nav button { padding: 10px 4px; font-size: 13px; background: transparent; color: var(--muted); }
+nav { position: sticky; bottom: 0; display: flex; gap: 6px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); max-width: 480px; margin: 0 auto; overflow-x: auto; scrollbar-width: none; }
+nav button { padding: 10px 8px; font-size: 13px; background: transparent; color: var(--muted); flex: none; width: auto; }
 nav button.on { color: var(--text); background: var(--line); }
 .toast { background: var(--ok); color: #0D0B0C; padding: 12px; border-radius: 12px; margin-bottom: 12px; }
 .photo { display: flex; align-items: center; justify-content: center; min-height: 72px; border: 1px dashed var(--line); border-radius: 12px; margin: 8px 0; color: var(--muted); cursor: pointer; overflow: hidden; }

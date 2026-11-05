@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 
+const clean = (id, t) => (t || '').replace(new RegExp(`^№?\\s*${id}\\s*·?\\s*`), '')
 const LABEL = {
-  deal_open: d => `Открыл сделку № ${d.entity_id}${d.data?.title ? ' · ' + d.data.title : ''}${d.data?.via === 'kp' ? ' (КП)' : ''}`,
+  deal_open: d => `Открыл сделку № ${d.entity_id}${d.data?.title ? ' · ' + clean(d.entity_id, d.data.title) : ''}${d.data?.via === 'kp' ? ' (КП)' : ''}`,
   place_download: d => `Скачал ${d.data?.name || 'файл'}`,
   shift_add: () => 'Отправил смену',
   expense_add: () => 'Отправил расход',
