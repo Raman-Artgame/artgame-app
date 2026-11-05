@@ -15,6 +15,14 @@ DEALS = {
              "CLOSEDATE": "2026-11-03T10:00:00+03:00", "UF_CRM_6881101914D8D": None},
 }
 SEMANTIC = {"WON": "S", "LOSE": "F"}
+LEADS = {
+    "3001": {"ID": "3001", "TITLE": "Заявка с сайта", "NAME": "Дана", "LAST_NAME": "", "STATUS_ID": "UC_93GBZP", "ASSIGNED_BY_ID": "4565",
+             "DATE_CREATE": "2026-11-01T09:00:00+05:00", "DATE_MODIFY": "2026-11-01T09:00:00+05:00", "OPPORTUNITY": "0",
+             "PHONE": [{"VALUE": "+7 701 555 44 33"}], "CONTACT_ID": None, "COMPANY_ID": None, "SOURCE_ID": "WEB",
+             "UF_CRM_1753202309": None},
+    "3002": {"ID": "3002", "TITLE": "Чужой лид", "STATUS_ID": "UC_93GBZP", "ASSIGNED_BY_ID": "4693",
+             "DATE_CREATE": "2026-11-04T09:00:00+05:00", "DATE_MODIFY": "2026-11-04T09:00:00+05:00", "PHONE": []},
+}
 CALLS = []
 
 
@@ -29,6 +37,21 @@ def fake(method, params):
         return {"result": rows, "total": len(rows)}
     if method == "crm.deal.get":
         return {"result": DEALS.get(str(params["id"]))}
+    if method == "crm.status.list" and params["filter"]["ENTITY_ID"] == "STATUS":
+        return {"result": [{"STATUS_ID": "UC_93GBZP", "NAME": "Новый лид", "SORT": "10"},
+                           {"STATUS_ID": "IN_PROCESS", "NAME": "В работе", "SORT": "20"},
+                           {"STATUS_ID": "CONVERTED", "NAME": "Сделка", "SORT": "30", "EXTRA": {"SEMANTICS": "success"}},
+                           {"STATUS_ID": "UC_MARGO5", "NAME": "Дорого", "SORT": "40", "EXTRA": {"SEMANTICS": "failure"}}]}
+    if method == "crm.lead.list":
+        f = params["filter"]
+        rows = [l for l in LEADS.values() if l["STATUS_ID"] not in ("CONVERTED", "UC_MARGO5")
+                and ("ASSIGNED_BY_ID" not in f or int(l["ASSIGNED_BY_ID"]) == f["ASSIGNED_BY_ID"])]
+        return {"result": rows, "total": len(rows)}
+    if method == "crm.lead.get":
+        return {"result": LEADS.get(str(params["id"]))}
+    if method == "crm.lead.fields":
+        return {"result": {"UF_CRM_1753202309": {"type": "enumeration", "items": [{"ID": "5501", "VALUE": "Казахстан, Астана"}]},
+                           "UF_CRM_ARTGAME_LEAD_AREA": {"type": "double"}}}
     if method == "crm.status.list":
         return {"result": [{"STATUS_ID": "NEW", "NAME": "Взаимное информирование", "SORT": "10"},
                            {"STATUS_ID": "PREPARATION", "NAME": "Встреча/Отправка КП", "SORT": "60"},
@@ -40,7 +63,7 @@ def fake(method, params):
                            "UF_CRM_ARTGAME_COMPLEXITY": {"type": "enumeration", "items": [{"ID": "901", "VALUE": "Лёгкий"}, {"ID": "902", "VALUE": "Средний"},
                                                                                            {"ID": "903", "VALUE": "Сложный"}, {"ID": "904", "VALUE": "Авторский"}]},
                            "UF_CRM_ARTGAME_NORM_SHIFTS": {"type": "double"}, "UF_CRM_ARTGAME_NORM_CREW": {"type": "integer"},
-                           "UF_CRM_ARTGAME_TERM_DAYS": {"type": "integer"}, "OPPORTUNITY": {"title": "Сумма"}}}
+                           "UF_CRM_ARTGAME_TERM_DAYS": {"type": "integer"}, "UF_CRM_ARTGAME_AREA_M2": {"type": "double"}, "OPPORTUNITY": {"title": "Сумма"}}}
     if method == "user.get":
         return {"result": [{"ID": "4565", "NAME": "Ануар", "LAST_NAME": "Минкеев", "USER_TYPE": "employee"},
                            {"ID": "4693", "NAME": "Тимур", "LAST_NAME": "Жандосов", "USER_TYPE": "employee"}]}
@@ -244,7 +267,7 @@ def test_full_and_today(bxc):
     c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
     d = c.get("/api/bx/deals/1601/full", headers=hdr(6000)).json()
     assert d["manager"] == "Ануар Минкеев" and [h["stage"] for h in d["history"]] == ["Встреча/Отправка КП", "Взаимное информирование"]
-    assert {f["kind"] for f in d["feed"]} == {"comment", "звонок"} and d["feed"][0]["who"] == "Ануар Минкеев"
+    assert {f["kind"] for f in d["feed"]} == {"comment", "call"} and d["feed"][0]["who"] == "Ануар Минкеев"
     t = c.get("/api/bx/today", headers=hdr(6000)).json()
     assert t["tasks"] == [{"id": 501, "title": "Перезвонить по КП", "deadline": "2026-11-06T10:00:00+03:00", "deal": 1601}]
     assert [x["id"] for x in t["kp"]] == [1601] and t["limits"]["kp_days"] == 2   # сделка на КП с 04.11 — без ответа
@@ -283,8 +306,8 @@ def test_notify(bxc, monkeypatch):
     assert [d["id"] for d in t["back"]] == [1601] and t["kp"] == []   # отложенная — в «пора вернуться», не в «КП без ответа»
     assert notify.run(datetime(2026, 11, 6, 3, 0, tzinfo=ZoneInfo("Asia/Almaty"))) == 0   # ночью молчим
     n = notify.run(datetime(2026, 11, 6, 10, 0, tzinfo=ZoneInfo("Asia/Almaty")))
-    assert n == 2 and sent[0][0] == 6000 and "Пора вернуться к сделке № 1601" in sent[0][1] and "ждут бюджет" in sent[0][1]
-    assert "Задача на сегодня: Перезвонить по КП" in sent[0][1]
+    assert n == 3 and sent[0][0] == 6000 and "Пора вернуться к сделке № 1601" in sent[0][1] and "ждут бюджет" in sent[0][1]
+    assert "Задача на сегодня: Перезвонить по КП" in sent[0][1] and "Лид № 3001 Дана: новый лид без ответа" in sent[0][1]
     assert notify.run(datetime(2026, 11, 6, 10, 30, tzinfo=ZoneInfo("Asia/Almaty"))) == 0 and len(sent) == 1   # повторно не шлём
     with db.pool.connection() as conn:
         assert conn.execute("SELECT count(*) AS n FROM bx_reminders WHERE sent_at IS NULL").fetchone()["n"] == 0
@@ -317,3 +340,58 @@ def test_read_falls_back_to_webhook(monkeypatch):
     with pytest.raises(Exception) as ex:
         bx._gateway_read("crm.deal.list", {})
     assert "не подключён" in str(ex.value.detail)
+
+
+def test_leads(bxc, monkeypatch):
+    from artgame import bxw
+    from artgame.config import settings
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    r = c.get("/api/bx/leads", headers=hdr(6000)).json()
+    assert [l["id"] for l in r["leads"]] == [3001]
+    l = r["leads"][0]
+    assert l["new"] and l["name"] == "Дана" and l["phone"] == "+7 701 555 44 33"
+    assert l["missing"] == ["город", "площадь"]          # услуги у лида ещё нет — не требуем
+    assert c.get("/api/bx/leads/3002", headers=hdr(6000)).status_code == 403
+    full = c.get("/api/bx/leads/3001", headers=hdr(6000)).json()
+    assert full["has"] == {"service": False, "area": True} and full["fail"] == [{"id": "UC_MARGO5", "name": "Дорого"}]
+    assert c.get("/api/bx/leads/cities", headers=hdr(6000)).json() == [{"id": "5501", "name": "Астана"}]
+    # «Сегодня»: новый лид старше 4 ч — в «Горит»
+    t = c.get("/api/bx/today", headers=hdr(6000)).json()["queue"]
+    assert any(x["entity"] == "lead" and x["id"] == 3001 for x in t["hot"])
+    # запись
+    monkeypatch.setattr(settings, "bitrix_webhook", "https://x/rest/1/k/")
+    calls = []
+
+    def fake_call(method, params):
+        calls.append((method, params))
+        if method == "crm.lead.update":
+            LEADS[str(params["id"])].update(params["fields"])
+        return {"result": {"task": {"id": "778"}}} if method == "tasks.task.add" else {"result": 9100 if method.endswith(".add") else True}
+    monkeypatch.setattr(bxw, "CALL", fake_call)
+    assert c.post("/api/bx/leads/3001/convert", headers=hdr(6000)).status_code == 400   # не заполнены город и площадь
+    assert c.post("/api/bx/leads/3001", json={"city": "999"}, headers=hdr(6000)).status_code == 400
+    assert c.post("/api/bx/leads/3001", json={"city": "5501", "area": 40, "service": "1"}, headers=hdr(6000)).json()["bx"] == "ok"
+    upd = next(p for m, p in calls if m == "crm.lead.update")
+    assert upd["fields"] == {"UF_CRM_1753202309": "5501", "UF_CRM_ARTGAME_LEAD_AREA": 40}   # услуги нет в Битриксе — не пишем
+    # итог звонка с датой перезвона → комментарий, задача, напоминание
+    from datetime import date, timedelta
+    nxt = (date.today() + timedelta(days=1)).isoformat()
+    r = c.post("/api/bx/leads/3001/call", json={"result": "callback", "text": "в пятницу", "next": nxt}, headers=hdr(6000)).json()
+    assert r["task"] == 778
+    assert any(m == "crm.timeline.comment.add" and "просил перезвонить: в пятницу" in p["fields"]["COMMENT"] for m, p in calls)
+    with db.pool.connection() as conn:
+        assert conn.execute("SELECT entity FROM bx_reminders WHERE deal_id=3001").fetchone()["entity"] == "lead"
+    # отказ — только с причиной
+    assert c.post("/api/bx/leads/3001/status", json={"status": "UC_MARGO5"}, headers=hdr(6000)).status_code == 400
+    # в сделку: контакт → сделка (город по названию) → лид сконвертирован
+    calls.clear()
+    r = c.post("/api/bx/leads/3001/convert", headers=hdr(6000)).json()
+    assert r == {"bx": "ok", "deal": 9100}
+    assert [m for m, _ in calls] == ["crm.contact.add", "crm.deal.add", "crm.lead.update", "crm.timeline.comment.add"]
+    deal = calls[1][1]["fields"]
+    assert deal["UF_CRM_6881101914D8D"] == "12077" and deal["UF_CRM_ARTGAME_AREA_M2"] == 40 and deal["LEAD_ID"] == 3001
+    assert deal["CONTACT_ID"] == 9100 and deal["ASSIGNED_BY_ID"] == 4565
+    assert calls[2][1]["fields"] == {"STATUS_ID": "CONVERTED"}
+    LEADS["3001"].update({"STATUS_ID": "UC_93GBZP", "UF_CRM_1753202309": None})
+    LEADS["3001"].pop("UF_CRM_ARTGAME_LEAD_AREA", None)

@@ -1,69 +1,55 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { DealCard } from './dealcard.jsx'
+import { MonthStrip, ageDays, cleanTitle, money } from './crm.jsx'
 
 export const DEAL_ROLES = new Set(['mop', 'mop_vip', 'head'])
-const money = n => n ? Math.round(n).toLocaleString('ru-RU') + ' ₸' : '—'
-const POSTPONED = 'UC_VCP4VO'   // «Отложено»: только с датой возврата
-const tomorrow = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10)
-const when = s => s ? new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : ''
+const IDLE = 3   // дней без движения — красный бейдж (как mop.today.idle_days)
 
-// Мои открытые сделки из Битрикса (ответственный — я; HEAD видит всех). Только чтение.
-// «КП» / «Документы» открывают место МОП, и страница сама подтягивает сделку.
-export function Deals({ me, openPlace, initial }) {
+// Сделки воронкой: стадии свёрнутыми группами с количеством и суммой, внутри — дни без движения.
+// Действия (стадия, заметка, звонок, расчёт, КП) — в карточке сделки.
+export function Deals({ initial, openPlace, openMonth }) {
   const [card, setCard] = useState(initial || null)
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
-  const [stages, setStages] = useState([])
-  const [canWrite, setCanWrite] = useState(false)
-  const [edit, setEdit] = useState(null)   // {id, kind: 'stage'|'note'}
-  const [msg, setMsg] = useState('')
-  useEffect(() => { api('/bx/stages').then(setStages, () => {}); api('/bx/status').then(s => setCanWrite(!!s.write), () => {}) }, [])
+  const [openSt, setOpenSt] = useState({})
   const load = fresh => { setBusy(true); setErr(''); return api(`/bx/deals${fresh ? '?fresh=1' : ''}`).then(setData, e => setErr(e.message)).finally(() => setBusy(false)) }
   useEffect(() => { load(false) }, [])
   const open = (id, view) => {
     try { localStorage.setItem('artgame.bx.open', JSON.stringify({ id, view, t: Date.now() })); localStorage.setItem('artgame.place', 'mop') } catch { /* без памяти */ }
     openPlace()
   }
-  const send = (id, path, body) => api(`/bx/deals/${id}/${path}`, { method: 'POST', body })
-    .then(r => { setEdit(null); setMsg(r.bx === 'off' ? 'Сохранено в журнал. В Битрикс не записано: ключ записи ещё не задан.' : 'Записано в Битрикс.'); load(true) }, e => setMsg('Не записалось: ' + e.message))
-  if (card) return <DealCard id={card} back={() => setCard(null)} open={open} />
-  if (err) return <div className="card"><h2>Мои сделки</h2><p className="muted">{err}</p></div>
+  if (card) return <DealCard id={card} back={() => { setCard(null); load(true) }} open={open} />
+  if (err) return <div className="card"><h2>Сделки</h2><p className="muted">{err}</p></div>
   if (!data) return <div className="card muted">Загружаю сделки из Битрикса…</div>
   const s = q.trim().toLowerCase()
   const list = data.deals.filter(d => !s || String(d.id).includes(s) || d.title.toLowerCase().includes(s) || (d.manager || '').toLowerCase().includes(s))
   const groups = {}
-  list.forEach(d => { (groups[d.stage_name] ||= { sort: d.stage_sort + d.category * 1000, items: [] }).items.push(d) })
-  return <div className="card"><h2>{data.all ? 'Сделки в работе' : 'Мои сделки'} <span className="muted small">{data.deals.length}</span></h2>
-    {!canWrite && <p className="small muted">Запись в Битрикс пока выключена: действия сохраняются в журнал приложения.</p>}
-    <div className="dealbar"><input value={q} onChange={e => setQ(e.target.value)} placeholder="Номер, название или менеджер" />
-      <button className="ghost" disabled={busy} onClick={() => load(true)}>{busy ? '…' : 'Обновить'}</button></div>
-    {msg && <p className="small muted">{msg}</p>}
-    {!list.length && <p className="muted">Открытых сделок нет.</p>}
-    {Object.entries(groups).sort((a, b) => a[1].sort - b[1].sort).map(([name, g]) => <div key={name}>
-      <div className="dealstage">{name} <span className="muted">· {g.items.length}</span></div>
-      {g.items.map(d => <div key={d.id} className="deal">
-        <div onClick={() => setCard(d.id)}><b>№ {d.id}</b> {d.title.replace(new RegExp(`^№?\\s*${d.id}\\s*·?\\s*`), '')} <a>открыть</a></div>
-        <div className="muted small">{[d.city, d.area ? d.area + ' м²' : '', money(d.sum), d.manager, when(d.modified)].filter(Boolean).join(' · ')}</div>
-        <div className="dealbtns"><button className="ghost" onClick={() => open(d.id, 'kp')}>КП</button>
-          <button className="ghost" onClick={() => open(d.id, 'docs')}>Документы</button>
-          <button className="ghost" onClick={() => setEdit(edit?.id === d.id && edit.kind === 'stage' ? null : { id: d.id, kind: 'stage', stage: d.stage, reason: '', until: '' })}>Стадия</button>
-          <button className="ghost" onClick={() => setEdit(edit?.id === d.id && edit.kind === 'note' ? null : { id: d.id, kind: 'note', text: '' })}>Заметка</button></div>
-        {edit?.id === d.id && edit.kind === 'stage' && <div className="dealedit">
-          <select value={edit.stage} onChange={e => setEdit({ ...edit, stage: e.target.value })}>
-            {stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-          {['failure', 'apology'].includes(stages.find(s => s.id === edit.stage)?.semantic) && <input value={edit.reason} onChange={e => setEdit({ ...edit, reason: e.target.value })} placeholder="Причина отказа (обязательно)" />}
-          {edit.stage === POSTPONED && <>
-            <label>Вернуться к сделке<input type="date" value={edit.until || ''} min={tomorrow()} onChange={e => setEdit({ ...edit, until: e.target.value })} /></label>
-            <input value={edit.reason} onChange={e => setEdit({ ...edit, reason: e.target.value })} placeholder="Почему отложили (в ленту и в напоминание)" />
-            <p className="small muted">В Битриксе появится задача с этой датой, бот напомнит утром.</p></>}
-          <button disabled={edit.stage === d.stage || (edit.stage === POSTPONED && !edit.until)} onClick={() => send(d.id, 'stage', { stage: edit.stage, reason: edit.reason || null, until: edit.stage === POSTPONED ? edit.until : null })}>Перевести</button></div>}
-        {edit?.id === d.id && edit.kind === 'note' && <div className="dealedit">
-          <input value={edit.text} onChange={e => setEdit({ ...edit, text: e.target.value })} placeholder="Заметка в ленту сделки" />
-          <button disabled={!edit.text.trim()} onClick={() => send(d.id, 'note', { text: edit.text })}>Записать</button></div>}
-      </div>)}
-    </div>)}
-  </div>
+  list.forEach(d => { (groups[d.stage] ||= { name: d.stage_name, sort: d.stage_sort + d.category * 1000, items: [], sum: 0 }); groups[d.stage].items.push(d); groups[d.stage].sum += d.sum || 0 })
+  const total = list.reduce((a, d) => a + (d.sum || 0), 0)
+  return <>
+    <MonthStrip onOpen={openMonth} />
+    <div className="card"><div className="head"><h2>{data.all ? 'Сделки' : 'Мои сделки'} <span className="muted small">{data.deals.length} · {money(total)}</span></h2>
+      <button className="ghost mini" disabled={busy} onClick={() => load(true)}>{busy ? '…' : 'Обновить'}</button></div>
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Номер, название или менеджер" />
+      {!list.length && <p className="muted">Открытых сделок нет.</p>}
+      {Object.entries(groups).sort((a, b) => a[1].sort - b[1].sort).map(([id, g]) => {
+        const on = s || openSt[id]
+        const stale = g.items.filter(d => ageDays(d.modified) >= IDLE).length
+        return <div key={id} className="stage">
+          <div className="stagehead" onClick={() => setOpenSt({ ...openSt, [id]: !openSt[id] })}>
+            <span>{on ? '▾' : '▸'} {g.name}</span>
+            <span className="small"><b>{g.items.length}</b> · {money(g.sum)}{stale ? <span className="badge hot">{stale} стоят</span> : null}</span>
+          </div>
+          {on && g.items.map(d => { const age = ageDays(d.modified)
+            return <div key={d.id} className="qrow" onClick={() => setCard(d.id)}>
+              <div className="qmain"><div><b>№ {d.id}</b> {cleanTitle(d.title, d.id)}</div>
+                <div className="small muted">{[d.city, d.area ? d.area + ' м²' : '', money(d.sum), d.manager].filter(Boolean).join(' · ')}</div></div>
+              <span className={'badge' + (age >= IDLE ? ' hot' : '')}>{age ? `${age} дн.` : 'сегодня'}</span>
+            </div> })}
+        </div> })}
+    </div>
+  </>
 }

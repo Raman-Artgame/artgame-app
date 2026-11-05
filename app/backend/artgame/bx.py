@@ -1,9 +1,8 @@
-"""Сделки Битрикса для МОП — только чтение, через шлюз ARTGAME (bitrix_read). Своего ключа у приложения нет.
+"""Сделки Битрикса для МОП — чтение (шлюз ARTGAME, а если он не задан — вебхук приложения). Запись — bxw.py, лиды — leads.py.
 
 Кто что видит: МОП и VIP МОП — сделки, где он ответственный (people.bitrix_user_id = ASSIGNED_BY_ID); HEAD — все.
 Связку человек ↔ пользователь Битрикса ставит HEAD во вкладке «Команда».
 Ответы кешируются на 2 минуты (кнопка «Обновить» — без кеша), справочники (стадии, города) — на час.
-Запись в Битрикс отсюда невозможна: шлюз отдаёт только методы чтения.
 """
 import threading
 import time
@@ -274,26 +273,14 @@ def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
     d = _deal(p, deal_id)
     st = stages()
     names = {u["id"]: u["name"] for u in users()}
-    hist, feed, files = [], [], []
+    from .leads import feed as _feed
+    hist, files = [], []
     try:
         for h in _rows(read("crm.stagehistory.list", {"entityTypeId": 2, "filter": {"OWNER_ID": deal_id}, "order": {"ID": "DESC"}}, fresh=fresh))[:20]:
             hist.append({"at": h.get("CREATED_TIME"), "stage": (st.get(h.get("STAGE_ID")) or {}).get("name", h.get("STAGE_ID"))})
     except HTTPException:
         pass
-    try:
-        for c in _rows(read("crm.timeline.comment.list", {"filter": {"ENTITY_ID": deal_id, "ENTITY_TYPE": "deal"}, "order": {"ID": "DESC"}}, fresh=fresh))[:30]:
-            feed.append({"at": c.get("CREATED"), "who": names.get(int(c.get("AUTHOR_ID") or 0), ""), "text": c.get("COMMENT") or "", "kind": "comment"})
-    except HTTPException:
-        pass
-    try:
-        for a in _rows(read("crm.activity.list", {"filter": {"OWNER_ID": deal_id, "OWNER_TYPE_ID": 2}, "order": {"ID": "DESC"},
-                                                  "select": ["ID", "SUBJECT", "TYPE_ID", "COMPLETED", "DEADLINE", "CREATED", "RESPONSIBLE_ID", "DIRECTION"]}, fresh=fresh))[:30]:
-            feed.append({"at": a.get("CREATED"), "who": names.get(int(a.get("RESPONSIBLE_ID") or 0), ""), "text": a.get("SUBJECT") or "",
-                         "kind": {"1": "встреча", "2": "звонок", "3": "задача", "4": "письмо", "6": "чат"}.get(str(a.get("TYPE_ID")), "дело"),
-                         "done": a.get("COMPLETED") == "Y", "deadline": a.get("DEADLINE")})
-    except HTTPException:
-        pass
-    feed.sort(key=lambda x: x["at"] or "", reverse=True)
+    feed = _feed("deal", deal_id, names, fresh)
     for k, title in FILES.items():
         v = d.get(k)
         if not v:
@@ -304,7 +291,7 @@ def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
                 files.append({"title": title, "url": it.get("downloadUrl") or it.get("url") or "", "id": it.get("id")})
             elif isinstance(it, str) and it.startswith("http"):
                 files.append({"title": title, "url": it})
-    card.update({"history": hist, "feed": feed[:40], "files": files, "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), ""),
+    card.update({"history": hist, "feed": feed, "files": files, "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), ""),
                  "created": d.get("DATE_CREATE"), "modified": d.get("DATE_MODIFY"), "comments": d.get("COMMENTS") or "",
                  "pay": {k: (_money(d.get(f)) if k != "next" else d.get(f)) for k, f in FIN.items()}, "category": int(d.get("CATEGORY_ID") or 0),
                  "level": level_key(d.get(F_LEVEL)), "norm": {"shifts": _num(d.get(F_SHIFTS)), "crew": _num(d.get(F_CREW)), "term": _num(d.get(F_TERM))},
@@ -364,6 +351,7 @@ def _days(iso: str | None) -> float:
 
 
 def today(p: dict, fresh: bool = False) -> dict:
+    from datetime import date
     """Сделки, по которым пора действовать. Сроки — из «Значений» (mop.today.*), иначе по умолчанию."""
     vals = _vals()
     new_h = float(vals.get("mop.today.new_hours") or 4)
@@ -372,18 +360,46 @@ def today(p: dict, fresh: bool = False) -> dict:
     deals = my_deals(p, fresh)["deals"]
     out = {"new": [], "kp": [], "idle": [], "back": [], "tasks": [], "limits": {"new_hours": new_h, "kp_days": kp_d, "idle_days": idle_d}}
     with db.pool.connection() as conn:
-        due = {r["deal_id"]: r for r in conn.execute(
-            "SELECT deal_id, due, note FROM bx_reminders WHERE person_id=%s AND due <= current_date ORDER BY due", (p["id"],)).fetchall()}
+        rem = conn.execute("SELECT entity, deal_id, due, note FROM bx_reminders WHERE person_id=%s AND due <= current_date "
+                           "ORDER BY due", (p["id"],)).fetchall()
+    due = {r["deal_id"]: r for r in rem if r["entity"] == "deal"}
+    lead_due = {r["deal_id"]: r for r in rem if r["entity"] == "lead"}
+    q = {"hot": [], "today": [], "later": []}
+    item = lambda kind, d, why, **kw: {"entity": kind, "id": d["id"], "title": d.get("title") or d.get("name") or "", "why": why,  # noqa: E731
+                                       "sum": d.get("sum") or 0, "stage": d.get("stage_name") or d.get("status_name") or "",
+                                       "phone": d.get("phone") or "", "name": d.get("name") or "", **kw}
     for d in deals:
         age = _days(d["modified"])
         if d["id"] in due:
-            out["back"].append({**d, "due": due[d["id"]]["due"].isoformat(), "note": due[d["id"]]["note"]})
+            r = due[d["id"]]
+            out["back"].append({**d, "due": r["due"].isoformat(), "note": r["note"]})
+            q["hot"].append(item("deal", d, "пора вернуться" + (f": {r['note']}" if r["note"] else "")))
         elif d["stage"] == "NEW" and age * 24 >= new_h:
             out["new"].append(d)
+            q["hot"].append(item("deal", d, f"новая заявка без ответа {int(age * 24)} ч", action="call"))
+        elif d["stage"] == "NEW":
+            q["today"].append(item("deal", d, "новая заявка", action="call"))
         elif d["stage"] == "PREPARATION" and age >= kp_d:
             out["kp"].append(d)
+            q["today"].append(item("deal", d, f"КП без ответа {int(age)} дн.", action="call"))
         elif d["stage"] not in ("NEW", "PREPARATION", "UC_VCP4VO") and age >= idle_d:
             out["idle"].append(d)
+            q["later"].append(item("deal", d, f"без движения {int(age)} дн."))
+    try:
+        from .leads import my_leads
+        for l in my_leads(p, fresh)["leads"]:
+            age = _days(l["created"] if l["new"] else l["modified"])
+            if l["id"] in lead_due:
+                n = lead_due[l["id"]]["note"]
+                q["hot"].append(item("lead", l, "перезвонить" + (f": {n}" if n else ""), action="call"))
+            elif l["new"] and age * 24 >= new_h:
+                q["hot"].append(item("lead", l, f"новый лид без ответа {int(age * 24)} ч", action="call"))
+            elif l["new"]:
+                q["today"].append(item("lead", l, "новый лид", action="call"))
+            elif age >= idle_d:
+                q["later"].append(item("lead", l, f"лид без движения {int(age)} дн.", action="call"))
+    except HTTPException:
+        pass
     uid = bx_id(p)
     if uid:
         try:
@@ -392,10 +408,16 @@ def today(p: dict, fresh: bool = False) -> dict:
             res = j.get("result", j) if isinstance(j, dict) else {}
             for t in (res.get("tasks") if isinstance(res, dict) else res) or []:
                 deal = next((int(x[2:]) for x in (t.get("ufCrmTask") or t.get("UF_CRM_TASK") or []) if str(x).startswith("D_")), None)
-                out["tasks"].append({"id": int(t.get("id") or t.get("ID")), "title": t.get("title") or t.get("TITLE") or "",
-                                     "deadline": t.get("deadline") or t.get("DEADLINE"), "deal": deal})
+                x = {"id": int(t.get("id") or t.get("ID")), "title": t.get("title") or t.get("TITLE") or "",
+                     "deadline": t.get("deadline") or t.get("DEADLINE"), "deal": deal}
+                out["tasks"].append(x)
+                dl, now = (x["deadline"] or "")[:10], date.today().isoformat()
+                tq = {"entity": "task", "id": x["id"], "title": x["title"], "why": "задача" + (f" до {dl[8:10]}.{dl[5:7]}" if dl else ""),
+                      "deal": deal, "sum": 0, "stage": "", "phone": "", "name": ""}
+                q["hot" if dl and dl < now else "today" if dl == now else "later"].append(tq)
         except HTTPException:
             pass
+    out["queue"] = q
     return out
 
 

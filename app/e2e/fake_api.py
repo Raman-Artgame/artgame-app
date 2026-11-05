@@ -41,7 +41,7 @@ bx.READ = fake_bx
 # Запись в Битрикс: вебхук подменён, вызовы складываются в BX_CALLS (смотрит тест через /api/_e2e/bx_calls)
 from artgame import bxw  # noqa: E402
 from artgame.config import settings  # noqa: E402
-from test_bx import DEALS  # noqa: E402
+from test_bx import DEALS, LEADS  # noqa: E402
 settings.bitrix_webhook = "https://fake.bitrix24.kz/rest/1/key/"
 BX_CALLS = []
 
@@ -53,6 +53,14 @@ def fake_write(method, params):
         return {"result": {"task": {"id": "777"}}}
     if method == "crm.deal.update":
         DEALS[str(params["id"])].update({k: v for k, v in params["fields"].items() if not isinstance(v, (dict, list))})
+    if method == "crm.lead.update":
+        LEADS[str(params["id"])].update(params["fields"])
+    if method == "crm.contact.add":
+        return {"result": 2300}
+    if method == "crm.deal.add":
+        DEALS["9100"] = {**params["fields"], "ID": "9100", "DATE_MODIFY": "2026-11-05T10:00:00+05:00", "CATEGORY_ID": "0",
+                         "COMPANY_ID": "0", "CONTACT_ID": str(params["fields"].get("CONTACT_ID") or 0)}
+        return {"result": 9100}
     return {"result": True}
 
 
