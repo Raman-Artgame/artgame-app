@@ -429,6 +429,20 @@ def today(p: dict, fresh: bool = False) -> dict:
         for b in q.values():
             b[:] = [x for x in b if (x["entity"], x["id"]) != (m["entity"], m["id"])]
         q["hot"].insert(len(seen) - 1, item(m["entity"], src, f"пропущенный звонок {calls.hhmm(m['at'])} — перезвонить", action="call"))
+    # клиент написал в WhatsApp и ждёт ответа дольше нормы — тоже наверх (chats.py; резюме чатов делает Битрикс)
+    from datetime import datetime, timezone
+    from . import chats
+    chat_min = float(vals.get("mop.today.chat_minutes") or 30)
+    waits, out["warn"] = chats.waiting(fresh)
+    for w in sorted(waits, key=lambda x: x["since"]):
+        src = (deals_by_id if w["entity"] == "deal" else leads_by_id).get(w["id"])
+        if not src or (w["entity"], w["id"]) in seen or (datetime.now(timezone.utc) - w["since"]).total_seconds() < chat_min * 60:
+            continue
+        seen.add((w["entity"], w["id"]))
+        for b in q.values():
+            b[:] = [x for x in b if (x["entity"], x["id"]) != (w["entity"], w["id"])]
+        q["hot"].insert(len(seen) - 1, item(w["entity"], src, f"клиент ждёт ответа в WhatsApp {chats.ago(w['since'])}", action="chat"))
+    out["limits"]["chat_minutes"] = chat_min
     uid = bx_id(p)
     if uid:
         try:

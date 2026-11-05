@@ -121,7 +121,7 @@ export function Today({ openDeal, openLead, openMonth }) {
       <div className="small why">{x.why}</div>
       {(x.stage || x.sum) ? <div className="small muted">{[x.stage, x.sum ? money(x.sum) : ''].filter(Boolean).join(' · ')}</div> : null}
     </div>
-    {x.action === 'call' && x.entity !== 'task' && portal ? <a className="btn mini" href={bxLink(portal, x.entity, x.id)} target="_blank" rel="noreferrer">Позвонить</a>
+    {(x.action === 'call' || x.action === 'chat') && x.entity !== 'task' && portal ? <a className="btn mini" href={bxLink(portal, x.entity, x.id)} target="_blank" rel="noreferrer">{x.action === 'chat' ? 'Ответить' : 'Позвонить'}</a>
       : <button className="ghost mini" onClick={() => open(x)}>Открыть</button>}
   </div>
   return <>
@@ -130,6 +130,7 @@ export function Today({ openDeal, openLead, openMonth }) {
       <div className="head"><div><h2>Сегодня</h2><div className="small muted">{dayName()}</div></div>
         <button className="ghost mini" disabled={busy} onClick={reload}>{busy ? '…' : 'Обновить'}</button></div>
       <div className="tiles">{BUCKETS.map(([k, title]) => <button key={k} className={'tile ' + k + (only === k ? ' on' : '')} onClick={() => setOnly(only === k ? '' : k)}><b>{q[k].length}</b><span>{title}</span></button>)}</div>
+      {t.warn ? <p className="small" style={{ color: 'var(--hot)' }}>{t.warn}</p> : null}
       <p className="small muted">{total ? `Сделать сегодня: ${total}.` : 'Срочного нет.'} {only ? 'Показан один раздел, нажмите цифру ещё раз — все.' : 'Нажмите на цифру, чтобы оставить один раздел.'}</p>
     </div>
     {BUCKETS.filter(([k]) => !only || only === k).map(([k, title, hint]) => {
