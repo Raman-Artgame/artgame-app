@@ -347,6 +347,9 @@ async def place_bx(code: str, tok: str, tool: str, request: Request):
     args = args if isinstance(args, dict) else {}
     if tool == "my_deals":
         return my_deals(p, bool(args.get("fresh")))
+    if tool == "doc_saved":
+        from .bxw import doc_saved
+        return doc_saved(p, int(args.get("deal") or 0), str(args.get("name") or ""), str(args.get("fid") or ""), args.get("fields") or {})
     if tool == "deal_card":
         return deal_card(p, int(args.get("id") or 0), bool(args.get("fresh")))
     return crm_tool(p, tool, args, _allowed.setdefault(p["id"], set()))

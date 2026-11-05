@@ -62,6 +62,7 @@
       return fetch(BASE + '/_dl?name=' + encodeURIComponent(name), { method: 'POST', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob })
         .then(function (r) { if (!r.ok) throw Object.assign(new Error('download'), { code: 'unavailable' }); return r.json() })
         .then(function (d) {
+          try { if (window.ARTGAME_ON_DOWNLOAD) window.ARTGAME_ON_DOWNLOAD({ name: name, fid: d.url.split('/').pop() }) } catch (e) {}
           var url = location.origin + d.url
           var tg = null
           try { tg = window.parent && window.parent.Telegram && window.parent.Telegram.WebApp } catch (e) {}

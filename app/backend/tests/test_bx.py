@@ -24,7 +24,9 @@ def fake(method, params):
         return {"result": DEALS.get(str(params["id"]))}
     if method == "crm.status.list":
         return {"result": [{"STATUS_ID": "NEW", "NAME": "Взаимное информирование", "SORT": "10"},
-                           {"STATUS_ID": "PREPARATION", "NAME": "Встреча/Отправка КП", "SORT": "60"}]}
+                           {"STATUS_ID": "PREPARATION", "NAME": "Встреча/Отправка КП", "SORT": "60"},
+                           {"STATUS_ID": "UC_VCP4VO", "NAME": "Отложено", "SORT": "130"},
+                           {"STATUS_ID": "LOSE", "NAME": "Высокая стоимость", "SORT": "160", "EXTRA": {"SEMANTICS": "failure"}}]}
     if method == "crm.deal.fields":
         return {"result": {"UF_CRM_6881101914D8D": {"type": "enumeration", "items": [{"ID": "12077", "VALUE": "Казахстан, Астана"}]},
                            "UF_CRM_1753294730602": {"items": [{"ID": "19285", "VALUE": "Художественная роспись стен"}]},
@@ -147,3 +149,50 @@ def test_journal(bxc):
     assert len(h["items"]) == 1 and [s["deals_today"] for s in h["summary"] if s["id"] == ids[6000]] == [1]
     # у художника свой журнал тоже есть (вкладка только у МОП, данные — у всех)
     assert c.get("/api/journal", headers=hdr(2000)).json()["items"] == []
+
+
+def test_write_off_and_on(bxc, monkeypatch, tmp_path):
+    from artgame import bxw, places
+    from artgame.config import settings
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    # ключа нет — действие в журнале, статус off, Битрикс не трогаем
+    r = c.post("/api/bx/deals/1601/note", json={"text": "позвонить завтра"}, headers=hdr(6000)).json()
+    assert r["bx"] == "off"
+    # ключ есть — пишем и сверяем
+    monkeypatch.setattr(settings, "bitrix_webhook", "https://x.bitrix24.kz/rest/1/key/")
+    monkeypatch.setattr(places, "DL_DIR", tmp_path)
+    calls = []
+
+    def fake_call(method, params):
+        calls.append((method, params))
+        if method == "crm.deal.update":
+            DEALS["1601"].update({k: v for k, v in params["fields"].items() if not isinstance(v, (dict, list))})
+        return {"result": True}
+    monkeypatch.setattr(bxw, "CALL", fake_call)
+    # чужая сделка — нельзя даже с ключом
+    assert c.post("/api/bx/deals/1651/note", json={"text": "x"}, headers=hdr(6000)).status_code == 403
+    # стадия: проигрыш без причины — нельзя
+    assert c.post("/api/bx/deals/1601/stage", json={"stage": "LOSE"}, headers=hdr(6000)).status_code == 400
+    r = c.post("/api/bx/deals/1601/stage", json={"stage": "NEW"}, headers=hdr(6000)).json()
+    assert r["bx"] == "ok" and DEALS["1601"]["STAGE_ID"] == "NEW" and calls[0][0] == "crm.deal.update" and calls[1][0] == "crm.timeline.comment.add"
+    assert "P6000 (приложение)" in calls[1][1]["fields"]["COMMENT"]
+    # документ скачан на странице: КП → сумма, площадь, файл, стадия NEW → PREPARATION
+    (tmp_path / "abc1.bin").write_bytes(b"%PDF")
+    calls.clear()
+    bx._cache.clear()
+    url = c.get("/api/places", headers=hdr(6000)).json()
+    r = bxw.doc_saved({"id": ids[6000], "role_code": "mop", "full_name": "Ануар", "status": "active"}, 1601,
+                      "КП ARTGAME №1601 Ромашка 05.11.2026.pdf", "abc1", {"total": 589250, "area": 25})
+    f = calls[0][1]["fields"]
+    assert r["bx"] == "ok" and f["OPPORTUNITY"] == 589250 and f["UF_CRM_ARTGAME_AREA_M2"] == 25 and f["STAGE_ID"] == "PREPARATION"
+    assert f[bxw.F_KP][0]["fileData"][0].startswith("КП ARTGAME") and r["stage"] == "PREPARATION"
+    # договор из «Выполнения проекта» стадию назад не двигает
+    DEALS["1601"]["STAGE_ID"] = "UC_AV00QK"
+    bx._cache.clear()
+    r = bxw.doc_saved({"id": ids[6000], "role_code": "mop", "full_name": "Ануар", "status": "active"}, 1601,
+                      "ARTGAME_Dogovor_1601.docx", "", {"total": 600000, "adv": 50, "days": 20, "warr": 6})
+    assert "STAGE_ID" not in calls[-2][1]["fields"] and calls[-2][1]["fields"][bxw.F_ADV] == 50
+    j = c.get("/api/journal", headers=hdr(6000)).json()
+    assert [x["data"]["bx"] for x in j["items"] if x["action"] == "bx_write"][:2] == ["ok", "ok"]
+    DEALS["1601"]["STAGE_ID"] = "PREPARATION"

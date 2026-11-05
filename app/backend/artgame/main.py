@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from . import constants as consts
-from . import bx, db, files, places, work
+from . import bx, bxw, db, files, places, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
 
@@ -23,6 +23,7 @@ app.include_router(work.router)
 app.include_router(files.router)
 app.include_router(places.router)
 app.include_router(bx.router)
+app.include_router(bxw.router)
 
 
 @app.get("/api/health")

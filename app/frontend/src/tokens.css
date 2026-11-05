@@ -58,3 +58,5 @@ a { color: var(--accent); }
 .deal { padding: 10px 0; border-top: 1px solid var(--line); }
 .dealbtns { display: flex; gap: 8px; margin-top: 6px; }
 .dealbtns button { width: auto; padding: 6px 14px; font-size: 13px; }
+.dealedit { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.dealedit input, .dealedit select { margin: 0; }

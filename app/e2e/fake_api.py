@@ -38,5 +38,28 @@ from artgame import bx  # noqa: E402
 from test_bx import fake as fake_bx  # noqa: E402
 bx.READ = fake_bx
 
+# Запись в Битрикс: вебхук подменён, вызовы складываются в BX_CALLS (смотрит тест через /api/_e2e/bx_calls)
+from artgame import bxw  # noqa: E402
+from artgame.config import settings  # noqa: E402
+from test_bx import DEALS  # noqa: E402
+settings.bitrix_webhook = "https://fake.bitrix24.kz/rest/1/key/"
+BX_CALLS = []
+
+
+def fake_write(method, params):
+    BX_CALLS.append({"method": method, "params": {k: v for k, v in params.items() if k != "fields"} | {"fields": {
+        k: ("файл" if isinstance(v, (dict, list)) else v) for k, v in (params.get("fields") or {}).items()}}})
+    if method == "crm.deal.update":
+        DEALS[str(params["id"])].update({k: v for k, v in params["fields"].items() if not isinstance(v, (dict, list))})
+    return {"result": True}
+
+
+bxw.CALL = fake_write
+
+
+@app.get("/api/_e2e/bx_calls")
+def _bx_calls():
+    return BX_CALLS
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8100)

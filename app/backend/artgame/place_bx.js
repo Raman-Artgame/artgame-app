@@ -114,6 +114,31 @@
     }
   }
 
+  /* ---- документ скачан → запись в сделку Битрикса (сервер, от имени МОП) ---- */
+  function kpFields() {
+    var its = (typeof items !== 'undefined' && items) || []
+    var total = 0, area = 0
+    its.forEach(function (i) { var q = +String(i.qty).replace(',', '.') || 0, pr = +String(i.price).replace(/\s/g, '') || 0; total += q * pr; if (!area) area = q })
+    return { total: total, area: area }
+  }
+  window.ARTGAME_ON_DOWNLOAD = function (f) {
+    var n = f.name || '', deal = 0, fields = {}, st = null
+    if (/^КП /i.test(n)) {
+      var el = document.getElementById('num'); deal = parseInt(el && el.value, 10) || 0; fields = kpFields(); st = document.getElementById('pdfStatus')
+    } else if (/^ARTGAME_(Dogovor|Schet|AVR)/i.test(n) && typeof DS !== 'undefined') {
+      deal = parseInt(DS.num, 10) || 0
+      fields = { total: DS.total, area: DS.area, adv: DS.adv, days: DS.days, warr: DS.warr, objAddr: DS.objAddr, invSum: DS.invSum || DS.total }
+      st = document.getElementById('dsst')
+    }
+    if (!deal) return
+    BX('doc_saved', { deal: deal, name: n, fid: f.fid, fields: fields }).then(function (r) {
+      if (!st) return
+      var msg = r.bx === 'ok' ? ' Записано в сделку № ' + deal + (r.stage ? ', стадия обновлена.' : '.')
+        : r.bx === 'off' ? ' В Битрикс не записано: ключ записи ещё не задан.' : r.bx === 'error' ? ' В Битрикс не записалось: ' + (r.error || '') : ''
+      st.textContent = (st.textContent || '') + msg
+    }, function (e) { if (st) st.textContent = (st.textContent || '') + ' В Битрикс не записалось: ' + e.message })
+  }
+
   new MutationObserver(function () { mountKp(); mountDocs() }).observe(document.documentElement, { childList: true, subtree: true })
   mountKp(); mountDocs(); pending()
 })()
