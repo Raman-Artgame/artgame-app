@@ -37,10 +37,25 @@ _gw = None
 
 # ---------- чтение через шлюз ----------
 
+def _webhook_read(method: str, params: dict):
+    """Чтение тем же вебхуком, что и запись (шлюз ARTGAME-MCP на сервере только под OAuth, 05.11)."""
+    import httpx
+    r = httpx.post(settings.bitrix_webhook.rstrip("/") + "/" + method, json=params, timeout=60)
+    try:
+        j = r.json()
+    except ValueError:
+        raise HTTPException(502, f"Битрикс не ответил: {r.status_code}")
+    if "error" in j:
+        raise HTTPException(502, f"Битрикс: {str(j.get('error_description') or j['error'])[:200]}")
+    return j
+
+
 def _gateway_read(method: str, params: dict):
     global _gw
     if not settings.gateway_url:
-        raise HTTPException(503, "Битрикс не подключён (нет адреса шлюза)")
+        if settings.bitrix_webhook:
+            return _webhook_read(method, params)
+        raise HTTPException(503, "Битрикс не подключён (нет адреса шлюза и вебхука)")
     from .sync_objects import Gateway
     for attempt in (1, 2):
         try:

@@ -288,3 +288,32 @@ def test_notify(bxc, monkeypatch):
     assert notify.run(datetime(2026, 11, 6, 10, 30, tzinfo=ZoneInfo("Asia/Almaty"))) == 0 and len(sent) == 1   # повторно не шлём
     with db.pool.connection() as conn:
         assert conn.execute("SELECT count(*) AS n FROM bx_reminders WHERE sent_at IS NULL").fetchone()["n"] == 0
+
+
+def test_read_falls_back_to_webhook(monkeypatch):
+    """Без адреса шлюза чтение идёт вебхуком (05.11: шлюз на сервере только под OAuth)."""
+    from artgame import bx
+    from artgame.config import settings
+    monkeypatch.setattr(settings, "gateway_url", "")
+    monkeypatch.setattr(settings, "bitrix_webhook", "https://x.bitrix24.kz/rest/1/key/")
+    seen = {}
+
+    class R:
+        status_code = 200
+
+        def json(self):
+            return {"result": [{"ID": "1"}], "total": 1}
+
+    def fake_post(url, json, timeout):
+        seen["url"] = url
+        return R()
+
+    import httpx
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert bx._gateway_read("crm.deal.list", {"filter": {}}) == {"result": [{"ID": "1"}], "total": 1}
+    assert seen["url"] == "https://x.bitrix24.kz/rest/1/key/crm.deal.list"
+    monkeypatch.setattr(settings, "bitrix_webhook", "")
+    import pytest
+    with pytest.raises(Exception) as ex:
+        bx._gateway_read("crm.deal.list", {})
+    assert "не подключён" in str(ex.value.detail)

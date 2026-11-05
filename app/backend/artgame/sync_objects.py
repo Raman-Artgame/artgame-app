@@ -64,10 +64,13 @@ class Gateway:
 
 
 def fetch_deals() -> list[dict]:
-    g = Gateway(settings.gateway_url, settings.gateway_token).open()
+    if settings.gateway_url:
+        rd = Gateway(settings.gateway_url, settings.gateway_token).open().bitrix_read
+    else:
+        from .bx import _webhook_read as rd   # шлюз не настроен — читаем вебхуком приложения
     out, start = [], 0
     while start is not None:
-        j = g.bitrix_read("crm.deal.list", {
+        j = rd("crm.deal.list", {
             "filter": {"CATEGORY_ID": CATEGORY, "STAGE_ID": list(ACTIVE + DONE)},
             "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD], "start": start})
         if isinstance(j, list):  # шлюз может вернуть сразу список
