@@ -204,56 +204,125 @@ export function Finance() {
   </>
 }
 
-// ---------- закупки из бюджета: склад расходников и мастерская холстов ----------
+// ---------- закупки на склад: все роли, по каталогу журнала закупок (HEAD 06.11) ----------
+// Ориентир цены задаёт HEAD, потолок = ориентир + допуск из «Значений». В пределах потолка — принято само,
+// выше потолка или без ориентира — ждёт HEAD. Лимитов нет. Деньги — в финансы, статья «Склад» / «Мастерская холстов».
 
-function StockForm({ cats, limits, done, cancel }) {
-  const [v, set] = useState({ category: cats[0]?.code, amount: '', paid_by: 'own', note: '', deal_id: '', receipt: '' })
+const FL = { ok: ['🟢', 'в норме'], above_ref: ['🟡', 'выше ориентира'], over_cap: ['🔴', 'выше потолка — к HEAD'], no_ref: ['⚪', 'нет ориентира — к HEAD'] }
+const flagOf = (unit, it) => it?.ref_price == null ? 'no_ref' : unit > it.cap_price + .005 ? 'over_cap' : unit > it.ref_price + .005 ? 'above_ref' : 'ok'
+const num = s => s.replace(',', '.').replace(/[^\d.]/g, '')
+
+function PurchaseForm({ cat, done, cancel }) {
+  const [dept, setDept] = useState(cat.home)
+  const [q, setQ] = useState('')
+  const [lines, setLines] = useState([])          // { key, item_code?, name, qty, amount }
+  const [v, set] = useState({ paid_by: 'own', note: '', deal_id: '', receipt: '' })
   const [busy, setBusy] = useState(false)
-  const art = cats.find(c => c.code === v.category)?.article
-  const l = limits[art] || {}
-  const left = l.left
-  const over = left != null && +v.amount > left
+  const items = cat.items.filter(i => i.active && i.dept === dept && (!q || i.name.toLowerCase().includes(q.toLowerCase())))
+  const byCode = Object.fromEntries(cat.items.map(i => [i.code, i]))
+  const add = it => setLines(l => l.some(x => x.item_code === it.code) ? l : [...l, { key: it.code, item_code: it.code, name: it.name, qty: '1', amount: it.ref_price ? String(it.ref_price) : '' }])
+  const own = () => setLines(l => [...l, { key: 'own' + Date.now(), name: q, qty: '1', amount: '' }])
+  const upd = (k, f) => setLines(l => l.map(x => x.key === k ? { ...x, ...f } : x))
+  const flags = lines.map(x => +x.qty > 0 && +x.amount > 0 ? flagOf(+x.amount / +x.qty, x.item_code && byCode[x.item_code]) : null)
+  const total = lines.reduce((s, x) => s + (+x.amount || 0), 0)
+  const ready = lines.length && lines.every(x => +x.qty > 0 && +x.amount > 0 && (x.item_code || x.name.trim())) && v.receipt
+  const toHead = flags.some(f => f === 'over_cap' || f === 'no_ref')
   const send = async () => {
     setBusy(true)
-    const n = await enqueue('/stock/expenses', { ...v, amount: +v.amount, deal_id: +v.deal_id || null, note: v.note || null })
+    const n = await enqueue('/stock/purchase', { dept, paid_by: v.paid_by, receipt: v.receipt, note: v.note || null, deal_id: +v.deal_id || null,
+      lines: lines.map(x => ({ item_code: x.item_code || null, name: x.item_code ? null : x.name.trim(), qty: +x.qty, amount: +x.amount })) })
     setBusy(false)
-    done(n ? 'Сохранено на телефоне, отправится, когда будет сеть.' : over || left == null ? 'Закупка ушла на одобрение HEAD.' : 'Закупка записана.')
+    done(n ? 'Сохранено на телефоне, отправится, когда будет сеть.' : toHead ? 'Покупка ушла на одобрение HEAD.' : 'Покупка записана.')
   }
+  let sec = null
   return <div className="dealedit">
-    <div className="chips">{cats.map(c => <button key={c.code} className={v.category === c.code ? 'on' : ''} onClick={() => set({ ...v, category: c.code })}>{c.title}</button>)}</div>
-    <input inputMode="numeric" value={v.amount} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder="Сумма, ₸" />
+    <div className="chips scroll">{cat.depts.map(d => <button key={d.code} className={dept === d.code ? 'on' : ''} onClick={() => { setDept(d.code); setLines([]) }}>{d.title}</button>)}</div>
+    <input value={q} onChange={e => setQ(e.target.value)} placeholder="Найти позицию" />
+    <div className="catlist">{items.map(it => {
+      const head = it.section !== sec ? (sec = it.section) : null
+      const inCart = lines.some(x => x.item_code === it.code)
+      return <React.Fragment key={it.code}>{head && <div className="catsec">{head}</div>}
+        <button className={'catitem' + (inCart ? ' on' : '')} onClick={() => add(it)}>
+          <span>{it.name}<small>{[it.unit, it.where_buy].filter(Boolean).join(' · ')}</small></span>
+          <b>{it.ref_price != null ? money(it.ref_price) : '—'}{it.cap_price != null && <small>до {money(it.cap_price)}</small>}</b></button></React.Fragment>
+    })}
+      {!items.length && <p className="small muted">Ничего не нашлось.</p>}
+      <button className="ghost mini" onClick={own}>+ Нет в списке{q ? `: «${q}»` : ''}</button></div>
+    {lines.length > 0 && <div className="cart"><b>Купил</b>
+      {lines.map((x, i) => { const it = x.item_code && byCode[x.item_code]; const f = flags[i]
+        return <div key={x.key} className="cartline">
+          {x.item_code ? <div>{x.name}<span className="small muted"> · {it?.unit || 'ед.'}{it?.ref_price != null ? ` · ориентир ${money(it.ref_price)}, потолок ${money(it.cap_price)}` : ' · ориентира нет'}</span></div>
+            : <input value={x.name} onChange={e => upd(x.key, { name: e.target.value })} placeholder="Что купил" />}
+          <div className="cartnums small muted"><span>Сколько, {it?.unit || 'ед.'}</span><span>Сумма по чеку, ₸</span><i style={{ width: 40 }} /></div>
+          <div className="cartnums">
+            <input inputMode="decimal" value={x.qty} onChange={e => upd(x.key, { qty: num(e.target.value) })} placeholder="Кол-во" aria-label="Количество" />
+            <input inputMode="numeric" value={x.amount} onChange={e => upd(x.key, { amount: e.target.value.replace(/\D/g, '') })} placeholder="Сумма, ₸" aria-label="Сумма" />
+            <button className="ghost mini" onClick={() => setLines(l => l.filter(y => y.key !== x.key))} aria-label="Убрать">✕</button></div>
+          {f && <div className="small">{FL[f][0]} {money(Math.round(+x.amount / +x.qty))} за ед. — {FL[f][1]}</div>}</div> })}
+      <div className="row"><span>Итого по чеку</span><b>{money(total)}</b></div></div>}
     <div className="segf"><button className={v.paid_by === 'own' ? 'on' : ''} onClick={() => set({ ...v, paid_by: 'own' })}>Свои деньги</button>
       <button className={v.paid_by === 'company' ? 'on' : ''} onClick={() => set({ ...v, paid_by: 'company' })}>Деньги компании</button></div>
-    <input value={v.note} onChange={e => set({ ...v, note: e.target.value })} placeholder="Что купил (например, 10 л белой краски)" />
-    {art === 'canvas' && <input inputMode="numeric" value={v.deal_id} onChange={e => set({ ...v, deal_id: e.target.value.replace(/\D/g, '') })} placeholder="№ сделки, если холсты под заказ (не обязательно)" />}
+    <input value={v.note} onChange={e => set({ ...v, note: e.target.value })} placeholder="Комментарий (магазин, зачем срочно)" />
+    <input inputMode="numeric" value={v.deal_id} onChange={e => set({ ...v, deal_id: e.target.value.replace(/\D/g, '') })} placeholder="№ сделки, если под проект (не обязательно)" />
     <label className="photo">{v.receipt ? <img src={v.receipt} alt="чек" /> : <span>📷 Фото чека (обязательно)</span>}
       <input type="file" accept="image/*" capture="environment" hidden onChange={async e => e.target.files[0] && set({ ...v, receipt: await shrink(e.target.files[0]) })} /></label>
-    {+v.amount > 0 && <p className={'small ' + (over || left == null ? 'why' : 'muted')}>{left == null ? 'Лимит ещё не задан — закупка уйдёт на одобрение HEAD.' : over ? `Сверх лимита (осталось ${money(left)}) — уйдёт на одобрение HEAD.` : `В пределах лимита, после неё останется ${money(left - v.amount)}.`}</p>}
-    <div className="dealbtns"><button disabled={busy || !(+v.amount > 0) || !v.receipt} onClick={send}>Записать закупку</button>
+    {lines.length > 0 && <p className={'small ' + (toHead ? 'why' : 'muted')}>{toHead ? 'Есть цена выше потолка или позиция без ориентира — покупка уйдёт на одобрение HEAD.' : 'Все цены в пределах потолка — покупка примется сразу.'}</p>}
+    <div className="dealbtns"><button disabled={busy || !ready} onClick={send}>Записать покупку</button>
       <button className="ghost" onClick={cancel}>Отмена</button></div>
   </div>
 }
 
+// HEAD: ориентиры цен и позиции каталога. Потолок считается сам из допуска в «Значениях».
+function Catalog({ cat, reload }) {
+  const [dept, setDept] = useState(cat.home === 'household' ? cat.depts[0]?.code : cat.home)
+  const [ed, setEd] = useState(null)
+  const [e, setE] = useState('')
+  const save = () => api(ed.code ? '/stock/items/' + encodeURIComponent(ed.code) : '/stock/items', { method: 'POST',
+    body: { dept: ed.dept, name: ed.name, section: ed.section || null, unit: ed.unit || null, ref_price: ed.ref_price === '' || ed.ref_price == null ? null : +ed.ref_price,
+      where_buy: ed.where_buy || null, norm: ed.norm || null, active: ed.active } }).then(() => { setEd(null); setE(''); reload() }, err(setE))
+  return <>
+    <p className="small muted">Допуск над ориентиром: {cat.tolerance != null ? cat.tolerance + ' %' : 'не задан в «Значениях» (stock.price_tolerance_pct) — потолок = ориентир'}.</p>
+    <div className="chips scroll">{cat.depts.map(d => <button key={d.code} className={dept === d.code ? 'on' : ''} onClick={() => setDept(d.code)}>{d.title}</button>)}</div>
+    {ed ? <div className="dealedit">
+      <input value={ed.name} onChange={x => setEd({ ...ed, name: x.target.value })} placeholder="Позиция" />
+      <input value={ed.section || ''} onChange={x => setEd({ ...ed, section: x.target.value })} placeholder="Раздел" />
+      <input value={ed.unit || ''} onChange={x => setEd({ ...ed, unit: x.target.value })} placeholder="Единица (шт, уп. 10 шт)" />
+      <input inputMode="numeric" value={ed.ref_price ?? ''} onChange={x => setEd({ ...ed, ref_price: x.target.value.replace(/\D/g, '') })} placeholder="Ориентир за единицу, ₸" />
+      <input value={ed.where_buy || ''} onChange={x => setEd({ ...ed, where_buy: x.target.value })} placeholder="Где брать" />
+      <input value={ed.norm || ''} onChange={x => setEd({ ...ed, norm: x.target.value })} placeholder="Норма склада" />
+      {e && <p className="small why">{e}</p>}
+      <div className="dealbtns"><button disabled={!ed.name.trim()} onClick={save}>Сохранить</button>
+        {ed.code && <button className="ghost" onClick={() => setEd({ ...ed, active: !ed.active })}>{ed.active ? 'Выключить' : 'Включить'}</button>}
+        <button className="ghost" onClick={() => setEd(null)}>Отмена</button></div></div>
+      : <button className="ghost mini" onClick={() => setEd({ dept, name: '', active: true })}>+ Позиция</button>}
+    {cat.items.filter(i => i.dept === dept).map(i => <div key={i.code} className="row" style={{ cursor: 'pointer', opacity: i.active ? 1 : .45 }}
+      onClick={() => setEd({ ...i, ref_price: i.ref_price ?? '' })}>
+      <span>{i.name}<div className="small muted">{[i.code, i.unit, i.where_buy, i.fact_price != null && 'факт ' + money(i.fact_price)].filter(Boolean).join(' · ')}</div></span>
+      <b className={i.ref_price == null ? 'muted' : ''}>{i.ref_price != null ? money(i.ref_price) : 'нет'}</b></div>)}
+  </>
+}
+
 export function StockSpend() {
   const [m, setM] = useState(null)
+  const [cat, setCat] = useState(null)
   const [e, setE] = useState('')
   const [form, setForm] = useState(false)
+  const [view, setView] = useState('buy')
   const [msg, setMsg] = useState('')
   const load = () => api('/stock/expenses').then(setM, err(setE))
-  useEffect(() => { load(); const f = () => load(); window.addEventListener('artgame:queue', f); return () => window.removeEventListener('artgame:queue', f) }, [])
-  if (e) return <div className="card"><h3>Закупки</h3><p className="small muted">{e}</p></div>
-  if (!m) return null
-  const title = Object.values(m.limits).map(l => l.title).join(' и ')
+  const loadCat = () => api('/stock/catalog').then(setCat, err(setE))
+  useEffect(() => { load(); loadCat(); const f = () => load(); window.addEventListener('artgame:queue', f); return () => window.removeEventListener('artgame:queue', f) }, [])
+  if (e) return <div className="card"><h3>Склад</h3><p className="small muted">{e}</p></div>
+  if (!m || !cat) return <div className="card muted">Загрузка…</div>
   return <div className="card">
-    <div className="head"><h3>{m.all ? 'Закупки из бюджета' : title} <span className="muted small">{money(m.total)}</span></h3>
-      {!form && <button className="mini" onClick={() => { setForm(true); setMsg('') }}>+ Закупка</button>}</div>
-    <p className="small muted">Закупки впрок, не на конкретный объект. Идут в расходы бюджета, не в себестоимость объекта.</p>
-    {!m.all && Object.entries(m.limits).map(([k, l]) => <div key={k}>{l.limit ? <>
-      <div className="bar"><i style={{ width: Math.min(100, Math.round(l.spent / l.limit * 100)) + '%' }} /></div>
-      <p className="small muted">{l.title}: лимит на месяц {money(l.limit)}, осталось <b>{money(l.left)}</b>. Сверх лимита — ждёт HEAD.</p></>
-      : <p className="small muted">{l.title}: лимит ещё не задан, каждая закупка ждёт одобрения HEAD.</p>}</div>)}
+    <div className="head"><h3>{m.all ? 'Закупки на склад' : 'Склад'} {m.total > 0 && <span className="muted small">{money(m.total)} за месяц</span>}</h3>
+      {!form && view === 'buy' && <button className="mini" onClick={() => { setForm(true); setMsg('') }}>+ Покупка</button>}</div>
+    {cat.head && <div className="segf"><button className={view === 'buy' ? 'on' : ''} onClick={() => setView('buy')}>Покупки</button>
+      <button className={view === 'cat' ? 'on' : ''} onClick={() => { setView('cat'); setForm(false) }}>Каталог и цены</button></div>}
+    {view === 'cat' ? <Catalog cat={cat} reload={loadCat} /> : <>
+    {!form && <p className="small muted">Купил что-то на склад — отметь здесь: что, сколько, за сколько, и фото чека. Цена в пределах потолка — принято сразу, выше — решает HEAD.</p>}
     {m.waiting > 0 && m.all && <p className="small why">Ждут одобрения: {m.waiting} — во вкладке «Проверка».</p>}
-    {form && <StockForm cats={m.categories} limits={m.all ? {} : m.limits} cancel={() => setForm(false)} done={t => { setForm(false); setMsg(t); load() }} />}
+    {form && <PurchaseForm cat={cat} cancel={() => setForm(false)} done={t => { setForm(false); setMsg(t); load(); loadCat() }} />}
     {msg && <p className="small muted">{msg}</p>}
     {pending() > 0 && <p className="small muted">Ждут сети: {pending()}</p>}
     {m.items.map(x => <div key={x.id} className="row">
@@ -264,7 +333,7 @@ export function StockSpend() {
         {x.reason && x.status === 'rejected' && <div className="small">Причина: {x.reason}</div>}</div>
       <span className={'tag st-' + x.status}>{ST[x.status] || x.status}</span>
     </div>)}
-    {!m.items.length && !form && <p className="small muted">В этом месяце закупок нет.</p>}
+    {!m.items.length && !form && <p className="small muted">В этом месяце покупок нет.</p>}</>}
   </div>
 }
 

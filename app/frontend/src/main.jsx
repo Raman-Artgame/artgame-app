@@ -60,8 +60,7 @@ function App() {
 }
 
 const CHECKERS = new Set(['head', 'lead_artist', 'print_master', 'lead_designer'])
-// Закупки из бюджета (HEAD 06.11): склад расходников и мастерская холстов.
-const STOCK = new Set(['lead_artist', 'artist_pro', 'print_master', 'carpenter', 'head'])
+// Закупки на склад (HEAD 06.11): у каждой роли; HEAD — в «Финансы → Закупки».
 const PLAIN = new Set(['today', 'leads', 'deals', 'projects', 'month'])
 
 // Единое рабочее поле МОП (HEAD 06.11): вся работа по клиенту — в карточке сделки; «Место» МОП стало «Учёбой»
@@ -88,7 +87,7 @@ function Main({ me, web, logout }) {
     ...(mopPlace ? [['study', 'Учёба']] : []),
     ...(other.length ? [['place', 'Место']] : []),
     ...(mop || carp ? [] : [['shift', 'Смена'], ['expense', 'Расход'], ['objects', 'Объекты']]),
-    ...(STOCK.has(me.role_code) && me.role_code !== 'head' ? [['stock', 'Склад']] : []), ['mine', 'Мои'],
+    ...(me.role_code !== 'head' ? [['stock', 'Склад']] : []), ['mine', 'Мои'],
     ...(!sales ? [['projects', 'Проекты']] : []),
     ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []),
     ...(me.role_code === 'head' ? [['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда']] : [])]

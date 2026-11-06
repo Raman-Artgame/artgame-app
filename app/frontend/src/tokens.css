@@ -274,3 +274,17 @@ body.web .sheetbox.modal { max-width: 560px; }
 @keyframes skel { 0%, 100% { opacity: .5 } 50% { opacity: 1 } }
 details.how summary { cursor: pointer; list-style: none; } details.how summary::before { content: '▸ '; } details[open].how summary::before { content: '▾ '; }
 select.inline { width: auto; padding: 2px 6px; margin: 0; font-size: 12px; border-radius: 8px; }
+/* Склад: каталог закупок (HEAD 06.11) */
+.catlist { max-height: 46vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; padding: 4px 8px 8px; }
+.catsec { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 10px 2px 4px; }
+button.catitem { display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; padding: 9px 10px; margin: 2px 0;
+  background: transparent; color: var(--text); font-weight: 400; font-size: 14px; border: 1px solid transparent; }
+button.catitem.on { border-color: var(--accent); }
+button.catitem small { display: block; color: var(--muted); font-size: 12px; }
+button.catitem b { white-space: nowrap; text-align: right; font-weight: 600; }
+.cart { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--bg); }
+.cartline { padding: 8px 0; border-top: 1px solid var(--line); }
+.cartline:first-of-type { border-top: 0; }
+.cartnums { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.cartnums input { margin: 0; flex: 1; min-width: 0; }
+.cartnums.small span { flex: 1; }

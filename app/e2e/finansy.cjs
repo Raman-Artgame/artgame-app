@@ -32,23 +32,41 @@ async function tab(p, name) {
 ;(async () => {
   const b = await chromium.launch()
   await call(1000, '/register', { full_name: 'HEAD' })
-  await call(1000, '/_e2e/consts', { 'fin.canvas.limit_month': 50000, 'fin.tax.ipn': 10, vat: 16 })
+  await call(1000, '/_e2e/consts', { 'stock.price_tolerance_pct': 15, 'fin.tax.ipn': 10, vat: 16 })
   const c = await call(4000, '/register', { full_name: 'Плотник Арман' })
   await call(1000, `/people/${c.id}`, { role_code: 'carpenter', zones: [] })
+  const mo = await call(6000, '/register', { full_name: 'МОП Дана' })
+  await call(1000, `/people/${mo.id}`, { role_code: 'mop', zones: ['sales'] })
 
-  // 1. Мастер-плотник: вкладка «Склад», закупка бруса в пределах лимита — принята сама
+  // 1. Мастер-плотник: «Склад» открывается сразу на «Мастерской», рейка 50 м за 12 000 (240 ₸/м: выше ориентира 230, в потолке) — принято само
   const w = await open(b, 4000)
-  await w.getByText('Мастерская холстов: лимит на месяц').waitFor()
-  await w.getByRole('button', { name: '+ Закупка' }).click()
-  await w.getByRole('button', { name: 'Брус и подрамники' }).click()
-  await w.getByPlaceholder('Сумма, ₸').fill('12000')
-  await w.getByPlaceholder('Что купил').fill('брус 40×40, 20 шт')
+  await w.getByRole('button', { name: '+ Покупка' }).click()
+  await w.getByPlaceholder('Найти позицию').fill('Рейка 2 × 4')
+  await w.locator('button.catitem', { hasText: 'Рейка 2 × 4' }).first().click()
+  await w.getByLabel('Количество').fill('50')
+  await w.getByLabel('Сумма').fill('12000')
+  await w.getByText('240 ₸ за ед. — выше ориентира').waitFor()
   await w.locator('label.photo input').setInputFiles(__dirname + '/chek.png')
-  await w.getByText('В пределах лимита').waitFor()
-  await w.getByRole('button', { name: 'Записать закупку' }).click()
-  await w.getByText('Закупка записана.').waitFor()
-  await w.locator('.row', { hasText: 'Брус и подрамники' }).getByText('принято').waitFor()
+  await w.getByText('Все цены в пределах потолка').waitFor()
+  await w.screenshot({ path: `${shots}/sklad-form.png`, fullPage: true })
+  await w.getByRole('button', { name: 'Записать покупку' }).click()
+  await w.getByText('Покупка записана.').waitFor()
+  await w.locator('.row', { hasText: 'Мастерская холстов' }).getByText('принято').waitFor()
   await w.screenshot({ path: `${shots}/fin-carpenter.png` })
+
+  // 1б. МОП: «Склад» → хозтовары, своя позиция без ориентира — уходит HEAD
+  const mp = await open(b, 6000)
+  await tab(mp, 'Склад')
+  await mp.getByRole('button', { name: '+ Покупка' }).click()
+  await mp.locator('.chips button.on', { hasText: 'Хозтовары' }).waitFor()
+  await mp.getByPlaceholder('Найти позицию').fill('Чайник')
+  await mp.getByRole('button', { name: /Нет в списке/ }).click()
+  await mp.getByLabel('Сумма').fill('9000')
+  await mp.locator('label.photo input').setInputFiles(__dirname + '/chek.png')
+  await mp.getByText('уйдёт на одобрение HEAD').waitFor()
+  await mp.getByRole('button', { name: 'Записать покупку' }).click()
+  await mp.getByText('Покупка ушла на одобрение HEAD.').waitFor()
+
 
   // 2. HEAD: «Финансы» → «Закупки» видит закупку плотника
   const h = await open(b, 1000)
@@ -56,6 +74,20 @@ async function tab(p, name) {
   await h.getByText('Прибыль месяца').waitFor()
   await h.locator('.segf').getByRole('button', { name: 'Закупки' }).click()
   await h.locator('.row', { hasText: 'Плотник Арман' }).waitFor()
+  // каталог: HEAD ставит ориентир чайнику-позиции нет, правит ориентир рейки
+  await h.locator('.segf').getByRole('button', { name: 'Каталог и цены' }).click()
+  await h.locator('.chips button', { hasText: 'Мастерская холстов' }).click()
+  await h.locator('.row', { hasText: 'Рейка 2 × 4' }).first().click()
+  await h.getByPlaceholder('Ориентир за единицу, ₸').fill('250')
+  await h.getByRole('button', { name: 'Сохранить' }).click()
+  await h.locator('.row', { hasText: 'Рейка 2 × 4' }).first().getByText(/250/).waitFor()
+  await h.screenshot({ path: `${shots}/sklad-catalog.png` })
+  // «Проверка»: покупка МОП ждёт с причиной
+  await tab(h, 'Проверка')
+  await h.getByText(/Хозтовары и офис · нет ориентира цены/).waitFor()
+  await h.screenshot({ path: `${shots}/sklad-review.png` })
+  await tab(h, 'Финансы')
+  await h.getByText('Прибыль месяца').waitFor()
 
   // 3. «Деньги»: остаток на начало по Kaspi
   await h.locator('.segf').getByRole('button', { name: 'Деньги' }).click()

@@ -224,11 +224,18 @@ def review_list(p: dict = Depends(active)):
                     FROM {t} x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id
                     WHERE x.status='submitted' AND {cond} ORDER BY x.created_at""", args).fetchall()
         cats = {c["code"]: c for c in conn.execute("SELECT code, title, article FROM expense_categories").fetchall()}
+        flags = {}   # покупки по каталогу: почему ждёт HEAD (выше потолка / нет ориентира)
+        for r in conn.execute("""SELECT expense_id, array_agg(DISTINCT flag) AS f FROM stock_lines
+                                 WHERE expense_id = ANY(%s) AND flag IN ('over_cap','no_ref') GROUP BY expense_id""",
+                              ([e["id"] for e in out["expenses"]],)).fetchall():
+            flags[r["expense_id"]] = [{"over_cap": "выше потолка цены", "no_ref": "нет ориентира цены"}[f] for f in sorted(r["f"], reverse=True)]
         for e in out["expenses"]:   # трата отдела продаж: вместо «Офис / без объекта» — статья и сделка
             c = cats.get(e["category"]) or {}
             e["category_title"] = c.get("title", e["category"])
             if c.get("article") in ("stock", "canvas"):
-                e["object_title"] = ("Склад" if c["article"] == "stock" else "Мастерская холстов") + " · " + e["category_title"] + (" · сверх лимита" if e.get("over_limit") else "")
+                fl = flags.get(e["id"])
+                tail = (" · " + ", ".join(fl)) if fl else (" · сверх лимита" if e.get("over_limit") else "")
+                e["object_title"] = ("Склад" if c["article"] == "stock" else "Мастерская холстов") + " · " + e["category_title"] + tail
             if c.get("article") == "sales":
                 e["object_title"] = "Отдел продаж · " + e["category_title"] + (f" · сделка № {e['deal_id']}" if e.get("deal_id") else "") + (" · сверх лимита" if e.get("over_limit") else "")
         out["expenses"] = [with_receipt(e) for e in out["expenses"]]
