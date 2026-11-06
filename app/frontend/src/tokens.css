@@ -288,3 +288,31 @@ button.catitem b { white-space: nowrap; text-align: right; font-weight: 600; }
 .cartnums { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
 .cartnums input { margin: 0; flex: 1; min-width: 0; }
 .cartnums.small span { flex: 1; }
+
+/* Заполненность карточки (HEAD 06.11) */
+.fillbar { margin: 8px 0 10px; padding: 10px 12px; border-radius: var(--r2); background: var(--dark2); cursor: pointer; }
+.fillbar .fb-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--dark-muted); }
+.fillbar .fb-top b { color: #fff; }
+.fillbar .fb-line { height: 6px; border-radius: 99px; background: var(--dark-line); margin: 6px 0; overflow: hidden; }
+.fillbar .fb-line i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .3s ease; }
+.fillbar.full .fb-line i { background: var(--ok); }
+.fillbar .fb-miss { font-size: 12px; color: var(--dark-text); }
+.aibox { background: var(--dark); color: var(--dark-text); border-radius: var(--r2); padding: 12px; margin-bottom: 12px; }
+.aibox .aihead { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.aibox .aihead b { color: #fff; } .aibox .aihead .small { color: var(--dark-muted); }
+.aibox textarea { background: var(--dark2); color: #fff; border-color: var(--dark-line); }
+.aibox p { color: var(--dark-text); margin: 8px 0 0; }
+.aibox .found { background: var(--surface); color: var(--text); border-radius: var(--r2); padding: 8px 10px; margin-top: 10px; }
+.aibox .found p { color: var(--muted); }
+.fillgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.fillgrid label.need input, .fillgrid label.need select { border-color: var(--accent); }
+.fillgrid label.ai input, .fillgrid label.ai select { background: #FFF6D6; }
+.aitag, .needtag { font-style: normal; font-size: 10px; font-weight: 700; margin-left: 6px; padding: 1px 6px; border-radius: 99px; vertical-align: middle; }
+.aitag { background: var(--dark); color: #fff; } .needtag { background: var(--accent); color: #fff; }
+.fillother { margin: 6px 0 12px; } .fillother .row { gap: 10px; }
+.warnbox { background: #FFF1E0; border: 1px solid #F3C38A; border-radius: var(--r2); padding: 10px 12px; font-size: 13px; margin: 8px 0; }
+.warnbox .small { display: block; color: var(--muted); margin-top: 4px; }
+.lockbox { background: var(--dark); color: var(--dark-text); border-radius: var(--r2); padding: 12px; font-size: 13px; margin: 8px 0; }
+.lockbox b { color: #fff; display: block; margin-bottom: 4px; }
+.lockbox .dealbtns { margin-top: 10px; } .lockbox > button { margin-top: 10px; }
+@media (max-width: 420px) { .fillgrid { grid-template-columns: 1fr; } }

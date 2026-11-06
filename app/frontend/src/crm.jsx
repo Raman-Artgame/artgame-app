@@ -198,21 +198,32 @@ export function LeadCard({ id, back, openDeal }) {
   const [l, setL] = useState(null)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
-  const [f, setF] = useState({ city: '', cityName: '', service: '', area: '', sum: '' })
+  const [f, setF] = useState({ name: '', city: '', cityName: '', service: '', area: '', sum: '' })
+  // HEAD 06.11 «пожестче»: без имени, телефона, города, услуги и площади лид в сделку не уходит.
+  // Пока у лида в Битриксе нет полей «Услуга»/«Площадь», их указывают здесь — они уходят сразу в сделку.
+  const convKey = `artgame.lead.conv.${id}`
+  const [cv, setCv] = useState(() => { try { return JSON.parse(localStorage.getItem(convKey)) || { service: '', area: '', address: '' } } catch { return { service: '', area: '', address: '' } } })
+  const [dict, setDict] = useState({ services: [] })
   const [cities, setCities] = useState([])
   const [fail, setFail] = useState(null)
   const [reasons, setReasons] = useState([])
   const load = fresh => api(`/bx/leads/${id}${fresh ? '?fresh=1' : ''}`).then(r => {
-    setL(r); setF({ city: r.city_id, cityName: r.city, service: r.service_id, area: r.area || '', sum: r.sum || '' })
+    setL(r); setF({ name: r.client_name || '', city: r.city_id, cityName: r.city, service: r.service_id, area: r.area || '', sum: r.sum || '' })
   }, e => setErr(e.message))
-  useEffect(() => { load(false); api('/bx/leads/cities').then(setCities, () => {}); api('/bx/reasons').then(setReasons, () => {}) }, [id])
+  useEffect(() => { load(false); api('/bx/leads/cities').then(setCities, () => {}); api('/bx/reasons').then(setReasons, () => {}); api('/bx/dict').then(setDict, () => {}) }, [id])
   if (err) return <div className="card"><a onClick={back}>← назад</a><p className="muted">{err}</p></div>
   if (!l) return <Skeleton n={2} />
+  const setC = (k, v) => { const n = { ...cv, [k]: v }; setCv(n); try { localStorage.setItem(convKey, JSON.stringify(n)) } catch { /* без памяти */ } }
   const say = p => p.then(r => { setMsg(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Записано в Битрикс.'); return load(true) }, e => setMsg('Не записалось: ' + e.message))
   const pickCity = v => { const c = cities.find(x => x.name.toLowerCase() === v.trim().toLowerCase()); setF({ ...f, cityName: v, city: c ? c.id : '' }) }
-  const save = () => say(api(`/bx/leads/${id}`, { method: 'POST', body: { city: f.city || null, service: f.service || null, area: +f.area || null, sum: +f.sum || null } }))
-  const convert = () => api(`/bx/leads/${id}/convert`, { method: 'POST' }).then(r => openDeal(r.deal), e => setMsg('Не получилось: ' + e.message))
-  const changed = f.city !== l.city_id || f.service !== l.service_id || (+f.area || 0) !== (l.area || 0) || (+f.sum || 0) !== (l.sum || 0)
+  const save = () => say(api(`/bx/leads/${id}`, { method: 'POST', body: { name: f.name.trim() !== (l.client_name || '') ? f.name.trim() : null, city: f.city || null, service: f.service || null, area: +f.area || null, sum: +f.sum || null } }))
+  const convert = () => api(`/bx/leads/${id}/convert`, { method: 'POST', body: { service: l.has.service ? null : cv.service || null, area: l.has.area ? null : +cv.area || null, address: cv.address.trim() || null } })
+    .then(r => { try { localStorage.removeItem(convKey) } catch { /* ок */ } openDeal(r.deal) }, e => setMsg('Не получилось: ' + e.message))
+  const changed = f.name.trim() !== (l.client_name || '') || f.city !== l.city_id || f.service !== l.service_id || (+f.area || 0) !== (l.area || 0) || (+f.sum || 0) !== (l.sum || 0)
+  // что ещё не хватает с учётом того, что указано для сделки прямо здесь
+  const miss = l.missing.filter(m => !(m === 'услуга' && !l.has.service && cv.service) && !(m === 'площадь' && !l.has.area && +cv.area > 0))
+  const req = m => l.missing.includes(m) && miss.includes(m) ? 'need' : ''
+  const lock = miss.length ? 'Не хватает: ' + miss.join(', ') : changed ? 'Сначала сохраните изменения в Битрикс' : ''
   return <>
     <div className="card">
       <a onClick={back}>← к лидам</a>
@@ -222,22 +233,32 @@ export function LeadCard({ id, back, openDeal }) {
       <Contact phone={l.phone} name={l.name} entity="lead" id={l.id} />
       <CallOutcome path={`/bx/leads/${id}`} done={() => load(true)} />
     </div>
-    <div className="card"><h3>Что нужно для сделки</h3>
-      {l.missing.length ? <p className="small">Не хватает: {l.missing.map(m => <span key={m} className="miss">{m}</span>)}</p> : <p className="small ok">Всё заполнено, можно в сделку.</p>}
-      <label>Город<input list="lead-cities" value={f.cityName} onChange={e => pickCity(e.target.value)} placeholder="Начните вводить" /></label>
+    <div className="card"><h3>Обязательно для сделки</h3>
+      {miss.length ? <p className="small">Не хватает: {miss.map(m => <span key={m} className="miss">{m}</span>)}</p> : <p className="small ok">Всё заполнено, можно в сделку.</p>}
+      <div className="fillgrid">
+        <label className={req('имя клиента')}><span>Имя клиента</span><input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Как обращаться" /></label>
+        <label className={req('город')}><span>Город</span><input list="lead-cities" value={f.cityName} onChange={e => pickCity(e.target.value)} placeholder="Начните вводить" /></label>
+        {l.has.service
+          ? <label className={req('услуга')}><span>Услуга</span><select value={f.service} onChange={e => setF({ ...f, service: e.target.value })}>
+            <option value="">—</option>{l.services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          : <label className={req('услуга')}><span>Услуга</span><select value={cv.service} onChange={e => setC('service', e.target.value)}>
+            <option value="">—</option>{dict.services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
+        {l.has.area
+          ? <label className={req('площадь')}><span>Площадь, м²</span><input type="number" min="1" inputMode="decimal" value={f.area} onChange={e => setF({ ...f, area: e.target.value })} /></label>
+          : <label className={req('площадь')}><span>Площадь, м²</span><input type="number" min="1" inputMode="decimal" value={cv.area} onChange={e => setC('area', e.target.value)} /></label>}
+        <label><span>Адрес объекта</span><input value={cv.address} onChange={e => setC('address', e.target.value)} placeholder="Улица, дом" /></label>
+        <label><span>Бюджет, ₸</span><input type="number" min="0" value={f.sum} onChange={e => setF({ ...f, sum: e.target.value })} /></label>
+      </div>
       <datalist id="lead-cities">{cities.map(c => <option key={c.id} value={c.name} />)}</datalist>
       {f.cityName && !f.city && <p className="small muted">Выберите город из списка.</p>}
-      {l.has.service && <label>Услуга<select value={f.service} onChange={e => setF({ ...f, service: e.target.value })}>
-        <option value="">—</option>{l.services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
-      {l.has.area && <label>Площадь, м²<input type="number" min="1" value={f.area} onChange={e => setF({ ...f, area: e.target.value })} /></label>}
-      <label>Бюджет, ₸<input type="number" min="0" value={f.sum} onChange={e => setF({ ...f, sum: e.target.value })} /></label>
-      {!l.has.service && <p className="small muted">Поля «Услуга» у лида в Битриксе ещё нет — его создаст Кодекс.</p>}
+      {l.missing.includes('телефон') && <p className="small">Телефона нет — добавьте его в карточке лида в Битриксе (кнопка выше), потом обновите.</p>}
+      {(!l.has.service || !l.has.area) && <p className="small muted">{!l.has.service && !l.has.area ? 'Услуга и площадь уйдут' : !l.has.service ? 'Услуга уйдёт' : 'Площадь уйдёт'} сразу в сделку при переводе.</p>}
       <button className="ghost" disabled={!changed} onClick={save}>Сохранить в Битрикс</button>
       {msg && <p className="small muted">{msg}</p>}
     </div>
     <div className="card"><h3>Решение</h3>
-      <button disabled={!!l.missing.length} onClick={convert}>В сделку</button>
-      {!!l.missing.length && <p className="small muted">Кнопка откроется, когда заполнены {l.missing.join(', ')}.</p>}
+      <button disabled={!!lock} onClick={convert}>В сделку</button>
+      {lock && <p className="small muted">🔒 {lock}.</p>}
       {!fail ? <button className="ghost" onClick={() => setFail({ status: l.fail[0]?.id || '', code: '', reason: '' })}>Отказ</button>
         : <div className="dealedit">
           <select value={fail.status} onChange={e => setFail({ ...fail, status: e.target.value })}>{l.fail.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>

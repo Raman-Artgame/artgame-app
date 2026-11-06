@@ -1,11 +1,11 @@
 # Автовыкладка на test.app.artgame.world: пуш с изменениями в app/ → сервер ставит этот коммит.
 # Нужен секрет TEST_DEPLOY_KEY (ключ пользователя artgame-ci, см. app/deploy/setup_ci_deploy.sh).
 # Ключ умеет только «deploy <коммит>» — ничего другого на сервере им не сделать.
-# Ветки: main и рабочие ветки claude/*; последняя выкладка побеждает. Prod этим не трогается.
+# Ветки: main и общая ветка интегратора claude/project-thread-54ahqn (HEAD 06.11); другие треды шлют ему ветки или патчи. Prod не трогается.
 name: Deploy test
 on:
   push:
-    branches: [main, 'claude/**']
+    branches: [main, 'claude/project-thread-54ahqn']   # HEAD 06.11: на test выкладывает только интегратор (тред МОП)
     paths: ['app/**', '.github/workflows/deploy-test.yml']
   workflow_dispatch:
 concurrency:

@@ -110,6 +110,9 @@
       if (typeof dsRerender === 'function') dsRerender()
       mountDocs()
       var miss = c.requisites === null && c.client.type !== 'Физлицо' ? ' Реквизиты (БИН, банк) вставьте из карточки клиента или анкеты.' : ''
+      // анкета/переписка, вставленная в карточке сделки («Заполнить карточку») — разбираем тем же «Заполнить из текста»
+      var ta = document.getElementById('ds-paste'), pb = document.getElementById('ds-parse')
+      if (ds && ds.anketa && ta && pb) { ta.value = ds.anketa; ta.dispatchEvent(new Event('input', { bubbles: true })); pb.click(); got.push('анкета'); miss = '' }
       var s2 = document.querySelector('#app .agbx-st')
       if (s2) s2.textContent = 'Сделка ' + c.id + ' (' + c.stage_name + '): заполнено — ' + (got.join(', ') || 'ничего') + '. Проверьте поля.' + miss
     }, function (e) { st.textContent = e.message })
@@ -149,7 +152,13 @@
 
   /* ---- документ скачан → запись в сделку Битрикса (сервер, от имени МОП) ---- */
   function kpFields() {
-    var its = (typeof items !== 'undefined' && items) || []
+    // позиции КП: массив генератора, если он его отдаёт, иначе — поля формы (#items — это div, не массив)
+    var its = (typeof items !== 'undefined' && Array.isArray(items)) ? items : []
+    if (!its.length) {
+      var by = {}
+      Array.prototype.forEach.call(document.querySelectorAll('#items [data-f][data-i]'), function (e) { (by[e.dataset.i] = by[e.dataset.i] || {})[e.dataset.f] = e.value })
+      its = Object.keys(by).map(function (k) { return by[k] })
+    }
     var total = 0, area = 0
     var level = '', service = 'mural', height = false
     its.forEach(function (i) { var q = +String(i.qty).replace(',', '.') || 0, pr = +String(i.price).replace(/\s/g, '') || 0; total += q * pr; if (!area) area = q
@@ -169,7 +178,7 @@
     }
     if (!deal) return
     BX('doc_saved', { deal: deal, name: n, fid: f.fid, fields: fields }).then(function (r) {
-      try { if (window.parent !== window) window.parent.postMessage({ type: 'artgame:doc', deal: deal, name: n, bx: r.bx, stage: r.stage || null }, location.origin) } catch (e) {}
+      try { if (window.parent !== window) window.parent.postMessage({ type: 'artgame:doc', deal: deal, name: n, bx: r.bx, stage: r.stage || null, held: r.held || null }, location.origin) } catch (e) {}
       if (!st) return
       var msg = r.bx === 'ok' ? ' Записано в сделку № ' + deal + (r.stage ? ', стадия обновлена.' : '.')
         : r.bx === 'off' ? ' В Битрикс не записано: ключ записи ещё не задан.' : r.bx === 'error' ? ' В Битрикс не записалось: ' + (r.error || '') : ''

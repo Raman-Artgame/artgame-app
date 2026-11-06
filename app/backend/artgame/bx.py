@@ -239,10 +239,11 @@ def requisites(company_id) -> dict | None:
     return {k: v for k, v in out.items() if v}
 
 
-def deal_card(p: dict, deal_id: int, fresh: bool = False) -> dict:
+def deal_card(p: dict, deal_id: int, fresh: bool = False, audit: bool = True) -> dict:
     d = _deal(p, deal_id, fresh)
-    with db.pool.connection() as conn:
-        db.audit(conn, p["id"], "deal_open", "deal", deal_id, {"title": d.get("TITLE") or "", "stage": d["STAGE_ID"]})
+    if audit:
+        with db.pool.connection() as conn:
+            db.audit(conn, p["id"], "deal_open", "deal", deal_id, {"title": d.get("TITLE") or "", "stage": d["STAGE_ID"]})
     comp = _entity("crm.company.get", d.get("COMPANY_ID"))
     cont = _entity("crm.contact.get", d.get("CONTACT_ID"))
     if comp:
@@ -306,6 +307,9 @@ def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
                  "norm_fields": all(k in deal_fields() for k in (F_SHIFTS, F_CREW, F_TERM))})
     from .sales_exp import for_deal
     card["acq"] = for_deal(deal_id)   # траты отдела продаж по сделке — стоимость привлечения
+    from . import fill
+    card["fill"] = fill.state(d, card, fill.saved_calc(deal_id))
+    card["fill"].update(required=fill.REQUIRED, step_of=fill.STAGE_STEP, free=p["role_code"] == "head")   # для замка в приложении
     return card
 
 

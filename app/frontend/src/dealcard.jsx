@@ -5,6 +5,7 @@ import { Embed } from './places.jsx'
 import { Copy, Sheet } from './ui.jsx'
 import { CallOutcome, Contact, Feed, Skeleton, bxLink, cleanTitle, dt, money, strip, usePortal } from './crm.jsx'
 import { leftText } from './projects.jsx'
+import { FillBar, FillSheet, LOCK_DOCS, LOCK_KP, Locked, anketaKey, lockFor, missingFor } from './fill.jsx'
 
 // Карточка сделки = единственное рабочее поле МОП (HEAD 06.11, вариант А). Тёмная шапка с шагами, нажатие на шаг открывает
 // его панель: Клиент → Расчёт → КП → Договор → Оплата → В работе. Расчёт считает сервер по «Значениям» и пишет в Битрикс;
@@ -64,7 +65,7 @@ function Scripts({ codes, title, onClose, algoStep }) {
 }
 
 // Перевод стадии: отказ — только с причиной из списка (HEAD 06.11, 8 причин) и строкой комментария; «Отложено» — с датой возврата.
-function StageSheet({ d, stages, onClose, onDone }) {
+function StageSheet({ d, stages, onClose, onDone, onFill }) {
   const [stage, setStage] = useState(d.stage)
   const [code, setCode] = useState('')
   const [reason, setReason] = useState('')
@@ -75,7 +76,8 @@ function StageSheet({ d, stages, onClose, onDone }) {
   useEffect(() => { api('/bx/reasons').then(setReasons, () => {}) }, [])
   const sel = stages.find(s => s.id === stage)
   const fail = ['failure', 'apology'].includes(sel?.semantic)
-  const ok = stage !== d.stage && (!fail || code) && (stage !== POSTPONED || until)
+  const miss = !fail && stage !== d.stage && stage !== POSTPONED ? missingFor(d.fill, d.stage, stage) : []
+  const ok = stage !== d.stage && (!fail || code) && (stage !== POSTPONED || until) && !miss.length
   const send = () => { setBusy(true); api(`/bx/deals/${d.id}/stage`, { method: 'POST', body: { stage, reason: reason || null, reason_code: fail ? code : null, until: stage === POSTPONED ? until : null } })
     .then(r => onDone(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Стадия записана в Битрикс.'), e => { setErr(e.message); setBusy(false) }) }
   return <Sheet title="Стадия сделки" onClose={onClose}>
@@ -90,6 +92,9 @@ function StageSheet({ d, stages, onClose, onDone }) {
       <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Почему отложили" />
       <p className="small muted">В Битриксе появится задача с этой датой, бот напомнит утром.</p></>}
     {!fail && stage !== POSTPONED && stage !== d.stage && <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Комментарий (по желанию)" />}
+    {!!miss.length && <div className="lockbox"><b>🔒 На эту стадию нельзя, пока не заполнено:</b>
+      <div>{miss.map(m => <span key={m} className="miss">{m}</span>)}</div>
+      <button className="mini" onClick={onFill}>Заполнить карточку</button></div>}
     {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}
     <button disabled={!ok || busy} onClick={send}>Перевести</button>
   </Sheet>
@@ -253,7 +258,12 @@ export function DealCard({ id, back, place }) {
   const algo = PANEL_ALGO[cur] || ['01']
   const codes = [...new Set(algo.flatMap(n => STEP_SCR[n] || []))]
   const kpItem = calc?.kp
-  const ds = calc ? { total: calc.out.total, area: +calc.in.area || 0, prepay: calc.out.pay?.prepay, adv: calc.out.pay?.prepay_pct, days: calc.out.norm?.client } : null
+  const lockKP = lockFor(d.fill, LOCK_KP), lockDocs = lockFor(d.fill, LOCK_DOCS)
+  const fillIt = () => setSheet({ kind: 'fill' })
+  const onDoc = x => { load(true); if (x?.held?.length) { setMsg('Файл в сделке, но стадия не сменилась — не хватает: ' + x.held.join(', ')); setTimeout(() => setMsg(''), 8000) } }
+  let anketa = ''
+  try { anketa = localStorage.getItem(anketaKey(d.id)) || '' } catch { /* без памяти */ }
+  const ds = calc || anketa ? { ...(calc ? { total: calc.out.total, area: +calc.in.area || 0, prepay: calc.out.pay?.prepay, adv: calc.out.pay?.prepay_pct, days: calc.out.norm?.client } : {}), anketa } : null
   return <>
     <div className="hero">
       <a className="back" onClick={back}>← к сделкам</a>
@@ -267,12 +277,14 @@ export function DealCard({ id, back, place }) {
       </div>
       <Contact phone={c.phone} name={[c.name, d.contact && d.contact !== c.name ? d.contact : ''].filter(Boolean).join(' · ')} entity="deal" id={d.id} />
       <div className="steps">{st.map(([k, ok], i) => <div key={k} className={(ok ? 'done' : i === nextI ? 'next' : '') + (cur === k ? ' cur' : '')} onClick={() => setPanel(k)}><i />{name(k)}</div>)}</div>
+      <FillBar fill={d.fill} onOpen={() => setSheet({ kind: 'fill' })} />
       <div className="nextstep">{nextI >= 0 ? <><div><span className="small muted">Следующий шаг</span><b>{name(st[nextI][0])}</b></div>
         <button className="mini" onClick={() => setPanel(st[nextI][0])}>{NEXT[st[nextI][0]]}</button></>
         : <div><b>Все шаги пройдены</b><span className="small muted">проект в работе</span></div>}</div>
       <div className="dealbtns wrapbtns">
         <button className="ghost" onClick={() => setSheet({ kind: 'call' })}>Итог звонка</button>
         <button className="ghost" onClick={say}>Сообщение</button>
+        <button className="ghost" onClick={() => setSheet({ kind: 'fill' })}>Заполнить карточку</button>
         <button className="ghost" onClick={() => setSheet({ kind: 'note' })}>Заметка</button>
         <button className="ghost" onClick={() => setSheet({ kind: 'stage' })}>Стадия</button>
         <button className={'ghost' + (cur === 'hist' ? ' on' : '')} onClick={() => setPanel('hist')}>История</button>
@@ -292,7 +304,8 @@ export function DealCard({ id, back, place }) {
         <div className="panelhead"><h3>Коммерческое предложение</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>
         {calc ? <p className="small muted">Позиция из расчёта ({money(calc.out.total)}) уже в КП, клиент и сделка подставлены. Проверьте, скачайте PDF — файл ляжет в сделку Битрикса, стадия сменится на «Отправка КП».</p>
           : <p className="small why">Сначала сделайте расчёт — тогда КП соберётся без ввода цифр. <a onClick={() => setPanel('calc')}>К расчёту</a></p>}
-        <Embed place={place} view="kp" dealId={d.id} kp={kpItem} onDoc={() => load(true)} />
+        {lockKP.length ? <Locked what="КП" miss={lockKP} onFill={fillIt} onCalc={() => setPanel('calc')} />
+          : <Embed place={place} view="kp" dealId={d.id} kp={kpItem} onDoc={onDoc} />}
       </div>
       <Materials place={place} d={d} portal={portal} />
     </>}
@@ -300,7 +313,8 @@ export function DealCard({ id, back, place }) {
       <div className="card">
         <div className="panelhead"><h3>Договор, счёт, акт</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>
         <p className="small muted">{calc ? `Сумма ${money(calc.out.total)} и аванс ${money(calc.out.pay.prepay)} — из расчёта; ` : ''}клиент и реквизиты — из Битрикса (если их там нет, вставьте из анкеты). Скачанный файл ложится в сделку, стадия — «Отправка счёта/договора».</p>
-        <Embed place={place} view="docs" dealId={d.id} ds={ds} onDoc={() => load(true)} />
+        {lockDocs.length ? <Locked what="Договор и счёт" miss={lockDocs} onFill={fillIt} onCalc={() => setPanel('calc')} />
+          : <Embed place={place} view="docs" dealId={d.id} ds={ds} onDoc={onDoc} />}
       </div>
       {!!d.files.length && <div className="card"><h3>Документы в сделке</h3>
         {d.files.map((f, i) => <div key={i} className="row"><span>{f.title}</span>{f.url ? <a href={f.url} target="_blank" rel="noreferrer">открыть</a> : <span className="muted small">в Битриксе</span>}</div>)}</div>}
@@ -332,7 +346,8 @@ export function DealCard({ id, back, place }) {
     </>}
 
     {sheet?.kind === 'call' && <Sheet title="Итог звонка" onClose={() => setSheet(null)}><CallOutcome path={`/bx/deals/${id}`} auto done={() => said('Итог звонка записан.')} /></Sheet>}
-    {sheet?.kind === 'stage' && <StageSheet d={d} stages={stages} onClose={() => setSheet(null)} onDone={said} />}
+    {sheet?.kind === 'stage' && <StageSheet d={d} stages={stages} onClose={() => setSheet(null)} onDone={said} onFill={() => setSheet({ kind: 'fill' })} />}
+    {sheet?.kind === 'fill' && <FillSheet d={d} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'note' && <NoteSheet d={d} initial={sheet.text} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'say' && <Scripts codes={codes} algoStep={algo[0]} title={`Скрипты: ${name(cur)}`} onClose={() => setSheet(null)} />}
   </>

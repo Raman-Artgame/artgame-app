@@ -168,7 +168,7 @@ def config_values(code: str) -> dict:
         return {"id": "values", "exists": False, "data": None}
     aud = PLACES[code]["aud"]
     vals = {k: consts.num(v["value"]) for k, v in row["values"].items()
-            if v["status"] == "Утверждено" and consts.who_set(v["who"]) & aud and str(v["value"]).strip()}
+            if v["status"] == "Утверждено" and consts.who_set(v.get("who") or "") & aud and str(v["value"]).strip()}
     return {"id": "values", "exists": True,
             "data": {"_updated": row["fetched_at"].isoformat(), "_source": "Значения", "values": vals}}
 

@@ -64,6 +64,8 @@ def fake(method, params):
     if method == "crm.status.list":
         return {"result": [{"STATUS_ID": "NEW", "NAME": "Взаимное информирование", "SORT": "10"},
                            {"STATUS_ID": "PREPARATION", "NAME": "Встреча/Отправка КП", "SORT": "60"},
+                           {"STATUS_ID": "FINAL_INVOICE", "NAME": "Отправка счета/договора", "SORT": "100"},
+                           {"STATUS_ID": "UC_AV00QK", "NAME": "Выполнение проекта", "SORT": "110"},
                            {"STATUS_ID": "UC_VCP4VO", "NAME": "Отложено", "SORT": "130"},
                            {"STATUS_ID": "LOSE", "NAME": "Высокая стоимость", "SORT": "160", "EXTRA": {"SEMANTICS": "failure"}}]}
     if method == "crm.deal.fields":
@@ -250,7 +252,9 @@ def test_write_off_and_on(bxc, monkeypatch, tmp_path):
     with db.pool.connection() as conn:
         assert conn.execute("SELECT due::text, note FROM bx_reminders WHERE deal_id=1601").fetchone() == {"due": "2027-01-15", "note": "ждут бюджет"}
     DEALS["1601"]["STAGE_ID"] = "NEW"
-    # документ скачан на странице: КП → сумма, площадь, файл, стадия NEW → PREPARATION
+    # документ скачан на странице: КП → сумма, площадь, файл, стадия NEW → PREPARATION (расчёт сохранён — замок открыт)
+    with db.pool.connection() as conn:
+        conn.execute("INSERT INTO deal_calc (deal_id, data) VALUES (1601, '{\"out\": {\"total\": 589250}}') ON CONFLICT DO NOTHING")
     (tmp_path / "abc1.bin").write_bytes(b"%PDF")
     calls.clear()
     bx._cache.clear()
@@ -279,6 +283,8 @@ def test_write_off_and_on(bxc, monkeypatch, tmp_path):
     j = c.get("/api/journal", headers=hdr(6000)).json()
     assert [x["data"]["bx"] for x in j["items"] if x["action"] == "bx_write"][:2] == ["ok", "ok"]
     DEALS["1601"]["STAGE_ID"] = "PREPARATION"
+    with db.pool.connection() as conn:
+        conn.execute("DELETE FROM deal_calc WHERE deal_id=1601")
 
 
 def test_full_and_today(bxc):
@@ -413,7 +419,7 @@ def test_leads(bxc, monkeypatch):
     assert [l["id"] for l in r["leads"]] == [3001]
     l = r["leads"][0]
     assert l["new"] and l["name"] == "Дана" and l["phone"] == "+7 701 555 44 33"
-    assert l["missing"] == ["город", "площадь"]          # услуги у лида ещё нет — не требуем
+    assert l["missing"] == ["город", "услуга", "площадь"]   # услуги у лида в Битриксе нет — спросим при переводе
     assert c.get("/api/bx/leads/3002", headers=hdr(6000)).status_code == 403
     full = c.get("/api/bx/leads/3001", headers=hdr(6000)).json()
     assert full["has"] == {"service": False, "area": True} and full["fail"] == [{"id": "UC_MARGO5", "name": "Дорого"}]
@@ -448,12 +454,16 @@ def test_leads(bxc, monkeypatch):
     assert c.post("/api/bx/leads/3001/status", json={"status": "UC_MARGO5"}, headers=hdr(6000)).status_code == 400
     # в сделку: контакт → сделка (город по названию) → лид сконвертирован
     calls.clear()
-    r = c.post("/api/bx/leads/3001/convert", headers=hdr(6000)).json()
+    assert c.post("/api/bx/leads/3001/convert", headers=hdr(6000)).status_code == 400          # услуга обязательна
+    assert c.post("/api/bx/leads/3001/convert", json={"service": "1"}, headers=hdr(6000)).status_code == 400
+    assert not calls
+    r = c.post("/api/bx/leads/3001/convert", json={"service": "19285", "address": "Астана, Кенесары 40"}, headers=hdr(6000)).json()
     assert r == {"bx": "ok", "deal": 9100}
     assert [m for m, _ in calls] == ["crm.contact.add", "crm.deal.add", "crm.lead.update", "crm.timeline.comment.add"]
     deal = calls[1][1]["fields"]
     assert deal["UF_CRM_6881101914D8D"] == "12077" and deal["UF_CRM_ARTGAME_AREA_M2"] == 40 and deal["LEAD_ID"] == 3001
     assert deal["CONTACT_ID"] == 9100 and deal["ASSIGNED_BY_ID"] == 4565
+    assert deal["UF_CRM_1753294730602"] == "19285" and deal["UF_CRM_1755520919823"] == "Астана, Кенесары 40"
     assert calls[2][1]["fields"] == {"STATUS_ID": "CONVERTED"}
     LEADS["3001"].update({"STATUS_ID": "UC_93GBZP", "UF_CRM_1753202309": None})
     LEADS["3001"].pop("UF_CRM_ARTGAME_LEAD_AREA", None)

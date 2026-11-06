@@ -24,7 +24,8 @@ router = APIRouter(prefix="/api")
 F_KP, F_CONTRACT, F_INVOICES, F_OTHER = "UF_CRM_1753202415", "UF_CRM_1753202391", "UF_CRM_ARTGAME_DOC05_INVOICES", "UF_CRM_ARTGAME_DOC05_OTHER"
 F_ADV, F_DAYS, F_WARR = "UF_CRM_ARTGAME_ADVANCE_PERCENT", "UF_CRM_1753295493279", "UF_CRM_ARTGAME_WARRANTY_MONTHS"
 F_INV_SUM, F_INV_PURPOSE, F_REASON = "UF_CRM_ARTGAME_INVOICE_AMOUNT", "UF_CRM_ARTGAME_INVOICE_PURPOSE", "UF_CRM_1753381316974"
-WRITABLE = {"OPPORTUNITY", "STAGE_ID", bx.AREA, bx.SERVICE, bx.ADDR, bx.CITY, F_ADV, F_DAYS, F_WARR, F_INV_SUM, F_INV_PURPOSE, F_REASON,
+F_START, F_END = "UF_CRM_ARTGAME_PROJECT_START_ACTUAL", "UF_CRM_ARTGAME_PROJECT_END_PLAN"
+WRITABLE = {"OPPORTUNITY", "STAGE_ID", F_START, F_END, bx.AREA, bx.SERVICE, bx.ADDR, bx.CITY, F_ADV, F_DAYS, F_WARR, F_INV_SUM, F_INV_PURPOSE, F_REASON,
             F_KP, F_CONTRACT, F_INVOICES, F_OTHER, bx.F_LEVEL, bx.F_SHIFTS, bx.F_CREW, bx.F_TERM}
 MULTI_FILE = {F_KP, F_CONTRACT, F_INVOICES, F_OTHER}
 # Переходы по документам: двигаем только вперёд и только из перечисленных стадий.
@@ -72,16 +73,38 @@ def _file_data(path: Path, name: str) -> dict:
     return {"fileData": [name, base64.b64encode(path.read_bytes()).decode()]}
 
 
+def _same(got, want) -> bool:
+    """Сверка после записи: «60» = 60.0, дата «2026-11-06» = «2026-11-06T03:00:00+03:00», адрес — до «|»."""
+    a, b = str(got or "").split("|")[0], str(want).split("|")[0]
+    if a == b:
+        return True
+    if len(b) == 10 and b[4] == "-" and a[:10] == b:
+        return True
+    try:
+        return float(a) == float(b)
+    except ValueError:
+        return False
+
+
 def write(p: dict, deal_id: int, what: str, fields: dict | None = None, comment: str | None = None,
           file: tuple[Path, str, str] | None = None, stage_for: str | None = None) -> dict:
     """Одна запись: поля + файл + комментарий в ленту. Проверка прав по текущей сделке из Битрикса."""
     d = bx._deal(p, deal_id, fresh=True)
     fields = {k: v for k, v in (fields or {}).items() if k in WRITABLE and v not in (None, "", 0, "0")}
+    held = []
     if stage_for and stage_for in STAGE_FLOW:
         to, allowed = STAGE_FLOW[stage_for]
         if d["STAGE_ID"] in allowed:
-            fields["STAGE_ID"] = to
+            from . import fill
+            # что даёт сама запись: скачанный файл и поля из документа (аванс, срок, гарантия, адрес, площадь)
+            given = {F_ADV: "adv", F_DAYS: "days", F_WARR: "warranty", bx.ADDR: "address", bx.AREA: "area", "OPPORTUNITY": "sum"}
+            done = tuple(v for k, v in given.items() if fields.get(k)) + ((stage_for,) if stage_for in ("kp", "signed") else ())
+            held = fill.gate(p, deal_id, d["STAGE_ID"], to, done=done)
+            if not held:
+                fields["STAGE_ID"] = to
     log = {"what": what, "fields": {k: (v if not isinstance(v, dict) else "файл") for k, v in fields.items()}}
+    if held:
+        log["held"] = held   # файл записан, стадию не двигаем: карточка не заполнена (HEAD 06.11)
     if not enabled():
         log["bx"] = "off"
         with db.pool.connection() as conn:
@@ -102,8 +125,7 @@ def write(p: dict, deal_id: int, what: str, fields: dict | None = None, comment:
                                                          "COMMENT": f"{p['full_name']} (приложение): {comment}"}})
         # сверка: перечитываем и сравниваем простые поля
         after = bx._deal(p, deal_id, fresh=True)
-        bad = [k for k, v in fields.items() if k not in MULTI_FILE and not isinstance(v, dict)
-               and str(after.get(k) or "").split("|")[0] != str(v).split("|")[0]]
+        bad = [k for k, v in fields.items() if k not in MULTI_FILE and not isinstance(v, dict) and not _same(after.get(k), v)]
         log["bx"] = "ok" if not bad else "error"
         if bad:
             log["error"] = f"не записалось: {', '.join(bad)}"
@@ -114,7 +136,7 @@ def write(p: dict, deal_id: int, what: str, fields: dict | None = None, comment:
         db.audit(conn, p["id"], "bx_write", "deal", deal_id, log)
     if log["bx"] == "error":
         return {"bx": "error", "error": log["error"], "fields": log["fields"]}
-    return {"bx": "ok", "fields": log["fields"], "stage": fields.get("STAGE_ID")}
+    return {"bx": "ok", "fields": log["fields"], "stage": fields.get("STAGE_ID"), "held": held}
 
 
 # ---------- документ скачан на странице МОП ----------
@@ -216,6 +238,12 @@ def api_stage(deal_id: int, body: StageIn, p: dict = Depends(active)):
     if body.stage not in st:
         raise HTTPException(400, "нет такой стадии")
     fields = {"STAGE_ID": body.stage}
+    if st[body.stage]["semantic"] not in ("failure", "apology") and body.stage != POSTPONED:
+        from . import fill
+        cur = bx._deal(p, deal_id, fresh=True)["STAGE_ID"]
+        miss = fill.gate(p, deal_id, cur, body.stage)
+        if miss:   # замок (HEAD 06.11): вперёд по воронке — только с заполненной карточкой
+            raise HTTPException(409, "сначала заполните: " + ", ".join(miss))
     if st[body.stage]["semantic"] in ("failure", "apology"):
         if body.reason_code not in REASON:
             raise HTTPException(400, "выберите причину отказа из списка")
@@ -287,6 +315,11 @@ class FieldsIn(BaseModel):
     service: str | None = None    # ID пункта списка «Услуга»
     city: str | None = None       # ID пункта списка «Город»
     address: str | None = None
+    adv: int | None = None        # аванс, %
+    days: int | None = None       # срок по договору, календарных дней
+    warranty: int | None = None   # гарантия, месяцев
+    start: date | None = None     # старт факт
+    end: date | None = None       # окончание план
 
 
 @router.post("/bx/deals/{deal_id}/fields")
@@ -305,9 +338,14 @@ def api_fields(deal_id: int, body: FieldsIn, p: dict = Depends(active)):
     if body.address is not None and body.address.strip():
         fields[bx.ADDR] = body.address.strip()
         parts.append(body.address.strip())
+    for val, key, txt in ((body.adv, F_ADV, "аванс {}%"), (body.days, F_DAYS, "срок {} дн."), (body.warranty, F_WARR, "гарантия {} мес."),
+                          (body.start, F_START, "старт {}"), (body.end, F_END, "сдача план {}")):
+        if val:
+            fields[key] = val.isoformat() if isinstance(val, date) else (str(val) if key == F_DAYS else val)
+            parts.append(txt.format(val.strftime("%d.%m.%Y") if isinstance(val, date) else val))
     if not fields:
         raise HTTPException(400, "нечего менять")
-    r = write(p, deal_id, "квалификация", fields, "уточнил: " + ", ".join(parts))
+    r = write(p, deal_id, "карточка сделки", fields, "уточнил: " + ", ".join(parts))
     if r["bx"] == "error":
         raise HTTPException(502, r["error"])
     return r

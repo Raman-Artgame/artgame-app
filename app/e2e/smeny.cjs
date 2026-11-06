@@ -4,7 +4,8 @@ const { chromium } = require('playwright')
 const { execSync } = require('child_process')
 const assert = require('assert')
 const BE = __dirname + '/../backend'
-const sign = id => execSync(`cd ${BE} && .venv/bin/python -c "import sys;sys.path+=['tests'];from conftest import make_init_data;print(make_init_data({'id':${id},'first_name':'Тест'}))"`).toString().trim()
+const PY = process.env.PY || `${BE}/.venv/bin/python`
+const sign = id => execSync(`cd ${BE} && ${PY} -c "import sys;sys.path+=['tests'];from conftest import make_init_data;print(make_init_data({'id':${id},'first_name':'Тест'}))"`).toString().trim()
 const API = 'http://127.0.0.1:8100/api'
 const call = async (id, path, body) => (await fetch(API + path, { method: body ? 'POST' : 'GET',
   headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': sign(id) }, body: body && JSON.stringify(body) })).json()
@@ -21,6 +22,14 @@ async function page(b, id, name) {
   return { p, ctx }
 }
 
+async function tab(p, name) {
+  const nav = p.locator('nav')
+  const btn = nav.getByRole('button', { name, exact: true })
+  if (await btn.waitFor({ timeout: 3000 }).then(() => true, () => false)) return nav.getByRole('button', { name, exact: true }).click()
+  await nav.locator('button').last().click()   // «Ещё»
+  await p.locator('.sheetbox').getByRole('button', { name, exact: true }).click()
+}
+
 ;(async () => {
   const b = await chromium.launch()
   await call(1000, '/register', { full_name: 'HEAD' })
@@ -33,7 +42,7 @@ async function page(b, id, name) {
   await a.getByText('Заявка у HEAD').waitFor()
   // HEAD назначает роль и зону на вкладке «Команда»
   const { p: h } = await page(b, 1000, 'HEAD')
-  await h.getByRole('button', { name: 'Команда' }).click()
+  await tab(h, 'Команда')
   const row = h.locator('.person', { hasText: 'Дана' })
   await row.getByText('ждёт роли').waitFor()
   await row.locator('select').selectOption('artist')
@@ -60,14 +69,14 @@ async function page(b, id, name) {
   await ctx.setOffline(false)
   await a.evaluate(() => window.dispatchEvent(new Event('online')))
   await a.waitForTimeout(800)
-  await a.getByRole('button', { name: 'Мои' }).click()
+  await tab(a, 'Мои')
   await a.screenshot({ path: `${shots}/2-moi.png` })
   await a.getByText(/15\s000 ₸/).waitFor()
   await a.screenshot({ path: `${shots}/2-moi.png` })
 
   // 4. Главный художник проверяет: смену принимает, расход отклоняет с причиной
   const { p: l } = await page(b, 3000, 'Главный')
-  await l.getByRole('button', { name: 'Проверка' }).click()
+  await tab(l, 'Проверка')
   await l.getByText('Дана').first().waitFor()
   await l.screenshot({ path: `${shots}/3-proverka.png` })
   await l.getByRole('button', { name: '✓' }).first().click()
@@ -79,7 +88,7 @@ async function page(b, id, name) {
   await call(1000, `/people/${(await call(1000, '/people')).find(x => x.full_name === 'Дана').id}`, { zones: ['mural', 'design'] })
   await a.reload()
   await a.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000001' }) }))
-  await a.getByRole('button', { name: 'Объекты' }).click()
+  await tab(a, 'Объекты')
   await a.getByText('Офис / без объекта').click()
   await a.locator('input[type=file]').setInputFiles([__dirname + '/chek.png', __dirname + '/chek.png'])
   await a.locator('.grid img').nth(1).waitFor()

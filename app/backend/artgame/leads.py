@@ -55,16 +55,20 @@ def _name(l: dict) -> str:
     return n or l.get("TITLE") or f"Лид № {l.get('ID')}"
 
 
-def missing(l: dict, have: dict) -> list[str]:
-    """Что нужно заполнить до «В сделку». Поля, которых ещё нет в Битриксе, не требуем."""
+def missing(l: dict, have: dict, extra: "ConvertIn | None" = None) -> list[str]:
+    """Что нужно заполнить до «В сделку» (HEAD 06.11: «пожестче»): имя, телефон, город, услуга, площадь — всё обязательно.
+    Полей «Услуга»/«Площадь» у лида в Битриксе пока нет (BX-MOP-FIELDS) — тогда МОП указывает их при переводе (extra),
+    и они сразу уходят в поля сделки."""
     out = []
+    if not ((l.get("NAME") or "").strip() or (l.get("LAST_NAME") or "").strip()):
+        out.append("имя клиента")
     if not _phone(l):
         out.append("телефон")
     if not l.get(L_CITY):
         out.append("город")
-    if L_SERVICE in have and not l.get(L_SERVICE):
+    if not (l.get(L_SERVICE) if L_SERVICE in have else (extra and extra.service)):
         out.append("услуга")
-    if L_AREA in have and not bx._num(l.get(L_AREA)):
+    if not (bx._num(l.get(L_AREA)) if L_AREA in have else (extra and extra.area)):
         out.append("площадь")
     return out
 
@@ -140,6 +144,7 @@ def lead_full(p: dict, lead_id: int, fresh: bool = False) -> dict:
     row = _row(l, st, have, names)
     row.update({"manager": names.get(int(l.get("ASSIGNED_BY_ID") or 0), ""), "comments": l.get("COMMENTS") or "",
                 "city_id": str(l.get(L_CITY) or ""), "service_id": str(l.get(L_SERVICE) or ""),
+                "client_name": " ".join(x.strip() for x in (l.get("NAME"), l.get("LAST_NAME")) if x and x.strip()),
                 "feed": feed("lead", lead_id, names, fresh),
                 "has": {"service": L_SERVICE in have, "area": L_AREA in have},
                 "services": [{"id": k, "name": v} for k, v in _items(L_SERVICE, have).items()],
@@ -179,6 +184,7 @@ def lwrite(p: dict, lead_id: int, what: str, flds: dict | None = None, comment: 
 
 
 class LeadIn(BaseModel):
+    name: str | None = None       # имя клиента (NAME лида)
     city: str | None = None       # ID пункта списка городов лида
     service: str | None = None    # ID пункта «Услуга» лида
     area: float | None = None
@@ -205,6 +211,9 @@ def api_lead(lead_id: int, fresh: int = 0, p: dict = Depends(active)):
 def api_lead_save(lead_id: int, body: LeadIn, p: dict = Depends(active)):
     have = fields()
     f, parts = {}, []
+    if body.name and body.name.strip():
+        f["NAME"] = body.name.strip()
+        parts.append("имя " + body.name.strip())
     if body.city:
         if body.city not in _items(L_CITY, have):
             raise HTTPException(400, "нет такого города")
@@ -244,13 +253,22 @@ def api_lead_status(lead_id: int, body: StatusIn, p: dict = Depends(active)):
     return lwrite(p, lead_id, f"статус → {st[body.status]['name']}", {"STATUS_ID": body.status}, note)
 
 
+class ConvertIn(BaseModel):
+    service: str | None = None    # ID пункта «Услуга» СДЕЛКИ — пока у лида нет своего поля
+    area: float | None = None
+    address: str | None = None
+
+
 @router.post("/bx/leads/{lead_id}/convert")
-def api_convert(lead_id: int, p: dict = Depends(active)):
+def api_convert(lead_id: int, body: ConvertIn | None = None, p: dict = Depends(active)):
     """«В сделку»: контакт (если у лида его нет) → сделка в «1.1 Продажи РК» на первой стадии → лид «Сконвертирован».
-    Город, услуга и площадь переносятся по названию в поля сделки."""
+    Город, услуга и площадь переносятся по названию в поля сделки; без них сделку не создаём."""
+    body = body or ConvertIn()
+    if body.service and body.service not in bx.enum_map(bx.SERVICE):
+        raise HTTPException(400, "нет такой услуги")
     l = _lead(p, lead_id, fresh=True)
     have = fields()
-    miss = missing(l, have)
+    miss = missing(l, have, body)
     if miss:
         raise HTTPException(400, "сначала заполните: " + ", ".join(miss))
     if not bxw.enabled():
@@ -274,8 +292,13 @@ def api_convert(lead_id: int, p: dict = Depends(active)):
         svc = _items(L_SERVICE, have).get(str(l.get(L_SERVICE) or ""), "") if L_SERVICE in have else ""
         if svc:
             deal[bx.SERVICE] = next((k for k, v in bx.enum_map(bx.SERVICE).items() if v.lower() == svc.lower()), None)
-        if bx._num(l.get(L_AREA)) and bx.AREA in df:
-            deal[bx.AREA] = bx._num(l.get(L_AREA))
+        if body.service and not deal.get(bx.SERVICE):
+            deal[bx.SERVICE] = body.service
+        area = bx._num(l.get(L_AREA)) or body.area
+        if area and bx.AREA in df:
+            deal[bx.AREA] = area
+        if body.address and body.address.strip():
+            deal[bx.ADDR] = body.address.strip()
         deal = {k: v for k, v in deal.items() if v not in (None, "")}
         j = bxw.CALL("crm.deal.add", {"fields": deal, "params": {"REGISTER_SONET_EVENT": "Y"}})
         deal_id = int(j.get("result") or 0)

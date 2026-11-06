@@ -120,6 +120,16 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   assert.deepStrictEqual(kp, { client: 'ТОО «Ромашка»', item: 'Художественная роспись стен', qty: '60', header: 'none' })
   assert.strictEqual(await p.locator('.mat').count(), 6, 'материалы клиенту под КП')
   await p.screenshot({ path: `${shots}/mop-kp.png`, fullPage: true })
+  // Замок: договор закрыт, пока КП не в сделке; скачанный КП → файл в сделку → договор открывается
+  await step(p, 'Договор')
+  await p.locator('.lockbox', { hasText: 'КП в сделке' }).waitFor()
+  await p.screenshot({ path: `${shots}/mop-lock.png` })
+  await step(p, 'КП')
+  await p.waitForFunction(() => document.querySelector('.embed iframe')?.contentWindow?.KPGEN?.count() === 1, null, { timeout: 20000 })
+  const dl = require('child_process').execSync('python3 -c "import tempfile;print(tempfile.gettempdir())"').toString().trim() + '/artgame-dl'
+  require('fs').mkdirSync(dl, { recursive: true }); require('fs').writeFileSync(dl + '/e2ekp.bin', '%PDF-1.4 e2e')
+  await mopFrame(p).evaluate(() => window.ARTGAME_ON_DOWNLOAD({ name: 'КП 1601 Ромашка.pdf', fid: 'e2ekp' }))
+  await p.waitForFunction(() => fetch('/api/_e2e/bx_calls').then(r => r.json()).then(c => c.some(x => x.params.fields?.UF_CRM_1753202415 === 'файл')))
   // Договор: сумма и аванс из расчёта, клиент из Битрикса; скачанный договор → запись в сделку
   await step(p, 'Договор')
   await p.waitForFunction(() => /заполнено/.test(document.querySelector('.embed iframe')?.contentDocument?.querySelector('#app .agbx-st')?.textContent || ''), null, { timeout: 20000 })
@@ -201,7 +211,7 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   assert.match(await p.locator('.qrow', { hasText: 'Дана' }).textContent(), /нет: город.*нет: площадьждёт \d+ ч/)
   await p.screenshot({ path: `${shots}/mop-leads.png` })
   await p.locator('.qrow', { hasText: 'Дана' }).click()
-  await p.locator('h3', { hasText: 'Что нужно для сделки' }).waitFor()
+  await p.locator('h3', { hasText: 'Обязательно для сделки' }).waitFor()
   await p.getByRole('button', { name: 'Отказ' }).click()
   assert.strictEqual(await p.locator('.chips button').count(), 8, 'восемь причин отказа')
   assert.ok(await p.getByRole('button', { name: 'Закрыть лид' }).isDisabled())
@@ -210,11 +220,16 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   await p.locator('input[list=lead-cities]').fill('Астана')
   await p.locator('label', { hasText: 'Площадь' }).locator('input').fill('40')
   await p.getByRole('button', { name: 'Сохранить в Битрикс' }).click()
+  await p.locator('.miss', { hasText: 'услуга' }).waitFor()          // услуга обязательна, у лида её поля нет — выбирается для сделки
+  assert.ok(await p.getByRole('button', { name: 'В сделку' }).isDisabled())
+  await p.locator('label', { hasText: 'Услуга' }).locator('select').selectOption({ label: 'Художественная роспись стен' })
   await p.locator('text=Всё заполнено, можно в сделку.').waitFor()
+  await p.screenshot({ path: `${shots}/mop-lead-lock.png`, fullPage: true })
   await p.getByRole('button', { name: 'В сделку' }).click()
   await p.locator('.hero h2', { hasText: '№ 9100' }).waitFor()
   calls = await bxCalls()
   assert.strictEqual(calls.find(c => c.method === 'crm.deal.add').params.fields.LEAD_ID, 3001)
+  assert.strictEqual(calls.find(c => c.method === 'crm.deal.add').params.fields.UF_CRM_1753294730602, '19285')
   // новая сделка: отказ из карточки — причина из списка + комментарий → поле причины и лента
   await p.locator('.hero').getByRole('button', { name: 'Стадия' }).click()
   await p.locator('.sheetbox select').selectOption('LOSE')

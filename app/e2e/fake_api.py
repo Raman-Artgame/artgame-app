@@ -65,7 +65,10 @@ def fake_write(method, params):
     if method == "tasks.task.add":
         return {"result": {"task": {"id": "777"}}}
     if method == "crm.deal.update":
-        DEALS[str(params["id"])].update({k: v for k, v in params["fields"].items() if not isinstance(v, (dict, list))})
+        # файл ложится в поле как в Битриксе: {id, downloadUrl}; простые поля — как есть
+        fake = {"id": 500 + len(BX_CALLS), "downloadUrl": "https://fake.bitrix24.kz/file"}
+        DEALS[str(params["id"])].update({k: (fake if isinstance(v, dict) else [fake] * len(v) if isinstance(v, list) else v)
+                                         for k, v in params["fields"].items()})
     if method == "crm.lead.update":
         LEADS[str(params["id"])].update(params["fields"])
     if method == "crm.contact.add":
