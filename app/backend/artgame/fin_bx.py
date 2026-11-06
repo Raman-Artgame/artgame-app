@@ -22,9 +22,18 @@ def _day(v) -> date | None:
         return None
 
 
-def import_payments(conn, since: date = START) -> dict:
-    deals = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": list(bx.CATEGORIES), ">=DATE_MODIFY": since.isoformat()},
-                                          "select": ["ID", "TITLE", "CATEGORY_ID"] + [f for _, a, d in PAY for f in (a, d)]}, fresh=True)
+SELECT = ["ID", "TITLE", "CATEGORY_ID"] + [f for _, a, d in PAY for f in (a, d)]
+
+
+def import_payments(conn, since: date = START, until: date | None = None, ids: list[int] | None = None) -> dict:
+    """Поступления сделок с датой в [since, until) → приходы журнала. ids — только эти сделки (история года по листу «Проекты»)."""
+    if ids is not None:
+        deals = []
+        for i in range(0, len(ids), 50):
+            deals += bx.read_all("crm.deal.list", {"filter": {"ID": ids[i:i + 50]}, "select": SELECT}, fresh=True)
+    else:
+        deals = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": list(bx.CATEGORIES), ">=DATE_MODIFY": since.isoformat()},
+                                              "select": SELECT}, fresh=True)
     added = changed = 0
     for d in deals:
         did = int(d["ID"])
@@ -33,7 +42,9 @@ def import_payments(conn, since: date = START) -> dict:
             ref = f"deal:{did}:pay{n}"
             rows = conn.execute("SELECT * FROM fin_ledger WHERE source='bitrix' AND source_ref=%s ORDER BY id DESC", (ref,)).fetchall()
             old = next((r for r in rows if r["status"] == "active"), None)
-            ok = amount > 0 and day is not None and day >= since
+            if (day and day < since) or (old and old["op_date"] < since) or (until and ((day and day >= until) or (old and old["op_date"] >= until))):
+                continue   # чужой период: история не трогается текущим импортом и наоборот
+            ok = amount > 0 and day is not None
             if ok and any(float(r["amount"]) == amount and r["op_date"] == day for r in rows) and (old is None or
                                                                                                (float(old["amount"]) == amount and old["op_date"] == day)):
                 continue   # уже в журнале (или HEAD сам отменил эту строку — не возвращаем)
