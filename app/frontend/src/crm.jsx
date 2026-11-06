@@ -52,8 +52,8 @@ export function Contact({ phone, name, entity, id }) {
 
 const RESULTS = [['reached', 'Дозвонился'], ['no_answer', 'Не дозвонился'], ['callback', 'Перезвонить'], ['chat', 'Написал']]
 // Итог звонка: в ленту Битрикса; «Перезвонить» — задача с датой и напоминание бота.
-export function CallOutcome({ path, done }) {
-  const [f, setF] = useState(null)
+export function CallOutcome({ path, done, auto }) {
+  const [f, setF] = useState(auto ? { result: 'reached', text: '', next: '' } : null)
   const [msg, setMsg] = useState('')
   const send = () => api(`${path}/call`, { method: 'POST', body: { result: f.result, text: f.text, next: f.next || null } })
     .then(r => { setF(null); setMsg(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Записано в Битрикс' + (r.task ? ', задача поставлена.' : '.')); done && done() },
@@ -201,10 +201,11 @@ export function LeadCard({ id, back, openDeal }) {
   const [f, setF] = useState({ city: '', cityName: '', service: '', area: '', sum: '' })
   const [cities, setCities] = useState([])
   const [fail, setFail] = useState(null)
+  const [reasons, setReasons] = useState([])
   const load = fresh => api(`/bx/leads/${id}${fresh ? '?fresh=1' : ''}`).then(r => {
     setL(r); setF({ city: r.city_id, cityName: r.city, service: r.service_id, area: r.area || '', sum: r.sum || '' })
   }, e => setErr(e.message))
-  useEffect(() => { load(false); api('/bx/leads/cities').then(setCities, () => {}) }, [id])
+  useEffect(() => { load(false); api('/bx/leads/cities').then(setCities, () => {}); api('/bx/reasons').then(setReasons, () => {}) }, [id])
   if (err) return <div className="card"><a onClick={back}>← назад</a><p className="muted">{err}</p></div>
   if (!l) return <Skeleton n={2} />
   const say = p => p.then(r => { setMsg(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Записано в Битрикс.'); return load(true) }, e => setMsg('Не записалось: ' + e.message))
@@ -237,11 +238,13 @@ export function LeadCard({ id, back, openDeal }) {
     <div className="card"><h3>Решение</h3>
       <button disabled={!!l.missing.length} onClick={convert}>В сделку</button>
       {!!l.missing.length && <p className="small muted">Кнопка откроется, когда заполнены {l.missing.join(', ')}.</p>}
-      {!fail ? <button className="ghost" onClick={() => setFail({ status: l.fail[0]?.id || '', reason: '' })}>Отказ</button>
+      {!fail ? <button className="ghost" onClick={() => setFail({ status: l.fail[0]?.id || '', code: '', reason: '' })}>Отказ</button>
         : <div className="dealedit">
           <select value={fail.status} onChange={e => setFail({ ...fail, status: e.target.value })}>{l.fail.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-          <input value={fail.reason} onChange={e => setFail({ ...fail, reason: e.target.value })} placeholder="Причина (обязательно)" />
-          <div className="dealbtns"><button disabled={!fail.reason.trim()} onClick={() => say(api(`/bx/leads/${id}/status`, { method: 'POST', body: fail })).then(() => setFail(null))}>Закрыть лид</button>
+          <p className="small muted">Причина — одна из списка (HEAD 06.11), к ней строка комментария.</p>
+          <div className="chips">{reasons.map(r => <button key={r.code} className={fail.code === r.code ? 'on' : ''} onClick={() => setFail({ ...fail, code: r.code })}>{r.name}</button>)}</div>
+          <input value={fail.reason} onChange={e => setFail({ ...fail, reason: e.target.value })} placeholder="Комментарий: что сказал клиент" />
+          <div className="dealbtns"><button disabled={!fail.code} onClick={() => say(api(`/bx/leads/${id}/status`, { method: 'POST', body: { status: fail.status, reason: fail.reason, reason_code: fail.code } })).then(() => setFail(null))}>Закрыть лид</button>
             <button className="ghost" onClick={() => setFail(null)}>Отмена</button></div></div>}
     </div>
     <Feed items={l.feed} />

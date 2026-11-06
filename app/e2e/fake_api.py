@@ -51,6 +51,11 @@ from artgame import bxw  # noqa: E402
 from artgame.config import settings  # noqa: E402
 from test_bx import DEALS, LEADS  # noqa: E402
 settings.bitrix_webhook = "https://fake.bitrix24.kz/rest/1/key/"
+# «Проекты»: объект в работе у другого МОП (Тимур), старт 2 дня назад, норма 12 смен / 10 раб. дней
+DEALS["1700"] = {"ID": "1700", "TITLE": "1700 · ШКОЛА — ШЫМКЕНТ", "STAGE_ID": "UC_AV00QK", "CATEGORY_ID": "0", "OPPORTUNITY": "2400000.00",
+                 "ASSIGNED_BY_ID": "4693", "CONTACT_ID": "0", "COMPANY_ID": "0", "UF_CRM_6881101914D8D": None,
+                 "DATE_MODIFY": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat(), "UF_CRM_ARTGAME_AREA_M2": "120",
+                 "UF_CRM_ARTGAME_NORM_SHIFTS": "12", "UF_CRM_ARTGAME_TERM_DAYS": "10", "UF_CRM_ARTGAME_COMPLEXITY": "901"}
 BX_CALLS = []
 
 

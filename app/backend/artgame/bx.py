@@ -321,10 +321,10 @@ def level_key(name) -> str:
 
 
 def resources(area: float, level: str = "medium", service: str = "mural", height: bool = False, outdoor: bool = False,
-              surface: bool = False, white: bool = False) -> dict:
+              surface: bool = False, white: bool = False, v: dict | None = None) -> dict:
     """Смены, люди, дни — по norm.* и print.* из «Значений» (утверждены 04–05.11). Нулевая площадь → пусто."""
     import math
-    v = _vals()
+    v = v if v is not None else _vals()
     area = float(area or 0)
     if area <= 0:
         return {}

@@ -38,6 +38,7 @@ def fake(method, params):
         rows = [d for d in rows if "ID" in f or SEMANTIC.get(d["STAGE_ID"].split(":")[-1], "P") == f.get("STAGE_SEMANTIC_ID", "P")]
         rows = [d for d in rows if "CATEGORY_ID" not in f or int(d["CATEGORY_ID"]) in f["CATEGORY_ID"]]
         rows = [d for d in rows if "ID" not in f or int(d["ID"]) in f["ID"]]
+        rows = [d for d in rows if "STAGE_ID" not in f or d["STAGE_ID"] in f["STAGE_ID"]]
         if ">=CLOSEDATE" in f:
             rows = [d for d in rows if f[">=CLOSEDATE"] <= d.get("CLOSEDATE", "")[:10] < f["<CLOSEDATE"]]
         return {"result": rows, "total": len(rows)}

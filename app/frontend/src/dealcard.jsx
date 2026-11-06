@@ -1,138 +1,340 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { api } from './api.js'
-
 import { SalesSpend } from './salesexp.jsx'
+import { Embed } from './places.jsx'
+import { Copy, Sheet } from './ui.jsx'
 import { CallOutcome, Contact, Feed, Skeleton, bxLink, cleanTitle, dt, money, strip, usePortal } from './crm.jsx'
+import { leftText } from './projects.jsx'
 
-// Карточка сделки (HEAD 05.11): шапка с шагами и ОДНОЙ кнопкой следующего шага, ниже три раздела —
-// «Действия», «Срок и деньги», «История», чтобы не листать одну длинную простыню. Битрикс — источник правды.
+// Карточка сделки = единственное рабочее поле МОП (HEAD 06.11, вариант А). Тёмная шапка с шагами, нажатие на шаг открывает
+// его панель: Клиент → Расчёт → КП → Договор → Оплата → В работе. Расчёт считает сервер по «Значениям» и пишет в Битрикс;
+// КП и документы — панель рабочего места с подставленной сделкой и расчётом; скрипты и заметки — во всплывающих окнах.
 const LEVELS = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный', author: 'Авторский' }
-const POSTPONED = 'UC_VCP4VO'   // «Отложено»: только с датой возврата
-const KP_ON = new Set(['PREPARATION', 'UC_VZFPUP', 'UC_YV66BV', 'UC_1EXUAC', 'FINAL_INVOICE', 'UC_AV00QK'])
-const DOG_ON = new Set(['FINAL_INVOICE', 'UC_AV00QK'])
+const FIX = { lite: 'Лёгкий', hard: 'Сложный', excl: 'Эксклюзив' }
+const SERVICES = [['mural', 'Роспись'], ['print', 'Печать'], ['fix', 'Фикс-прайс'], ['bulk', 'Покраска']]
+const EXTRAS = [['urgent', 'Срочность'], ['height', 'Высота'], ['night', 'Ночь'], ['lacquer', 'Лак']]
+const DESIGNS = ['XS', 'S', 'M', 'L', 'XL']
+const PLACES = [['base', 'Астана / Шымкент'], ['near', '150–200 км'], ['far', 'Другой город']]
+const POSTPONED = 'UC_VCP4VO'
+const KP_ON = new Set(['PREPARATION', 'UC_VZFPUP', 'UC_YV66BV', 'UC_1EXUAC', 'FINAL_INVOICE', 'UC_AV00QK', 'UC_BMKDS4'])
+const DOG_ON = new Set(['FINAL_INVOICE', 'UC_AV00QK', 'UC_BMKDS4'])
+const WORK_ON = new Set(['UC_AV00QK', 'UC_BMKDS4', 'WON'])
+const STEPS = [['client', 'Клиент'], ['calc', 'Расчёт'], ['kp', 'КП'], ['docs', 'Договор'], ['pay', 'Оплата'], ['work', 'В работе']]
+// скрипты рабочего места по шагам алгоритма (rm_extra.js STEP_SCR) → панели карточки
+const STEP_SCR = { '01': ['С1', 'С2', 'С3', 'Ж1', 'Ж2'], '03': ['С4', 'С5', 'С8', 'Ж3', 'Ж4', 'Ж5'], '05': ['С6', 'С7', 'Д1', 'Д2', 'Д3'], '06': ['С8', 'С26', 'С13', 'Ж16'],
+  '07': ['Д4', 'Д5', 'Д6', 'Д7'], '08': ['Д7', 'Д8'], '09': ['С17', 'С23', 'С24', 'Ж17', 'Ж18'], '12': ['С25'] }
+const PANEL_ALGO = { client: ['01', '03'], calc: ['05'], kp: ['06'], docs: ['09', '07'], pay: ['09'], work: ['12'], hist: ['12'] }
 const tomorrow = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10)
-function steps(d) {
+const autoDesign = m2 => m2 < 30 ? 'S' : m2 < 200 ? 'M' : m2 < 1000 ? 'L' : 'XL'
+const MAT = [['ARTGAME_Price_2026_phone.pdf', 'Прайс 2026', 'для WhatsApp'], ['ARTGAME_Price_paintings_2026_phone.pdf', 'Прайс картин', 'для WhatsApp'],
+  ['ARTGAME_Catalog_FixPrice_2026_phone.pdf', 'Каталог фикс-прайса', 'рисунки 01–32'], ['ARTGAME_Object_requirements_phone.pdf', 'Подготовка объекта', 'стены, доступ, условия'],
+  ['ARTGAME_Warranty_care_phone.pdf', 'Гарантия и уход', 'срок, что покрывает'], ['ARTGAME_Company_card.pdf', 'Карточка компании', 'наши реквизиты']]
+
+function steps(d, calc) {
   const has = t => d.files.some(f => f.title.startsWith(t))
-  return [['Клиент', !!(d.client?.phone || d.client?.name)], ['Расчёт', !!d.norm.shifts || !!d.area], ['КП', KP_ON.has(d.stage) || has('КП')],
-    ['Договор', DOG_ON.has(d.stage) || has('Договор')], ['Оплата', d.pay.received > 0]]
+  return [['client', !!(d.client?.phone || d.client?.name)], ['calc', !!(calc?.out?.total) || !!d.norm.shifts], ['kp', KP_ON.has(d.stage) || has('КП')],
+    ['docs', DOG_ON.has(d.stage) || has('Договор')], ['pay', d.pay.received > 0], ['work', WORK_ON.has(d.stage)]]
 }
-export function DealCard({ id, back, open }) {
+
+let scriptsCache = null
+function useScripts() {
+  const [s, setS] = useState(scriptsCache)
+  useEffect(() => { if (!scriptsCache) api('/bx/scripts').then(r => { scriptsCache = r; setS(r) }, () => setS({ scr: { p1: [], p2: [] }, algo: { steps: [] } })) }, [])
+  return s
+}
+const allScr = s => [...(s?.scr?.p1 || []), ...(s?.scr?.p2 || [])].flatMap(([, items]) => items)
+
+// Скрипты шага во всплывающем окне: русский / казахский, каждая реплика копируется одной кнопкой.
+function Scripts({ codes, title, onClose, algoStep }) {
+  const s = useScripts()
+  const [lang, setLang] = useState(() => { try { return localStorage.getItem('ag-rm-lang') || 'ru' } catch { return 'ru' } })
+  const byCode = Object.fromEntries(allScr(s).map(x => [x.c, x]))
+  const list = codes.map(c => byCode[c]).filter(Boolean)
+  const step = s?.algo?.steps?.find(x => x.n === algoStep)
+  return <Sheet title={title} onClose={onClose}>
+    {step && <div className="hint"><div><b>Шаг {+step.n}. {step.title}</b><br />Результат: {step.result}{step.bx ? <><br />Битрикс: {step.bx}</> : null}</div></div>}
+    <div className="segf"><button className={lang === 'ru' ? 'on' : ''} onClick={() => { setLang('ru'); try { localStorage.setItem('ag-rm-lang', 'ru') } catch { /* */ } }}>Русский</button>
+      <button className={lang === 'kz' ? 'on' : ''} onClick={() => { setLang('kz'); try { localStorage.setItem('ag-rm-lang', 'kz') } catch { /* */ } }}>Қазақша</button></div>
+    {!s && <Skeleton n={3} />}
+    {s && !list.length && <p className="muted">Для этого шага готовых реплик нет — см. учебник во вкладке «Учёба».</p>}
+    {list.map(x => { const t = lang === 'kz' && x.kz ? x.kz : x.ru
+      return <div key={x.c} className="scr"><div><span className="code">{x.c}</span><b>{x.s}</b></div><div className="st">{t}</div>
+        {x.n && <div className="sn">{x.n}</div>}<div className="dealbtns"><Copy text={t} />{lang === 'kz' && !x.kz && <span className="small muted">только на русском</span>}</div></div> })}
+  </Sheet>
+}
+
+// Перевод стадии: отказ — только с причиной из списка (HEAD 06.11, 8 причин) и строкой комментария; «Отложено» — с датой возврата.
+function StageSheet({ d, stages, onClose, onDone }) {
+  const [stage, setStage] = useState(d.stage)
+  const [code, setCode] = useState('')
+  const [reason, setReason] = useState('')
+  const [until, setUntil] = useState('')
+  const [reasons, setReasons] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => { api('/bx/reasons').then(setReasons, () => {}) }, [])
+  const sel = stages.find(s => s.id === stage)
+  const fail = ['failure', 'apology'].includes(sel?.semantic)
+  const ok = stage !== d.stage && (!fail || code) && (stage !== POSTPONED || until)
+  const send = () => { setBusy(true); api(`/bx/deals/${d.id}/stage`, { method: 'POST', body: { stage, reason: reason || null, reason_code: fail ? code : null, until: stage === POSTPONED ? until : null } })
+    .then(r => onDone(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Стадия записана в Битрикс.'), e => { setErr(e.message); setBusy(false) }) }
+  return <Sheet title="Стадия сделки" onClose={onClose}>
+    <select value={stage} onChange={e => setStage(e.target.value)}>{stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+    {fail && <>
+      <p className="small muted">Причина отказа — одна из списка, к ней строка комментария. «Прочее» нет нарочно: так отчёт покажет, что чинить.</p>
+      <div className="chips">{reasons.map(r => <button key={r.code} className={code === r.code ? 'on' : ''} onClick={() => setCode(r.code)}>{r.name}</button>)}</div>
+      <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Комментарий: что именно сказал клиент" />
+    </>}
+    {stage === POSTPONED && <>
+      <label>Вернуться к сделке<input type="date" value={until} min={tomorrow()} onChange={e => setUntil(e.target.value)} /></label>
+      <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Почему отложили" />
+      <p className="small muted">В Битриксе появится задача с этой датой, бот напомнит утром.</p></>}
+    {!fail && stage !== POSTPONED && stage !== d.stage && <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Комментарий (по желанию)" />}
+    {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}
+    <button disabled={!ok || busy} onClick={send}>Перевести</button>
+  </Sheet>
+}
+
+function NoteSheet({ d, onClose, onDone, initial = '' }) {
+  const [text, setText] = useState(initial)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const send = () => { setBusy(true); api(`/bx/deals/${d.id}/note`, { method: 'POST', body: { text } }).then(r => onDone(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Заметка записана в ленту сделки.'), e => { setErr(e.message); setBusy(false) }) }
+  return <Sheet title="Заметка в сделку" onClose={onClose}>
+    <textarea rows={4} value={text} onChange={e => setText(e.target.value)} placeholder="Что важно помнить по этой сделке" autoFocus />
+    {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}
+    <button disabled={!text.trim() || busy} onClick={send}>Записать</button>
+  </Sheet>
+}
+
+// Объединённый расчёт: цена клиенту + срок и состав одной формой. Считает сервер (POST /price), «Записать в сделку» — /price/save.
+function Calc({ d, saved, onSaved }) {
+  const svc0 = /печат/i.test(d.service || '') ? 'print' : 'mural'
+  const [f, setF] = useState(() => saved?.in || { service: svc0, area: d.area || '', level: d.level || 'medium', design: null, extras: [], outdoor: false, place: 'base', cash: 0, qty: 1 })
+  const [r, setR] = useState(saved?.out || null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const t = useRef(null)
+  useEffect(() => {
+    if (!(+f.area > 0) && f.service !== 'fix') { setR(null); return undefined }
+    clearTimeout(t.current)
+    t.current = setTimeout(() => api(`/bx/deals/${d.id}/price`, { method: 'POST', body: { ...f, area: +f.area || 0, cash: +f.cash || 0 } }).then(x => { setR(x); setErr('') }, e => setErr(e.message)), 250)
+    return () => clearTimeout(t.current)
+  }, [f])
+  const set = p => setF({ ...f, ...p })
+  const tog = k => set({ extras: f.extras.includes(k) ? f.extras.filter(x => x !== k) : [...f.extras, k] })
+  const save = () => { setBusy(true); setMsg(''); api(`/bx/deals/${d.id}/price/save`, { method: 'POST', body: { ...f, area: +f.area || 0, cash: +f.cash || 0 } })
+    .then(x => { setMsg((x.bx === 'off' ? 'Расчёт сохранён, в Битрикс не записан (ключ записи не задан).' : 'Записано в сделку: сумма, площадь' + (x.norm_fields ? ', смены и срок.' : '. Полей для смен и срока в Битриксе ещё нет — задание Кодексу.')) ); onSaved() }, e => setMsg('Не записалось: ' + e.message)).finally(() => setBusy(false)) }
+  const n = r?.norm || {}
+  const isArea = f.service !== 'fix'
+  return <div className="card">
+    <div className="panelhead"><h3>Расчёт</h3><span className="small muted">{saved ? `записан ${dt(saved.at)}` : 'по «Значениям» сейчас'}</span></div>
+    <div className="segf">{SERVICES.map(([k, name]) => <button key={k} className={f.service === k ? 'on' : ''} onClick={() => set({ service: k, design: null })}>{name}</button>)}</div>
+    {isArea && <label>Площадь, м²<input type="number" min="1" inputMode="decimal" value={f.area} onChange={e => set({ area: e.target.value, design: null })} placeholder="60" /></label>}
+    {f.service === 'mural' && <><label>Сложность</label><div className="chips">{Object.entries(LEVELS).map(([k, v]) => <button key={k} className={f.level === k ? 'on' : ''} onClick={() => set({ level: k })}>{v}</button>)}</div></>}
+    {f.service === 'fix' && <><label>Рисунок</label><div className="chips">{Object.entries(FIX).map(([k, v]) => <button key={k} className={f.level === k ? 'on' : ''} onClick={() => set({ level: k })}>{v}</button>)}</div>
+      <label>Количество работ<input type="number" min="1" value={f.qty} onChange={e => set({ qty: +e.target.value || 1 })} /></label></>}
+    {(f.service === 'mural' || f.service === 'print') && <>
+      <label>Дизайн <span className="muted">· по площади {autoDesign(+f.area || 0)}, другую — только по решению HEAD</span></label>
+      <div className="chips">{DESIGNS.map(k => <button key={k} className={(f.design || autoDesign(+f.area || 0)) === k ? 'on' : ''} onClick={() => set({ design: k })}>{k}</button>)}</div>
+      <label>Надбавки и условия</label>
+      <div className="chips">{EXTRAS.map(([k, v]) => <button key={k} className={f.extras.includes(k) ? 'on' : ''} onClick={() => tog(k)}>{v} +10%</button>)}
+        <button className={f.outdoor ? 'on' : ''} onClick={() => set({ outdoor: !f.outdoor })}>Улица</button></div></>}
+    {isArea && <><label>Где объект</label><div className="chips">{PLACES.map(([k, v]) => <button key={k} className={f.place === k ? 'on' : ''} onClick={() => set({ place: k })}>{v}</button>)}</div></>}
+    <label>Скидка за наличные, % (до 15)<input type="number" min="0" max="15" value={f.cash} onChange={e => set({ cash: e.target.value })} /></label>
+    {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}
+    {r && <>
+      <div className="lines">{r.lines.map(([c, s, v], i) => <div key={i} className={c.replace('ln', '').trim()}><span>{s}</span><span>{typeof v === 'number' ? (v < 0 ? '−' + money(-v) : money(v)) : v}</span></div>)}</div>
+      <div className="total"><span>{r.no_vat ? 'Итого по акции, без НДС' : 'Итого с НДС'}</span><b>{money(r.total)}</b></div>
+      <div className="two">
+        <div><h4>Клиенту</h4><div className="kv">
+          <div><span className="muted small">Аванс {r.pay.prepay_pct}%</span><b>{money(r.pay.prepay)}</b></div>
+          <div><span className="muted small">Остаток</span><b>{money(r.pay.rest)}</b></div>
+          {r.dprice ? <div><span className="muted small">Дизайн {r.design}, 100% вперёд</span><b>{money(r.dprice)}</b></div> : null}
+          <div><span className="muted small">{r.pay.vat_included ? 'В том числе НДС' : 'Если нужен счёт с НДС'}</span><b>{money(r.pay.vat)}</b></div>
+          {r.rate ? <div><span className="muted small">За м²</span><b>{money(r.rate)}</b></div> : null}
+        </div></div>
+        <div><h4>Команде</h4>{n.shifts ? <div className="kv">
+          <div><span className="muted small">Смен по норме</span><b>{n.shifts}</b></div>
+          <div><span className="muted small">Художников</span><b>{n.crew}</b></div>
+          <div><span className="muted small">Срок клиенту</span><b>{n.client} раб. дн.</b></div>
+          <div><span className="muted small">Подготовка + работа</span><b>{n.prep} + {n.work} дн.</b></div>
+          {n.ink ? <div><span className="muted small">Чернила</span><b>{n.ink} мл</b></div> : null}
+        </div> : <p className="small muted">Срок и состав считаются для росписи и печати по площади.</p>}</div>
+      </div>
+      {r.flags.map(([c, t], i) => <div key={i} className={'flag ' + c}>{t}</div>)}
+      <div className="copybox">{r.ladder}</div>
+      <div className="dealbtns wrapbtns"><Copy text={r.ladder} label="Скопировать лестницу цены" /><Copy text={r.client_text} label="Скопировать текст клиенту" /></div>
+      <button disabled={busy || !r.total} onClick={save}>{saved ? 'Записать заново в сделку' : 'Записать в сделку'}</button>
+      {msg && <p className="small muted">{msg}</p>}
+      <p className="small muted">В сделку уходят сумма, площадь, сложность, смены, состав и срок; в ленту — короткий расчёт. КП и договор возьмут эти цифры сами.</p>
+    </>}
+    {!r && !err && <p className="small muted">Укажите площадь — цена, аванс, смены и срок появятся сразу.</p>}
+  </div>
+}
+
+// Квалификация клиента (шаг «Клиент»): город, услуга, площадь, адрес → в сделку.
+function Qualify({ d, onDone }) {
+  const [dict, setDict] = useState(null)
+  const [f, setF] = useState({ cityName: d.city || '', city: '', service: '', area: d.area || '', address: d.address || '' })
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  useEffect(() => { api('/bx/dict').then(x => { setDict(x); const s = x.services.find(s => s.name === d.service); setF(v => ({ ...v, service: s?.id || '' })) }, () => setDict({ cities: [], services: [] })) }, [])
+  const pickCity = v => { const c = (dict?.cities || []).find(x => x.name.toLowerCase() === v.trim().toLowerCase()); setF({ ...f, cityName: v, city: c ? c.id : '' }) }
+  const changed = (f.city && f.cityName !== d.city) || (+f.area || 0) !== (d.area || 0) || (f.address || '') !== (d.address || '') || (f.service && (dict?.services.find(s => s.id === f.service)?.name || '') !== (d.service || ''))
+  const save = () => { setBusy(true); api(`/bx/deals/${d.id}/fields`, { method: 'POST', body: { city: f.city || null, service: f.service || null, area: +f.area || null, address: f.address || null } })
+    .then(r => { setMsg(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Записано в Битрикс.'); onDone() }, e => setMsg('Не записалось: ' + e.message)).finally(() => setBusy(false)) }
+  return <>
+    <h3>Что нужно для расчёта</h3>
+    <label>Город<input list="deal-cities" value={f.cityName} onChange={e => pickCity(e.target.value)} placeholder="Начните вводить" /></label>
+    <datalist id="deal-cities">{(dict?.cities || []).map(c => <option key={c.id} value={c.name} />)}</datalist>
+    <label>Услуга<select value={f.service} onChange={e => setF({ ...f, service: e.target.value })}><option value="">—</option>{(dict?.services || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+    <label>Площадь, м²<input type="number" min="1" inputMode="decimal" value={f.area} onChange={e => setF({ ...f, area: e.target.value })} /></label>
+    <label>Адрес объекта<input value={f.address} onChange={e => setF({ ...f, address: e.target.value })} placeholder="Город, улица, дом" /></label>
+    <button className="ghost" disabled={!changed || busy} onClick={save}>Сохранить в Битрикс</button>
+    {msg && <p className="small muted">{msg}</p>}
+  </>
+}
+
+function Materials({ place, d, portal }) {
+  if (!place) return null
+  const base = place.url.replace(/index\.html$/, '')
+  const bx = bxLink(portal, 'deal', d.id)
+  const send = f => { window.open(base + 'files/' + f, '_blank', 'noopener'); if (bx) setTimeout(() => window.open(bx, '_blank', 'noopener'), 300) }
+  return <div className="card"><h3>Материалы клиенту</h3>
+    <p className="small muted">«Отправить» скачивает файл и открывает карточку клиента в Битриксе — прикрепите его в чат. С личных номеров не пишем.</p>
+    {MAT.map(([f, title, sub]) => <div key={f} className="mat"><div><b>{title}</b><div className="small muted">{sub}</div></div>
+      <div className="dealbtns"><button className="mini" onClick={() => send(f)}>Отправить</button><a className="btn ghost mini" href={base + 'files/' + f} target="_blank" rel="noreferrer" aria-label="Скачать">↓</a></div></div>)}
+  </div>
+}
+
+function WorkPanel({ d, portal }) {
+  const [p, setP] = useState(null)
+  useEffect(() => { api('/bx/projects').then(r => setP(r.projects.find(x => x.id === d.id) || false), () => setP(false)) }, [d.id])
+  return <div className="card"><h3>В работе</h3>
+    {p === null && <Skeleton n={1} />}
+    {p === false && <p className="small muted">{WORK_ON.has(d.stage) ? 'Проект пока не виден во вкладке «Проекты».' : 'Сделка ещё не переведена в работу. После подписанного договора и аванса переведите стадию — проект появится у всей команды во вкладке «Проекты».'}</p>}
+    {p && <>
+      <div className="kv">
+        <div><span className="muted small">Старт</span><b>{p.start ? p.start.split('-').reverse().join('.') : '—'}</b></div>
+        <div><span className="muted small">Сдача</span><b>{p.due ? p.due.split('-').reverse().join('.') : 'срок не задан'}</b></div>
+        <div><span className="muted small">Осталось</span><b className={p.state === 'late' ? 'left late' : ''}>{leftText(p)}</b></div>
+        <div><span className="muted small">Смен</span><b>{p.done.shifts}{p.norm.shifts ? ` из ${p.norm.shifts}` : ''}</b></div>
+      </div>
+      {p.people.length ? <p className="small">На объекте: {p.people.join(', ')}</p> : <p className="small muted">Смен за последние дни не отмечено.</p>}
+    </>}
+    <p className="small muted">Передача куратору — заметкой в сделку; дата старта называется клиенту только после подтверждения загрузки (скрипт С23).</p>
+  </div>
+}
+
+export function DealCard({ id, back, place }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
-  const [calc, setCalc] = useState(null)   // форма расчёта: {area, level, service, height, outdoor}
-  const [edit, setEdit] = useState(null)   // {kind: 'stage'|'note', ...}
   const [stages, setStages] = useState([])
+  const [calc, setCalc] = useState(undefined)
+  const [panel, setPanel] = useState(null)
+  const [sheet, setSheet] = useState(null)   // {kind: call|stage|note|say, ...}
   const [msg, setMsg] = useState('')
-  const [calcMsg, setCalcMsg] = useState('')
-  const [view, setView] = useState('act')   // act | money | hist
   const portal = usePortal()
   const load = fresh => api(`/bx/deals/${id}/full${fresh ? '?fresh=1' : ''}`).then(setD, e => setErr(e.message))
-  useEffect(() => { load(false); api('/bx/stages').then(setStages, () => {}) }, [id])
-  const said = r => r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Записано в Битрикс.'
-  const send = (path, body) => api(`/bx/deals/${id}/${path}`, { method: 'POST', body }).then(r => { setEdit(null); setMsg(said(r)); load(true) }, e => setMsg('Не записалось: ' + e.message))
-  const runCalc = () => api(`/bx/deals/${id}/calc`, { method: 'POST', body: { ...calc, area: +calc.area } }).then(r => {
-    setCalc(null); const c = r.calc
-    setCalcMsg(`По норме: ${c.shifts} смен, ${c.crew} чел., ${c.client} раб. дн. клиенту. ` + (r.bx === 'off' ? 'В Битрикс не записано.' : !r.norm_fields ? 'В Битриксе ещё нет полей для смен и срока (задание Кодексу), записаны площадь и комментарий.' : 'Записано в сделку.'))
-    load(true)
-  }, e => setCalcMsg('Не записалось: ' + e.message))
+  const loadCalc = () => api(`/bx/deals/${id}/calc`).then(c => setCalc(c && c.out ? c : null), () => setCalc(null))
+  useEffect(() => { load(false); loadCalc(); api('/bx/stages').then(setStages, () => {}) }, [id])
+  const said = t => { setSheet(null); setMsg(t); load(true); setTimeout(() => setMsg(''), 5000) }
   if (err) return <div className="card"><a onClick={back}>← назад</a><p className="muted">{err}</p></div>
-  if (!d) return <Skeleton n={3} />
+  if (!d || calc === undefined) return <Skeleton n={3} />
   const c = d.client || {}
-  const st = steps(d)
-  const next = st.findIndex(x => !x[1])
-  const stSel = stages.find(s => s.id === edit?.stage)
-  const startCalc = () => { setView('money'); setCalc({ area: d.area || '', level: d.level || 'medium', service: 'mural', height: false, outdoor: false }) }
-  // «Цена клиенту» — калькулятор рабочего места с площадью и сложностью сделки; «Срок и состав» — нормы, пишет в Битрикс.
-  const price = () => open(d.id, 'calc', { area: d.area, level: LEVELS[d.level], service: /печат/i.test(d.service || '') ? 'print' : 'mural' })
-  // Готовые сообщения по шагу: алгоритм рабочего места, шаг с его скриптами (01 первый контакт, 05 цена, 06 КП, 09 договор)
-  const ALGO = { 'Клиент': '01', 'Расчёт': '05', 'КП': '06', 'Договор': '09', 'Оплата': '09' }
-  const say = () => open(d.id, 'hash', null, '#a' + (ALGO[next >= 0 ? st[next][0] : 'Договор'] || '01'))
-  const NEXT = { 'Клиент': { label: 'Позвонить', href: bxLink(portal, 'deal', d.id) }, 'Расчёт': { label: 'Цена клиенту', run: price },
-    'КП': { label: 'Сделать КП', run: () => open(d.id, 'kp') }, 'Договор': { label: 'Договор и счёт', run: () => open(d.id, 'docs') },
-    'Оплата': { label: 'Оплаты', run: () => setView('money') } }
-  const na = next >= 0 ? NEXT[st[next][0]] : null
-  const VIEWS = [['act', 'Действия'], ['money', 'Срок и деньги'], ['hist', 'История']]
+  const st = steps(d, calc)
+  const nextI = st.findIndex(x => !x[1])
+  const cur = panel || (nextI >= 0 ? st[nextI][0] : 'work')
+  const name = k => STEPS.find(s => s[0] === k)?.[1] || 'История'
+  const NEXT = { client: 'Заполнить и позвонить', calc: 'Посчитать цену и срок', kp: 'Собрать КП', docs: 'Договор и счёт', pay: 'Оплата', work: 'Проект' }
+  const say = () => setSheet({ kind: 'say' })
+  const algo = PANEL_ALGO[cur] || ['01']
+  const codes = [...new Set(algo.flatMap(n => STEP_SCR[n] || []))]
+  const kpItem = calc?.kp
+  const ds = calc ? { total: calc.out.total, area: +calc.in.area || 0, prepay: calc.out.pay?.prepay, adv: calc.out.pay?.prepay_pct, days: calc.out.norm?.client } : null
   return <>
-    <div className="card">
-      <a onClick={back}>← к сделкам</a>
+    <div className="hero">
+      <a className="back" onClick={back}>← к сделкам</a>
       <h2>№ {d.id} · {cleanTitle(d.title, d.id)}</h2>
       <span className="tag">{d.stage_name}</span>{d.manager && <span className="tag">{d.manager}</span>}
-      <div className="steps">{st.map(([t, ok], i) => <div key={t} className={ok ? 'done' : i === next ? 'next' : ''}><i />{t}</div>)}</div>
-      <div className="nextstep">{na ? <><div><span className="small muted">Следующий шаг</span><b>{st[next][0]}</b></div>
-        {na.href ? <a className="btn mini" href={na.href} target="_blank" rel="noreferrer">{na.label}</a> : <button className="mini" onClick={na.run}>{na.label}</button>}</>
-        : <div><b>Все шаги пройдены</b><span className="small muted">оплата получена</span></div>}</div>
       <div className="kv">
         <div><span className="muted small">Сумма</span><b>{money(d.sum)}</b></div>
         <div><span className="muted small">Площадь</span><b>{d.area ? d.area + ' м²' : '—'}</b></div>
         <div><span className="muted small">Услуга</span><b>{d.service || '—'}</b></div>
         <div><span className="muted small">Город</span><b>{d.city || '—'}</b></div>
       </div>
-      {d.address && <p className="small">{d.address}</p>}
       <Contact phone={c.phone} name={[c.name, d.contact && d.contact !== c.name ? d.contact : ''].filter(Boolean).join(' · ')} entity="deal" id={d.id} />
-      <div className="segf">{VIEWS.map(([k, t]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}</div>
-    </div>
-    {view === 'act' && <div className="card">
-      <CallOutcome path={`/bx/deals/${id}`} done={() => load(true)} />
+      <div className="steps">{st.map(([k, ok], i) => <div key={k} className={(ok ? 'done' : i === nextI ? 'next' : '') + (cur === k ? ' cur' : '')} onClick={() => setPanel(k)}><i />{name(k)}</div>)}</div>
+      <div className="nextstep">{nextI >= 0 ? <><div><span className="small muted">Следующий шаг</span><b>{name(st[nextI][0])}</b></div>
+        <button className="mini" onClick={() => setPanel(st[nextI][0])}>{NEXT[st[nextI][0]]}</button></>
+        : <div><b>Все шаги пройдены</b><span className="small muted">проект в работе</span></div>}</div>
       <div className="dealbtns wrapbtns">
+        <button className="ghost" onClick={() => setSheet({ kind: 'call' })}>Итог звонка</button>
         <button className="ghost" onClick={say}>Сообщение</button>
-        <button className="ghost" onClick={price}>Цена</button>
-        <button className="ghost" onClick={() => open(d.id, 'kp')}>КП</button>
-        <button className="ghost" onClick={() => open(d.id, 'docs')}>Документы</button>
-        <button className="ghost" onClick={() => setEdit(edit?.kind === 'stage' ? null : { kind: 'stage', stage: d.stage, reason: '', until: '' })}>Стадия</button>
-        <button className="ghost" onClick={() => setEdit(edit?.kind === 'note' ? null : { kind: 'note', text: '' })}>Заметка</button>
+        <button className="ghost" onClick={() => setSheet({ kind: 'note' })}>Заметка</button>
+        <button className="ghost" onClick={() => setSheet({ kind: 'stage' })}>Стадия</button>
+        <button className={'ghost' + (cur === 'hist' ? ' on' : '')} onClick={() => setPanel('hist')}>История</button>
       </div>
-      {edit?.kind === 'stage' && <div className="dealedit">
-        <select value={edit.stage} onChange={e => setEdit({ ...edit, stage: e.target.value })}>{stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-        {['failure', 'apology'].includes(stSel?.semantic) && <input value={edit.reason} onChange={e => setEdit({ ...edit, reason: e.target.value })} placeholder="Причина отказа (обязательно)" />}
-        {edit.stage === POSTPONED && <>
-          <label>Вернуться к сделке<input type="date" value={edit.until} min={tomorrow()} onChange={e => setEdit({ ...edit, until: e.target.value })} /></label>
-          <input value={edit.reason} onChange={e => setEdit({ ...edit, reason: e.target.value })} placeholder="Почему отложили" />
-          <p className="small muted">В Битриксе появится задача с этой датой, бот напомнит утром.</p></>}
-        <button disabled={edit.stage === d.stage || (edit.stage === POSTPONED && !edit.until)} onClick={() => send('stage', { stage: edit.stage, reason: edit.reason || null, until: edit.stage === POSTPONED ? edit.until : null })}>Перевести</button></div>}
-      {edit?.kind === 'note' && <div className="dealedit">
-        <input value={edit.text} onChange={e => setEdit({ ...edit, text: e.target.value })} placeholder="Заметка в ленту сделки" />
-        <button disabled={!edit.text.trim()} onClick={() => send('note', { text: edit.text })}>Записать</button></div>}
-      {msg && <p className="small muted">{msg}</p>}
-    </div>}
-    {view === 'money' && <>
-    <div className="card"><h3>Срок и состав <span className="muted small">по нормам, не цена</span></h3>
-      {d.norm.shifts ? <div className="kv">
-        <div><span className="muted small">Смен по норме</span><b>{d.norm.shifts}</b></div>
-        <div><span className="muted small">Художников</span><b>{d.norm.crew}</b></div>
-        <div><span className="muted small">Срок клиенту</span><b>{d.norm.term} раб. дн.</b></div>
-        <div><span className="muted small">Сложность</span><b>{LEVELS[d.level] || '—'}</b></div>
-      </div> : <p className="small muted">Расчёта ещё не было: смены, люди и срок появятся после расчёта, руками не вводятся.</p>}
-      {calcMsg && <p className="small muted">{calcMsg}</p>}
-      {!calc ? <div className="dealbtns"><button className="ghost" onClick={startCalc}>{d.norm.shifts ? 'Пересчитать срок' : 'Срок и состав'}</button><button className="ghost" onClick={price}>Цена клиенту</button></div>
-      : <div className="dealedit">
-        <div className="seg"><button className={calc.service === 'mural' ? '' : 'ghost'} onClick={() => setCalc({ ...calc, service: 'mural' })}>Роспись</button><button className={calc.service === 'print' ? '' : 'ghost'} onClick={() => setCalc({ ...calc, service: 'print' })}>Печать</button></div>
-        <input type="number" min="1" value={calc.area} onChange={e => setCalc({ ...calc, area: e.target.value })} placeholder="Площадь, м²" />
-        {calc.service === 'mural' && <select value={calc.level} onChange={e => setCalc({ ...calc, level: e.target.value })}>{Object.entries(LEVELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>}
-        {calc.service === 'mural' && <div className="dealbtns"><button className={calc.height ? '' : 'ghost'} onClick={() => setCalc({ ...calc, height: !calc.height })}>Высота</button><button className={calc.outdoor ? '' : 'ghost'} onClick={() => setCalc({ ...calc, outdoor: !calc.outdoor })}>Улица</button></div>}
-        <button disabled={!(+calc.area > 0)} onClick={runCalc}>Посчитать и записать в сделку</button>
-        <p className="small muted">Нормы из «Значений»: м² за смену по сложности, 1 человек на 20 м², подготовка, запас 20% клиенту.</p>
-      </div>}
     </div>
-    <div className="card"><h3>Оплаты</h3>
-      <div className="kv">
-        <div><span className="muted small">Поступило</span><b>{money(d.pay.received)}</b></div>
-        <div><span className="muted small">Долг</span><b>{money(d.pay.debt)}</b></div>
-        {d.pay.next && <div><span className="muted small">Ближайший платёж</span><b>{d.pay.next.slice(0, 10)}</b></div>}
+    {msg && <div className="toast">{msg}</div>}
+
+    {cur === 'client' && <div className="card">
+      <div className="panelhead"><h3>Клиент</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>
+      <div className="hint"><div><b>Шаг 1–3.</b> Ответить в течение 30 минут, узнать помещение, город, площадь и фото стены; назвать ориентир по лестнице цены; договориться о следующем касании.</div></div>
+      {portal && <a className="btn" href={bxLink(portal, 'deal', d.id)} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 10 }}>Позвонить · WhatsApp в Битриксе</a>}
+      <Qualify key={d.modified} d={d} onDone={() => load(true)} />
+    </div>}
+    {cur === 'calc' && <Calc key={calc?.at || 'new'} d={d} saved={calc} onSaved={() => { loadCalc(); load(true) }} />}
+    {cur === 'kp' && <>
+      <div className="card">
+        <div className="panelhead"><h3>Коммерческое предложение</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>
+        {calc ? <p className="small muted">Позиция из расчёта ({money(calc.out.total)}) уже в КП, клиент и сделка подставлены. Проверьте, скачайте PDF — файл ляжет в сделку Битрикса, стадия сменится на «Отправка КП».</p>
+          : <p className="small why">Сначала сделайте расчёт — тогда КП соберётся без ввода цифр. <a onClick={() => setPanel('calc')}>К расчёту</a></p>}
+        <Embed place={place} view="kp" dealId={d.id} kp={kpItem} onDoc={() => load(true)} />
       </div>
-      <p className="small muted">Считает сервер по поступлениям, отмечает HEAD.</p>
-    </div>
-    <SalesSpend dealId={d.id} />
-    {!!d.files.length && <div className="card"><h3>Документы в сделке</h3>
-      {d.files.map((f, i) => <div key={i} className="row"><span>{f.title}</span>{f.url ? <a href={f.url} target="_blank" rel="noreferrer">открыть</a> : <span className="muted small">в Битриксе</span>}</div>)}
-    </div>}
+      <Materials place={place} d={d} portal={portal} />
     </>}
-    {view === 'hist' && <>
-    {d.comments && <div className="card"><h3>Комментарий сделки</h3><p className="small">{strip(d.comments)}</p></div>}
-    <Feed items={d.feed} />
-    {!!d.history.length && <div className="card"><h3>Стадии</h3>
-      {d.history.map((h, i) => <div key={i} className="row"><span>{h.stage}</span><span className="muted small">{dt(h.at)}</span></div>)}
-    </div>}
+    {cur === 'docs' && <>
+      <div className="card">
+        <div className="panelhead"><h3>Договор, счёт, акт</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>
+        <p className="small muted">{calc ? `Сумма ${money(calc.out.total)} и аванс ${money(calc.out.pay.prepay)} — из расчёта; ` : ''}клиент и реквизиты — из Битрикса (если их там нет, вставьте из анкеты). Скачанный файл ложится в сделку, стадия — «Отправка счёта/договора».</p>
+        <Embed place={place} view="docs" dealId={d.id} ds={ds} onDoc={() => load(true)} />
+      </div>
+      {!!d.files.length && <div className="card"><h3>Документы в сделке</h3>
+        {d.files.map((f, i) => <div key={i} className="row"><span>{f.title}</span>{f.url ? <a href={f.url} target="_blank" rel="noreferrer">открыть</a> : <span className="muted small">в Битриксе</span>}</div>)}</div>}
     </>}
+    {cur === 'pay' && <>
+      <div className="card"><h3>Оплата</h3>
+        <div className="kv">
+          <div><span className="muted small">Поступило</span><b>{money(d.pay.received)}</b></div>
+          <div><span className="muted small">Долг</span><b>{money(d.pay.debt)}</b></div>
+          {calc && <div><span className="muted small">Аванс по расчёту</span><b>{money(calc.out.pay.prepay)}</b></div>}
+          {d.pay.next && <div><span className="muted small">Ближайший платёж</span><b>{d.pay.next.slice(0, 10)}</b></div>}
+        </div>
+        <p className="small muted">Поступления отмечает HEAD, сервер считает долг. Когда аванс пришёл и договор подписан — переведите сделку в работу и передайте куратору.</p>
+        <div className="dealbtns wrapbtns">
+          <button className="mini" onClick={() => setSheet({ kind: 'stage' })}>Перевести в работу</button>
+          <button className="ghost mini" onClick={() => setSheet({ kind: 'note', text: 'Передаю куратору: аванс получен, договор подписан. Старт — после подтверждения загрузки.' })}>Передать куратору</button>
+          <button className="ghost mini" onClick={say}>Скрипты шага</button>
+        </div>
+      </div>
+      <SalesSpend dealId={d.id} />
+    </>}
+    {cur === 'work' && <WorkPanel d={d} portal={portal} />}
+    {cur === 'hist' && <>
+      {d.comments && <div className="card"><h3>Комментарий сделки</h3><p className="small">{strip(d.comments)}</p></div>}
+      <Feed items={d.feed} />
+      {!!d.history.length && <div className="card"><h3>Стадии</h3>
+        {d.history.map((h, i) => <div key={i} className="row"><span>{h.stage}</span><span className="muted small">{dt(h.at)}</span></div>)}</div>}
+      <SalesSpend dealId={d.id} />
+    </>}
+
+    {sheet?.kind === 'call' && <Sheet title="Итог звонка" onClose={() => setSheet(null)}><CallOutcome path={`/bx/deals/${id}`} auto done={() => said('Итог звонка записан.')} /></Sheet>}
+    {sheet?.kind === 'stage' && <StageSheet d={d} stages={stages} onClose={() => setSheet(null)} onDone={said} />}
+    {sheet?.kind === 'note' && <NoteSheet d={d} initial={sheet.text} onClose={() => setSheet(null)} onDone={said} />}
+    {sheet?.kind === 'say' && <Scripts codes={codes} algoStep={algo[0]} title={`Скрипты: ${name(cur)}`} onClose={() => setSheet(null)} />}
   </>
 }
 
@@ -141,7 +343,7 @@ const MONTHS = ['январь', 'февраль', 'март', 'апрель', '�
 const ymName = ym => { const [y, m] = ym.split('-'); return `${MONTHS[+m - 1]} ${y}` }
 const ymShift = (ym, k) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + k, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 // План месяца (HEAD 06.11): шкала до верхней ступени, отметки 2/7/15 млн из «Значений», темп к концу месяца.
-const mln = x => x >= 1e6 ? `${(+(x / 1e6).toFixed(1)).toLocaleString("ru-RU")} млн` : money(x)
+const mln = x => x >= 1e6 ? `${(+(x / 1e6).toFixed(1)).toLocaleString('ru-RU')} млн` : money(x)
 function Plan({ m }) {
   const co = m.company, steps = m.steps.filter(s => s.from)
   if (!steps.length) return <p className="small muted">Ступени процента МОП не заданы в «Значениях».</p>
@@ -171,11 +373,10 @@ export function Month({ openDeal }) {
   const nav = <div className="seg"><button className="ghost" disabled={ym <= '2026-11'} onClick={() => setYm(ymShift(ym, -1))}>←</button><button className="ghost" disabled>{ymName(ym)}</button><button className="ghost" disabled={cur} onClick={() => setYm(ymShift(ym, 1))}>→</button></div>
   if (err) return <div className="card"><h2>Мой месяц</h2>{nav}<p className="muted">{err}</p></div>
   if (!m) return <div className="card"><h2>Мой месяц</h2>{nav}<p className="muted">Считаю…</p></div>
-  const steps = m.steps.filter(s => s.from)
   const co = m.company
   const deals = (ds, showMgr) => ds.map(d => <div key={d.id} className="row" onClick={() => openDeal(d.id)}><div><b>№ {d.id}</b> {d.title.replace(new RegExp(`^№?\\s*${d.id}\\s*·?\\s*`), '')}<div className="muted small">{[d.closed.split('-').reverse().join('.'), d.city, showMgr && d.manager].filter(Boolean).join(' · ')}</div></div><b>{money(d.sum)}</b></div>)
   return <>
-    <div className="card"><h2>{m.all ? 'Месяц команды' : 'Мой месяц'}</h2>{nav}
+    <div className="card dark"><h2>{m.all ? 'Месяц команды' : 'Мой месяц'}</h2>{nav}
       <Plan m={m} />
       <div className="kv">
         <div><span className="muted small">{cur ? 'Заработок сейчас' : 'Заработок за месяц'}</span><b>{money(co.earn)}</b></div>
