@@ -133,6 +133,27 @@ export function DealCard({ id, back, open }) {
 const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
 const ymName = ym => { const [y, m] = ym.split('-'); return `${MONTHS[+m - 1]} ${y}` }
 const ymShift = (ym, k) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + k, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
+// План месяца (HEAD 06.11): шкала до верхней ступени, отметки 2/7/15 млн из «Значений», темп к концу месяца.
+const mln = x => x >= 1e6 ? `${(+(x / 1e6).toFixed(1)).toLocaleString("ru-RU")} млн` : money(x)
+function Plan({ m }) {
+  const co = m.company, steps = m.steps.filter(s => s.from)
+  if (!steps.length) return <p className="small muted">Ступени процента МОП не заданы в «Значениях».</p>
+  const top = steps[steps.length - 1].from * 1.15
+  const w = x => `${Math.min(100, x / top * 100)}%`
+  const pace = co.pace
+  return <div className="plan">
+    <div className="planhead"><b>{mln(co.net)}</b><span className="muted small">без НДС · {co.step ? `ступень ${co.step}, ${co.pct}%` : 'ступень ещё не взята'}</span></div>
+    <div className="planbar">
+      {pace && pace.net > co.net && <i className="pace" style={{ width: w(pace.net) }} />}
+      <i className="fill" style={{ width: w(co.net) }} />
+      {steps.map((s, i) => <span key={i} className={'tick' + (co.net > s.from ? ' got' : '')} style={{ left: w(s.from) }}><em>{mln(s.from)}</em><em>{s.pct}%</em></span>)}
+    </div>
+    {co.next ? <p className="small">До ступени {co.next.step} ({steps[co.next.step - 1]?.pct}%) — ещё <b>{money(co.next.left)}</b> без НДС.</p>
+      : <p className="small">Верхняя ступень взята{m.bonus_plan ? `, бонус за план ${money(m.bonus_plan)}` : ''}.</p>}
+    {pace && pace.day < pace.days && <p className="small muted">По темпу ({pace.day} из {pace.days} дней) к концу месяца ≈ {mln(pace.net)} → {pace.step ? `ступень ${pace.step}, ${pace.pct}%` : 'без ступени'}, заработок ≈ {money(pace.earn)}.</p>}
+  </div>
+}
+
 export function Month({ openDeal }) {
   const now = new Date()
   const [ym, setYm] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
@@ -148,14 +169,13 @@ export function Month({ openDeal }) {
   const deals = (ds, showMgr) => ds.map(d => <div key={d.id} className="row" onClick={() => openDeal(d.id)}><div><b>№ {d.id}</b> {d.title.replace(new RegExp(`^№?\\s*${d.id}\\s*·?\\s*`), '')}<div className="muted small">{[d.closed.split('-').reverse().join('.'), d.city, showMgr && d.manager].filter(Boolean).join(' · ')}</div></div><b>{money(d.sum)}</b></div>)
   return <>
     <div className="card"><h2>{m.all ? 'Месяц команды' : 'Мой месяц'}</h2>{nav}
+      <Plan m={m} />
       <div className="kv">
-        <div><span className="muted small">Выручка компании без НДС</span><b>{money(co.net)}</b></div>
-        <div><span className="muted small">С НДС{m.vat ? ` ${m.vat}%` : ''}</span><b>{money(co.gross)}</b></div>
-        <div><span className="muted small">Ступень</span><b>{co.step ? `${co.step} · ${co.pct}%` : steps.length ? 'пока нет' : '—'}</b></div>
-        <div><span className="muted small">Процент МОП</span><b>{money(co.bonus)}{co.plan_bonus ? ` + ${money(co.plan_bonus)}` : ''}</b></div>
+        <div><span className="muted small">{cur ? 'Заработок сейчас' : 'Заработок за месяц'}</span><b>{money(co.earn)}</b></div>
+        {m.all ? <div><span className="muted small">С НДС{m.vat ? ` ${m.vat}%` : ''}</span><b>{money(co.gross)}</b></div>
+          : <div><span className="muted small">Мой вклад</span><b>{money(m.mine.net)}{m.mine.share ? <span className="muted small"> · {m.mine.share}%</span> : null}</b></div>}
       </div>
-      {co.next && <p className="small muted">До ступени {co.next.step} ({steps[co.next.step - 1]?.pct}%) не хватает {money(co.next.left)} без НДС.</p>}
-      {!!m.salary && <p className="small muted">Оклад {money(m.salary)} + процент от всей выручки компании за месяц без НДС{steps.length ? ': ' + steps.map(s => `${s.pct}% от ${money(s.from)}`).join(', ') : ''}. Выплаты отмечает HEAD.</p>}
+      {!!m.salary && <p className="small muted">Заработок = оклад {money(m.salary)} + {co.pct || 0}% от выручки компании{co.plan_bonus ? ` + бонус за план ${money(co.plan_bonus)}` : ''}. Ступень считается по всей выручке компании за месяц без НДС. Выплаты отмечает HEAD.</p>}
       <p className="small muted">{m.source === 'sheet' ? 'Выручка — по листу «Проекты» финансовой таблицы (дата завершения работ, с НДС).' : 'Выручка — по дате закрытия сделок в Битриксе (пока в листе «Проекты» нет строк за этот месяц).'}</p>
       {m.warn && <p className="small" style={{ color: 'var(--hot)' }}>{m.warn}</p>}
     </div>

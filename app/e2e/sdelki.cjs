@@ -45,7 +45,10 @@ async function card(p, id) {
 ;(async () => {
   const b = await chromium.launch()
   await call(1000, '/register', { full_name: 'HEAD' })
-  const m = await call(6000, '/register', { full_name: 'Ануар' })
+  await fetch(API + '/_e2e/consts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vat: '16',
+    'pay.mop.salary': '200000', 'pay.mop.bonus_plan': '100000', 'pay.mop.step1.from': '2000000', 'pay.mop.step1.pct': '3',
+    'pay.mop.step2.from': '7000000', 'pay.mop.step2.pct': '4', 'pay.mop.step3.from': '15000000', 'pay.mop.step3.pct': '5' }) })
+  const m = await call(6000, '/register', { full_name: 'Ануар', phone: '+7 701 111 22 33' })
   await call(1000, `/people/${m.id}`, { role_code: 'mop', zones: ['sales'] })
 
   // HEAD: связывает МОП с пользователем Битрикса во вкладке «Команда», видит все сделки
@@ -61,13 +64,15 @@ async function card(p, id) {
   const p = await open(b, 6000)
   await p.locator('.bucket.hot').waitFor()
   assert.match(await p.locator('.bucket.hot').textContent(), /Дана.*клиент ждёт ответа в WhatsApp 2 ч/)
-  assert.match(await p.locator('.tiles').textContent(), /1.*Горит.*1.*Сегодня.*2.*Можно позже/)
-  assert.match(await p.locator('nav button', { hasText: 'Сегодня' }).textContent(), /2$/, 'счётчик в меню')
+  // сколько в «Сегодня» и «Можно позже» — зависит от даты прогона (сделки фикстуры стареют), проверяем согласованность
+  const tiles = (await p.locator('.tiles').textContent()).match(/^1Горит(\d+)Сегодня(\d+)Можно позже/)
+  assert.ok(tiles, 'плитки: 1 горит, затем сегодня и позже')
+  assert.match(await p.locator('nav button', { hasText: 'Сегодня' }).textContent(), new RegExp(`${1 + +tiles[1]}$`), 'счётчик в меню')
   assert.strictEqual(await p.locator('nav button').count(), 5, 'у МОП пять кнопок меню')
   assert.match(await p.locator('.bucket.today').textContent(), /№ 1601.*КП без ответа/)
   assert.strictEqual(await p.locator('.bucket.hot a.btn', { hasText: 'Ответить' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/lead/details/3001/', '«Ответить» ведёт в карточку Битрикса (Wazzup там)')
   await p.locator('.strip').waitFor()
-  assert.match(await p.locator('.strip').textContent(), /Месяц: 2,9 млн/)
+  assert.match(await p.locator('.strip').textContent(), /Месяц: 2,5 млн из 7 млн.*до 4% ещё 4,5 млн/)
   await p.screenshot({ path: `${shots}/mop-today.png`, fullPage: true })
 
   // Сделки воронкой: только свои, стадия с количеством и суммой, бейдж дней
@@ -136,6 +141,14 @@ async function card(p, id) {
   // «Месяц»
   await tab(p, 'Месяц')
   await p.locator('h3', { hasText: 'Мои закрытые сделки' }).waitFor()
+  // План месяца: 2,5 млн без НДС → ступень 1 (3%), до ступени 2 ещё 4,5 млн, заработок 200 000 + 75 000, отметки 2/7/15 млн
+  const plan = p.locator('.plan')
+  assert.match(await plan.locator('.planhead').textContent(), /2,5 млн.*ступень 1, 3%/)
+  assert.strictEqual(await plan.locator('.tick').count(), 3)
+  assert.strictEqual(await plan.locator('.tick.got').count(), 1)
+  assert.match(await plan.textContent(), /До ступени 2 \(4%\) — ещё 4\s500\s000/)
+  assert.match(await p.locator('.kv').first().textContent(), /Заработок сейчас275\s000.*Мой вклад2\s500\s000.*100%/)
+  await p.screenshot({ path: `${shots}/mop-plan.png` })
   assert.match(await p.locator('.card', { hasText: 'Мои закрытые сделки' }).textContent(), /1590/)
   // Траты отдела продаж: лимит не задан → трата с чеком уходит HEAD; без чека кнопка закрыта
   const spend = p.locator('.card', { hasText: 'Мои траты' })
@@ -186,6 +199,25 @@ async function card(p, id) {
   await h.locator('.row', { hasText: 'Отдел продаж · Выезды и транспорт · сделка № 1601 · сверх лимита' }).waitFor()
   await tab(h, 'Журнал')   // у HEAD — через «Ещё»
   await h.locator('.row', { hasText: 'Ануар' }).first().waitFor()
-  console.log('OK: «Сегодня» очередью, лиды → сделка, воронка, карточка шагами, итог звонка, запись в Битрикс, КП и «Документы», месяц')
+  // Вход с компьютера без Telegram: телефон → код от бота → приложение; «Выйти» возвращает на вход
+  const wctx = await b.newContext({ viewport: { width: 1280, height: 800 } })
+  const w = await wctx.newPage()
+  await w.route('https://telegram.org/**', r => r.fulfill({ body: '' }))
+  await w.goto('http://127.0.0.1:4173/')
+  await w.locator('input[placeholder^="+7"]').fill('8 701 111 22 33')
+  await w.getByRole('button', { name: 'Получить код' }).click()
+  await w.locator('text=код уже в Telegram').waitFor()
+  const code = (await (await fetch(API + '/_e2e/sent')).json()).filter(x => x.tg === 6000).pop().text.match(/\d{6}/)[0]
+  await w.locator('input[placeholder="Код из Telegram"]').fill(code)
+  await w.screenshot({ path: `${shots}/web-login.png` })
+  await w.getByRole('button', { name: 'Войти' }).click()
+  await w.locator('.webbar', { hasText: 'Ануар' }).waitFor()
+  await w.locator('.tiles').waitFor()
+  await w.screenshot({ path: `${shots}/web-today.png` })
+  await w.reload()
+  await w.locator('.webbar').waitFor()   // вход помнится
+  await w.getByRole('button', { name: 'Выйти' }).click()
+  await w.getByRole('button', { name: 'Получить код' }).waitFor()
+  console.log('OK: «Сегодня» очередью, лиды → сделка, воронка, карточка шагами, итог звонка, запись в Битрикс, КП и «Документы», месяц с планом, вход с компьютера')
   await b.close()
 })().catch(e => { console.error(e); process.exit(1) })

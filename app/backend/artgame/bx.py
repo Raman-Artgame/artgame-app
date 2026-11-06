@@ -518,7 +518,18 @@ def month(p: dict, fresh: bool = False, ym: str | None = None) -> dict:
     company = {"count": len(deals), "gross": round(sum(d["sum"] for d in deals)), "net": round(net), "step": step, "pct": pct,
                "bonus": round(net * pct / 100), "plan_bonus": bonus_plan if step == 3 else 0,
                "next": {"step": nxt[0], "from": nxt[1], "left": round(nxt[1] - net)} if nxt else None}
-    out = {"month": f"{y}-{m:02d}", "vat": vat, "salary": salary, "steps": [{"from": f, "pct": c} for f, c in steps],
+    company["earn"] = round(salary + company["bonus"] + company["plan_bonus"])
+    # План месяца (HEAD 06.11): темп — выручка на сегодня, растянутая на весь месяц; ступень и заработок по темпу.
+    today_ = date.today()
+    if (y, m) == (today_.year, today_.month):
+        import calendar
+        days = calendar.monthrange(y, m)[1]
+        f_net = net / today_.day * days if today_.day else net
+        f_step = max([i for i, (frm, _) in enumerate(steps, 1) if frm and f_net > frm] or [0])
+        f_pct = steps[f_step - 1][1] if f_step else 0.0
+        company["pace"] = {"day": today_.day, "days": days, "net": round(f_net), "step": f_step, "pct": f_pct,
+                           "earn": round(salary + f_net * f_pct / 100 + (bonus_plan if f_step == 3 else 0))}
+    out = {"month": f"{y}-{m:02d}", "vat": vat, "salary": salary, "bonus_plan": bonus_plan, "steps": [{"from": f, "pct": c} for f, c in steps],
            "all": uid is None, "company": company, "source": source, "warn": warn if uid is None else ""}
     if uid is None:
         by: dict = {}
@@ -529,7 +540,8 @@ def month(p: dict, fresh: bool = False, ym: str | None = None) -> dict:
                                  key=lambda x: -x["net"])
     else:
         mine = [d for d in deals if d["manager_id"] == uid]
-        out["mine"] = {"deals": mine, "count": len(mine), "gross": round(sum(d["sum"] for d in mine)), "net": round(net_of(mine))}
+        out["mine"] = {"deals": mine, "count": len(mine), "gross": round(sum(d["sum"] for d in mine)), "net": round(net_of(mine)),
+                       "share": round(net_of(mine) / net * 100) if net else 0}
     return out
 
 

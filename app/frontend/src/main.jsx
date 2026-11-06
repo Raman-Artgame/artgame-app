@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { api } from './api.js'
+import { api, inTelegram, setWebToken, webToken } from './api.js'
+import { Login } from './login.jsx'
 import { ExpenseForm, Mine, Review, ShiftForm } from './work.jsx'
 import { People } from './people.jsx'
 import { Objects } from './objects.jsx'
@@ -35,21 +36,29 @@ function Register({ onDone }) {
 function App() {
   const [me, setMe] = useState(undefined)
   const [err, setErr] = useState('')
+  const web = !inTelegram()
+  const [login, setLogin] = useState(web && !webToken())
+  const load = () => { setErr(''); setMe(undefined); api('/me').then(setMe, e => e.status === 401 && web ? setLogin(true) : e.status === 403 && e.message === 'not registered' ? setMe(null) : setErr(e.message)) }
   useEffect(() => {
     window.Telegram?.WebApp?.ready()
-    api('/me').then(setMe, e => e.status === 403 && e.message === 'not registered' ? setMe(null) : setErr(e.message))
+    if (web) document.body.classList.add('web')
+    const out = () => setLogin(true)
+    window.addEventListener('artgame:logout', out)
+    if (!login) load()
+    return () => window.removeEventListener('artgame:logout', out)
   }, [])
+  if (login) return <div className="wrap"><Login onDone={() => { setLogin(false); load() }} /></div>
   if (err) return <div className="wrap"><div className="card"><h1>ARTGAME</h1><p className="muted">Открой приложение из бота @artgame_team_bot. ({err})</p></div></div>
   if (me === undefined) return <div className="wrap muted">Загрузка…</div>
   if (me === null) return <div className="wrap"><Register onDone={setMe} /></div>
   if (me.status !== 'active') return <div className="wrap"><div className="card"><h1>{me.full_name}</h1>
     <p className="muted">{me.status === 'pending' ? 'Заявка у HEAD. Как только назначат роль, откроются разделы.' : 'Вход закрыт.'}</p></div></div>
-  return <Main me={me} />
+  return <Main me={me} web={web} logout={() => { api('/logout', { method: 'POST' }).catch(() => {}); setWebToken(''); setLogin(true) }} />
 }
 
 const CHECKERS = new Set(['head', 'lead_artist', 'print_master', 'lead_designer'])
 
-function Main({ me }) {
+function Main({ me, web, logout }) {
   const places = usePlaces()
   const [tab, setTab] = useState(DEAL_ROLES.has(me.role_code) ? 'today' : 'shift')
   const [dealId, setDealId] = useState(null)
@@ -76,6 +85,7 @@ function Main({ me }) {
   </>
   return <>
     <div className="wrap">
+      {web && <div className="webbar"><b>ARTGAME</b><span className="muted small">{me.full_name}</span><button className="ghost mini" onClick={logout}>Выйти</button></div>}
       {!['today', 'leads', 'deals', 'month'].includes(tab) && <div className="card"><h1>{me.full_name}</h1><span className="tag">{ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
       {toast && <div className="toast">{toast}</div>}
       {tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} openMonth={openMonth} openPlace={() => { setDealId(null); setTab('place') }} /> :

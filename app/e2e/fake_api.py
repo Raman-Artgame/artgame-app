@@ -79,5 +79,27 @@ bxw.CALL = fake_write
 def _bx_calls():
     return BX_CALLS
 
+
+# Бот: сообщения складываются в SENT (код входа с компьютера смотрит тест)
+from artgame import notify  # noqa: E402
+SENT = []
+notify.SEND = lambda tg, text: SENT.append({"tg": tg, "text": text})
+
+
+@app.get("/api/_e2e/sent")
+def _sent():
+    return SENT
+
+
+@app.post("/api/_e2e/consts")
+def _consts(values: dict):
+    from psycopg.types.json import Jsonb
+    from artgame import db
+    with db.pool.connection() as conn:
+        conn.execute("INSERT INTO constants_versions (checksum, values) VALUES (md5(random()::text), %s)",
+                     (Jsonb({k: {"value": v, "status": "Утверждено"} for k, v in values.items()}),))
+    return {"ok": True}
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8100)

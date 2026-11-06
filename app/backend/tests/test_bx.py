@@ -307,6 +307,15 @@ def test_month(bxc):
     co = m["company"]   # ступень и % — по всей выручке компании (HEAD 03.11)
     assert co["net"] == 2500000 and co["step"] == 1 and co["pct"] == 3 and co["bonus"] == 75000
     assert co["next"] == {"step": 2, "from": 7000000, "left": 4500000} and m["salary"] == 200000
+    assert co["earn"] == 275000 and m["mine"]["share"] == 100 and m["bonus_plan"] == 100000
+    import calendar
+    from datetime import date
+    t = date.today()
+    if (t.year, t.month) == (2026, 11):   # план месяца: темп — выручка на сегодня, растянутая на месяц
+        f = 2500000 / t.day * 30
+        assert co["pace"]["day"] == t.day and co["pace"]["days"] == 30 and co["pace"]["net"] == round(f)
+        st = 3 if f > 15e6 else 2 if f > 7e6 else 1
+        assert co["pace"]["step"] == st and co["pace"]["earn"] == round(200000 + f * (3, 4, 5)[st - 1] / 100 + (100000 if st == 3 else 0))
     h = c.get("/api/bx/month?ym=2026-11", headers=hdr(1000)).json()
     assert h["all"] and h["managers"][0]["name"] == "Ануар Минкеев" and h["managers"][0]["net"] == 2500000
     assert c.get("/api/bx/month?ym=2026-10", headers=hdr(6000)).json()["company"]["count"] == 0
