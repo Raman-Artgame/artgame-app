@@ -84,9 +84,14 @@ export function Feed({ items }) {
 // ---------- «Сегодня»: очередь дня ----------
 // Один запрос на сеанс: экран «Сегодня» и счётчики в меню читают один и тот же ответ.
 let todayCache = null
+let todayLoading = null   // экран и счётчики меню открываются вместе — один запрос на двоих
 const todayWatchers = new Set()
 export function loadToday(fresh) {
-  return api(`/bx/today${fresh ? '?fresh=1' : ''}`).then(r => { todayCache = r; todayWatchers.forEach(f => f(r)); return r })
+  if (todayLoading && !fresh) return todayLoading
+  const p = api(`/bx/today${fresh ? '?fresh=1' : ''}`).then(r => { todayCache = r; todayWatchers.forEach(f => f(r)); return r })
+    .finally(() => { if (todayLoading === p) todayLoading = null })
+  todayLoading = p
+  return p
 }
 export function useToday(enabled = true) {
   const [t, setT] = useState(todayCache)

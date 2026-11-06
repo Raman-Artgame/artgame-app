@@ -542,3 +542,51 @@ def test_chat_waiting(bxc):
     finally:
         DIALOGS.clear()
         HISTORY.clear()
+
+
+def test_chat_history_shapes_and_batch(monkeypatch):
+    """Переписка: пустые наборы списком, наивные даты — без падения; через вебхук — одна пачка batch, чужие диалоги не читаем."""
+    from datetime import datetime, timedelta, timezone
+    from artgame import chats
+    from artgame.config import settings
+    assert chats.last_client_wait({"message": [], "users": []}) is None
+    assert chats.last_client_wait(None) is None
+    old = (datetime.now(timezone.utc) - timedelta(hours=2)).replace(tzinfo=None).isoformat(timespec="seconds")
+    w = chats.last_client_wait({"users": [{"id": "9", "connector": True}], "message": [{"id": "1", "senderid": "9", "date": old}]})
+    assert w is not None and w.tzinfo is not None
+    t0 = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(timespec="seconds")
+    acts = [{"OWNER_TYPE_ID": "2", "OWNER_ID": "1601", "ASSOCIATED_ENTITY_ID": "71", "LAST_UPDATED": t0},
+            {"OWNER_TYPE_ID": "2", "OWNER_ID": "9999", "ASSOCIATED_ENTITY_ID": "79", "LAST_UPDATED": t0}]
+    sent = []
+
+    def webhook(method, params):
+        sent.append((method, params))
+        if method == "crm.activity.list":
+            return {"result": acts}
+        assert method == "batch"
+        return {"result": {"result": {k: {"users": {"9": {"connector": True}}, "message": {"1": {"id": "1", "senderid": "9", "date": old}}}
+                                      for k in params["cmd"]}, "result_error": []}}
+    monkeypatch.setattr(bx, "READ", bx._gateway_read)
+    monkeypatch.setattr(bx, "_webhook_read", webhook)
+    monkeypatch.setattr(settings, "gateway_url", "")
+    monkeypatch.setattr(settings, "bitrix_webhook", "https://example.invalid/rest/1/x/")
+    out, err = chats.waiting(True, {("deal", 1601)})
+    assert err == "" and [(o["entity"], o["id"]) for o in out] == [("deal", 1601)]
+    batches = [p for m, p in sent if m == "batch"]
+    assert len(batches) == 1 and list(batches[0]["cmd"]) == ["s71"]
+    assert batches[0]["cmd"]["s71"] == "imopenlines.session.history.get?SESSION_ID=71"
+
+
+def test_today_survives_broken_source(bxc, monkeypatch):
+    """Упали звонки — «Сегодня» открывается со сделками и пометкой, а не ошибкой 500."""
+    from artgame import calls
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+
+    def boom(fresh=False):
+        raise RuntimeError("timeout")
+    monkeypatch.setattr(calls, "missed", boom)
+    r = c.get("/api/bx/today?fresh=1", headers=hdr(6000))
+    assert r.status_code == 200
+    t = r.json()
+    assert "звонки не загрузились" in t["warn"] and (t["queue"]["hot"] or t["queue"]["today"] or t["queue"]["later"])

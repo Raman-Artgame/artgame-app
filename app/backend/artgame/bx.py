@@ -38,16 +38,27 @@ _gw = None
 # ---------- чтение через шлюз ----------
 
 def _webhook_read(method: str, params: dict):
-    """Чтение тем же вебхуком, что и запись (шлюз ARTGAME-MCP на сервере только под OAuth, 05.11)."""
+    """Чтение тем же вебхуком, что и запись (шлюз ARTGAME-MCP на сервере только под OAuth, 05.11).
+    Битрикс пускает ~2 запроса в секунду: на QUERY_LIMIT_EXCEEDED ждём и повторяем; сеть/таймаут — 502, а не 500."""
     import httpx
-    r = httpx.post(settings.bitrix_webhook.rstrip("/") + "/" + method, json=params, timeout=60)
-    try:
-        j = r.json()
-    except ValueError:
-        raise HTTPException(502, f"Битрикс не ответил: {r.status_code}")
-    if "error" in j:
-        raise HTTPException(502, f"Битрикс: {str(j.get('error_description') or j['error'])[:200]}")
-    return j
+    for attempt in range(4):
+        try:
+            r = httpx.post(settings.bitrix_webhook.rstrip("/") + "/" + method, json=params, timeout=30)
+        except httpx.HTTPError as ex:
+            if attempt < 1:
+                continue
+            raise HTTPException(502, f"Битрикс не ответил: {type(ex).__name__}")
+        try:
+            j = r.json()
+        except ValueError:
+            raise HTTPException(502, f"Битрикс не ответил: {r.status_code}")
+        if isinstance(j, dict) and j.get("error") == "QUERY_LIMIT_EXCEEDED" and attempt < 3:
+            time.sleep(1 + attempt)
+            continue
+        if isinstance(j, dict) and "error" in j:
+            raise HTTPException(502, f"Битрикс: {str(j.get('error_description') or j['error'])[:200]}")
+        return j
+    raise HTTPException(502, "Битрикс: слишком много запросов, повторите через минуту")
 
 
 def _gateway_read(method: str, params: dict):
@@ -101,6 +112,49 @@ def read_all(method: str, params: dict, fresh: bool = False) -> list:
         if start is None:
             break
     return out
+
+
+def read_many(method: str, plist: dict, fresh: bool = False) -> tuple[dict, str]:
+    """Много однотипных чтений ({ключ: параметры}) → ({ключ: ответ}, текст первой ошибки).
+    Через вебхук — пачками batch по 50 (один запрос вместо пятидесяти), иначе по одному до первой ошибки."""
+    from urllib.parse import urlencode
+    out, todo, now = {}, {}, time.time()
+    for k, prm in plist.items():
+        with _lock:
+            hit = _cache.get((method, repr(sorted(prm.items()))))
+        if hit and not fresh and now - hit[0] < TTL:
+            out[k] = hit[1]
+        else:
+            todo[k] = prm
+    if not todo:
+        return out, ""
+    if READ is _gateway_read and not settings.gateway_url and settings.bitrix_webhook:
+        keys, err = list(todo), ""
+        for i in range(0, len(keys), 50):
+            part = keys[i:i + 50]
+            try:
+                j = _webhook_read("batch", {"halt": 0, "cmd": {k: method + "?" + urlencode(todo[k]) for k in part}})
+            except HTTPException as ex:
+                return out, str(ex.detail)
+            res = j.get("result") if isinstance(j, dict) else None
+            ok = (res or {}).get("result") if isinstance(res, dict) else None
+            bad = (res or {}).get("result_error") if isinstance(res, dict) else None
+            ok, bad = ok if isinstance(ok, dict) else {}, bad if isinstance(bad, dict) else {}
+            for k in part:
+                if k in ok:
+                    out[k] = {"result": ok[k]}
+                    with _lock:
+                        _cache[(method, repr(sorted(todo[k].items())))] = (now, out[k])
+                elif k in bad and not err:
+                    e = bad[k]
+                    err = "Битрикс: " + str((e.get("error_description") or e.get("error")) if isinstance(e, dict) else e)[:200]
+        return out, err
+    for k, prm in todo.items():
+        try:
+            out[k] = read(method, prm, fresh=fresh)
+        except HTTPException as ex:
+            return out, str(ex.detail)
+    return out, ""
 
 
 # ---------- справочники ----------
@@ -364,14 +418,63 @@ def _days(iso: str | None) -> float:
         return 0.0
 
 
+_today_locks: dict = {}
+_today_last: dict = {}
+
+
 def today(p: dict, fresh: bool = False) -> dict:
+    """Один расчёт на человека за раз: экран, счётчики меню и уведомления, пришедшие одновременно, получают один ответ."""
+    t0 = time.time()
+    with _lock:
+        lk = _today_locks.setdefault(p["id"], threading.Lock())
+    with lk:
+        hit = _today_last.get(p["id"])
+        if hit and hit[0] >= t0:          # посчитано, пока мы ждали
+            return hit[1]
+        out = _today(p, fresh)
+        _today_last[p["id"]] = (time.time(), out)
+        return out
+
+
+def _tasks(p: dict, fresh: bool):
+    uid = bx_id(p)
+    if not uid:
+        return []
+    j = read("tasks.task.list", {"filter": {"RESPONSIBLE_ID": uid, "<REAL_STATUS": 5}, "order": {"DEADLINE": "asc"},
+                                 "select": ["ID", "TITLE", "DEADLINE", "UF_CRM_TASK"]}, fresh=fresh)
+    res = j.get("result", j) if isinstance(j, dict) else {}
+    return (res.get("tasks") if isinstance(res, dict) else res) or []
+
+
+def _today(p: dict, fresh: bool = False) -> dict:
+    """Сделки, по которым пора действовать. Сроки — из «Значений» (mop.today.*), иначе по умолчанию.
+    Сделки, лиды, звонки и задачи читаются из Битрикса параллельно; упал один источник — экран открывается
+    без него с пометкой (warn), а не ошибкой."""
+    from concurrent.futures import ThreadPoolExecutor
     from datetime import date
-    """Сделки, по которым пора действовать. Сроки — из «Значений» (mop.today.*), иначе по умолчанию."""
+    from . import calls
+    from .leads import my_leads
     vals = _vals()
     new_h = float(vals.get("mop.today.new_hours") or 4)
     kp_d = float(vals.get("mop.today.kp_days") or 2)
     idle_d = float(vals.get("mop.today.idle_days") or 3)
-    deals = my_deals(p, fresh)["deals"]
+    with ThreadPoolExecutor(4) as ex:
+        f_deals, f_leads = ex.submit(my_deals, p, fresh), ex.submit(my_leads, p, fresh)
+        f_calls, f_tasks = ex.submit(calls.missed, fresh), ex.submit(_tasks, p, fresh)
+    warns = []
+
+    def got(f, what, empty):
+        try:
+            return f.result()
+        except HTTPException as e:
+            if e.status_code in (403, 409):
+                raise
+            warns.append(f"{what}: {str(e.detail)[:120]}")
+        except Exception as e:  # noqa: BLE001 — экран «Сегодня» не должен падать из-за одного источника
+            warns.append(f"{what}: {type(e).__name__}")
+        return empty
+
+    deals = got(f_deals, "сделки не загрузились", {"deals": []})["deals"]
     out = {"new": [], "kp": [], "idle": [], "back": [], "tasks": [], "limits": {"new_hours": new_h, "kp_days": kp_d, "idle_days": idle_d}}
     with db.pool.connection() as conn:
         rem = conn.execute("SELECT entity, deal_id, due, note FROM bx_reminders WHERE person_id=%s AND due <= current_date "
@@ -402,30 +505,27 @@ def today(p: dict, fresh: bool = False) -> dict:
             out["idle"].append(d)
             q["later"].append(item("deal", d, ("дизайн: " if not sales else "") + f"без движения {int(age)} дн." +
                                    (" в «Взаимном информировании»" if sales and code == "NEW" else "")))
-    leads_by_id = {}
     try:
-        from .leads import my_leads
-        lst = my_leads(p, fresh)["leads"]
-        leads_by_id = {l["id"]: l for l in lst}
-        for l in lst:
-            age = _days(l["created"] if l["new"] else l["modified"])
-            if l["id"] in lead_due:
-                n = lead_due[l["id"]]["note"]
-                q["hot"].append(item("lead", l, "перезвонить" + (f": {n}" if n else ""), action="call"))
-            elif l["new"] and age * 24 >= new_h:
-                q["hot"].append(item("lead", l, f"новый лид без ответа {int(age * 24)} ч", action="call"))
-            elif l["new"]:
-                q["today"].append(item("lead", l, "новый лид", action="call"))
-            elif age >= idle_d:
-                q["later"].append(item("lead", l, f"лид без движения {int(age)} дн.", action="call"))
+        lst = got(f_leads, "лиды не загрузились", {"leads": []})["leads"]
     except HTTPException:
-        pass
+        lst = []                          # лиды МОП без связки с Битриксом — не повод ронять сделки
+    leads_by_id = {l["id"]: l for l in lst}
+    for l in lst:
+        age = _days(l["created"] if l["new"] else l["modified"])
+        if l["id"] in lead_due:
+            n = lead_due[l["id"]]["note"]
+            q["hot"].append(item("lead", l, "перезвонить" + (f": {n}" if n else ""), action="call"))
+        elif l["new"] and age * 24 >= new_h:
+            q["hot"].append(item("lead", l, f"новый лид без ответа {int(age * 24)} ч", action="call"))
+        elif l["new"]:
+            q["today"].append(item("lead", l, "новый лид", action="call"))
+        elif age >= idle_d:
+            q["later"].append(item("lead", l, f"лид без движения {int(age)} дн.", action="call"))
     # пропущенные входящие без перезвона — наверх «Горит» (calls.py; резюме разговоров делает CoPilot в Битриксе).
     # Чей звонок — по своим сделкам и лидам (у HEAD — все).
-    from . import calls
     deals_by_id = {d["id"]: d for d in deals}
     seen = set()
-    for m in calls.missed(fresh):
+    for m in got(f_calls, "звонки не загрузились", []):
         src = (deals_by_id if m["entity"] == "deal" else leads_by_id).get(m["id"])
         if not src or (m["entity"], m["id"]) in seen:
             continue
@@ -437,7 +537,12 @@ def today(p: dict, fresh: bool = False) -> dict:
     from datetime import datetime, timezone
     from . import chats
     chat_min = float(vals.get("mop.today.chat_minutes") or vals.get("mop.reply_min") or 30)
-    waits, out["warn"] = chats.waiting(fresh)
+    own = None if need_bx(p) is None else {("deal", i) for i in deals_by_id} | {("lead", i) for i in leads_by_id}
+    try:
+        waits, cw = chats.waiting(fresh, own)
+    except Exception as e:  # noqa: BLE001
+        waits, cw = [], f"переписка не загрузилась: {type(e).__name__}"
+    warns += [cw] if cw else []
     for w in sorted(waits, key=lambda x: x["since"]):
         src = (deals_by_id if w["entity"] == "deal" else leads_by_id).get(w["id"])
         if not src or (w["entity"], w["id"]) in seen or (datetime.now(timezone.utc) - w["since"]).total_seconds() < chat_min * 60:
@@ -447,23 +552,19 @@ def today(p: dict, fresh: bool = False) -> dict:
             b[:] = [x for x in b if (x["entity"], x["id"]) != (w["entity"], w["id"])]
         q["hot"].insert(len(seen) - 1, item(w["entity"], src, f"клиент ждёт ответа в WhatsApp {chats.ago(w['since'])}", action="chat"))
     out["limits"]["chat_minutes"] = chat_min
-    uid = bx_id(p)
-    if uid:
+    for t in got(f_tasks, "задачи не загрузились", []):
         try:
-            j = read("tasks.task.list", {"filter": {"RESPONSIBLE_ID": uid, "<REAL_STATUS": 5}, "order": {"DEADLINE": "asc"},
-                                         "select": ["ID", "TITLE", "DEADLINE", "UF_CRM_TASK"]}, fresh=fresh)
-            res = j.get("result", j) if isinstance(j, dict) else {}
-            for t in (res.get("tasks") if isinstance(res, dict) else res) or []:
-                deal = next((int(x[2:]) for x in (t.get("ufCrmTask") or t.get("UF_CRM_TASK") or []) if str(x).startswith("D_")), None)
-                x = {"id": int(t.get("id") or t.get("ID")), "title": t.get("title") or t.get("TITLE") or "",
-                     "deadline": t.get("deadline") or t.get("DEADLINE"), "deal": deal}
-                out["tasks"].append(x)
-                dl, now = (x["deadline"] or "")[:10], date.today().isoformat()
-                tq = {"entity": "task", "id": x["id"], "title": x["title"], "why": "задача" + (f" до {dl[8:10]}.{dl[5:7]}" if dl else ""),
-                      "deal": deal, "sum": 0, "stage": "", "phone": "", "name": ""}
-                q["hot" if dl and dl < now else "today" if dl == now else "later"].append(tq)
-        except HTTPException:
-            pass
+            deal = next((int(x[2:]) for x in (t.get("ufCrmTask") or t.get("UF_CRM_TASK") or []) if str(x).startswith("D_")), None)
+            x = {"id": int(t.get("id") or t.get("ID")), "title": t.get("title") or t.get("TITLE") or "",
+                 "deadline": t.get("deadline") or t.get("DEADLINE"), "deal": deal}
+        except (TypeError, ValueError, AttributeError):
+            continue
+        out["tasks"].append(x)
+        dl, now = (x["deadline"] or "")[:10], date.today().isoformat()
+        tq = {"entity": "task", "id": x["id"], "title": x["title"], "why": "задача" + (f" до {dl[8:10]}.{dl[5:7]}" if dl else ""),
+              "deal": deal, "sum": 0, "stage": "", "phone": "", "name": ""}
+        q["hot" if dl and dl < now else "today" if dl == now else "later"].append(tq)
+    out["warn"] = "; ".join(warns)
     out["queue"] = q
     return out
 
