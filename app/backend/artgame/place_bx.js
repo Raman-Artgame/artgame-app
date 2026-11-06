@@ -113,8 +113,10 @@
       // анкета/переписка, вставленная в карточке сделки («Заполнить карточку») — разбираем тем же «Заполнить из текста»
       var ta = document.getElementById('ds-paste'), pb = document.getElementById('ds-parse')
       if (ds && ds.anketa && ta && pb) { ta.value = ds.anketa; ta.dispatchEvent(new Event('input', { bubbles: true })); pb.click(); got.push('анкета'); miss = '' }
-      var s2 = document.querySelector('#app .agbx-st')
-      if (s2) s2.textContent = 'Сделка ' + c.id + ' (' + c.stage_name + '): заполнено — ' + (got.join(', ') || 'ничего') + '. Проверьте поля.' + miss
+      // «Заполнить из текста» перерисовывает форму — строку сделки и статус ставим заново
+      var say = function () { mountDocs(); var s2 = document.querySelector('#app .agbx-st')
+        if (s2) s2.textContent = 'Сделка ' + c.id + ' (' + c.stage_name + '): заполнено — ' + (got.join(', ') || 'ничего') + '. Проверьте поля.' + miss }
+      say(); setTimeout(say, 400)
     }, function (e) { st.textContent = e.message })
   }
   function mountDocs() {

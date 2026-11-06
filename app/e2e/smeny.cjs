@@ -38,8 +38,11 @@ async function tab(p, name) {
 
   // 1. Художник регистрируется сам и ждёт роли
   const { p: a, ctx } = await page(b, 2000, 'Дана')
+  await a.getByRole('button', { name: 'Отправить' }).waitFor()
+  await a.screenshot({ path: `${shots}/00-registr.png` })
   await a.getByRole('button', { name: 'Отправить' }).click()
   await a.getByText('Заявка у HEAD').waitFor()
+  await a.screenshot({ path: `${shots}/00-zayavka.png` })
   // HEAD назначает роль и зону на вкладке «Команда»
   const { p: h } = await page(b, 1000, 'HEAD')
   await tab(h, 'Команда')
