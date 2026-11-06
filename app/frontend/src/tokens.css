@@ -171,3 +171,4 @@ body.web .wrap, body.web nav, body.web .sheetbox { max-width: 760px; }
 @keyframes skel { 0%, 100% { opacity: .5 } 50% { opacity: 1 } }
 details.how summary { cursor: pointer; list-style: none; } details.how summary::before { content: '▸ '; } details[open].how summary::before { content: '▾ '; }
 .stagesum { margin: 0 0 6px; display: flex; gap: 8px; align-items: center; }
+select.inline { width: auto; padding: 2px 6px; margin: 0; font-size: 12px; border-radius: 8px; }

@@ -8,7 +8,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from . import db, finance
+from . import db, fin_bx, finance
 from .config import settings
 from .deps import require_head
 
@@ -82,11 +82,17 @@ def run(year: int | None = None) -> dict:
     if not settings.fin_sheet_id:
         return {"ok": False, "detail": "таблица витрины ещё не задана (ARTGAME_FIN_SHEET_ID)"}
     year = year or date.today().year
+    pays = None
+    try:   # сначала оплаты клиентов из Битрикса — витрина видит их сразу
+        with db.pool.connection() as conn, conn.transaction():
+            pays = fin_bx.import_payments(conn)
+    except Exception as ex:  # noqa: BLE001 — Битрикс недоступен: витрину всё равно обновляем
+        pays = {"error": str(ex)[:200]}
     with db.pool.connection() as conn:
         head = conn.execute("SELECT * FROM people WHERE role_code='head' ORDER BY id LIMIT 1").fetchone() or {"id": None}
         tabs = build(conn, year, head)
     write(settings.fin_sheet_id, tabs)
-    return {"ok": True, "rows": {t: len(r) - 1 for t, r in tabs.items()}}
+    return {"ok": True, "rows": {t: len(r) - 1 for t, r in tabs.items()}, "bitrix": pays}
 
 
 @router.post("/fin/export")

@@ -171,3 +171,36 @@ def test_export_rows(client, monkeypatch):
     r = client.post("/api/fin/export", headers=hdr(1000)).json()
     assert r["ok"] and set(written) == {"Сводка", "Движение денег", "ФОТ", "Закупки"}
     assert written["Сводка"][11][0] == "Ноябрь" and written["Движение денег"][1][3] == 1000.0
+
+
+def test_bitrix_payments(client, monkeypatch):
+    """Оплаты клиентов из Битрикса: поступления сделки → приходы журнала, без задвоения; правка суммы — замена; отмена HEAD держится."""
+    from artgame import bx, fin_bx
+    setup(client, monkeypatch)
+    deals = [{"ID": "831", "TITLE": "Кафе", "CATEGORY_ID": "0", "UF_CRM_ARTGAME_FIN03_PAY1_AMOUNT": "500000|KZT",
+              "UF_CRM_ARTGAME_FIN03_PAY1_DATE": "2026-11-03T03:00:00+05:00", "UF_CRM_ARTGAME_FIN03_PAY2_AMOUNT": "300000|KZT",
+              "UF_CRM_ARTGAME_FIN03_PAY2_DATE": "2026-10-20T03:00:00+05:00"},   # октябрь — до запуска учёта, не берём
+             {"ID": "900", "TITLE": "Дизайн квартиры", "CATEGORY_ID": "13", "UF_CRM_ARTGAME_FIN03_PAY1_AMOUNT": "90000|KZT",
+              "UF_CRM_ARTGAME_FIN03_PAY1_DATE": "2026-11-04"}]
+    monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False: deals)
+    run = lambda: fin_bx_run(fin_bx)  # noqa: E731
+    assert run()["added"] == 2 and run()["added"] == 0
+    led = lambda: [x for x in client.get("/api/fin/ledger", params={"ym": YM}, headers=hdr(1000)).json() if x["source"] == "bitrix"]  # noqa: E731
+    rows = {x["deal_id"]: x for x in led()}
+    assert rows[831]["article_code"] == "client_payment" and float(rows[831]["amount"]) == 500000 and rows[831]["account_code"] == "kaspi"
+    assert rows[900]["article_code"] == "design_prepay"
+    # HEAD меняет счёт, МОП исправляет сумму в сделке: новая строка, счёт сохраняется
+    assert client.post(f"/api/fin/ledger/{rows[831]['id']}/account", json={"account": "cash"}, headers=hdr(1000)).json()["ok"]
+    deals[0]["UF_CRM_ARTGAME_FIN03_PAY1_AMOUNT"] = "550000|KZT"
+    assert run()["changed"] == 1
+    act = [x for x in led() if x["status"] == "active"]
+    assert sorted(float(x["amount"]) for x in act) == [90000, 550000] and {x["account_code"] for x in act if x["deal_id"] == 831} == {"cash"}
+    # HEAD отменил строку — следующий импорт её не возвращает
+    d900 = next(x for x in act if x["deal_id"] == 900)
+    client.post(f"/api/fin/ledger/{d900['id']}/cancel", headers=hdr(1000))
+    assert run() == {"deals": 2, "added": 0, "changed": 0}
+
+
+def fin_bx_run(fin_bx):
+    with db.pool.connection() as conn, conn.transaction():
+        return fin_bx.import_payments(conn)

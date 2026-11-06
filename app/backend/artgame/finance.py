@@ -185,6 +185,24 @@ def ledger_cancel(item_id: int, p: dict = Depends(require_head)):
     return {"ok": True}
 
 
+class AccountIn(BaseModel):
+    account: str
+
+
+@router.post("/fin/ledger/{item_id}/account")
+def ledger_account(item_id: int, b: AccountIn, p: dict = Depends(require_head)):
+    """Счёт у прихода из Битрикса (там счёт не указан, по умолчанию Kaspi) или у ошибочной операции."""
+    with db.pool.connection() as conn, conn.transaction():
+        if not conn.execute("SELECT 1 FROM fin_accounts WHERE code=%s AND active", (b.account,)).fetchone():
+            raise HTTPException(400, "нет такого счёта")
+        row = conn.execute("UPDATE fin_ledger SET account_code=%s WHERE id=%s AND status='active' AND transfer_id IS NULL RETURNING id",
+                           (b.account, item_id)).fetchone()
+        if not row:
+            raise HTTPException(404, "операция не найдена")
+        db.audit(conn, p["id"], "fin_ledger_account", "fin_ledger", item_id, {"account": b.account})
+    return {"ok": True}
+
+
 def balances(conn, upto: date | None = None) -> list[dict]:
     """Остаток по каждому счёту на конец дня upto (по умолчанию — сейчас)."""
     return conn.execute(

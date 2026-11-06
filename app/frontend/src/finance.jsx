@@ -101,7 +101,10 @@ function Ledger({ m, d }) {
       <div><b>{x.direction === 'in' ? '+' : '−'}{money(+x.amount)}</b> {x.article_title}
         <div className="small muted">{[new Date(x.op_date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }), x.account_title, x.payee_name,
           x.deal_id && `сделка № ${x.deal_id}`, x.period !== m && `за ${x.period}`, x.note].filter(Boolean).join(' · ')}
-          {x.receipt_url && <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></>}</div></div>
+          {x.receipt_url && <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></>}</div>
+        {x.source === 'bitrix' && x.status === 'active' && <div className="small muted">из Битрикса · счёт:{' '}
+          <select className="inline" value={x.account_code} onChange={e => api(`/fin/ledger/${x.id}/account`, { method: 'POST', body: { account: e.target.value } }).then(load, err(setE))}>
+            {d.accounts.map(a => <option key={a.code} value={a.code}>{a.title}</option>)}</select></div>}</div>
       {x.status === 'active' && <button className="ghost mini" onClick={() => cancel(x.id)}>✕</button>}
     </div>)}
     {rows && !rows.length && !form && <p className="small muted">Операций за месяц нет. Начните с «Остаток на начало» по каждому счёту.</p>}
