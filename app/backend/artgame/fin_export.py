@@ -30,7 +30,7 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
         sv.append([MONTHS[m - 1], r["gross"], r["vat"], r["net"], c["project"], c["stock"], c["canvas"], c["sales"], c["payroll"],
                    c["fixed"], c["variable"], s["profit"], s["ipn"], s["cash"]["in"], s["cash"]["out"],
                    sum(float(b["balance"]) for b in s["cash"]["closing"])])
-        for x in finance.payroll(ym, head)["rows"]:
+        for x in (r for r in finance.payroll(ym, head)["rows"] if r["accrued"] or r["paid"]):   # без пустых строк
             pay.append([MONTHS[m - 1], x["name"], x["group"], x["accrued"], x["paid"], x["left"], str(x["last_paid"] or ""),
                         "; ".join(f"{a['detail'] or a['kind']}: {float(a['amount']):.0f}" for a in x["lines"])])
     led = [["Дата", "Счёт", "Приход/расход", "Сумма", "Статья", "За месяц", "Сделка", "Получатель", "Комментарий", "Источник", "Статус"]]
