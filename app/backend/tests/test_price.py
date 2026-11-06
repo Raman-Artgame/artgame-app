@@ -113,15 +113,26 @@ def test_projects(bxc):
     bx._cache.clear()
     try:
         r = c.get("/api/bx/projects", headers=hdr(6000)).json()
-        assert r["counts"] == {"work": 1, "soon": 0, "late": 1}
+        assert r["counts"] == {"work": 1, "soon": 0, "closing": 0, "late": 1}
         p = r["projects"][0]
         # старт 01.11 (вс), 4 рабочих дня → сдача 05.11; сегодня 06.11 и позже → просрочен
         assert p["id"] == 1601 and p["working"] and p["start"] == "2026-11-01" and p["due"] == "2026-11-05" and p["left"] < 0 and p["state"] == "late"
         assert p["done"] == {"shifts": 2, "m2": 22.0, "last": p["done"]["last"]} and p["progress"] == 33 and p["people"] == ["P2000"]
+        # «Старт факт» из сделки важнее истории стадий; «Оплата+закрывающие» — отдельно, не «в работе»
+        DEALS["1601"]["UF_CRM_ARTGAME_PROJECT_START_ACTUAL"] = "2026-11-03T03:00:00+03:00"
+        DEALS["1651"]["STAGE_ID"] = "UC_BMKDS4"
+        bx._cache.clear()
+        r = c.get("/api/bx/projects", headers=hdr(6000)).json()
+        assert r["counts"]["work"] == 1 and r["counts"]["closing"] == 1
+        p = next(x for x in r["projects"] if x["id"] == 1601)
+        assert p["start"] == "2026-11-03" and p["due"] == "2026-11-09"
+        q = next(x for x in r["projects"] if x["id"] == 1651)
+        assert q["closing"] and not q["working"] and q["state"] == "closing" and q["left"] is None
         assert p["sum"] == 589250 and p["manager"] == "Ануар Минкеев" and p["norm"] == {"shifts": 6, "crew": 0, "term": 4}
         r2 = c.get("/api/bx/projects", headers=hdr(2000)).json()   # художник видит проект, но не сумму
         assert r2["projects"][0]["sum"] is None
     finally:
         DEALS["1601"] = old
+        DEALS["1651"]["STAGE_ID"] = "NEW"
         with db.pool.connection() as conn:
             conn.execute("DELETE FROM shifts WHERE object_id=1601"); conn.execute("DELETE FROM objects WHERE id=1601")

@@ -70,7 +70,7 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   const tiles = (await p.locator('.tiles').textContent()).match(/^1Горит(\d+)Сегодня(\d+)Можно позже/)
   assert.ok(tiles, 'плитки: 1 горит, затем сегодня и позже')
   assert.match(await p.locator('nav button', { hasText: 'Сегодня' }).textContent(), new RegExp(`${1 + +tiles[1]}$`), 'счётчик в меню')
-  assert.deepStrictEqual(await p.locator('nav button').allTextContents().then(a => a.map(x => x.replace(/\d+$/, ''))), ['Сегодня', 'Лиды', 'Сделки', 'Проекты', 'Месяц', 'Учёба'], 'у МОП шесть кнопок меню')
+  assert.deepStrictEqual(await p.locator('nav button').allTextContents().then(a => a.map(x => x.replace(/\d+$/, ''))), ['Сегодня', 'Лиды', 'Сделки', 'Проекты', 'Месяц', 'Ещё'], 'у МОП пять кнопок и «Ещё» (Учёба, Мои)')
   assert.match(await p.locator('.bucket.today').textContent(), /№ 1601.*КП без ответа/)
   assert.strictEqual(await p.locator('.bucket.hot a.btn', { hasText: 'Ответить' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/lead/details/3001/')
   await p.locator('.strip').waitFor()

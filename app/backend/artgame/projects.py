@@ -1,7 +1,9 @@
 """«Проекты» — общая вкладка (HEAD 06.11): кто где находится и сколько дней осталось до сдачи.
 
-Проект = сделка воронки «1.1 Продажи РК» на стадии работ (UC_AV00QK, UC_BMKDS4) или перед стартом (FINAL_INVOICE).
-Срок — поле «Срок клиенту» из расчёта (норма) или дни из договора; старт — день перевода в «В работе» (история стадий).
+Проект = сделка воронки «1.1 Продажи РК» на стадии «Выполнение проекта» (UC_AV00QK), перед стартом (FINAL_INVOICE)
+или на закрытии (UC_BMKDS4 «Оплата+закрывающие документы»: работы сданы, ждём деньги и акты — отдельно, в «в работе» не считаем).
+Старт — поле «Старт факт» сделки, иначе день перевода в «Выполнение проекта» (история стадий). Сдача — «Окончание план»,
+иначе старт + срок: норма из расчёта (поле сделки или сохранённый расчёт приложения, раб. дни) или дни из договора (календарные).
 Ход работ — смены из приложения по объекту (shifts): сделано смен и м², кто был на объекте последние дни.
 Видят все активные роли; сумму сделки — только МОП и HEAD.
 """
@@ -14,11 +16,13 @@ from .work import active
 
 router = APIRouter(prefix="/api")
 
-WORK = ("UC_AV00QK", "UC_BMKDS4")
+WORK = ("UC_AV00QK",)
+CLOSING = ("UC_BMKDS4",)
 SOON = ("FINAL_INVOICE",)
 F_DAYS = "UF_CRM_1753295493279"
+F_START, F_END = "UF_CRM_ARTGAME_PROJECT_START_ACTUAL", "UF_CRM_ARTGAME_PROJECT_END_PLAN"
 SELECT = ["ID", "TITLE", "STAGE_ID", "ASSIGNED_BY_ID", "OPPORTUNITY", "DATE_MODIFY", bx.CITY, bx.AREA, bx.F_LEVEL, bx.F_SHIFTS,
-          bx.F_CREW, bx.F_TERM, F_DAYS, bx.ADDR]
+          bx.F_CREW, bx.F_TERM, F_DAYS, bx.ADDR, F_START, F_END]
 
 
 def _d(iso) -> date | None:
@@ -50,15 +54,17 @@ def _started(deal_id: int, fresh: bool) -> date | None:
 
 
 def projects(p: dict, fresh: bool = False) -> dict:
-    rows = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": list(WORK + SOON)}, "select": SELECT,
+    rows = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": list(WORK + SOON + CLOSING)}, "select": SELECT,
                                          "order": {"DATE_MODIFY": "DESC"}}, fresh=fresh)
     st = bx.stages()
     names = {u["id"]: u["name"] for u in bx.users()}
     see_sum = p["role_code"] in bx.BX_ROLES
     ids = [int(d["ID"]) for d in rows]
-    done, who = {}, {}
+    done, who, calc = {}, {}, {}
     if ids:
         with db.pool.connection() as conn:
+            for r in conn.execute("SELECT deal_id, data FROM deal_calc WHERE deal_id = ANY(%s)", (ids,)).fetchall():
+                calc[r["deal_id"]] = ((r["data"] or {}).get("out") or {}).get("norm") or {}
             for r in conn.execute("""SELECT object_id, count(*) AS n, coalesce(sum(area_m2), 0) AS m2, max(started_at) AS last
                                      FROM shifts WHERE object_id = ANY(%s) AND status <> 'rejected' GROUP BY object_id""", (ids,)).fetchall():
                 done[r["object_id"]] = r
@@ -69,34 +75,38 @@ def projects(p: dict, fresh: bool = False) -> dict:
     today, out = date.today(), []
     for d in rows:
         did = int(d["ID"])
-        working = d["STAGE_ID"] in WORK
-        start = (_started(did, fresh) if working else None) or (_d(d.get("DATE_MODIFY")) if working else None)
-        term = int(bx._num(d.get(bx.F_TERM))) or 0
+        working, closing = d["STAGE_ID"] in WORK, d["STAGE_ID"] in CLOSING
+        cn = calc.get(did) or {}
+        start = (_d(d.get(F_START)) or (_started(did, fresh) if working else None) or _d(d.get("DATE_MODIFY"))) if working or closing else None
+        term = int(bx._num(d.get(bx.F_TERM)) or bx._num(cn.get("client")) or 0)
+        due = _d(d.get(F_END)) or (work_days(start, term) if start and term else None)
         if not term:
             try:
-                term = int(str(d.get(F_DAYS) or "0").split()[0])
+                cal = int(str(d.get(F_DAYS) or "0").split()[0])
             except ValueError:
-                term = 0
-        due = work_days(start, term) if start and term else None
+                cal = 0
+            if cal and start and not due:
+                due, term = start + timedelta(days=cal), cal
         dn = done.get(did)
-        shifts_norm = bx._num(d.get(bx.F_SHIFTS))
+        shifts_norm = bx._num(d.get(bx.F_SHIFTS)) or bx._num(cn.get("shifts"))
         shifts_done = int(dn["n"]) if dn else 0
         progress = min(100, round(shifts_done / shifts_norm * 100)) if shifts_norm else None
-        left = (due - today).days if due else None
-        state = ("soon" if not working else "late" if left is not None and left < 0 else "today" if left == 0
+        left = (due - today).days if due and working else None
+        state = ("closing" if closing else "soon" if not working else "late" if left is not None and left < 0 else "today" if left == 0
                  else "quiet" if dn and dn["last"] and (datetime.now(timezone.utc) - dn["last"]).days >= 3 else "idle" if not dn else "ok")
         out.append({"id": did, "title": d.get("TITLE") or "", "stage": d["STAGE_ID"], "stage_name": (st.get(d["STAGE_ID"]) or {}).get("name", d["STAGE_ID"]),
                     "working": working, "city": bx.city_name(d.get(bx.CITY)), "address": (d.get(bx.ADDR) or "").split("|")[0] if isinstance(d.get(bx.ADDR), str) else "",
                     "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), ""), "area": bx._num(d.get(bx.AREA)),
                     "level": bx.LEVELS.get(bx.level_key(d.get(bx.F_LEVEL)), ""), "sum": bx._num(d.get("OPPORTUNITY")) if see_sum else None,
-                    "norm": {"shifts": shifts_norm, "crew": bx._num(d.get(bx.F_CREW)), "term": term},
+                    "closing": closing,
+                    "norm": {"shifts": shifts_norm, "crew": bx._num(d.get(bx.F_CREW)) or bx._num(cn.get("crew")), "term": term},
                     "start": start.isoformat() if start else None, "due": due.isoformat() if due else None, "left": left,
                     "done": {"shifts": shifts_done, "m2": float(dn["m2"]) if dn else 0, "last": dn["last"].isoformat() if dn and dn["last"] else None},
                     "progress": progress, "people": who.get(did, []), "state": state})
-    order = {"late": 0, "today": 1, "quiet": 2, "idle": 3, "ok": 4, "soon": 5}
+    order = {"late": 0, "today": 1, "quiet": 2, "idle": 3, "ok": 4, "soon": 5, "closing": 6}
     out.sort(key=lambda x: (order[x["state"]], x["left"] if x["left"] is not None else 999))
     return {"projects": out, "today": today.isoformat(),
-            "counts": {"work": sum(x["working"] for x in out), "soon": sum(not x["working"] for x in out),
+            "counts": {"work": sum(x["working"] for x in out), "soon": sum(x["state"] == "soon" for x in out), "closing": sum(x["closing"] for x in out),
                        "late": sum(x["state"] == "late" for x in out)}}
 
 
