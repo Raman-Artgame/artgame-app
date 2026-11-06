@@ -374,6 +374,9 @@ def compute(conn, ym: str, by: dict) -> dict:
 
 @router.post("/fin/payroll/{ym}/compute")
 def payroll_compute(ym: str, p: dict = Depends(require_head)):
+    from .fin_bx import START
+    if ym < f"{START:%Y-%m}":
+        raise HTTPException(400, "до ноября 2026 ФОТ — история из «ФОТ 2026», пересчёт её не трогает")
     with db.pool.connection() as conn, conn.transaction():
         conn.execute("SELECT pg_advisory_xact_lock(hashtext('fin_compute'))")
         out = compute(conn, ym, p)

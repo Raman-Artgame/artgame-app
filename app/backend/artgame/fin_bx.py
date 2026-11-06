@@ -25,7 +25,8 @@ def _day(v) -> date | None:
 SELECT = ["ID", "TITLE", "CATEGORY_ID"] + [f for _, a, d in PAY for f in (a, d)]
 
 
-def import_payments(conn, since: date = START, until: date | None = None, ids: list[int] | None = None) -> dict:
+def import_payments(conn, since: date = START, until: date | None = None, ids: list[int] | None = None,
+                    account: str = "kaspi") -> dict:
     """Поступления сделок с датой в [since, until) → приходы журнала. ids — только эти сделки (история года по листу «Проекты»)."""
     if ids is not None:
         deals = []
@@ -48,7 +49,7 @@ def import_payments(conn, since: date = START, until: date | None = None, ids: l
             if ok and any(float(r["amount"]) == amount and r["op_date"] == day for r in rows) and (old is None or
                                                                                                (float(old["amount"]) == amount and old["op_date"] == day)):
                 continue   # уже в журнале (или HEAD сам отменил эту строку — не возвращаем)
-            account = old["account_code"] if old else "kaspi"
+            acc = old["account_code"] if old else account
             if old:   # поменяли или убрали в сделке — старую строку отменяем
                 conn.execute("UPDATE fin_ledger SET status='cancelled' WHERE id=%s", (old["id"],))
                 changed += 1
@@ -57,7 +58,7 @@ def import_payments(conn, since: date = START, until: date | None = None, ids: l
             conn.execute(
                 """INSERT INTO fin_ledger (client_uid, op_date, account_code, direction, amount, article_code, period, deal_id, note, source, source_ref)
                    VALUES (%s,%s,%s,'in',%s,%s,%s,%s,%s,'bitrix',%s)""",
-                (uuid.uuid4(), day, account, amount, "design_prepay" if int(d.get("CATEGORY_ID") or 0) == DESIGN else "client_payment",
+                (uuid.uuid4(), day, acc, amount, "design_prepay" if int(d.get("CATEGORY_ID") or 0) == DESIGN else "client_payment",
                  f"{day:%Y-%m}", did, f"{(d.get('TITLE') or '')[:120]} · поступление {n}", ref))
             added += 0 if old else 1
     return {"deals": len(deals), "added": added, "changed": changed}

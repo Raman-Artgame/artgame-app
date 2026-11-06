@@ -8,7 +8,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from . import db, fin_bx, finance
+from . import db, fin_bx, fin_history, finance
 from .config import settings
 from .deps import require_head
 
@@ -52,7 +52,12 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
                     "свои" if e["paid_by"] == "own" else "компании",
                     {"submitted": "ждёт проверки", "approved": "принято", "rejected": "отказ"}.get(e["status"], e["status"]),
                     {"to_pay": "к выплате", "paid": "выплачено"}.get(e["payout_status"], "")])
-    return {"Сводка": sv, "Движение денег": led, "ФОТ": pay, "Закупки": buy}
+    prj = [["Месяц", "Сделка", "Объект", "Город", "Модель", "Категория", "Услуга", "Источник", "ИП", "Конец работ", "Выручка с НДС",
+            "Получено", "Долг"]]
+    for r in conn.execute("SELECT * FROM fin_projects WHERE year=%s ORDER BY month, closed NULLS LAST, row_no", (year,)).fetchall():
+        prj.append([MONTHS[r["month"] - 1], r["deal_id"] or "", r["title"], r["city"], r["model"], r["category"], r["service"], r["source"],
+                    r["ip"], str(r["closed"] or ""), float(r["revenue"]), float(r["received"]), float(r["debt"])])
+    return {"Сводка": sv, "Проекты": prj, "Движение денег": led, "ФОТ": pay, "Закупки": buy}
 
 
 def write(sheet_id: str, tabs: dict[str, list[list]]):
@@ -89,10 +94,12 @@ def run(year: int | None = None) -> dict:
     except Exception as ex:  # noqa: BLE001 — Битрикс недоступен: витрину всё равно обновляем
         pays = {"error": str(ex)[:200]}
     with db.pool.connection() as conn:
+        hist = fin_history.run(conn)
+    with db.pool.connection() as conn:
         head = conn.execute("SELECT * FROM people WHERE role_code='head' ORDER BY id LIMIT 1").fetchone() or {"id": None}
         tabs = build(conn, year, head)
     write(settings.fin_sheet_id, tabs)
-    return {"ok": True, "rows": {t: len(r) - 1 for t, r in tabs.items()}, "bitrix": pays}
+    return {"ok": True, "rows": {t: len(r) - 1 for t, r in tabs.items()}, "bitrix": pays, "history": hist}
 
 
 @router.post("/fin/export")

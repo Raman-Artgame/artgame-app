@@ -61,7 +61,7 @@ def test_finance_flow(client, monkeypatch):
     assert led(account="kaspi", amount=200_000, article="transfer").status_code == 400     # без счёта «куда»
     assert led(account="kaspi", amount=10, article="payroll").status_code == 400            # выплаты — только через ФОТ
     bal = {b["code"]: float(b["balance"]) for b in client.get("/api/fin/summary", params={"ym": YM}, headers=hdr(1000)).json()["cash"]["closing"]}
-    assert bal == {"kaspi": 5_000_000 - 300_000 + 1_160_000 - 200_000, "cash": 500_000, "head": 0}
+    assert bal == {"kaspi": 5_000_000 - 300_000 + 1_160_000 - 200_000, "cash": 500_000, "head": 0, "hist": 0}
     # смены: художник 2 полные + 1 короткая (4 ч по часу), главный художник 1 смена → доплата до минимума
     shift(client, 2000, "2026-11-04T09:00:00+05:00", "2026-11-04T19:00:00+05:00")
     shift(client, 2000, "2026-11-05T09:00:00+05:00", "2026-11-05T19:00:00+05:00")
@@ -169,7 +169,7 @@ def test_export_rows(client, monkeypatch):
             return cls(2026, 11, 20)
     monkeypatch.setattr(fin_export, "date", D)
     r = client.post("/api/fin/export", headers=hdr(1000)).json()
-    assert r["ok"] and set(written) == {"Сводка", "Движение денег", "ФОТ", "Закупки"}
+    assert r["ok"] and set(written) == {"Сводка", "Проекты", "Движение денег", "ФОТ", "Закупки"}
     assert written["Сводка"][11][0] == "Ноябрь" and written["Движение денег"][1][3] == 1000.0
 
 
@@ -204,3 +204,52 @@ def test_bitrix_payments(client, monkeypatch):
 def fin_bx_run(fin_bx):
     with db.pool.connection() as conn, conn.transaction():
         return fin_bx.import_payments(conn)
+
+
+FOT_OCT = [[None] * 12,
+           ["АСТАНА", "Аванс", "ЗП 1-5", "Премия|%", "Итог", None, "Владимир", None, None, None, "Асель 15т"],
+           ["Владимир", None, None, None, "=", None, "Мурал Павлодар", "360000", "13 дней", None, "Gala One", "130 000"],
+           ["Асель", None, None, None, "=", None, "Школа", "34000", "1 день", None, "Картины", "105000"],
+           [None] * 6 + ["Премия", "212000", None, None, "Премия", "20000"],
+           [None] * 6 + ["Аванс", "200000", None, None, "Аванс", "0"],
+           [None] * 6 + ["Итог", "=SUM", None, None, "Итог", "=SUM"],
+           ["ШЫМКЕНТ", "Аванс ", "ЗП 1-5", "Премия|%", "Итог", None, "Анна"],
+           [None] * 6 + ["Оклад", "200000"],
+           [None] * 6 + ["Аванс", "124500", "80т заказчик"],
+           [None] * 6 + ["Итог", "=SUM"]]
+
+
+def test_history_import(client, monkeypatch):
+    """История 2026: проекты из листа, ФОТ из «ФОТ 2026» — начисления и выплаты на счёт «История», без задвоения."""
+    from artgame import fin, fin_history
+    ids = setup(client, monkeypatch)
+    people = fin_history.parse_fot(FOT_OCT)
+    by = {p["name"]: p for p in people}
+    assert by["Владимир"]["piece"] == 394000 and by["Владимир"]["bonus"] == 212000 and by["Владимир"]["advance"] == 200000
+    assert by["Асель"]["piece"] == 235000 and by["Анна"]["salary"] == 200000 and by["Анна"]["city"] == "Шымкент"
+    projects = [["171", "Октябрь", "ЦУМ", "Караганда", "B2B", "Спорт", "", "Роспись", "Instagram", "", "Яковлев", "", "", "20.10.2026",
+                 "1 160 000", "1 000 000", "160 000"], ["", "Октябрь", ""]]
+
+    def sheet(sid, rng):
+        if sid == fin.SHEET_ID:
+            return projects
+        return FOT_OCT if rng.startswith("'Октябрь'") else []
+    monkeypatch.setattr(fin, "sheet_values", sheet)
+    monkeypatch.setattr(fin_history, "import_client_payments", lambda conn, year=2026: {"deals": 0})
+    client.get("/api/fin/payees", headers=hdr(1000))                         # получатели команды
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE fin_payees SET name='Асель Нурланова' WHERE person_id=%s", (ids[2000],))
+        r1 = fin_history.run(conn)
+        r2 = fin_history.run(conn)
+        assert r1["projects"] == 1 and r1["payroll"]["added"] == 5 and r2["payroll"]["added"] == 0
+        pr = conn.execute("SELECT * FROM fin_projects").fetchall()
+        assert len(pr) == 1 and pr[0]["month"] == 10 and float(pr[0]["revenue"]) == 1160000
+        out = conn.execute("SELECT sum(amount) AS s FROM fin_ledger WHERE account_code='hist' AND article_code='payroll'").fetchone()["s"]
+        assert float(out) == 394000 + 212000 + 235000 + 20000 + 200000
+    p = client.get("/api/fin/payroll/2026-10", headers=hdr(1000)).json()
+    rows = {x["name"]: x for x in p["rows"]}
+    assert rows["Асель Нурланова"]["accrued"] == 255000                     # нашёлся человек приложения по имени
+    assert rows["Владимир"]["accrued"] == 606000 and rows["Владимир"]["left"] == 0
+    assert client.post("/api/fin/payroll/2026-10/compute", headers=hdr(1000)).status_code == 400
+    s = client.get("/api/fin/summary", params={"ym": "2026-11"}, headers=hdr(1000)).json()
+    assert all(b["code"] != "hist" or float(b["balance"]) <= 0 for b in s["cash"]["closing"])
