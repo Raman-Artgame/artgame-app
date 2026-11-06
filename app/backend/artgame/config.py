@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     bitrix_webhook: str = ""           # входящий вебхук Битрикса (права CRM): запись из приложения, решение HEAD 05.11
     drive_inbox: str = ""              # папка Диска для чеков «Офис / без объекта»
     google_sa_file: str = ""            # путь к JSON сервисного аккаунта на сервере
-    fin_sheet_id: str = ""              # Google Таблица-витрина финансов (сервер пишет, руками не правим)
+    # Google Таблица-витрина «Финансы 2026 — витрина (из приложения)» (HEAD 06.11): сервер пишет, руками не правим
+    fin_sheet_id: str = "1-beqAb-w27ZJnLepsdCZBbxIRQYWSUFDsJMdoBneS-s"
     content_key: str = ""               # hex 32 байта: расшифровка рабочих мест (places/*.enc)
 
 

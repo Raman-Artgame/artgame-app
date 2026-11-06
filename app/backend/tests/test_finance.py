@@ -155,6 +155,7 @@ def test_export_rows(client, monkeypatch):
     setup(client, monkeypatch)
     client.post("/api/fin/ledger", json={"client_uid": uid(), "op_date": "2026-11-01", "account": "kaspi", "amount": 1000,
                                          "article": "opening"}, headers=hdr(1000))
+    monkeypatch.setattr(settings, "fin_sheet_id", "")
     assert client.post("/api/fin/export", headers=hdr(1000)).json()["ok"] is False
     written = {}
     monkeypatch.setattr(settings, "fin_sheet_id", "sheet-x")
