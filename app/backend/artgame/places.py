@@ -137,6 +137,18 @@ def places(p: dict = Depends(active)):
             for c in ORDER if allowed(p, c) and (ROOT / c / "index.html.enc").exists()]
 
 
+@router.get("/bx/scripts")
+def mop_scripts(p: dict = Depends(active)):
+    """Скрипты сообщений и шаги алгоритма МОП для карточки сделки (из зашифрованного places/mop/scripts.json)."""
+    if p["role_code"] not in PLACES["mop"]["roles"]:
+        raise HTTPException(403, "только МОП и HEAD")
+    f = ROOT / "mop" / "scripts.json.enc"
+    if not f.exists():
+        raise HTTPException(404, "скрипты не загружены")
+    return Response(decrypt(f.read_bytes(), "mop/scripts.json"), media_type="application/json",
+                    headers={"Cache-Control": "private, max-age=3600"})
+
+
 @router.get("/p/_shim.js")
 def shim():
     return FileResponse(SHIM, media_type="text/javascript", headers={"Cache-Control": "no-cache"})

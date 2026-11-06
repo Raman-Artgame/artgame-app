@@ -227,6 +227,7 @@ def api_lead_save(lead_id: int, body: LeadIn, p: dict = Depends(active)):
 class StatusIn(BaseModel):
     status: str
     reason: str = ""
+    reason_code: str | None = None   # одна из bxw.REASONS — при отказе обязательна
 
 
 @router.post("/bx/leads/{lead_id}/status")
@@ -234,8 +235,11 @@ def api_lead_status(lead_id: int, body: StatusIn, p: dict = Depends(active)):
     st = statuses()
     if body.status not in st or body.status == CONVERTED:
         raise HTTPException(400, "нет такого статуса")
-    if st[body.status]["semantic"] == "failure" and not body.reason.strip():
-        raise HTTPException(400, "укажите причину отказа")
+    if st[body.status]["semantic"] == "failure":
+        from .bxw import REASON
+        if body.reason_code not in REASON:
+            raise HTTPException(400, "выберите причину отказа из списка")
+        body.reason = REASON[body.reason_code] + (f". {body.reason.strip()}" if body.reason.strip() else "")
     note = f"перевёл в «{st[body.status]['name']}»" + (f": {body.reason.strip()}" if body.reason.strip() else "")
     return lwrite(p, lead_id, f"статус → {st[body.status]['name']}", {"STATUS_ID": body.status}, note)
 
