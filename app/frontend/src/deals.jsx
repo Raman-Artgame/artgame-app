@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { DealCard } from './dealcard.jsx'
-import { ageDays, cleanTitle, money } from './crm.jsx'
+import { Skeleton, ageDays, cleanTitle, money } from './crm.jsx'
 
 export const DEAL_ROLES = new Set(['mop', 'mop_vip', 'head'])
 const IDLE = 3   // дней без движения — красный бейдж (как mop.today.idle_days)
@@ -19,7 +19,7 @@ export function Deals({ initial, openPlace }) {
   const [st, setSt] = useState(null)       // стадия: id | 'all' | null — сама выберет
   const load = fresh => { setBusy(true); setErr(''); return api(`/bx/deals${fresh ? '?fresh=1' : ''}`).then(setData, e => setErr(e.message)).finally(() => setBusy(false)) }
   useEffect(() => { load(false) }, [])
-  const open = (id, view, calc) => {
+  const open = (id, view, calc, hash) => {
     try {
       if (calc) {   // калькулятор рабочего места читает своё состояние из ag-rm-calc: подставляем площадь и сложность сделки
         const S = JSON.parse(localStorage.getItem('ag-rm-calc') || '{}')
@@ -28,13 +28,13 @@ export function Deals({ initial, openPlace }) {
         else S.paint = { ...(S.paint || { own: 30000, design: 'M' }), m2: calc.area || S.paint?.m2 || 60, level: calc.level || S.paint?.level || 'Средний' }
         localStorage.setItem('ag-rm-calc', JSON.stringify(S))
       }
-      localStorage.setItem('artgame.bx.open', JSON.stringify({ id, view, t: Date.now() })); localStorage.setItem('artgame.place', 'mop')
+      localStorage.setItem('artgame.bx.open', JSON.stringify({ id, view, hash, t: Date.now() })); localStorage.setItem('artgame.place', 'mop')
     } catch { /* без памяти */ }
     openPlace()
   }
   if (card) return <DealCard id={card} back={() => { setCard(null); load(true) }} open={open} />
   if (err) return <div className="card"><h2>Сделки</h2><p className="muted">{err}</p></div>
-  if (!data) return <div className="card muted">Загружаю сделки из Битрикса…</div>
+  if (!data) return <Skeleton n={4} />
   const s = q.trim().toLowerCase()
   const mine = data.deals.filter(d => !mgr || d.manager_id === mgr)
   const list = mine.filter(d => d.category === cat && (!s || String(d.id).includes(s) || d.title.toLowerCase().includes(s) || (d.manager || '').toLowerCase().includes(s)))
@@ -67,10 +67,10 @@ export function Deals({ initial, openPlace }) {
     <div className="card">
       {!list.length && <p className="muted">В этой воронке открытых сделок нет.</p>}
       {shown.map(([id, g]) => <div key={id} className="stage">
-        <div className="stagehead">
+        {cur === 'all' ? <div className="stagehead">
           <span>{g.name}</span>
           <span className="small"><b>{g.items.length}</b> · {money(g.sum)}{g.stale ? <span className="badge hot">{g.stale} стоят</span> : null}</span>
-        </div>
+        </div> : <p className="small muted stagesum">{money(g.sum)}{g.stale ? <span className="badge hot">{g.stale} стоят</span> : null}</p>}
         {g.items.map(row)}
       </div>)}
     </div>

@@ -162,3 +162,12 @@ body.web .wrap, body.web nav, body.web .sheetbox { max-width: 760px; }
 .planbar .tick em { position: absolute; left: 50%; transform: translateX(-50%); font: 500 11px/1.2 Onest, system-ui; font-style: normal; color: var(--muted); white-space: nowrap; }
 .planbar .tick em:first-child { top: 20px; } .planbar .tick em:last-child { top: 33px; }
 .planbar .tick.got em { color: var(--ok); }
+
+/* Заготовки загрузки, свёрнутые пояснения, сводка стадии */
+.skel .skrow { display: flex; gap: 12px; align-items: center; padding: 10px 0; }
+.skel .skrow i, .skel .skrow b, .skel .skrow span { display: block; background: var(--line); border-radius: 8px; animation: skel 1.2s ease-in-out infinite; }
+.skel .skrow i { width: 36px; height: 36px; border-radius: 10px; flex: none; }
+.skel .skrow div { flex: 1; } .skel .skrow b { height: 14px; width: 60%; margin-bottom: 8px; } .skel .skrow span { height: 10px; width: 40%; }
+@keyframes skel { 0%, 100% { opacity: .5 } 50% { opacity: 1 } }
+details.how summary { cursor: pointer; list-style: none; } details.how summary::before { content: '▸ '; } details[open].how summary::before { content: '▾ '; }
+.stagesum { margin: 0 0 6px; display: flex; gap: 8px; align-items: center; }

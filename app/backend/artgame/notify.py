@@ -1,6 +1,7 @@
 """Уведомления МОП в Telegram (HEAD 05.11.2026): новая заявка без ответа, КП без ответа, задача Битрикса на сегодня,
 пора вернуться к отложенной сделке. Запускается таймером каждые 15 минут, пишет только с 8 до 21 по Алматы,
-каждое событие — один раз (таблица notices). Бот: ARTGAME_BOT_TOKEN, только в env сервера."""
+каждое событие — один раз (таблица notices). С 06.11: в 9:00 одна утренняя сводка со всем на день, остальное время —
+сразу только «горит» (новая заявка, лид ждёт, пора вернуться); КП и задачи ждут сводки. Бот: ARTGAME_BOT_TOKEN, только в env сервера."""
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -29,9 +30,17 @@ def _title(d: dict) -> str:
     return f"№ {d['id']} {t}".strip()
 
 
+_last: dict = {}
+
+
+def t_queue(p: dict) -> dict:
+    return _last.get(p["id"], {}).get("queue", {"hot": [], "today": []})
+
+
 def events(p: dict, today: str) -> list[tuple[str, str]]:
     """(ключ, текст) для одного МОП по данным «Сегодня»."""
     t = bx.today(p)
+    _last[p["id"]] = t
     ev = []
     for d in t["back"]:
         ev.append((f"back:{d['id']}:{d['due']}", f"⏰ Пора вернуться к сделке {_title(d)}" + (f"\n{d['note']}" if d.get("note") else "")))
@@ -46,6 +55,10 @@ def events(p: dict, today: str) -> list[tuple[str, str]]:
         if (x.get("deadline") or "")[:10] == today:
             ev.append((f"task:{x['id']}:{today}", f"✅ Задача на сегодня: {x['title']}" + (f" (сделка № {x['deal']})" if x.get("deal") else "")))
     return ev
+
+
+DIGEST_HOUR = 9   # утренняя сводка (HEAD 06.11): всё на день одним сообщением; до неё и после — сразу только «горит»
+HOT = ("back", "new", "lead")
 
 
 def run(now: datetime | None = None) -> int:
@@ -67,15 +80,23 @@ def run(now: datetime | None = None) -> int:
         with db.pool.connection() as conn:
             done = {r["key"] for r in conn.execute("SELECT key FROM notices WHERE person_id=%s AND sent_at > now() - interval '3 days'",
                                                    (p["id"],)).fetchall()}
-            fresh = [(k, txt) for k, txt in ev if k not in done]
+            digest = now.hour >= DIGEST_HOUR and f"digest:{today}" not in done
+            fresh = [(k, txt) for k, txt in ev if k not in done and (digest or k.split(":")[0] in HOT)]
             if not fresh:
                 continue
+            head = ""
+            if digest:
+                q = t_queue(p)
+                head = f"☀️ На сегодня: {len(q['hot'])} горит, {len(q['today'])} сделать.\n\n"
+                fresh_keys = [(f"digest:{today}", "")] + fresh
+            else:
+                fresh_keys = fresh
             try:
-                SEND(p["tg_id"], "\n\n".join(txt for _, txt in fresh))
+                SEND(p["tg_id"], head + "\n\n".join(txt for _, txt in fresh))
             except Exception as ex:
                 print(f"{p['full_name']}: telegram {ex}")
                 continue
-            for k, _ in fresh:
+            for k, _ in fresh_keys:
                 conn.execute("INSERT INTO notices (person_id, key) VALUES (%s, %s) ON CONFLICT DO NOTHING", (p["id"], k))
             conn.execute("UPDATE bx_reminders SET sent_at=now() WHERE person_id=%s AND due <= current_date AND sent_at IS NULL", (p["id"],))
             db.audit(conn, p["id"], "notify", data={"keys": [k for k, _ in fresh]})

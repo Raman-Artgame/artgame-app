@@ -363,9 +363,12 @@ def test_notify(bxc, monkeypatch):
     t = c.get("/api/bx/today", headers=hdr(6000)).json()
     assert [d["id"] for d in t["back"]] == [1601] and t["kp"] == []   # отложенная — в «пора вернуться», не в «КП без ответа»
     assert notify.run(datetime(2026, 11, 6, 3, 0, tzinfo=ZoneInfo("Asia/Almaty"))) == 0   # ночью молчим
-    n = notify.run(datetime(2026, 11, 6, 10, 0, tzinfo=ZoneInfo("Asia/Almaty")))
-    assert n == 3 and sent[0][0] == 6000 and "Пора вернуться к сделке № 1601" in sent[0][1] and "ждут бюджет" in sent[0][1]
-    assert "Задача на сегодня: Перезвонить по КП" in sent[0][1] and "Лид Дана: новый лид без ответа" in sent[0][1]
+    assert notify.run(datetime(2026, 11, 6, 8, 30, tzinfo=ZoneInfo("Asia/Almaty"))) == 2   # до сводки — только «горит»: вернуться + лид
+    assert "Пора вернуться" in sent[0][1] and "Лид Дана" in sent[0][1] and "Задача" not in sent[0][1]
+    sent.clear()
+    n = notify.run(datetime(2026, 11, 6, 10, 0, tzinfo=ZoneInfo("Asia/Almaty")))   # сводка: остальное одним сообщением
+    assert n == 1 and sent[0][0] == 6000 and sent[0][1].startswith("☀️ На сегодня: 2 горит, 1 сделать.") and "Пора вернуться" not in sent[0][1]
+    assert "Задача на сегодня: Перезвонить по КП" in sent[0][1]
     assert notify.run(datetime(2026, 11, 6, 10, 30, tzinfo=ZoneInfo("Asia/Almaty"))) == 0 and len(sent) == 1   # повторно не шлём
     with db.pool.connection() as conn:
         assert conn.execute("SELECT count(*) AS n FROM bx_reminders WHERE sent_at IS NULL").fetchone()["n"] == 0

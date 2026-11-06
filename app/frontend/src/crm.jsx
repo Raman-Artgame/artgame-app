@@ -6,7 +6,9 @@ export const money = n => n ? Math.round(n).toLocaleString('ru-RU') + ' ₸' : '
 const mln = n => n >= 1e6 ? (n / 1e6).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' млн' : Math.round(n / 1000) + ' тыс.'
 export const dt = s => s ? new Date(s).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
 export const strip = s => (s || '').replace(/<[^>]+>/g, '').replace(/\[\/?[A-Za-z]+[^\]]*\]/g, '')
-export const cleanTitle = (title, id) => (title || '').replace(new RegExp(`^№?\\s*${id}\\s*·?\\s*`), '')
+// Названия сделок из Битрикса часто капсом («КАФЕ — АСТАНА») — приводим к обычному регистру, аббревиатуры (ТОО, КП) не трогаем.
+export const nice = t => /[а-яa-z]/.test(t || '') ? t : (t || '').toLowerCase().replace(/(^|[\s«(—-])(\S)/g, (m, a, b) => a + b.toUpperCase()).replace(/\b(тоо|ип|ао|кп|жк|тц|трц|бц|vip)\b/gi, w => w.toUpperCase())
+export const cleanTitle = (title, id) => nice((title || '').replace(new RegExp(`^№?\\s*${id}\\s*·?\\s*`), ''))
 export const ageDays = s => s ? Math.floor((Date.now() - new Date(s).getTime()) / 86400000) : 0
 const tomorrow = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10)
 
@@ -21,10 +23,9 @@ export function MonthStrip({ onOpen }) {
   const target = co.next ? co.next.from : steps.length ? steps[steps.length - 1].from : 0
   const pct = target ? Math.min(100, Math.round(co.net / target * 100)) : 100
   return <div className="strip" onClick={onOpen}>
-    <div className="strip-top"><span>Месяц: <b>{mln(co.net)}</b>{target ? ` из ${mln(target)}` : ''}</span>
-      <span className="muted">{co.step ? `${co.pct}%` : 'ступени нет'}</span></div>
+    <div className="strip-top"><span>Месяц: <b>{mln(co.net)}</b>{target ? <span className="muted"> из {mln(target)}</span> : null}</span>
+      <span className="muted small">{co.step ? `${co.pct}%` : 'ступени нет'}{co.next ? ` · до ${steps[co.next.step - 1]?.pct}% ещё ${mln(co.next.left)}` : ''}</span></div>
     <div className="bar"><i style={{ width: pct + '%' }} /></div>
-    {co.next && <div className="small muted">до {steps[co.next.step - 1]?.pct}% ещё {mln(co.next.left)} без НДС</div>}
   </div>
 }
 
@@ -33,17 +34,18 @@ export function MonthStrip({ onOpen }) {
 let portalCache = null
 export function usePortal() {
   const [p, setP] = useState(portalCache)
-  useEffect(() => { if (portalCache === null) api('/bx/status').then(s => { portalCache = s.portal || ''; setP(portalCache) }, () => setP('')) }, [])
+  useEffect(() => { if (portalCache === null) api('/bx/status').then(s => { portalCache = s.portal || ''; setP(portalCache); try { localStorage.setItem('artgame.bx.portal', portalCache) } catch { /* без памяти */ } }, () => setP('')) }, [])
   return p || ''
 }
 export const bxLink = (portal, entity, id) => portal ? `${portal}/crm/${entity}/details/${id}/` : ''
 export function Contact({ phone, name, entity, id }) {
   const portal = usePortal()
   const link = bxLink(portal, entity, id)
+  useEffect(() => { try { if (link) localStorage.setItem('artgame.bx.last', JSON.stringify({ entity, id, link, t: Date.now() })) } catch { /* без памяти */ } }, [link])
   return <div className="contact">
     <div><b>{name || '—'}</b><div className="small muted">{phone || 'телефона нет — добавьте в Битриксе'}</div></div>
     <div className="dealbtns">
-      {link && <a className="btn" href={link} target="_blank" rel="noreferrer">Позвонить · WhatsApp в Битриксе</a>}
+      {link && <a className="btn ghost" href={link} target="_blank" rel="noreferrer">Позвонить · WhatsApp в Битриксе</a>}
     </div>
   </div>
 }
@@ -110,7 +112,7 @@ export function Today({ openDeal, openLead, openMonth }) {
   useEffect(() => { if (!t) loadToday(false).catch(e => setErr(e.message)) }, [])
   const reload = () => { setBusy(true); loadToday(true).catch(e => setErr(e.message)).finally(() => setBusy(false)) }
   if (err && !t) return <div className="card"><h2>Сегодня</h2><p className="muted">{err}</p></div>
-  if (!t) return <div className="card muted">Смотрю, что срочно…</div>
+  if (!t) return <Skeleton n={3} />
   const q = t.queue
   const open = x => x.entity === 'lead' ? openLead(x.id) : x.entity === 'deal' ? openDeal(x.id) : x.deal && openDeal(x.deal)
   const total = q.hot.length + q.today.length
@@ -125,18 +127,17 @@ export function Today({ openDeal, openLead, openMonth }) {
       : <button className="ghost mini" onClick={() => open(x)}>Открыть</button>}
   </div>
   return <>
-    <MonthStrip onOpen={openMonth} />
     <div className="card">
       <div className="head"><div><h2>Сегодня</h2><div className="small muted">{dayName()}</div></div>
         <button className="ghost mini" disabled={busy} onClick={reload}>{busy ? '…' : 'Обновить'}</button></div>
       <div className="tiles">{BUCKETS.map(([k, title]) => <button key={k} className={'tile ' + k + (only === k ? ' on' : '')} onClick={() => setOnly(only === k ? '' : k)}><b>{q[k].length}</b><span>{title}</span></button>)}</div>
       {t.warn ? <p className="small" style={{ color: 'var(--hot)' }}>{t.warn}</p> : null}
-      <p className="small muted">{total ? `Сделать сегодня: ${total}.` : 'Срочного нет.'} {only ? 'Показан один раздел, нажмите цифру ещё раз — все.' : 'Нажмите на цифру, чтобы оставить один раздел.'}</p>
+      {!total && !q.later.length && <p className="small muted">Срочного нет. Хороший момент позвонить тем, кто давно молчит.</p>}
     </div>
     {BUCKETS.filter(([k]) => !only || only === k).map(([k, title, hint]) => {
       const items = q[k]
       const kinds = Object.keys(KINDS).filter(e => items.some(x => x.entity === e))
-      if (k === 'later' && !items.length && !only) return null
+      if (!items.length && !only) return null   // пустые разделы не показываем — плитки сверху уже говорят «0»
       return <div key={k} className={'card bucket ' + k}>
         <h3>{title} <span className="muted small">{items.length}</span></h3>
         <p className="small muted">{items.length ? hint : k === 'hot' ? 'Ничего не горит.' : 'Пусто.'}</p>
@@ -146,8 +147,12 @@ export function Today({ openDeal, openLead, openMonth }) {
         </div>)}
       </div>
     })}
+    <MonthStrip onOpen={openMonth} />
   </>
 }
+
+// Серые заготовки вместо «Загружаю…»: экран не прыгает, когда придут данные.
+export const Skeleton = ({ n = 3 }) => <div className="card skel">{Array.from({ length: n }, (_, i) => <div key={i} className="skrow"><i /><div><b /><span /></div></div>)}</div>
 
 // ---------- Лиды ----------
 
@@ -160,13 +165,14 @@ export function Leads({ openLead }) {
   const load = fresh => { setBusy(true); setErr(''); return api(`/bx/leads${fresh ? '?fresh=1' : ''}`).then(setD, e => setErr(e.message)).finally(() => setBusy(false)) }
   useEffect(() => { load(false) }, [])
   if (err) return <div className="card"><h2>Лиды</h2><p className="muted">{err}</p></div>
-  if (!d) return <div className="card muted">Загружаю лиды из Битрикса…</div>
-  const news = d.leads.filter(l => l.new), work = d.leads.filter(l => !l.new)
+  if (!d) return <Skeleton n={4} />
+  const hours = l => Math.max(0, Math.round((Date.now() - new Date(l.created)) / 3600000))
+  // новые — кто дольше ждёт, тот выше; в работе — кто дольше без движения
+  const news = d.leads.filter(l => l.new).sort((a, b) => hours(b) - hours(a)), work = d.leads.filter(l => !l.new).sort((a, b) => ageDays(b.modified) - ageDays(a.modified))
   const cur = seg || (news.length ? 'new' : 'work')
   const s = q.trim().toLowerCase()
   const base = s ? d.leads : cur === 'new' ? news : cur === 'work' ? work : d.leads
   const list = base.filter(l => !s || (l.name + ' ' + l.title + ' ' + l.phone + ' ' + (l.manager || '')).toLowerCase().includes(s))
-  const hours = l => Math.max(0, Math.round((Date.now() - new Date(l.created)) / 3600000))
   return <>
     <div className="card"><div className="head"><h2>{d.all ? 'Лиды' : 'Мои лиды'}</h2>
       <button className="ghost mini" disabled={busy} onClick={() => load(true)}>{busy ? '…' : 'Обновить'}</button></div>
@@ -180,9 +186,9 @@ export function Leads({ openLead }) {
       {list.map(l => <div key={l.id} className="qrow lead" onClick={() => openLead(l.id)}>
         <span className="ic lead">{initial(l.name)}</span>
         <div className="qmain"><div className="qt"><b>{l.name}</b></div>
-          <div className="small muted">{[l.phone, l.city, l.manager, l.new ? `${hours(l)} ч назад` : `${ageDays(l.modified)} дн. без движения`].filter(Boolean).join(' · ')}</div>
+          <div className="small muted">{[l.phone, l.city, l.manager].filter(Boolean).join(' · ')}</div>
           {!!l.missing.length && <div>{l.missing.map(m => <span key={m} className="miss">нет: {m}</span>)}</div>}</div>
-        <span className="muted">›</span>
+        <span className={'badge' + ((l.new ? hours(l) >= (d.new_hours || 4) : ageDays(l.modified) >= 3) ? ' hot' : '')}>{l.new ? (hours(l) ? `ждёт ${hours(l)} ч` : 'только что') : `${ageDays(l.modified)} дн.`}</span>
       </div>)}
     </div>
   </>
@@ -200,7 +206,7 @@ export function LeadCard({ id, back, openDeal }) {
   }, e => setErr(e.message))
   useEffect(() => { load(false); api('/bx/leads/cities').then(setCities, () => {}) }, [id])
   if (err) return <div className="card"><a onClick={back}>← назад</a><p className="muted">{err}</p></div>
-  if (!l) return <div className="card muted">Загружаю лид…</div>
+  if (!l) return <Skeleton n={2} />
   const say = p => p.then(r => { setMsg(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Записано в Битрикс.'); return load(true) }, e => setMsg('Не записалось: ' + e.message))
   const pickCity = v => { const c = cities.find(x => x.name.toLowerCase() === v.trim().toLowerCase()); setF({ ...f, cityName: v, city: c ? c.id : '' }) }
   const save = () => say(api(`/bx/leads/${id}`, { method: 'POST', body: { city: f.city || null, service: f.service || null, area: +f.area || null, sum: +f.sum || null } }))

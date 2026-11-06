@@ -99,7 +99,9 @@
     try { o = JSON.parse(localStorage.getItem('artgame.bx.open') || 'null'); localStorage.removeItem('artgame.bx.open') } catch (e) {}
     if (!o || !o.id || Date.now() - (o.t || 0) > 60000) return
     var tries = 0
-    if (o.view === 'calc') {   // «Цена клиенту» из карточки сделки: площадь и сложность уже подставлены (localStorage ag-rm-calc)
+    if (o.view === 'hash' && o.hash) {   // «Сообщение»: шаг алгоритма со скриптами для этого шага
+      if (location.hash !== o.hash) location.hash = o.hash
+    } else if (o.view === 'calc') {   // «Цена клиенту» из карточки сделки: площадь и сложность уже подставлены (localStorage ag-rm-calc)
       if (location.hash !== '#calc') location.hash = '#calc'
     } else if (o.view === 'kp') {
       if (location.hash !== '#kp') location.hash = '#kp'

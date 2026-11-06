@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 
 import { SalesSpend } from './salesexp.jsx'
-import { CallOutcome, Contact, Feed, bxLink, cleanTitle, dt, money, strip, usePortal } from './crm.jsx'
+import { CallOutcome, Contact, Feed, Skeleton, bxLink, cleanTitle, dt, money, strip, usePortal } from './crm.jsx'
 
 // Карточка сделки (HEAD 05.11): шапка с шагами и ОДНОЙ кнопкой следующего шага, ниже три раздела —
 // «Действия», «Срок и деньги», «История», чтобы не листать одну длинную простыню. Битрикс — источник правды.
@@ -36,7 +36,7 @@ export function DealCard({ id, back, open }) {
     load(true)
   }, e => setCalcMsg('Не записалось: ' + e.message))
   if (err) return <div className="card"><a onClick={back}>← назад</a><p className="muted">{err}</p></div>
-  if (!d) return <div className="card muted">Загружаю сделку № {id}…</div>
+  if (!d) return <Skeleton n={3} />
   const c = d.client || {}
   const st = steps(d)
   const next = st.findIndex(x => !x[1])
@@ -44,6 +44,9 @@ export function DealCard({ id, back, open }) {
   const startCalc = () => { setView('money'); setCalc({ area: d.area || '', level: d.level || 'medium', service: 'mural', height: false, outdoor: false }) }
   // «Цена клиенту» — калькулятор рабочего места с площадью и сложностью сделки; «Срок и состав» — нормы, пишет в Битрикс.
   const price = () => open(d.id, 'calc', { area: d.area, level: LEVELS[d.level], service: /печат/i.test(d.service || '') ? 'print' : 'mural' })
+  // Готовые сообщения по шагу: алгоритм рабочего места, шаг с его скриптами (01 первый контакт, 05 цена, 06 КП, 09 договор)
+  const ALGO = { 'Клиент': '01', 'Расчёт': '05', 'КП': '06', 'Договор': '09', 'Оплата': '09' }
+  const say = () => open(d.id, 'hash', null, '#a' + (ALGO[next >= 0 ? st[next][0] : 'Договор'] || '01'))
   const NEXT = { 'Клиент': { label: 'Позвонить', href: bxLink(portal, 'deal', d.id) }, 'Расчёт': { label: 'Цена клиенту', run: price },
     'КП': { label: 'Сделать КП', run: () => open(d.id, 'kp') }, 'Договор': { label: 'Договор и счёт', run: () => open(d.id, 'docs') },
     'Оплата': { label: 'Оплаты', run: () => setView('money') } }
@@ -71,6 +74,7 @@ export function DealCard({ id, back, open }) {
     {view === 'act' && <div className="card">
       <CallOutcome path={`/bx/deals/${id}`} done={() => load(true)} />
       <div className="dealbtns wrapbtns">
+        <button className="ghost" onClick={say}>Сообщение</button>
         <button className="ghost" onClick={price}>Цена</button>
         <button className="ghost" onClick={() => open(d.id, 'kp')}>КП</button>
         <button className="ghost" onClick={() => open(d.id, 'docs')}>Документы</button>
@@ -178,9 +182,11 @@ export function Month({ openDeal }) {
         {m.all ? <div><span className="muted small">С НДС{m.vat ? ` ${m.vat}%` : ''}</span><b>{money(co.gross)}</b></div>
           : <div><span className="muted small">Мой вклад</span><b>{money(m.mine.net)}{m.mine.share ? <span className="muted small"> · {m.mine.share}%</span> : null}</b></div>}
       </div>
-      {!!m.salary && <p className="small muted">Заработок = оклад {money(m.salary)} + {co.pct || 0}% от выручки компании{co.plan_bonus ? ` + бонус за план ${money(co.plan_bonus)}` : ''}. Ступень считается по всей выручке компании за месяц без НДС. Выплаты отмечает HEAD.</p>}
-      <p className="small muted">{m.source === 'sheet' ? 'Выручка — по листу «Проекты» финансовой таблицы (дата завершения работ, с НДС).' : 'Выручка — по дате закрытия сделок в Битриксе (пока в листе «Проекты» нет строк за этот месяц).'}</p>
       {m.warn && <p className="small" style={{ color: 'var(--hot)' }}>{m.warn}</p>}
+      <details className="how"><summary className="small muted">Как считается</summary>
+        {!!m.salary && <p className="small muted">Заработок = оклад {money(m.salary)} + {co.pct || 0}% от выручки компании{co.plan_bonus ? ` + бонус за план ${money(co.plan_bonus)}` : ''}. Ступень считается по всей выручке компании за месяц без НДС. Выплаты отмечает HEAD.</p>}
+        <p className="small muted">{m.source === 'sheet' ? 'Выручка — по листу «Проекты» финансовой таблицы (дата завершения работ, с НДС).' : 'Выручка — по дате закрытия сделок в Битриксе (пока в листе «Проекты» нет строк за этот месяц).'}</p>
+      </details>
     </div>
     {cur && <SalesSpend won={co.count} />}
     {m.all && m.managers.map(x => <div key={x.id} className="card"><h3>{x.name} <span className="muted small">{x.count}</span></h3>
