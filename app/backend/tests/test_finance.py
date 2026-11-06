@@ -14,7 +14,7 @@ VALS = {"pay.artist.shift": 15000, "pay.artist.hour": 1500, "pay.chief.shift": 2
         "pay.mop.step2.from": 7000000, "pay.mop.step2.pct": 4, "pay.mop.step3.from": 15000000, "pay.mop.step3.pct": 5,
         "pay.mop.bonus_plan": 100000, "pay.accountant.month": 120000, "fin.stock.limit_month": 50000,
         "fin.fixed.rent_studio_ast": 300000, "fin.tax.ipn": 10,
-        "pay.carpenter.month": 200000, "fin.fixed.bitrix_year": 120000}
+        "pay.carpenter.month": 200000, "fin.fixed.bitrix_year": 120000, "fin.var.ads_target_day": 1000}
 
 
 def uid():
@@ -139,6 +139,7 @@ def test_finance_flow(client, monkeypatch):
     assert s["profit"] == 10_000_000 - sum(c.values()) and s["ipn"] == round(s["profit"] * 0.10)
     studio = next(b for b in s["budget"] if b["code"] == "rent_studio")
     assert next(b for b in s["budget"] if b["code"] == "bitrix")["plan"] == 10000   # годовая сумма / 12
+    assert next(b for b in s["budget"] if b["code"] == "ads_target")["plan"] == 30000   # 1000 ₸ в день × 30 дней ноября
     assert studio["plan"] == 300000 and studio["fact"] == 300000
     assert s["cash"]["in"] == 1_160_000 and s["cash"]["out"] == 300_000 + 43000
     # отмена выплаты возвращает чек в «к выплате»

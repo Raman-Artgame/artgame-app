@@ -512,7 +512,11 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
     for a in plans:
         b = budget.setdefault(a["code"], {"title": a["title"], "kind": a["kind"], "fact": 0.0, "plan": None})
         plan = v.get(a["plan_key"])
-        b["plan"] = round(plan / 12) if plan and a["plan_key"].endswith("_year") else plan
+        if plan and a["plan_key"].endswith("_year"):
+            plan = round(plan / 12)
+        elif plan and a["plan_key"].endswith("_day"):      # ₸ в день × дней в месяце
+            plan = round(plan * (end - start).days)
+        b["plan"] = plan
     if net is not None and v.get("fin.var.ads_pct"):
         budget.setdefault("ads", {"title": "Реклама", "kind": "variable", "fact": 0.0, "plan": None})["plan"] = round(net * v["fin.var.ads_pct"] / 100)
     fixed = sum(b["fact"] for b in budget.values() if b["kind"] == "fixed")
