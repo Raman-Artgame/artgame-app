@@ -13,7 +13,8 @@ VALS = {"pay.artist.shift": 15000, "pay.artist.hour": 1500, "pay.chief.shift": 2
         "shift.hours": 10, "pay.mop.salary": 200000, "vat": 16, "pay.mop.step1.from": 2000000, "pay.mop.step1.pct": 3,
         "pay.mop.step2.from": 7000000, "pay.mop.step2.pct": 4, "pay.mop.step3.from": 15000000, "pay.mop.step3.pct": 5,
         "pay.mop.bonus_plan": 100000, "pay.accountant.month": 120000, "fin.stock.limit_month": 50000,
-        "fin.fixed.rent_studio": 300000, "fin.tax.ipn": 10}
+        "fin.fixed.rent_studio_ast": 300000, "fin.tax.ipn": 10,
+        "pay.carpenter.month": 200000, "fin.fixed.bitrix_year": 120000}
 
 
 def uid():
@@ -93,16 +94,21 @@ def test_finance_flow(client, monkeypatch):
     mine = client.get("/api/stock/expenses", headers=hdr(3000)).json()
     assert mine["limits"]["stock"]["spent"] == 60000 and mine["limits"]["stock"]["left"] == 0 and not mine["all"]
     # получатель без приложения: бухгалтер с окладом из «Значений»
-    acc = client.post("/api/fin/payees", json={"name": "Бухгалтер", "grp": "office", "scheme": "salary",
-                                               "amount_key": "pay.accountant.month"}, headers=hdr(1000)).json()
+    pl = {x["name"]: x for x in client.get("/api/fin/payees", headers=hdr(1000)).json()}
+    acc = pl["Бухгалтер"]                                                    # заведён миграцией 013, оклад из «Значений»
+    assert pl["SMM"]["amount_key"] == "pay.smm.month" and pl["P8000"]["scheme"] == "salary"
+    # оклад сверх смен (как у Анны): засчитывается в гарантированный минимум
+    p3 = pl["P3000"]
+    client.post(f"/api/fin/payees/{p3['id']}", json={"name": "P3000", "grp": "core", "scheme": "shifts", "amount": 50000}, headers=hdr(1000))
     assert client.post("/api/fin/payees", json={"name": "Иван", "grp": "nope", "scheme": "salary"}, headers=hdr(1000)).status_code == 400
     # начисление
     r = client.post(f"/api/fin/payroll/{YM}/compute", headers=hdr(1000)).json()
     by = {x["name"]: x for x in r["rows"]}
     assert by["P2000"]["accrued"] == 15000 * 2 + 4 * 1500 + 7000           # 2 смены + 4 ч + возмещение чека
-    assert by["P3000"]["accrued"] == 150000 + 40000                         # 20 000 + доплата до минимума 130 000 + склад своими
+    assert by["P3000"]["accrued"] == 150000 + 40000                         # 20 000 + оклад 50 000 + доплата 80 000 + склад своими
+    assert {a["kind"]: float(a["amount"]) for a in by["P3000"]["lines"]}["topup"] == 80000
     assert by["P6000"]["accrued"] == 200000 + 400000                        # оклад + 4 % от 10 млн
-    assert by["P8000"]["accrued"] == 25000 and any("pay.carpenter.shift" in w for w in r["warn"]) is False
+    assert by["P8000"]["accrued"] == 200000 + 25000 and any("pay.carpenter.shift" in w for w in r["warn"]) is False
     assert by["Бухгалтер"]["accrued"] == 120000 and by["Бухгалтер"]["group"] == "Офис"
     # повторный пересчёт не удваивает; ручная премия остаётся
     client.post(f"/api/fin/payroll/{YM}/accrual", json={"payee_id": acc["id"], "amount": 10000, "detail": "премия"}, headers=hdr(1000))
@@ -132,6 +138,7 @@ def test_finance_flow(client, monkeypatch):
     assert c["payroll"] == r["accrued"] - 7000 - 40000 - 25000                # возмещения не считаются второй раз
     assert s["profit"] == 10_000_000 - sum(c.values()) and s["ipn"] == round(s["profit"] * 0.10)
     studio = next(b for b in s["budget"] if b["code"] == "rent_studio")
+    assert next(b for b in s["budget"] if b["code"] == "bitrix")["plan"] == 10000   # годовая сумма / 12
     assert studio["plan"] == 300000 and studio["fact"] == 300000
     assert s["cash"]["in"] == 1_160_000 and s["cash"]["out"] == 300_000 + 43000
     # отмена выплаты возвращает чек в «к выплате»

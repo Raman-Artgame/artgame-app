@@ -170,7 +170,7 @@ function Payees({ d }) {
       <input value={v.name} onChange={e => set({ ...v, name: e.target.value })} placeholder="Имя или компания" disabled={!!v.person_id} />
       <select value={v.grp} onChange={e => set({ ...v, grp: e.target.value })}>{Object.entries(d.groups).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
       <select value={v.scheme} onChange={e => set({ ...v, scheme: e.target.value })}>{Object.entries(SCHEME).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
-      {v.scheme === 'salary' && <><input inputMode="numeric" value={v.amount ?? ''} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder="Оклад в месяц, ₸" />
+      {['salary', 'shifts'].includes(v.scheme) && <><input inputMode="numeric" value={v.amount ?? ''} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder={v.scheme === 'shifts' ? 'Оклад сверх смен, ₸ (если есть)' : 'Оклад в месяц, ₸'} />
         <input value={v.amount_key || ''} onChange={e => set({ ...v, amount_key: e.target.value })} placeholder="или ключ в «Значениях» (pay.accountant.month)" /></>}
       <div className="segf"><button className={v.pay_rule === 'month' ? 'on' : ''} onClick={() => set({ ...v, pay_rule: 'month' })}>Аванс + расчёт</button>
         <button className={v.pay_rule === 'weekly' ? 'on' : ''} onClick={() => set({ ...v, pay_rule: 'weekly' })}>Еженедельно</button></div>

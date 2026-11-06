@@ -30,6 +30,8 @@ RATE = {"support": ("pay.support.shift", "pay.support.hour"), "artist": ("pay.ar
         "print_operator": ("pay.print.operator", None), "print_master": ("pay.print.master", None),
         "carpenter": ("pay.carpenter.shift", "pay.carpenter.hour"),
         "designer_asst": ("pay.designer_asst.shift", None), "lead_designer": ("pay.lead_designer.shift", None)}
+# Роли на окладе (HEAD 06.11): плотник, помощник дизайнера — сумма из «Значений».
+SALARY_ROLE = {"carpenter": "pay.carpenter.month", "designer_asst": "pay.design_assistant.month"}
 MINIMUM = {"lead_artist": "pay.chief.min_month", "artist_pro": "pay.pro.min_month"}
 GROUP = {"support": "support", "artist": "core", "artist_pro": "core", "lead_artist": "core", "print_operator": "print",
          "print_master": "print", "mop": "sales", "mop_vip": "sales", "carpenter": "workshop",
@@ -210,9 +212,10 @@ def sync_payees(conn) -> int:
     for pe in conn.execute("""SELECT p.id, p.full_name, p.role_code FROM people p LEFT JOIN fin_payees f ON f.person_id=p.id
                               WHERE f.id IS NULL AND p.status='active' AND p.role_code IS NOT NULL AND p.role_code <> 'head'""").fetchall():
         mop = pe["role_code"] in ("mop", "mop_vip")
-        conn.execute("""INSERT INTO fin_payees (person_id, name, grp, scheme, pay_rule) VALUES (%s,%s,%s,%s,%s)""",
-                     (pe["id"], pe["full_name"], GROUP.get(pe["role_code"], "core"), "mop" if mop else "shifts",
-                      "weekly" if pe["role_code"] == "support" else "month"))
+        key = SALARY_ROLE.get(pe["role_code"])
+        conn.execute("""INSERT INTO fin_payees (person_id, name, grp, scheme, amount_key, pay_rule) VALUES (%s,%s,%s,%s,%s,%s)""",
+                     (pe["id"], pe["full_name"], GROUP.get(pe["role_code"], "core"), "mop" if mop else "salary" if key else "shifts",
+                      key, "weekly" if pe["role_code"] == "support" else "month"))
         added += 1
     return added
 
@@ -325,9 +328,11 @@ def compute(conn, ym: str, by: dict) -> dict:
                 warn.append(f"{f['name']}: {missing}")
             acc(f["id"], "piece", piece, f"{len(shifts)} смен", ",".join(str(s["id"]) for s in shifts))
             acc(f["id"], "bonus", bonus, "бонус печати сверх плана")
+            fixed = _f(f["amount"]) or (v.get(f["amount_key"]) or 0 if f["amount_key"] else 0)   # оклад сверх смен, если задан
+            acc(f["id"], "salary", fixed, "оклад")
             minimum = v.get(MINIMUM.get(role, ""), 0)
-            if minimum and piece + bonus < minimum:
-                acc(f["id"], "topup", minimum - piece - bonus, f"доплата до минимума {minimum:,.0f} ₸".replace(",", " "))
+            if minimum and piece + bonus + fixed < minimum:
+                acc(f["id"], "topup", minimum - piece - bonus - fixed, f"доплата до минимума {minimum:,.0f} ₸".replace(",", " "))
         elif f["scheme"] == "salary":
             amount = _f(f["amount"]) or (v.get(f["amount_key"]) if f["amount_key"] else 0)
             if amount:
@@ -506,7 +511,8 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
             budget[r["article_code"]]["fact"] += _f(r["s"]) * (1 if r["direction"] == "out" else -1)
     for a in plans:
         b = budget.setdefault(a["code"], {"title": a["title"], "kind": a["kind"], "fact": 0.0, "plan": None})
-        b["plan"] = v.get(a["plan_key"])
+        plan = v.get(a["plan_key"])
+        b["plan"] = round(plan / 12) if plan and a["plan_key"].endswith("_year") else plan
     if net is not None and v.get("fin.var.ads_pct"):
         budget.setdefault("ads", {"title": "Реклама", "kind": "variable", "fact": 0.0, "plan": None})["plan"] = round(net * v["fin.var.ads_pct"] / 100)
     fixed = sum(b["fact"] for b in budget.values() if b["kind"] == "fixed")
