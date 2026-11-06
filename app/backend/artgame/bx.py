@@ -432,7 +432,7 @@ def today(p: dict, fresh: bool = False) -> dict:
     # клиент написал в WhatsApp и ждёт ответа дольше нормы — тоже наверх (chats.py; резюме чатов делает Битрикс)
     from datetime import datetime, timezone
     from . import chats
-    chat_min = float(vals.get("mop.today.chat_minutes") or 30)
+    chat_min = float(vals.get("mop.today.chat_minutes") or vals.get("mop.reply_min") or 30)
     waits, out["warn"] = chats.waiting(fresh)
     for w in sorted(waits, key=lambda x: x["since"]):
         src = (deals_by_id if w["entity"] == "deal" else leads_by_id).get(w["id"])
