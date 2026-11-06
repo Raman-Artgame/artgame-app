@@ -227,6 +227,8 @@ def review_list(p: dict = Depends(active)):
         for e in out["expenses"]:   # трата отдела продаж: вместо «Офис / без объекта» — статья и сделка
             c = cats.get(e["category"]) or {}
             e["category_title"] = c.get("title", e["category"])
+            if c.get("article") in ("stock", "canvas"):
+                e["object_title"] = ("Склад" if c["article"] == "stock" else "Мастерская холстов") + " · " + e["category_title"] + (" · сверх лимита" if e.get("over_limit") else "")
             if c.get("article") == "sales":
                 e["object_title"] = "Отдел продаж · " + e["category_title"] + (f" · сделка № {e['deal_id']}" if e.get("deal_id") else "") + (" · сверх лимита" if e.get("over_limit") else "")
         out["expenses"] = [with_receipt(e) for e in out["expenses"]]

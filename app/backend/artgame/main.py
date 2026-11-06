@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from . import constants as consts
-from . import bx, bxw, db, files, leads, places, sales_exp, weblogin, work
+from . import bx, bxw, db, files, fin_export, finance, leads, places, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
 
@@ -27,6 +27,9 @@ app.include_router(bxw.router)
 app.include_router(leads.router)
 app.include_router(sales_exp.router)
 app.include_router(weblogin.router)
+app.include_router(finance.router)
+app.include_router(fin_export.router)
+app.include_router(stock.router)
 
 
 @app.exception_handler(Exception)

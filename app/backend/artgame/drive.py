@@ -137,3 +137,13 @@ def save_sales_receipt(name: str, data_url: str) -> str:
     root = d.child(settings.drive_inbox or PROJECTS_ROOT_ID, "Отдел продаж — чеки")
     month = d.child(d.child(root, str(now.year)), f"{now.month:02d} {MONTHS[now.month - 1]}")
     return d.upload(month, name + (".png" if mime == "image/png" else ".jpg"), data, mime)
+
+
+def save_office_receipt(folder: str, name: str, data_url: str) -> str:
+    """Чеки не по объекту (финансы, склад, мастерская холстов): «<папка> / год / ММ МЕСЯЦ» в папке офиса."""
+    data, mime = decode_data_url(data_url)
+    d = Drive()
+    now = datetime.now()
+    root = d.child(settings.drive_inbox or PROJECTS_ROOT_ID, folder)
+    month = d.child(d.child(root, str(now.year)), f"{now.month:02d} {MONTHS[now.month - 1]}")
+    return d.upload(month, name + (".png" if mime == "image/png" else ".jpg"), data, mime)

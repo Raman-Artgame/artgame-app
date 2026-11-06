@@ -10,11 +10,12 @@ import { DEAL_ROLES, Deals } from './deals.jsx'
 import { Journal } from './journal.jsx'
 import { Month } from './dealcard.jsx'
 import { LeadCard, Leads, Today, useToday } from './crm.jsx'
+import { Finance, MyPay, StockSpend } from './finance.jsx'
 import './tokens.css'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
   print_operator: 'Оператор настенного принтера', print_master: 'Мастер настенной печати', mop: 'МОП', mop_vip: 'VIP МОП',
-  lead_designer: 'Главный дизайнер', designer_asst: 'Помощник дизайнера', head: 'HEAD' }
+  lead_designer: 'Главный дизайнер', designer_asst: 'Помощник дизайнера', carpenter: 'Мастер-плотник', head: 'HEAD' }
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
 
 function Register({ onDone }) {
@@ -57,10 +58,12 @@ function App() {
 }
 
 const CHECKERS = new Set(['head', 'lead_artist', 'print_master', 'lead_designer'])
+// Закупки из бюджета (HEAD 06.11): склад расходников и мастерская холстов.
+const STOCK = new Set(['lead_artist', 'artist_pro', 'print_master', 'carpenter', 'head'])
 
 function Main({ me, web, logout }) {
   const places = usePlaces()
-  const [tab, setTab] = useState(DEAL_ROLES.has(me.role_code) ? 'today' : 'shift')
+  const [tab, setTab] = useState(DEAL_ROLES.has(me.role_code) ? 'today' : me.role_code === 'carpenter' ? 'stock' : 'shift')
   const [dealId, setDealId] = useState(null)
   const [leadId, setLeadId] = useState(null)
   const openDeal = id => { setDealId(id); setTab('deals') }
@@ -74,11 +77,13 @@ function Main({ me, web, logout }) {
   const t = useToday(sales)
   const counts = t ? { today: t.queue.hot.length + t.queue.today.length, leads: [...t.queue.hot, ...t.queue.today].filter(x => x.entity === 'lead').length } : {}
   const mop = ['mop', 'mop_vip'].includes(me.role_code)
+  const carp = me.role_code === 'carpenter'
   const tabs = [...(sales ? [['today', 'Сегодня'], ['leads', 'Лиды'], ['deals', 'Сделки'], ['month', 'Месяц']] : []),
     ...(places.length ? [['place', 'Место']] : []),
-    ...(mop ? [] : [['shift', 'Смена'], ['expense', 'Расход'], ['objects', 'Объекты'], ['mine', 'Мои']]),
+    ...(mop || carp ? [] : [['shift', 'Смена'], ['expense', 'Расход'], ['objects', 'Объекты']]),
+    ...(STOCK.has(me.role_code) && me.role_code !== 'head' ? [['stock', 'Склад']] : []), ['mine', 'Мои'],
     ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []),
-    ...(me.role_code === 'head' ? [['journal', 'Журнал'], ['people', 'Команда']] : [])]
+    ...(me.role_code === 'head' ? [['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда']] : [])]
   if (tab === 'place') return <>
     <Places list={places} />
     <Nav tabs={tabs} tab={tab} setTab={go} counts={counts} />
@@ -90,8 +95,9 @@ function Main({ me, web, logout }) {
       {toast && <div className="toast">{toast}</div>}
       {tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} openMonth={openMonth} openPlace={() => { setDealId(null); setTab('place') }} /> :
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
-        tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'objects' ? <Objects me={me} /> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <Mine /> : <Review />}
+        tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'objects' ? <Objects me={me} /> : tab === 'fin' ? <Finance /> : tab === 'stock' ? <StockSpend /> :
+        tab === 'mine' && (mop || carp || !me.zones.length) ? <MyPay /> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><Mine /></> : <Review />}
     </div>
     <Nav tabs={tabs} tab={tab} setTab={go} counts={counts} />
   </>
@@ -102,6 +108,7 @@ const ICON = {
   deals: 'M3 4h18l-7 8v6l-4 2v-8z', month: 'M4 20v-8m6 8V5m6 15v-5M3 20h18', place: 'M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z',
   shift: 'M4 8h16v11H4zM9 8V5h6v3', expense: 'M3 6h18v12H3zm0 4h18', objects: 'M3 11l9-7 9 7v10H3zm6 10v-6h6v6',
   mine: 'M4 6h16M4 12h16M4 18h10', review: 'M20 6 9 17l-5-5', journal: 'M5 3h11a3 3 0 0 1 3 3v15H8a3 3 0 0 1-3-3zm4 5h6',
+  fin: 'M12 3v18M16 7H10a3 3 0 0 0 0 6h4a3 3 0 0 1 0 6H7', stock: 'M3 7l9-4 9 4v10l-9 4-9-4zm0 0 9 4 9-4M12 11v10',
   people: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm7 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM2 20a7 7 0 0 1 14 0zm11 0a6 6 0 0 1 9 0',
   more: 'M5 12h.01M12 12h.01M19 12h.01' }
 const Icon = ({ k }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[k] || ICON.more} /></svg>
