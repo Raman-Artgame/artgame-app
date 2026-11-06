@@ -38,14 +38,13 @@ PLACES = {
     "art":   {"title": "Художники", "roles": ART | {"head"}, "aud": {"все", "производство"}},
     "print": {"title": "Печать", "roles": PRINT | {"lead_artist", "head"}, "aud": {"все", "производство"}},
     "mop":   {"title": "МОП", "roles": MOP | {"head"}, "aud": {"все", "моп"}, "editors": {"mop_vip", "head"}},
-    "calc":  {"title": "Калькулятор", "roles": MOP | {"head"}, "aud": {"все", "моп"}},
     "dz":    {"title": "Дизайн", "roles": DZ | {"head"}, "aud": {"все", "дизайн"}, "shared": {"projects"}},
 }
-ORDER = ["art", "print", "mop", "calc", "dz"]
-BX_PLACES = {"mop", "calc"}  # на этих страницах работает подтяжка сделок Битрикса (bx.py, place_bx.js)
+ORDER = ["art", "print", "mop", "dz"]
+BX_PLACES = {"mop"}  # на этих страницах работает подтяжка сделок Битрикса (bx.py, place_bx.js)
 # Ссылки между артефактами → места приложения (переписывает place_shim.js).
 ARTIFACTS = {"AUsM36vXPoSqk6J4LQUZqj": "art", "QvriqYAuWNEvypeNKAVAcE": "print", "8uecjatZFajVxKQwneyYQp": "mop",
-             "BGKMEr5zCyQxr2pgWXs8oZ": "calc", "73RaYPuD5WLq43NsvkJFVm": "dz"}
+             "BGKMEr5zCyQxr2pgWXs8oZ": "mop", "73RaYPuD5WLq43NsvkJFVm": "dz"}
 
 TTL = 12 * 3600
 ROOT = Path(__file__).resolve().parent.parent / "places"

@@ -19,8 +19,17 @@ export function Deals({ initial, openPlace }) {
   const [st, setSt] = useState(null)       // стадия: id | 'all' | null — сама выберет
   const load = fresh => { setBusy(true); setErr(''); return api(`/bx/deals${fresh ? '?fresh=1' : ''}`).then(setData, e => setErr(e.message)).finally(() => setBusy(false)) }
   useEffect(() => { load(false) }, [])
-  const open = (id, view) => {
-    try { localStorage.setItem('artgame.bx.open', JSON.stringify({ id, view, t: Date.now() })); localStorage.setItem('artgame.place', 'mop') } catch { /* без памяти */ }
+  const open = (id, view, calc) => {
+    try {
+      if (calc) {   // калькулятор рабочего места читает своё состояние из ag-rm-calc: подставляем площадь и сложность сделки
+        const S = JSON.parse(localStorage.getItem('ag-rm-calc') || '{}')
+        S.tab = calc.service === 'print' ? 'print' : 'paint'
+        if (calc.service === 'print') S.print = { ...(S.print || { design: 'S' }), m2: calc.area || S.print?.m2 || 25 }
+        else S.paint = { ...(S.paint || { own: 30000, design: 'M' }), m2: calc.area || S.paint?.m2 || 60, level: calc.level || S.paint?.level || 'Средний' }
+        localStorage.setItem('ag-rm-calc', JSON.stringify(S))
+      }
+      localStorage.setItem('artgame.bx.open', JSON.stringify({ id, view, t: Date.now() })); localStorage.setItem('artgame.place', 'mop')
+    } catch { /* без памяти */ }
     openPlace()
   }
   if (card) return <DealCard id={card} back={() => { setCard(null); load(true) }} open={open} />

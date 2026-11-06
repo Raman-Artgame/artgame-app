@@ -1,7 +1,7 @@
 /* ARTGAME: сделки Битрикса на странице МОП (КП и «Документы»). Только чтение, только свои сделки (HEAD — все).
    Вкладка КП: выбор из «Мои сделки» → номер в поле и штатная кнопка «Подтянуть» страницы (она ходит через mcp из place_shim.js).
    Вкладка «Документы»: выбор сделки → клиент, контакты, адрес, площадь, сумма (и реквизиты, если шлюз их отдаёт) — в поля мастера.
-   Из списка сделок приложения: localStorage 'artgame.bx.open' = {id, view: 'kp'|'docs'} → страница сама открывает и заполняет. */
+   Из списка сделок приложения: localStorage 'artgame.bx.open' = {id, view: 'kp'|'docs'|'calc'} → страница сама открывает и заполняет. */
 (function () {
   var BX = window.ARTGAME_BX
   if (!BX) return
@@ -99,7 +99,9 @@
     try { o = JSON.parse(localStorage.getItem('artgame.bx.open') || 'null'); localStorage.removeItem('artgame.bx.open') } catch (e) {}
     if (!o || !o.id || Date.now() - (o.t || 0) > 60000) return
     var tries = 0
-    if (o.view === 'kp') {
+    if (o.view === 'calc') {   // «Цена клиенту» из карточки сделки: площадь и сложность уже подставлены (localStorage ag-rm-calc)
+      if (location.hash !== '#calc') location.hash = '#calc'
+    } else if (o.view === 'kp') {
       if (location.hash !== '#kp') location.hash = '#kp'
       var t = setInterval(function () { if (kpPick(o.id) || ++tries > 40) clearInterval(t) }, 250)
     } else {

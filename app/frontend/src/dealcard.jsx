@@ -42,7 +42,9 @@ export function DealCard({ id, back, open }) {
   const next = st.findIndex(x => !x[1])
   const stSel = stages.find(s => s.id === edit?.stage)
   const startCalc = () => { setView('money'); setCalc({ area: d.area || '', level: d.level || 'medium', service: 'mural', height: false, outdoor: false }) }
-  const NEXT = { 'Клиент': { label: 'Позвонить', href: bxLink(portal, 'deal', d.id) }, 'Расчёт': { label: 'Сделать расчёт', run: startCalc },
+  // «Цена клиенту» — калькулятор рабочего места с площадью и сложностью сделки; «Срок и состав» — нормы, пишет в Битрикс.
+  const price = () => open(d.id, 'calc', { area: d.area, level: LEVELS[d.level], service: /печат/i.test(d.service || '') ? 'print' : 'mural' })
+  const NEXT = { 'Клиент': { label: 'Позвонить', href: bxLink(portal, 'deal', d.id) }, 'Расчёт': { label: 'Цена клиенту', run: price },
     'КП': { label: 'Сделать КП', run: () => open(d.id, 'kp') }, 'Договор': { label: 'Договор и счёт', run: () => open(d.id, 'docs') },
     'Оплата': { label: 'Оплаты', run: () => setView('money') } }
   const na = next >= 0 ? NEXT[st[next][0]] : null
@@ -69,6 +71,7 @@ export function DealCard({ id, back, open }) {
     {view === 'act' && <div className="card">
       <CallOutcome path={`/bx/deals/${id}`} done={() => load(true)} />
       <div className="dealbtns wrapbtns">
+        <button className="ghost" onClick={price}>Цена</button>
         <button className="ghost" onClick={() => open(d.id, 'kp')}>КП</button>
         <button className="ghost" onClick={() => open(d.id, 'docs')}>Документы</button>
         <button className="ghost" onClick={() => setEdit(edit?.kind === 'stage' ? null : { kind: 'stage', stage: d.stage, reason: '', until: '' })}>Стадия</button>
@@ -88,7 +91,7 @@ export function DealCard({ id, back, open }) {
       {msg && <p className="small muted">{msg}</p>}
     </div>}
     {view === 'money' && <>
-    <div className="card"><h3>Срок и ресурсы <span className="muted small">считает приложение</span></h3>
+    <div className="card"><h3>Срок и состав <span className="muted small">по нормам, не цена</span></h3>
       {d.norm.shifts ? <div className="kv">
         <div><span className="muted small">Смен по норме</span><b>{d.norm.shifts}</b></div>
         <div><span className="muted small">Художников</span><b>{d.norm.crew}</b></div>
@@ -96,7 +99,7 @@ export function DealCard({ id, back, open }) {
         <div><span className="muted small">Сложность</span><b>{LEVELS[d.level] || '—'}</b></div>
       </div> : <p className="small muted">Расчёта ещё не было: смены, люди и срок появятся после расчёта, руками не вводятся.</p>}
       {calcMsg && <p className="small muted">{calcMsg}</p>}
-      {!calc ? <button className="ghost" onClick={startCalc}>{d.norm.shifts ? 'Пересчитать' : 'Сделать расчёт'}</button>
+      {!calc ? <div className="dealbtns"><button className="ghost" onClick={startCalc}>{d.norm.shifts ? 'Пересчитать срок' : 'Срок и состав'}</button><button className="ghost" onClick={price}>Цена клиенту</button></div>
       : <div className="dealedit">
         <div className="seg"><button className={calc.service === 'mural' ? '' : 'ghost'} onClick={() => setCalc({ ...calc, service: 'mural' })}>Роспись</button><button className={calc.service === 'print' ? '' : 'ghost'} onClick={() => setCalc({ ...calc, service: 'print' })}>Печать</button></div>
         <input type="number" min="1" value={calc.area} onChange={e => setCalc({ ...calc, area: e.target.value })} placeholder="Площадь, м²" />
