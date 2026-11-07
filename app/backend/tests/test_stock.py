@@ -71,6 +71,17 @@ def test_stock_purchase(client, monkeypatch):
     it = {i["code"]: i for i in client.get("/api/stock/catalog", headers=hdr(1000)).json()["items"]}
     assert it["ХУД-001"]["fact_price"] == 350 and it["ХОЗ-003"]["fact_price"] == 400
 
+    # ошиблись разделом (Анна 06.11: такси в «Склад») — своя покупка отменяется, чужая — нет; из списка и «факта» уходит
+    assert client.post(f"/api/stock/expenses/{a['id']}/cancel", headers=hdr(6000)).status_code == 409
+    assert client.post(f"/api/stock/expenses/{a['id']}/cancel", headers=hdr(2000)).json() == {"ok": True}
+    assert client.post(f"/api/stock/expenses/{a['id']}/cancel", headers=hdr(2000)).status_code == 409   # второй раз — нечего
+    assert a["id"] not in {x["id"] for x in client.get("/api/stock/expenses", headers=hdr(2000)).json()["items"]}
+    assert client.get("/api/stock/expenses", headers=hdr(2000)).json()["me"] > 0
+    it = {i["code"]: i for i in client.get("/api/stock/catalog", headers=hdr(1000)).json()["items"]}
+    assert it["ХУД-001"]["fact_price"] is None
+    with db.pool.connection() as conn:
+        assert conn.execute("SELECT status, payout_status FROM expenses WHERE id=%s", (a["id"],)).fetchone() == {"status": "cancelled", "payout_status": "none"}
+
     # каталог правит только HEAD
     e = {"dept": "art", "name": "Валик средний", "unit": "шт", "ref_price": 400}
     assert client.post("/api/stock/items/ХУД-001", json=e, headers=hdr(2000)).status_code == 403
@@ -81,4 +92,4 @@ def test_stock_purchase(client, monkeypatch):
     # в финансах — бюджетный расход «на склад» / «мастерская»
     from datetime import date
     s = client.get("/api/fin/summary", params={"ym": f"{date.today():%Y-%m}"}, headers=hdr(1000)).json()
-    assert s["costs"]["stock"] == 3500 + 9800 + 170 and s["costs"]["canvas"] == 3000
+    assert s["costs"]["stock"] == 9800 + 170 and s["costs"]["canvas"] == 3000

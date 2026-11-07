@@ -211,8 +211,7 @@ def api_extract(deal_id: int, body: ExtractIn, p: dict = Depends(active)):
     text = (body.text or "").strip()
     if len(text) < 10:
         raise HTTPException(400, "вставьте переписку или анкету клиента")
-    from .leads import cities as city_list
-    cl = city_list()
+    cl = bx.deal_cities()   # ID города сделки, не лида: уходит в поле сделки
     sv = [{"id": k, "name": v} for k, v in bx.enum_map(bx.SERVICE).items()]
     source, note = "rules", ""
     if settings.anthropic_key:

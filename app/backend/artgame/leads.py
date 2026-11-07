@@ -32,6 +32,11 @@ def statuses() -> dict:
     return out
 
 
+def vacancy(st: dict) -> dict:
+    """Статусы «Вакансии…» (соискатели, не клиенты): хранить контакт / убрать. Определяем по названию — коды в Битриксе свои."""
+    return {k: v for k, v in st.items() if v["name"].lower().startswith("ваканс")}
+
+
 def fields() -> dict:
     j = bx.read("crm.lead.fields", {}, ttl=bx.TTL_DICT)
     return j.get("result", j) if isinstance(j, dict) else {}
@@ -56,20 +61,20 @@ def _name(l: dict) -> str:
 
 
 def missing(l: dict, have: dict, extra: "ConvertIn | None" = None) -> list[str]:
-    """Что нужно заполнить до «В сделку» (HEAD 06.11: «пожестче»): имя, телефон, город, услуга, площадь — всё обязательно.
-    Полей «Услуга»/«Площадь» у лида в Битриксе пока нет (BX-MOP-FIELDS) — тогда МОП указывает их при переводе (extra),
-    и они сразу уходят в поля сделки."""
+    """Что нужно заполнить до «В сделку» (HEAD 06.11 «пожестче», 07.11 «чтобы реально работало»): имя, телефон, город,
+    услуга и объект — из объекта и города собирается название сделки. Площадь — перед КП (замок сделки), на лиде её
+    часто ещё не знают. Полей «Услуга» у лида в Битриксе нет (BX-MOP-FIELDS) — МОП выбирает её при переводе (extra)."""
     out = []
-    if not ((l.get("NAME") or "").strip() or (l.get("LAST_NAME") or "").strip()):
+    if not ((l.get("NAME") or "").strip() or (l.get("LAST_NAME") or "").strip() or (extra and (extra.name or "").strip())):
         out.append("имя клиента")
     if not _phone(l):
         out.append("телефон")
-    if not l.get(L_CITY):
+    if not (l.get(L_CITY) or (extra and extra.city)):
         out.append("город")
     if not (l.get(L_SERVICE) if L_SERVICE in have else (extra and extra.service)):
         out.append("услуга")
-    if not (bx._num(l.get(L_AREA)) if L_AREA in have else (extra and extra.area)):
-        out.append("площадь")
+    if not (extra and (extra.object or "").strip()):
+        out.append("объект")
     return out
 
 
@@ -80,7 +85,7 @@ def _row(l: dict, st: dict, have: dict, names: dict) -> dict:
             "created": l.get("DATE_CREATE"), "modified": l.get("DATE_MODIFY"), "sum": bx._num(l.get("OPPORTUNITY")),
             "city": _city(_items(L_CITY, have).get(str(l.get(L_CITY) or ""), "")),
             "service": _items(L_SERVICE, have).get(str(l.get(L_SERVICE) or ""), "") if L_SERVICE in have else "",
-            "area": bx._num(l.get(L_AREA)), "missing": missing(l, have),
+            "area": bx._num(l.get(L_AREA)), "missing": [m for m in missing(l, have) if m != "объект"],
             "manager": names.get(int(l.get("ASSIGNED_BY_ID") or 0), "")}
 
 
@@ -93,8 +98,9 @@ def my_leads(p: dict, fresh: bool = False) -> dict:
         flt["ASSIGNED_BY_ID"] = uid
     rows = bx.read_all("crm.lead.list", {"filter": flt, "select": LIST_SELECT, "order": {"DATE_CREATE": "DESC"}}, fresh=fresh)
     st, have = statuses(), fields()
+    vac = vacancy(st)   # «Вакансии Астана» — рабочий статус Битрикса, но это не клиент: в очереди МОП не нужен
     names = {u["id"]: u["name"] for u in bx.users()} if uid is None else {}
-    return {"leads": [_row(l, st, have, names) for l in rows], "all": uid is None}
+    return {"leads": [_row(l, st, have, names) for l in rows if l.get("STATUS_ID") not in vac], "all": uid is None}
 
 
 def _lead(p: dict, lead_id: int, fresh: bool = False) -> dict:
@@ -149,7 +155,9 @@ def lead_full(p: dict, lead_id: int, fresh: bool = False) -> dict:
                 "has": {"service": L_SERVICE in have, "area": L_AREA in have},
                 "services": [{"id": k, "name": v} for k, v in _items(L_SERVICE, have).items()],
                 "fail": [{"id": k, "name": v["name"]} for k, v in sorted(st.items(), key=lambda x: x[1]["sort"])
-                         if v["semantic"] == "failure" and k != CONVERTED]})
+                         if v["semantic"] == "failure" and k != CONVERTED and k not in vacancy(st)],
+                "vacancy": [{"id": k, "name": v["name"], "keep": v["semantic"] != "failure"}
+                            for k, v in sorted(vacancy(st).items(), key=lambda x: x[1]["sort"])]})
     return row
 
 
@@ -184,6 +192,7 @@ def lwrite(p: dict, lead_id: int, what: str, flds: dict | None = None, comment: 
 
 
 class LeadIn(BaseModel):
+    title: str | None = None      # название лида (TITLE)
     name: str | None = None       # имя клиента (NAME лида)
     city: str | None = None       # ID пункта списка городов лида
     service: str | None = None    # ID пункта «Услуга» лида
@@ -211,6 +220,9 @@ def api_lead(lead_id: int, fresh: int = 0, p: dict = Depends(active)):
 def api_lead_save(lead_id: int, body: LeadIn, p: dict = Depends(active)):
     have = fields()
     f, parts = {}, []
+    if body.title and body.title.strip():
+        f["TITLE"] = body.title.strip()[:200]
+        parts.append("название «" + body.title.strip()[:200] + "»")
     if body.name and body.name.strip():
         f["NAME"] = body.name.strip()
         parts.append("имя " + body.name.strip())
@@ -244,7 +256,7 @@ def api_lead_status(lead_id: int, body: StatusIn, p: dict = Depends(active)):
     st = statuses()
     if body.status not in st or body.status == CONVERTED:
         raise HTTPException(400, "нет такого статуса")
-    if st[body.status]["semantic"] == "failure":
+    if st[body.status]["semantic"] == "failure" and body.status not in vacancy(st):
         from .bxw import REASON
         if body.reason_code not in REASON:
             raise HTTPException(400, "выберите причину отказа из списка")
@@ -257,25 +269,42 @@ class ConvertIn(BaseModel):
     service: str | None = None    # ID пункта «Услуга» СДЕЛКИ — пока у лида нет своего поля
     area: float | None = None
     address: str | None = None
+    object: str | None = None     # «Объект» сделки: «Школа №12», «Кофейня Daily» — вместе с городом даёт название
+    name: str | None = None       # имя клиента, если у лида его нет — запишется и в лид
+    city: str | None = None       # ID города ЛИДА, если у лида его нет — запишется и в лид
+    sum: float | None = None
 
 
 @router.post("/bx/leads/{lead_id}/convert")
 def api_convert(lead_id: int, body: ConvertIn | None = None, p: dict = Depends(active)):
-    """«В сделку»: контакт (если у лида его нет) → сделка в «1.1 Продажи РК» на первой стадии → лид «Сконвертирован».
-    Город, услуга и площадь переносятся по названию в поля сделки; без них сделку не создаём."""
+    """«В сделку» одной кнопкой (HEAD 07.11): то, чего не хватало лиду (имя, город), сначала пишем в лид; затем контакт
+    (если у лида его нет) → сделка в «1.1 Продажи РК» на первой стадии с названием «№ · ОБЪЕКТ — ГОРОД» → привязка сделки
+    к лиду (поле «Лид»), дела лида (звонки, WhatsApp) — и в сделку → лид «Качественный»."""
     body = body or ConvertIn()
     if body.service and body.service not in bx.enum_map(bx.SERVICE):
         raise HTTPException(400, "нет такой услуги")
-    l = _lead(p, lead_id, fresh=True)
     have = fields()
+    if body.city and body.city not in _items(L_CITY, have):
+        raise HTTPException(400, "нет такого города")
+    l = _lead(p, lead_id, fresh=True)
     miss = missing(l, have, body)
     if miss:
         raise HTTPException(400, "сначала заполните: " + ", ".join(miss))
     if not bxw.enabled():
         raise HTTPException(409, "запись в Битрикс выключена")
     uid = int(l.get("ASSIGNED_BY_ID") or 0) or bx.bx_id(p)
-    log = {"what": "лид → сделка"}
+    log = {"what": "лид → сделка", "warn": []}
     try:
+        fix = {}
+        if body.name and body.name.strip() and not (l.get("NAME") or "").strip():
+            fix["NAME"] = body.name.strip()
+        if body.city and str(l.get(L_CITY) or "") != body.city:
+            fix[L_CITY] = body.city
+        if body.sum and not bx._num(l.get("OPPORTUNITY")):
+            fix["OPPORTUNITY"] = int(round(body.sum))
+        if fix:
+            bxw.CALL("crm.lead.update", {"id": lead_id, "fields": fix})
+            l = {**l, **fix}
         contact = int(l.get("CONTACT_ID") or 0)
         if not contact and not int(l.get("COMPANY_ID") or 0):
             j = bxw.CALL("crm.contact.add", {"fields": {"NAME": l.get("NAME") or _name(l), "LAST_NAME": l.get("LAST_NAME") or "",
@@ -283,12 +312,13 @@ def api_convert(lead_id: int, body: ConvertIn | None = None, p: dict = Depends(a
                                                         "SOURCE_ID": l.get("SOURCE_ID") or "", "LEAD_ID": lead_id}})
             contact = int(j.get("result") or 0)
         df = bx.deal_fields()
-        deal = {"TITLE": l.get("TITLE") or _name(l), "CATEGORY_ID": 0, "STAGE_ID": "NEW", "ASSIGNED_BY_ID": uid, "LEAD_ID": lead_id,
-                "OPPORTUNITY": bx._num(l.get("OPPORTUNITY")) or None, "SOURCE_ID": l.get("SOURCE_ID") or None,
-                "CONTACT_ID": contact or None, "COMPANY_ID": int(l.get("COMPANY_ID") or 0) or None}
         city = _city(_items(L_CITY, have).get(str(l.get(L_CITY) or ""), ""))
+        obj = body.object.strip()[:120]
+        deal = {"TITLE": f"{obj.upper()} — {city.split(' (')[0].upper()}", "CATEGORY_ID": 0, "STAGE_ID": "NEW", "ASSIGNED_BY_ID": uid,
+                "LEAD_ID": lead_id, "OPPORTUNITY": bx._num(l.get("OPPORTUNITY")) or None, "SOURCE_ID": l.get("SOURCE_ID") or None,
+                "CONTACT_ID": contact or None, "COMPANY_ID": int(l.get("COMPANY_ID") or 0) or None, bx.OBJECT: obj}
         if city:
-            deal[bx.CITY] = next((k for k, v in bx.enum_map(bx.CITY).items() if _city(v).lower() == city.lower()), None)
+            deal[bx.CITY] = bx.city_find(city)
         svc = _items(L_SERVICE, have).get(str(l.get(L_SERVICE) or ""), "") if L_SERVICE in have else ""
         if svc:
             deal[bx.SERVICE] = next((k for k, v in bx.enum_map(bx.SERVICE).items() if v.lower() == svc.lower()), None)
@@ -299,28 +329,46 @@ def api_convert(lead_id: int, body: ConvertIn | None = None, p: dict = Depends(a
             deal[bx.AREA] = area
         if body.address and body.address.strip():
             deal[bx.ADDR] = body.address.strip()
+        if bx.OBJECT not in df:
+            deal.pop(bx.OBJECT)
         deal = {k: v for k, v in deal.items() if v not in (None, "")}
         j = bxw.CALL("crm.deal.add", {"fields": deal, "params": {"REGISTER_SONET_EVENT": "Y"}})
         deal_id = int(j.get("result") or 0)
         if not deal_id:
             raise RuntimeError("Битрикс не вернул номер сделки")
+        log["deal"] = deal_id
+        # номер появляется только после создания — название по правилу дописываем вторым шагом
+        bxw.CALL("crm.deal.update", {"id": deal_id, "fields": {"TITLE": bx.make_title(deal_id, obj, city)}})
+        # crm.deal.add молча игнорирует LEAD_ID (поле только для чтения) — привязываем через crm.item
+        try:
+            bxw.CALL("crm.item.update", {"entityTypeId": 2, "id": deal_id, "fields": {"leadId": lead_id}})
+        except Exception as ex:
+            log["warn"].append(f"привязка к лиду: {str(ex)[:120]}")
+        # звонки и переписка лида — и в сделку, чтобы история была на одном месте
+        try:
+            acts = bx._rows(bx.read("crm.activity.list", {"filter": {"OWNER_TYPE_ID": 1, "OWNER_ID": lead_id}, "select": ["ID"]}, fresh=True))
+            for a in acts[:50]:
+                bxw.CALL("crm.activity.binding.add", {"activityId": int(a["ID"]), "entityTypeId": 2, "entityId": deal_id})
+        except Exception as ex:
+            log["warn"].append(f"дела лида: {str(ex)[:120]}")
         bxw.CALL("crm.lead.update", {"id": lead_id, "fields": {"STATUS_ID": CONVERTED}})
         bxw.CALL("crm.timeline.comment.add", {"fields": {"ENTITY_ID": deal_id, "ENTITY_TYPE": "deal",
                                                          "COMMENT": f"{p['full_name']} (приложение): создал из лида № {lead_id}"}})
-        log.update(bx="ok", deal=deal_id, contact=contact)
+        log.update(bx="ok", contact=contact)
         bx._cache.clear()
     except Exception as ex:
         log.update(bx="error", error=str(ex)[:300])
     with db.pool.connection() as conn:
         db.audit(conn, p["id"], "bx_write", "lead", lead_id, log)
     if log["bx"] == "error":
-        raise HTTPException(502, log["error"])
+        raise HTTPException(502, log["error"] + (f" (сделка № {log['deal']} уже создана)" if log.get("deal") else ""))
     return {"bx": "ok", "deal": log["deal"]}
 
 
 # ---------- итог звонка: и для лида, и для сделки ----------
 
-RESULTS = {"reached": "дозвонился", "no_answer": "не дозвонился", "callback": "просил перезвонить", "chat": "написал в WhatsApp"}
+RESULTS = {"reached": "дозвонился", "no_answer": "не дозвонился", "callback": "просил перезвонить", "chat": "написал в WhatsApp",
+           "wait": "ждём ответа клиента"}   # «Жду ответа» (HEAD 07.11): с датой — не горит до этого дня
 
 
 class CallIn(BaseModel):
@@ -333,6 +381,8 @@ class CallIn(BaseModel):
 def api_call(entity: str, eid: int, body: CallIn, p: dict = Depends(active)):
     if entity not in ("deals", "leads") or body.result not in RESULTS:
         raise HTTPException(400, "не тот звонок")
+    if body.result == "wait" and not body.next:
+        raise HTTPException(400, "укажите, до какого дня ждём ответа")
     if body.next and body.next < date.today():
         raise HTTPException(400, "дата перезвона уже прошла")
     note = RESULTS[body.result] + (f": {body.text.strip()}" if body.text.strip() else "") + \

@@ -1,4 +1,5 @@
 import pytest
+from datetime import date as _date
 
 from artgame import bx, db
 from conftest import hdr
@@ -48,10 +49,12 @@ def fake(method, params):
         return {"result": [{"STATUS_ID": "UC_93GBZP", "NAME": "Новый лид", "SORT": "10"},
                            {"STATUS_ID": "IN_PROCESS", "NAME": "В работе", "SORT": "20"},
                            {"STATUS_ID": "CONVERTED", "NAME": "Сделка", "SORT": "30", "EXTRA": {"SEMANTICS": "success"}},
-                           {"STATUS_ID": "UC_MARGO5", "NAME": "Дорого", "SORT": "40", "EXTRA": {"SEMANTICS": "failure"}}]}
+                           {"STATUS_ID": "UC_MARGO5", "NAME": "Дорого", "SORT": "40", "EXTRA": {"SEMANTICS": "failure"}},
+                           {"STATUS_ID": "UC_YHM21B", "NAME": "Вакансии Астана", "SORT": "50"},
+                           {"STATUS_ID": "UC_F2Y3S1", "NAME": "Вакансии", "SORT": "60", "EXTRA": {"SEMANTICS": "failure"}}]}
     if method == "crm.lead.list":
         f = params["filter"]
-        rows = [l for l in LEADS.values() if l["STATUS_ID"] not in ("CONVERTED", "UC_MARGO5")
+        rows = [l for l in LEADS.values() if l["STATUS_ID"] not in ("CONVERTED", "UC_MARGO5", "UC_F2Y3S1")
                 and ("ASSIGNED_BY_ID" not in f or int(l["ASSIGNED_BY_ID"]) == f["ASSIGNED_BY_ID"])]
         return {"result": rows, "total": len(rows)}
     if method == "crm.lead.get":
@@ -74,7 +77,11 @@ def fake(method, params):
                            "UF_CRM_ARTGAME_COMPLEXITY": {"type": "enumeration", "items": [{"ID": "901", "VALUE": "Лёгкий"}, {"ID": "902", "VALUE": "Средний"},
                                                                                            {"ID": "903", "VALUE": "Сложный"}, {"ID": "904", "VALUE": "Авторский"}]},
                            "UF_CRM_ARTGAME_NORM_SHIFTS": {"type": "double"}, "UF_CRM_ARTGAME_NORM_CREW": {"type": "integer"},
-                           "UF_CRM_ARTGAME_TERM_DAYS": {"type": "integer"}, "UF_CRM_ARTGAME_AREA_M2": {"type": "double"}, "OPPORTUNITY": {"title": "Сумма"}}}
+                           "UF_CRM_ARTGAME_TERM_DAYS": {"type": "integer"}, "UF_CRM_ARTGAME_AREA_M2": {"type": "double"}, "OPPORTUNITY": {"title": "Сумма"},
+                           "UF_CRM_ARTGAME_OBJECT": {"type": "string"},
+                           "UF_CRM_ARTGAME_PROJECT_MODEL": {"type": "enumeration", "listLabel": "Модель", "items": [{"ID": "31", "VALUE": "B2B"}, {"ID": "32", "VALUE": "B2C"}]},
+                           "UF_CRM_ARTGAME_PROJECT_VIP": {"type": "boolean", "listLabel": "VIP"},
+                           "UF_CRM_1753381517": {"type": "employee", "listLabel": "Художники", "isMultiple": True}}}
     if method == "user.get":
         return {"result": [{"ID": "4565", "NAME": "Ануар", "LAST_NAME": "Минкеев", "USER_TYPE": "employee"},
                            {"ID": "4693", "NAME": "Тимур", "LAST_NAME": "Жандосов", "USER_TYPE": "employee"}]}
@@ -99,7 +106,7 @@ def fake(method, params):
     if method == "crm.activity.list":
         return {"result": [{"ID": "7", "SUBJECT": "Звонок клиенту", "TYPE_ID": "2", "COMPLETED": "Y", "CREATED": "2026-11-04T12:00:00+03:00", "RESPONSIBLE_ID": "4565"}]}
     if method == "tasks.task.list":
-        return {"result": {"tasks": [{"id": "501", "title": "Перезвонить по КП", "deadline": "2026-11-06T10:00:00+03:00", "ufCrmTask": ["D_1601"]}]}}
+        return {"result": {"tasks": [{"id": "501", "title": "Перезвонить по КП", "deadline": f"{_date.today()}T10:00:00+03:00", "ufCrmTask": ["D_1601"]}]}}
     if method == "crm.requisite.list":
         raise bx.HTTPException(502, "method not allowed")
     raise AssertionError(method)
@@ -149,7 +156,7 @@ def test_card_and_foreign_deal(bxc):
     c, ids = bxc
     c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
     card = c.get("/api/bx/deals/1601", headers=hdr(6000)).json()
-    assert card["client"] == {"type": "ТОО", "name": "ТОО «Ромашка»", "phone": "+77001112233", "email": "a@x.kz"}
+    assert card["client"] == {"type": "ТОО", "name": "ТОО «Ромашка»", "phone": "+77001112233", "email": "a@x.kz", "no_contact": False}
     assert card["address"] == "ул. Достык 5" and card["service"] == "Художественная роспись стен"
     assert card["requisites"] is None   # шлюз реквизиты не отдаёт — вводят вручную
     assert c.get("/api/bx/deals/1651", headers=hdr(6000)).status_code == 403
@@ -294,7 +301,7 @@ def test_full_and_today(bxc):
     assert d["manager"] == "Ануар Минкеев" and [h["stage"] for h in d["history"]] == ["Встреча/Отправка КП", "Взаимное информирование"]
     assert {f["kind"] for f in d["feed"]} == {"comment", "call"} and d["feed"][0]["who"] == "Ануар Минкеев"
     t = c.get("/api/bx/today", headers=hdr(6000)).json()
-    assert t["tasks"] == [{"id": 501, "title": "Перезвонить по КП", "deadline": "2026-11-06T10:00:00+03:00", "deal": 1601}]
+    assert t["tasks"] == [{"id": 501, "title": "Перезвонить по КП", "deadline": f"{_date.today()}T10:00:00+03:00", "deal": 1601}]
     assert [x["id"] for x in t["kp"]] == [1601] and t["limits"]["kp_days"] == 2   # сделка на КП с 04.11 — без ответа
     # дизайн-сделка в C13:NEW — не «новая заявка», а «без движения» в «позже»
     assert [x["id"] for x in t["new"]] == [] and any(x["id"] == 1647 and x["why"].startswith("дизайн: без движения") for x in t["queue"]["later"])
@@ -358,7 +365,7 @@ def test_month_from_sheet(bxc, monkeypatch):
 
 
 def test_notify(bxc, monkeypatch):
-    from datetime import datetime
+    from datetime import datetime, time
     from zoneinfo import ZoneInfo
     from artgame import notify
     c, ids = bxc
@@ -369,14 +376,14 @@ def test_notify(bxc, monkeypatch):
         conn.execute("INSERT INTO bx_reminders (person_id, deal_id, due, note) VALUES (%s, 1601, current_date, 'ждут бюджет')", (ids[6000],))
     t = c.get("/api/bx/today", headers=hdr(6000)).json()
     assert [d["id"] for d in t["back"]] == [1601] and t["kp"] == []   # отложенная — в «пора вернуться», не в «КП без ответа»
-    assert notify.run(datetime(2026, 11, 6, 3, 0, tzinfo=ZoneInfo("Asia/Almaty"))) == 0   # ночью молчим
-    assert notify.run(datetime(2026, 11, 6, 8, 30, tzinfo=ZoneInfo("Asia/Almaty"))) == 2   # до сводки — только «горит»: вернуться + лид
+    assert notify.run(datetime.combine(_date.today(), time(3, 0), tzinfo=ZoneInfo("Asia/Almaty"))) == 0   # ночью молчим
+    assert notify.run(datetime.combine(_date.today(), time(8, 30), tzinfo=ZoneInfo("Asia/Almaty"))) == 2   # до сводки — только «горит»: вернуться + лид
     assert "Пора вернуться" in sent[0][1] and "Лид Дана" in sent[0][1] and "Задача" not in sent[0][1]
     sent.clear()
-    n = notify.run(datetime(2026, 11, 6, 10, 0, tzinfo=ZoneInfo("Asia/Almaty")))   # сводка: остальное одним сообщением
+    n = notify.run(datetime.combine(_date.today(), time(10, 0), tzinfo=ZoneInfo("Asia/Almaty")))   # сводка: остальное одним сообщением
     assert n == 1 and sent[0][0] == 6000 and sent[0][1].startswith("☀️ На сегодня: 2 горит, 1 сделать.") and "Пора вернуться" not in sent[0][1]
     assert "Задача на сегодня: Перезвонить по КП" in sent[0][1]
-    assert notify.run(datetime(2026, 11, 6, 10, 30, tzinfo=ZoneInfo("Asia/Almaty"))) == 0 and len(sent) == 1   # повторно не шлём
+    assert notify.run(datetime.combine(_date.today(), time(10, 30), tzinfo=ZoneInfo("Asia/Almaty"))) == 0 and len(sent) == 1   # повторно не шлём
     with db.pool.connection() as conn:
         assert conn.execute("SELECT count(*) AS n FROM bx_reminders WHERE sent_at IS NULL").fetchone()["n"] == 0
 
@@ -419,7 +426,7 @@ def test_leads(bxc, monkeypatch):
     assert [l["id"] for l in r["leads"]] == [3001]
     l = r["leads"][0]
     assert l["new"] and l["name"] == "Дана" and l["phone"] == "+7 701 555 44 33"
-    assert l["missing"] == ["город", "услуга", "площадь"]   # услуги у лида в Битриксе нет — спросим при переводе
+    assert l["missing"] == ["город", "услуга"]   # услуги у лида в Битриксе нет — спросим при переводе; площадь — перед КП
     assert c.get("/api/bx/leads/3002", headers=hdr(6000)).status_code == 403
     full = c.get("/api/bx/leads/3001", headers=hdr(6000)).json()
     assert full["has"] == {"service": False, "area": True} and full["fail"] == [{"id": "UC_MARGO5", "name": "Дорого"}]
@@ -457,14 +464,22 @@ def test_leads(bxc, monkeypatch):
     assert c.post("/api/bx/leads/3001/convert", headers=hdr(6000)).status_code == 400          # услуга обязательна
     assert c.post("/api/bx/leads/3001/convert", json={"service": "1"}, headers=hdr(6000)).status_code == 400
     assert not calls
-    r = c.post("/api/bx/leads/3001/convert", json={"service": "19285", "address": "Астана, Кенесары 40"}, headers=hdr(6000)).json()
+    # объект обязателен: из него и города — название сделки (HEAD 06.11)
+    assert "объект" in c.post("/api/bx/leads/3001/convert", json={"service": "19285"}, headers=hdr(6000)).json()["detail"]
+    assert not calls
+    r = c.post("/api/bx/leads/3001/convert", json={"service": "19285", "address": "Астана, Кенесары 40", "object": "Школа №12"},
+               headers=hdr(6000)).json()
     assert r == {"bx": "ok", "deal": 9100}
-    assert [m for m, _ in calls] == ["crm.contact.add", "crm.deal.add", "crm.lead.update", "crm.timeline.comment.add"]
+    assert [m for m, _ in calls] == ["crm.contact.add", "crm.deal.add", "crm.deal.update", "crm.item.update", "crm.activity.binding.add",
+                                     "crm.lead.update", "crm.timeline.comment.add"]
     deal = calls[1][1]["fields"]
     assert deal["UF_CRM_6881101914D8D"] == "12077" and deal["UF_CRM_ARTGAME_AREA_M2"] == 40 and deal["LEAD_ID"] == 3001
-    assert deal["CONTACT_ID"] == 9100 and deal["ASSIGNED_BY_ID"] == 4565
+    assert deal["CONTACT_ID"] == 9100 and deal["ASSIGNED_BY_ID"] == 4565 and deal["TITLE"] == "ШКОЛА №12 — АСТАНА"
     assert deal["UF_CRM_1753294730602"] == "19285" and deal["UF_CRM_1755520919823"] == "Астана, Кенесары 40"
-    assert calls[2][1]["fields"] == {"STATUS_ID": "CONVERTED"}
+    assert calls[2][1] == {"id": 9100, "fields": {"TITLE": "9100 · ШКОЛА №12 — АСТАНА"}}
+    assert calls[3][1] == {"entityTypeId": 2, "id": 9100, "fields": {"leadId": 3001}}   # поле «Лид» у сделки
+    assert calls[4][1] == {"activityId": 7, "entityTypeId": 2, "entityId": 9100}        # звонок лида — и в сделке
+    assert calls[5][1]["fields"] == {"STATUS_ID": "CONVERTED"}
     LEADS["3001"].update({"STATUS_ID": "UC_93GBZP", "UF_CRM_1753202309": None})
     LEADS["3001"].pop("UF_CRM_ARTGAME_LEAD_AREA", None)
 
@@ -590,3 +605,75 @@ def test_today_survives_broken_source(bxc, monkeypatch):
     assert r.status_code == 200
     t = r.json()
     assert "звонки не загрузились" in t["warn"] and (t["queue"]["hot"] or t["queue"]["today"] or t["queue"]["later"])
+
+
+def test_anna_fixes(bxc, monkeypatch):
+    """Замечания Анны 06.11: «Жду ответа», вакансии, название, контакт сделки, поля проекта, города сделки."""
+    from datetime import date, timedelta
+    from artgame import bxw
+    from artgame.config import settings
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    monkeypatch.setattr(settings, "bitrix_webhook", "https://x/rest/1/k/")
+    calls = []
+
+    def fake_call(method, params):
+        calls.append((method, params))
+        if method == "crm.lead.update":
+            LEADS[str(params["id"])].update(params["fields"])
+        if method == "crm.deal.update":
+            DEALS[str(params["id"])].update(params["fields"])
+        return {"result": {"task": {"id": "779"}}} if method == "tasks.task.add" else {"result": 9200 if method.endswith(".add") else True}
+    monkeypatch.setattr(bxw, "CALL", fake_call)
+    # города в карточке сделки — из списка СДЕЛКИ (у лида свои ID)
+    dct = c.get("/api/bx/dict", headers=hdr(6000)).json()
+    assert dct["cities"] == [{"id": "12077", "name": "Астана"}]
+    assert dct["project"]["model"] == [{"id": "31", "name": "B2B"}, {"id": "32", "name": "B2C"}] and "artists" in dct["project"]["have"]
+    # «Жду ответа»: без даты нельзя; с датой — лид не горит, а ждёт в «позже»
+    assert any(x["id"] == 3001 for x in c.get("/api/bx/today", headers=hdr(6000)).json()["queue"]["hot"])
+    assert c.post("/api/bx/leads/3001/call", json={"result": "wait"}, headers=hdr(6000)).status_code == 400
+    nxt = date.today() + timedelta(days=2)
+    assert c.post("/api/bx/leads/3001/call", json={"result": "wait", "text": "думает", "next": nxt.isoformat()}, headers=hdr(6000)).json()["bx"] == "ok"
+    q = c.get("/api/bx/today?fresh=1", headers=hdr(6000)).json()["queue"]
+    assert not any(x["entity"] == "lead" and x["id"] == 3001 for x in q["hot"] + q["today"])
+    w = next(x for x in q["later"] if x["entity"] == "lead" and x["id"] == 3001)
+    assert w["why"].startswith(f"ждём до {nxt:%d.%m}") and "думает" in w["why"] and w["wait"] == nxt.isoformat()
+    # название лида
+    calls.clear()
+    assert c.post("/api/bx/leads/3001", json={"title": "Школа №12 — Астана"}, headers=hdr(6000)).json()["bx"] == "ok"
+    assert calls[0][0] == "crm.lead.update" and calls[0][1]["fields"] == {"TITLE": "Школа №12 — Астана"}
+    # вакансия: без причины, из списка лидов уходит
+    full = c.get("/api/bx/leads/3001?fresh=1", headers=hdr(6000)).json()
+    assert full["vacancy"] == [{"id": "UC_YHM21B", "name": "Вакансии Астана", "keep": True}, {"id": "UC_F2Y3S1", "name": "Вакансии", "keep": False}]
+    assert all(f["id"] != "UC_F2Y3S1" for f in full["fail"])
+    assert c.post("/api/bx/leads/3001/status", json={"status": "UC_YHM21B"}, headers=hdr(6000)).json()["bx"] == "ok"
+    assert [l["id"] for l in c.get("/api/bx/leads?fresh=1", headers=hdr(6000)).json()["leads"]] == []
+    LEADS["3001"]["STATUS_ID"] = "UC_93GBZP"
+    # название сделки = «№ · ОБЪЕКТ — ГОРОД»; объект пишется в своё поле
+    calls.clear()
+    assert c.post("/api/bx/deals/1601/fields", json={"object": "Кафе Daily"}, headers=hdr(6000)).json()["bx"] == "ok"
+    upd = next(p for m, p in calls if m == "crm.deal.update")["fields"]
+    assert upd["TITLE"] == "1601 · КАФЕ DAILY — АСТАНА" and upd["UF_CRM_ARTGAME_OBJECT"] == "Кафе Daily"
+    # поля проекта: только известные значения; VIP — Y/N, художники — списком
+    calls.clear()
+    r = c.post("/api/bx/deals/1601/fields", json={"project": {"model": "31", "vip": True, "artists": ["4565", "999"], "size": "x"}}, headers=hdr(6000))
+    assert r.json()["bx"] == "ok"
+    upd = next(p for m, p in calls if m == "crm.deal.update")["fields"]
+    assert upd == {"UF_CRM_ARTGAME_PROJECT_MODEL": "31", "UF_CRM_ARTGAME_PROJECT_VIP": "Y", "UF_CRM_1753381517": [4565]}
+    card = c.get("/api/bx/deals/1601?fresh=1", headers=hdr(6000)).json()
+    assert card["project"]["model"] == "31" and card["project"]["vip"] is True and card["project"]["artists"] == ["4565"]
+    # контакт: у сделки уже есть — 409; без контакта и без телефона — 400; с телефоном — создаём и привязываем
+    assert c.post("/api/bx/deals/1601/contact", json={}, headers=hdr(6000)).status_code == 409
+    DEALS["1590"]["STAGE_ID"] = "PREPARATION"
+    try:
+        assert c.get("/api/bx/deals/1590", headers=hdr(6000)).json()["client"]["no_contact"] is True
+        assert c.post("/api/bx/deals/1590/contact", json={}, headers=hdr(6000)).status_code == 400
+        calls.clear()
+        assert c.post("/api/bx/deals/1590/contact", json={"name": "Ерлан", "phone": "+77015550000"}, headers=hdr(6000)).json()["bx"] == "ok"
+        assert [m for m, _ in calls] == ["crm.contact.add", "crm.deal.update", "crm.timeline.comment.add"]
+        assert calls[0][1]["fields"]["PHONE"] == [{"VALUE": "+77015550000", "VALUE_TYPE": "WORK"}] and calls[1][1]["fields"] == {"CONTACT_ID": 9200}
+    finally:
+        DEALS["1590"].update({"STAGE_ID": "WON", "CONTACT_ID": "0"})
+        DEALS["1601"].update({"TITLE": "1601 · КАФЕ — АСТАНА"})
+        for k in ("UF_CRM_ARTGAME_OBJECT", "UF_CRM_ARTGAME_PROJECT_MODEL", "UF_CRM_ARTGAME_PROJECT_VIP", "UF_CRM_1753381517"):
+            DEALS["1601"].pop(k, None)

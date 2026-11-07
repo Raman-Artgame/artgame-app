@@ -26,7 +26,8 @@ F_ADV, F_DAYS, F_WARR = "UF_CRM_ARTGAME_ADVANCE_PERCENT", "UF_CRM_1753295493279"
 F_INV_SUM, F_INV_PURPOSE, F_REASON = "UF_CRM_ARTGAME_INVOICE_AMOUNT", "UF_CRM_ARTGAME_INVOICE_PURPOSE", "UF_CRM_1753381316974"
 F_START, F_END = "UF_CRM_ARTGAME_PROJECT_START_ACTUAL", "UF_CRM_ARTGAME_PROJECT_END_PLAN"
 WRITABLE = {"OPPORTUNITY", "STAGE_ID", F_START, F_END, bx.AREA, bx.SERVICE, bx.ADDR, bx.CITY, F_ADV, F_DAYS, F_WARR, F_INV_SUM, F_INV_PURPOSE, F_REASON,
-            F_KP, F_CONTRACT, F_INVOICES, F_OTHER, bx.F_LEVEL, bx.F_SHIFTS, bx.F_CREW, bx.F_TERM}
+            F_KP, F_CONTRACT, F_INVOICES, F_OTHER, bx.F_LEVEL, bx.F_SHIFTS, bx.F_CREW, bx.F_TERM, "TITLE", bx.OBJECT, *bx.PROJECT}
+KEEP_EMPTY = {k for k, (_, kind) in bx.PROJECT.items() if kind in ("bool", "users")}   # «нет» и пустой список — тоже значение
 MULTI_FILE = {F_KP, F_CONTRACT, F_INVOICES, F_OTHER}
 # Переходы по документам: двигаем только вперёд и только из перечисленных стадий.
 STAGE_FLOW = {
@@ -74,7 +75,13 @@ def _file_data(path: Path, name: str) -> dict:
 
 
 def _same(got, want) -> bool:
-    """Сверка после записи: «60» = 60.0, дата «2026-11-06» = «2026-11-06T03:00:00+03:00», адрес — до «|»."""
+    """Сверка после записи: «60» = 60.0, дата «2026-11-06» = «2026-11-06T03:00:00+03:00», адрес — до «|»,
+    списки — без порядка, да/нет — 1/Y/true."""
+    if isinstance(want, list) or isinstance(got, list):
+        norm = lambda x: {str(i) for i in (x if isinstance(x, list) else [x]) if i not in (None, "", False)}  # noqa: E731
+        return norm(got) == norm(want)
+    if want in ("Y", "N"):
+        return (str(got) in ("1", "Y", "True", "true")) == (want == "Y")
     a, b = str(got or "").split("|")[0], str(want).split("|")[0]
     if a == b:
         return True
@@ -90,7 +97,7 @@ def write(p: dict, deal_id: int, what: str, fields: dict | None = None, comment:
           file: tuple[Path, str, str] | None = None, stage_for: str | None = None) -> dict:
     """Одна запись: поля + файл + комментарий в ленту. Проверка прав по текущей сделке из Битрикса."""
     d = bx._deal(p, deal_id, fresh=True)
-    fields = {k: v for k, v in (fields or {}).items() if k in WRITABLE and v not in (None, "", 0, "0")}
+    fields = {k: v for k, v in (fields or {}).items() if k in WRITABLE and (k in KEEP_EMPTY and v is not None or v not in (None, "", 0, "0"))}
     held = []
     if stage_for and stage_for in STAGE_FLOW:
         to, allowed = STAGE_FLOW[stage_for]
@@ -320,6 +327,45 @@ class FieldsIn(BaseModel):
     warranty: int | None = None   # гарантия, месяцев
     start: date | None = None     # старт факт
     end: date | None = None       # окончание план
+    object: str | None = None     # «Объект» — из него и города собирается название сделки
+    project: dict | None = None   # поля проекта: {model, category, …} (bx.PROJECT)
+
+
+def _project_fields(vals: dict) -> tuple[dict, list]:
+    """Поля проекта из карточки → коды Битрикса и строка для ленты. Неизвестные ключи и чужие значения — мимо."""
+    pd = bx.project_dict()
+    users = {u["id"]: u["name"] for u in pd["users"]}
+    fields, parts = {}, []
+    for key, val in vals.items():
+        code = bx.PROJECT_KEY.get(key)
+        if not code or key not in pd["have"]:
+            continue
+        _, kind = bx.PROJECT[code]
+        title = (bx.deal_fields().get(code) or {}).get("listLabel") or (bx.deal_fields().get(code) or {}).get("formLabel") or key
+        if kind == "enum":
+            opts = {o["id"]: o["name"] for o in pd.get(key, [])}
+            if str(val) not in opts:
+                continue
+            fields[code], txt = str(val), opts[str(val)]
+        elif kind == "bool":
+            fields[code], txt = ("Y" if val else "N"), ("да" if val else "нет")
+        elif kind == "user":
+            if str(val) not in users:
+                continue
+            fields[code], txt = int(val), users[str(val)]
+        elif kind == "users":
+            ids = [str(x) for x in (val or []) if str(x) in users]
+            fields[code], txt = [int(x) for x in ids], ", ".join(users[x] for x in ids) or "никого"
+        elif kind == "date":
+            if not val:
+                continue
+            fields[code], txt = str(val)[:10], f"{str(val)[8:10]}.{str(val)[5:7]}.{str(val)[:4]}"
+        else:
+            if not str(val).strip():
+                continue
+            fields[code], txt = str(val).strip()[:200], str(val).strip()[:200]
+        parts.append(f"{title}: {txt}")
+    return fields, parts
 
 
 @router.post("/bx/deals/{deal_id}/fields")
@@ -343,9 +389,24 @@ def api_fields(deal_id: int, body: FieldsIn, p: dict = Depends(active)):
         if val:
             fields[key] = val.isoformat() if isinstance(val, date) else (str(val) if key == F_DAYS else val)
             parts.append(txt.format(val.strftime("%d.%m.%Y") if isinstance(val, date) else val))
+    if body.project:
+        pf, pp = _project_fields(body.project)
+        fields.update(pf)
+        parts += pp
+    if (body.object is not None and body.object.strip()) or body.city:
+        # название по правилу «№ · ОБЪЕКТ — ГОРОД» — из «Объекта» и «Города» (HEAD 06.11)
+        d = bx._deal(p, deal_id, fresh=True)
+        obj = body.object.strip() if body.object and body.object.strip() else (d.get(bx.OBJECT) or "")
+        if body.object and body.object.strip() and body.object.strip() != (d.get(bx.OBJECT) or ""):
+            fields[bx.OBJECT] = body.object.strip()[:120]
+            parts.append("объект " + body.object.strip()[:120])
+        if obj:
+            title = bx.make_title(deal_id, obj, bx.city_name(body.city or d.get(bx.CITY)))
+            if title != (d.get("TITLE") or ""):
+                fields["TITLE"] = title
     if not fields:
         raise HTTPException(400, "нечего менять")
-    r = write(p, deal_id, "карточка сделки", fields, "уточнил: " + ", ".join(parts))
+    r = write(p, deal_id, "карточка сделки", fields, "уточнил: " + ", ".join(parts) if parts else None)
     if r["bx"] == "error":
         raise HTTPException(502, r["error"])
     return r
@@ -355,8 +416,49 @@ def api_fields(deal_id: int, body: FieldsIn, p: dict = Depends(active)):
 def api_dict(p: dict = Depends(active)):
     """Справочники для карточки: города и услуги сделки (списки Битрикса)."""
     bx.need_bx(p)
-    from .leads import cities
-    return {"cities": cities(), "services": [{"id": k, "name": v} for k, v in bx.enum_map(bx.SERVICE).items()]}
+    return {"cities": bx.deal_cities(), "services": [{"id": k, "name": v} for k, v in bx.enum_map(bx.SERVICE).items()],
+            "project": bx.project_dict()}
+
+
+class ContactIn(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+
+
+@router.post("/bx/deals/{deal_id}/contact")
+def api_contact(deal_id: int, body: ContactIn | None = None, p: dict = Depends(active)):
+    """Сделка без «Контакта» (перевели в Битриксе «Сделка» без «Контакт»): контакт из лида или из того, что ввёл МОП."""
+    body = body or ContactIn()
+    d = bx._deal(p, deal_id, fresh=True)
+    if int(d.get("CONTACT_ID") or 0) or int(d.get("COMPANY_ID") or 0):
+        raise HTTPException(409, "у сделки уже есть клиент")
+    lead = bx._entity("crm.lead.get", d.get("LEAD_ID")) if d.get("LEAD_ID") else {}
+    phone = (body.phone or "").strip() or bx._fm(lead, "PHONE")
+    name = (body.name or "").strip() or " ".join(x.strip() for x in (lead.get("NAME"), lead.get("LAST_NAME")) if x and x.strip())
+    if not phone:
+        raise HTTPException(400, "нет телефона: введите номер клиента")
+    if not enabled():
+        raise HTTPException(409, "запись в Битрикс выключена")
+    log = {"what": "контакт из лида" if lead else "контакт"}
+    try:
+        j = CALL("crm.contact.add", {"fields": {"NAME": name or "Клиент", "PHONE": [{"VALUE": phone, "VALUE_TYPE": "WORK"}],
+                                                "ASSIGNED_BY_ID": int(d.get("ASSIGNED_BY_ID") or 0) or None,
+                                                "SOURCE_ID": lead.get("SOURCE_ID") or None, "LEAD_ID": int(d.get("LEAD_ID") or 0) or None}})
+        cid = int(j.get("result") or 0)
+        if not cid:
+            raise RuntimeError("Битрикс не вернул номер контакта")
+        CALL("crm.deal.update", {"id": deal_id, "fields": {"CONTACT_ID": cid}})
+        CALL("crm.timeline.comment.add", {"fields": {"ENTITY_ID": deal_id, "ENTITY_TYPE": "deal",
+                                                     "COMMENT": f"{p['full_name']} (приложение): добавил контакт {name} {phone}"}})
+        log.update(bx="ok", contact=cid)
+        bx._cache.clear()
+    except Exception as ex:
+        log.update(bx="error", error=str(ex)[:300])
+    with db.pool.connection() as conn:
+        db.audit(conn, p["id"], "bx_write", "deal", deal_id, log)
+    if log["bx"] == "error":
+        raise HTTPException(502, log["error"])
+    return {"bx": "ok", "contact": log["contact"]}
 
 
 @router.get("/bx/stages")

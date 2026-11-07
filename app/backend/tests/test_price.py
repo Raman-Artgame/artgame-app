@@ -80,7 +80,7 @@ def test_price_save_and_reasons(bxc, monkeypatch):
     assert "уточнил: 40 м², Астана, ул. Абая 1" in calls[1][1]["fields"]["COMMENT"]
     assert c.post("/api/bx/deals/1601/fields", json={}, headers=hdr(6000)).status_code == 400
     d = c.get("/api/bx/dict", headers=hdr(6000)).json()
-    assert d["cities"] == [{"id": "5501", "name": "Астана"}] and d["services"] == [{"id": "19285", "name": "Художественная роспись стен"}]
+    assert d["cities"] == [{"id": "12077", "name": "Астана"}] and d["services"] == [{"id": "19285", "name": "Художественная роспись стен"}]
     DEALS["1601"] = old
 
 

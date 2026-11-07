@@ -53,7 +53,7 @@ def test_extract_rules(bxc, monkeypatch):
     r = c.post("/api/bx/deals/1601/extract", json={"text": text}, headers=hdr(6000)).json()
     f, cl = r["fields"], r["client"]
     assert r["source"] == "rules"
-    assert f["area"] == 45 and f["adv"] == 50 and f["days"] == 14 and f["city"] == "5501" and f["address"].startswith("ул. Кенесары")
+    assert f["area"] == 45 and f["adv"] == 50 and f["days"] == 14 and f["city"] == "12077" and f["address"].startswith("ул. Кенесары")
     assert cl["bin"] == "123456789012" and cl["company"] == "ТОО «Солнышко»" and cl["phone"] == "+7 701 555 44 33"
     assert c.post("/api/bx/deals/1601/extract", json={"text": "привет"}, headers=hdr(6000)).status_code == 400
     assert c.post("/api/bx/deals/1651/extract", json={"text": text}, headers=hdr(6000)).status_code == 403   # чужая сделка
@@ -73,7 +73,7 @@ def test_extract_ai(bxc, monkeypatch):
     monkeypatch.setattr(fill, "_ai", fake_ai)
     r = c.post("/api/bx/deals/1601/extract", json={"text": "длинная переписка с клиентом"}, headers=hdr(6000)).json()
     assert r["source"] == "ai" and seen["cities"] == ["Астана"]
-    assert r["fields"] == {"city": "5501", "cityName": "Астана", "service": "19285", "serviceName": "Художественная роспись стен",
+    assert r["fields"] == {"city": "12077", "cityName": "Астана", "service": "19285", "serviceName": "Художественная роспись стен",
                            "area": 60, "address": "пр. Абая 10", "adv": 30, "days": None, "start": "2026-11-20"}
     monkeypatch.setattr(fill, "_ai", lambda *a: (_ for _ in ()).throw(RuntimeError("timeout")))
     r = c.post("/api/bx/deals/1601/extract", json={"text": "площадь 30 м2, аванс 50%"}, headers=hdr(6000)).json()

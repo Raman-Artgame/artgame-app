@@ -316,3 +316,25 @@ button.catitem b { white-space: nowrap; text-align: right; font-weight: 600; }
 .lockbox b { color: #fff; display: block; margin-bottom: 4px; }
 .lockbox .dealbtns { margin-top: 10px; } .lockbox > button { margin-top: 10px; }
 @media (max-width: 420px) { .fillgrid { grid-template-columns: 1fr; } }
+/* выбор города и «Жду ответа» (07.11) */
+.citypick { margin-top: 8px; }
+.citypick.wide, .fillgrid .citypick { grid-column: 1 / -1; }
+.cplabel { display: block; font-size: 13px; color: var(--muted); }
+.citypick.need input { border-color: var(--accent); }
+.cpcur { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); margin-top: 4px; }
+.cplist { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.cplist button { text-align: left; width: 100%; }
+.titleprev { font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--alt); margin: 6px 0; }
+.titleedit { display: flex; gap: 6px; align-items: center; }
+.titleedit input { flex: 1; }
+.pencil { background: none; border: 0; padding: 0 4px; cursor: pointer; font-size: 15px; color: inherit; opacity: .7; width: auto; }
+.qbtns { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.fromlead { font-size: 11px; padding: 0 6px; border-radius: 99px; background: var(--alt); margin-left: 6px; }
+.fillsec { grid-column: 1 / -1; margin: 12px 0 0; font-size: 14px; }
+.warnbox { background: var(--warnbg); color: var(--warn); border-radius: var(--r2); padding: 12px; font-size: 13px; margin: 8px 0; }
+.warnbox b { display: block; margin-bottom: 4px; }
+.warnbox p { color: var(--warn); margin: 4px 0; }
+.hero .pencil { color: #fff; }
+.fillchips { grid-column: 1 / -1; margin-top: 8px; }
+.fillgrid label.check { display: flex; align-items: center; gap: 8px; }
+.fillgrid label.check input { width: auto; }

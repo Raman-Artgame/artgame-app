@@ -25,7 +25,17 @@ AREA = "UF_CRM_ARTGAME_AREA_M2"
 # Срок и ресурсы — считает приложение по нормам «Значений», МОП руками не вводит (HEAD 05.11). Поля создаёт Кодекс.
 F_LEVEL, F_SHIFTS, F_CREW, F_TERM = "UF_CRM_ARTGAME_COMPLEXITY", "UF_CRM_ARTGAME_NORM_SHIFTS", "UF_CRM_ARTGAME_NORM_CREW", "UF_CRM_ARTGAME_TERM_DAYS"
 LEVELS = {"easy": "Лёгкий", "medium": "Средний", "hard": "Сложный", "author": "Авторский"}
-LIST_SELECT = ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", "OPPORTUNITY", "ASSIGNED_BY_ID", "CONTACT_ID", "COMPANY_ID",
+OBJECT = "UF_CRM_ARTGAME_OBJECT"
+# Поля проекта (HEAD 07.11 «модели и всех этих пунктов нет»): код → (ключ в приложении, тип)
+PROJECT = {"UF_CRM_ARTGAME_PROJECT_MODEL": ("model", "enum"), "UF_CRM_ARTGAME_PROJECT_CATEGORY": ("category", "enum"),
+           "UF_CRM_ARTGAME_PROJECT_SUBCATEGORY": ("subcategory", "enum"), "UF_CRM_ARTGAME_PROJECT_SIZE": ("size", "enum"),
+           "UF_CRM_ARTGAME_PROJECT_VIP": ("vip", "bool"), "UF_CRM_ARTGAME_PROJECT_CURATOR": ("curator", "user"),
+           "UF_CRM_ARTGAME_RESP_EXECUTOR": ("executor", "user"), "UF_CRM_1753381517": ("artists", "users"),
+           "UF_CRM_ARTGAME_DESIGNER": ("designer", "user"), "UF_CRM_ARTGAME_DESIGN_COMPLEXITY": ("design_level", "enum"),
+           "UF_CRM_ARTGAME_DESIGN_DEADLINE": ("design_deadline", "date"), "UF_CRM_6AD5EF400C4B9": ("entry", "enum"),
+           "UF_CRM_1753292354197": ("contract_no", "text")}
+PROJECT_KEY = {v[0]: k for k, v in PROJECT.items()}
+LIST_SELECT = ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", "OPPORTUNITY", "ASSIGNED_BY_ID", "CONTACT_ID", "COMPANY_ID", "LEAD_ID", OBJECT,
                "DATE_MODIFY", "DATE_CREATE", "LAST_ACTIVITY_TIME", CITY, AREA]
 FUNNELS = {0: "Продажи", 13: "Дизайн"}
 TTL, TTL_DICT, MAX_PAGES = 120, 3600, 10
@@ -186,6 +196,32 @@ def city_name(v) -> str:
     return raw.split(",", 1)[-1].strip() if raw else ""
 
 
+def deal_cities() -> list:
+    """Города СДЕЛКИ (свой список Битрикса, ID не совпадают с городами лида) — для карточки сделки."""
+    return sorted(({"id": k, "name": v.split(",", 1)[-1].strip()} for k, v in enum_map(CITY).items()), key=lambda x: x["name"])
+
+
+def city_find(name: str) -> str | None:
+    """ID города сделки по названию: «Астана» найдёт «Казахстан, Астана (Нур-Султан)»."""
+    n = (name or "").strip().lower()
+    if not n:
+        return None
+    best = None
+    for k, v in enum_map(CITY).items():
+        c = v.split(",", 1)[-1].strip().lower()
+        if c == n:
+            return k
+        if best is None and c.split(" (")[0] == n:
+            best = k
+    return best
+
+
+def make_title(deal_id: int, obj: str, city: str) -> str:
+    """Правило названия сделки (как у старых сделок): «1237 · ШКОЛА №12 — ШАХТИНСК». Город без скобок."""
+    obj, city = (obj or "").strip(), (city or "").split(" (")[0].strip()
+    return f"{deal_id} · {obj.upper()}" + (f" — {city.upper()}" if city else "")
+
+
 def users() -> list:
     rows = _rows(read("user.get", {"ACTIVE": True}, ttl=TTL_DICT))
     return [{"id": int(u["ID"]), "name": " ".join(x.strip() for x in (u.get("NAME"), u.get("LAST_NAME")) if x and x.strip()),
@@ -238,7 +274,7 @@ def my_deals(p: dict, fresh: bool = False, manager: int | None = None) -> dict:
               "category": int(d.get("CATEGORY_ID") or 0), "sum": _num(d.get("OPPORTUNITY")),
               "area": _num(d.get(AREA)), "city": city_name(d.get(CITY)), "modified": d.get("DATE_MODIFY"),
               "created": d.get("DATE_CREATE"), "active": d.get("LAST_ACTIVITY_TIME") or d.get("DATE_MODIFY"),
-              "manager_id": int(d.get("ASSIGNED_BY_ID") or 0),
+              "manager_id": int(d.get("ASSIGNED_BY_ID") or 0), "lead_id": int(d.get("LEAD_ID") or 0), "object": d.get(OBJECT) or "",
               "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), "") if uid is None else ""} for d in rows]
     return {"deals": deals, "all": uid is None, "updated": time.time(), "funnels": FUNNELS,
             "managers": sorted({(d["manager_id"], d["manager"]) for d in deals if d["manager"]}, key=lambda x: x[1]) if uid is None else []}
@@ -309,14 +345,50 @@ def deal_card(p: dict, deal_id: int, fresh: bool = False, audit: bool = True) ->
         name = " ".join(x for x in (cont.get("LAST_NAME"), cont.get("NAME"), cont.get("SECOND_NAME")) if x)
         client = {"type": "Физлицо", "name": name, "phone": _fm(cont, "PHONE"), "email": _fm(cont, "EMAIL")}
     contact = " ".join(x for x in (cont.get("NAME"), cont.get("LAST_NAME")) if x)
+    lead_id = int(d.get("LEAD_ID") or 0)
+    client["no_contact"] = not cont and not comp
+    if not client.get("phone") and lead_id:
+        # сделку завели в Битриксе без «Контакта» — телефон остался на лиде (HEAD 07.11, список Анны)
+        lead = _entity("crm.lead.get", lead_id)
+        client["phone"] = _fm(lead, "PHONE")
+        client["phone_from"] = "lead" if client["phone"] else ""
+        if not client.get("name"):
+            client["name"] = " ".join(x for x in (lead.get("NAME"), lead.get("LAST_NAME")) if x and x.strip())
     st = stages().get(d["STAGE_ID"]) or {}
     addr = d.get(ADDR)
     return {"id": int(d["ID"]), "title": d.get("TITLE") or "", "stage": d["STAGE_ID"], "stage_name": st.get("name", d["STAGE_ID"]),
             "sum": _num(d.get("OPPORTUNITY")), "area": _num(d.get(AREA)), "city": city_name(d.get(CITY)),
             "address": addr.split("|")[0] if isinstance(addr, str) else "",
             "service": enum_map(SERVICE).get(str(d.get(SERVICE) or ""), ""),
-            "object": d.get("UF_CRM_ARTGAME_OBJECT") or "", "client": client, "contact": contact,
+            "object": d.get(OBJECT) or "", "client": client, "contact": contact, "lead_id": lead_id,
+            "project": project_values(d),
             "requisites": requisites(d.get("COMPANY_ID")) if comp else None}
+
+
+def project_values(d: dict) -> dict:
+    """Поля проекта сделки в виде {ключ: значение} — ID пунктов списков и пользователей строками, VIP — True/False."""
+    out = {}
+    for code, (key, kind) in PROJECT.items():
+        v = d.get(code)
+        if kind == "users":
+            out[key] = [str(x) for x in (v if isinstance(v, list) else [v] if v else []) if x]
+        elif kind == "bool":
+            out[key] = str(v) in ("1", "Y", "True", "true")
+        elif kind == "date":
+            out[key] = str(v or "")[:10]
+        else:
+            out[key] = str(v or "") if v not in (None, False) else ""
+    return out
+
+
+def project_dict() -> dict:
+    """Варианты для полей проекта: списки Битрикса и сотрудники."""
+    f = deal_fields()
+    out = {key: [{"id": str(i["ID"]), "name": i["VALUE"]} for i in (f.get(code) or {}).get("items") or []]
+           for code, (key, kind) in PROJECT.items() if kind == "enum"}
+    out["have"] = [key for code, (key, _) in PROJECT.items() if code in f]
+    out["users"] = [{"id": str(u["id"]), "name": u["name"], "position": u["position"]} for u in users() if u["name"]]
+    return out
 
 
 # ---------- карточка сделки в приложении: история стадий, лента, файлы, оплаты ----------
@@ -344,6 +416,12 @@ def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
     except Exception as ex:  # история — не главное, карточка открывается и без неё
         print(f"stagehistory {deal_id}: {ex}")
     feed = _feed("deal", deal_id, names, fresh)
+    if card.get("lead_id"):
+        # звонки и WhatsApp до перевода остаются на лиде — показываем их в сделке
+        seen = {(x["at"], x["text"]) for x in feed}
+        feed += [{**x, "lead": True} for x in _feed("lead", card["lead_id"], names, fresh) if (x["at"], x["text"]) not in seen]
+        feed.sort(key=lambda x: x["at"] or "", reverse=True)
+        feed = feed[:50]
     for k, title in FILES.items():
         v = d.get(k)
         if not v:
@@ -477,10 +555,14 @@ def _today(p: dict, fresh: bool = False) -> dict:
     deals = got(f_deals, "сделки не загрузились", {"deals": []})["deals"]
     out = {"new": [], "kp": [], "idle": [], "back": [], "tasks": [], "limits": {"new_hours": new_h, "kp_days": kp_d, "idle_days": idle_d}}
     with db.pool.connection() as conn:
-        rem = conn.execute("SELECT entity, deal_id, due, note FROM bx_reminders WHERE person_id=%s AND due <= current_date "
-                           "ORDER BY due", (p["id"],)).fetchall()
-    due = {r["deal_id"]: r for r in rem if r["entity"] == "deal"}
-    lead_due = {r["deal_id"]: r for r in rem if r["entity"] == "lead"}
+        # последнее напоминание по каждой сделке/лиду: дата в будущем — «ждём ответа», не горит (HEAD 07.11);
+        # дата пришла — «пора вернуться». Старше двух недель не показываем.
+        rem = conn.execute("SELECT DISTINCT ON (entity, deal_id) entity, deal_id, due, note FROM bx_reminders "
+                           "WHERE person_id=%s AND due >= current_date - 14 ORDER BY entity, deal_id, id DESC", (p["id"],)).fetchall()
+    today_ = date.today()
+    due = {r["deal_id"]: r for r in rem if r["entity"] == "deal" and r["due"] <= today_}
+    lead_due = {r["deal_id"]: r for r in rem if r["entity"] == "lead" and r["due"] <= today_}
+    waiting = {(r["entity"], r["deal_id"]): r for r in rem if r["due"] > today_}
     q = {"hot": [], "today": [], "later": []}
     item = lambda kind, d, why, **kw: {"entity": kind, "id": d["id"], "title": d.get("title") or d.get("name") or "", "why": why,  # noqa: E731
                                        "sum": d.get("sum") or 0, "stage": d.get("stage_name") or d.get("status_name") or "",
@@ -524,8 +606,14 @@ def _today(p: dict, fresh: bool = False) -> dict:
     # пропущенные входящие без перезвона — наверх «Горит» (calls.py; резюме разговоров делает CoPilot в Битриксе).
     # Чей звонок — по своим сделкам и лидам (у HEAD — все).
     deals_by_id = {d["id"]: d for d in deals}
+    # звонки и чаты, оставшиеся на лиде после перевода в сделку, — это уже сделка
+    lead2deal = {d["lead_id"]: d["id"] for d in deals if d.get("lead_id")}
+
+    def owner(e: str, i: int) -> tuple[str, int]:
+        return ("deal", lead2deal[i]) if e == "lead" and i not in leads_by_id and i in lead2deal else (e, i)
     seen = set()
     for m in got(f_calls, "звонки не загрузились", []):
+        m["entity"], m["id"] = owner(m["entity"], m["id"])
         src = (deals_by_id if m["entity"] == "deal" else leads_by_id).get(m["id"])
         if not src or (m["entity"], m["id"]) in seen:
             continue
@@ -537,13 +625,15 @@ def _today(p: dict, fresh: bool = False) -> dict:
     from datetime import datetime, timezone
     from . import chats
     chat_min = float(vals.get("mop.today.chat_minutes") or vals.get("mop.reply_min") or 30)
-    own = None if need_bx(p) is None else {("deal", i) for i in deals_by_id} | {("lead", i) for i in leads_by_id}
+    own = None if need_bx(p) is None else \
+        {("deal", i) for i in deals_by_id} | {("lead", i) for i in leads_by_id} | {("lead", i) for i in lead2deal}
     try:
         waits, cw = chats.waiting(fresh, own)
     except Exception as e:  # noqa: BLE001
         waits, cw = [], f"переписка не загрузилась: {type(e).__name__}"
     warns += [cw] if cw else []
     for w in sorted(waits, key=lambda x: x["since"]):
+        w["entity"], w["id"] = owner(w["entity"], w["id"])
         src = (deals_by_id if w["entity"] == "deal" else leads_by_id).get(w["id"])
         if not src or (w["entity"], w["id"]) in seen or (datetime.now(timezone.utc) - w["since"]).total_seconds() < chat_min * 60:
             continue
@@ -552,6 +642,16 @@ def _today(p: dict, fresh: bool = False) -> dict:
             b[:] = [x for x in b if (x["entity"], x["id"]) != (w["entity"], w["id"])]
         q["hot"].insert(len(seen) - 1, item(w["entity"], src, f"клиент ждёт ответа в WhatsApp {chats.ago(w['since'])}", action="chat"))
     out["limits"]["chat_minutes"] = chat_min
+    # «Жду ответа» / «Перезвонить» с датой: до этого дня сделка/лид не горит — уходит в «Позже» с пометкой
+    for key, r in waiting.items():
+        src = (deals_by_id if key[0] == "deal" else leads_by_id).get(key[1])
+        if not src:
+            continue
+        for b in q.values():
+            b[:] = [x for x in b if (x["entity"], x["id"]) != key]
+        q["later"].insert(0, item(key[0], src, f"ждём до {r['due']:%d.%m}" + (f": {r['note']}" if r["note"] else ""), action="call", wait=r["due"].isoformat()))
+    for k in ("new", "kp", "idle"):   # и бот про них до этой даты не пишет
+        out[k] = [d for d in out[k] if ("deal", d["id"]) not in waiting]
     for t in got(f_tasks, "задачи не загрузились", []):
         try:
             deal = next((int(x[2:]) for x in (t.get("ufCrmTask") or t.get("UF_CRM_TASK") or []) if str(x).startswith("D_")), None)

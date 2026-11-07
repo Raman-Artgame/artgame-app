@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { api } from './api.js'
 import { SalesSpend } from './salesexp.jsx'
 import { Embed } from './places.jsx'
-import { Copy, Sheet } from './ui.jsx'
+import { CityPicker, Copy, Sheet, WaitSheet, cityBase } from './ui.jsx'
 import { CallOutcome, Contact, Feed, Skeleton, bxLink, cleanTitle, dt, money, strip, usePortal } from './crm.jsx'
 import { leftText } from './projects.jsx'
 import { FillBar, FillSheet, LOCK_DOCS, LOCK_KP, Locked, anketaKey, lockFor, missingFor } from './fill.jsx'
@@ -186,14 +186,12 @@ function Qualify({ d, onDone }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   useEffect(() => { api('/bx/dict').then(x => { setDict(x); const s = x.services.find(s => s.name === d.service); setF(v => ({ ...v, service: s?.id || '' })) }, () => setDict({ cities: [], services: [] })) }, [])
-  const pickCity = v => { const c = (dict?.cities || []).find(x => x.name.toLowerCase() === v.trim().toLowerCase()); setF({ ...f, cityName: v, city: c ? c.id : '' }) }
   const changed = (f.city && f.cityName !== d.city) || (+f.area || 0) !== (d.area || 0) || (f.address || '') !== (d.address || '') || (f.service && (dict?.services.find(s => s.id === f.service)?.name || '') !== (d.service || ''))
   const save = () => { setBusy(true); api(`/bx/deals/${d.id}/fields`, { method: 'POST', body: { city: f.city || null, service: f.service || null, area: +f.area || null, address: f.address || null } })
     .then(r => { setMsg(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Записано в Битрикс.'); onDone() }, e => setMsg('Не записалось: ' + e.message)).finally(() => setBusy(false)) }
   return <>
     <h3>Что нужно для расчёта</h3>
-    <label>Город<input list="deal-cities" value={f.cityName} onChange={e => pickCity(e.target.value)} placeholder="Начните вводить" /></label>
-    <datalist id="deal-cities">{(dict?.cities || []).map(c => <option key={c.id} value={c.name} />)}</datalist>
+    <CityPicker cities={dict?.cities || []} value={f.city || (dict?.cities || []).find(c => c.name === d.city)?.id || ''} need={!d.city && !f.city} onPick={(id, name) => setF({ ...f, city: id, cityName: name })} />
     <label>Услуга<select value={f.service} onChange={e => setF({ ...f, service: e.target.value })}><option value="">—</option>{(dict?.services || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
     <label>Площадь, м²<input type="number" min="1" inputMode="decimal" value={f.area} onChange={e => setF({ ...f, area: e.target.value })} /></label>
     <label>Адрес объекта<input value={f.address} onChange={e => setF({ ...f, address: e.target.value })} placeholder="Город, улица, дом" /></label>
@@ -233,6 +231,54 @@ function WorkPanel({ d, portal }) {
   </div>
 }
 
+// Название сделки (HEAD 06.11): не пишется руками — собирается из «Объекта» и «Города»: «1237 · ШКОЛА №12 — ШАХТИНСК».
+function TitleSheet({ d, onClose, onDone }) {
+  const [dict, setDict] = useState(null)
+  const [obj, setObj] = useState(d.object || '')
+  const [city, setCity] = useState({ id: '', name: d.city || '' })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => { api('/bx/dict').then(x => { setDict(x); const c = x.cities.find(c => c.name === d.city); if (c) setCity({ id: c.id, name: c.name }) }, () => setDict({ cities: [] })) }, [])
+  const cityId = city.id && city.name !== d.city ? city.id : null
+  const ok = obj.trim() && (obj.trim() !== (d.object || '') || cityId)
+  const preview = `${d.id} · ${obj.trim().toUpperCase()}${city.name ? ' — ' + cityBase(city.name).toUpperCase() : ''}`
+  const send = () => { setBusy(true); api(`/bx/deals/${d.id}/fields`, { method: 'POST', body: { object: obj.trim(), city: cityId } })
+    .then(r => onDone(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Название записано в Битрикс.'), e => { setErr(e.message); setBusy(false) }) }
+  return <Sheet title="Название сделки" onClose={onClose}>
+    <p className="small muted">Название собирается само из объекта и города — так сделку найдёт любой в Битриксе и в папках Диска.</p>
+    <label>Объект<input value={obj} onChange={e => setObj(e.target.value)} placeholder="«Школа №12», «Кофейня Daily»" autoFocus /></label>
+    {dict ? <CityPicker cities={dict.cities} value={city.id} onPick={(id, name) => setCity({ id, name })} need={!city.name} /> : <Skeleton n={1} />}
+    {obj.trim() && <div className="titleprev">Будет: <b>{preview}</b></div>}
+    {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}
+    <button disabled={!ok || busy} onClick={send}>{busy ? 'Записываю…' : 'Записать'}</button>
+  </Sheet>
+}
+
+// Сделка без «Контакта» (перевели в Битриксе «Сделка» без «Контакт»): телефон берём из лида, контакт создаём одной кнопкой.
+function ContactFix({ d, onDone }) {
+  const c = d.client || {}
+  const [open, setOpen] = useState(false)
+  const [f, setF] = useState({ name: c.name || '', phone: c.phone || '' })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  if (!c.no_contact) return null
+  const send = body => { setBusy(true); setErr(''); api(`/bx/deals/${d.id}/contact`, { method: 'POST', body })
+    .then(r => onDone(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Контакт создан и привязан к сделке.'), e => { setErr(e.message); setBusy(false) }) }
+  return <div className="warnbox">
+    <b>У сделки нет контакта{c.phone_from === 'lead' ? ' — телефон взят из лида' : ''}.</b>
+    <p className="small">Без контакта звонок и WhatsApp из сделки не работают, а в договор не попадёт клиент.</p>
+    {!open ? <div className="dealbtns wrapbtns">
+      <button className="mini" disabled={busy} onClick={() => c.phone ? send({ name: c.name || null, phone: c.phone }) : setOpen(true)}>{busy ? 'Создаю…' : c.phone ? `Создать контакт (${c.phone})` : 'Создать контакт'}</button>
+      {c.phone && <button className="ghost mini" onClick={() => setOpen(true)}>Другой номер</button>}</div>
+      : <div className="dealedit">
+        <input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Имя клиента" />
+        <input value={f.phone} type="tel" inputMode="tel" onChange={e => setF({ ...f, phone: e.target.value })} placeholder="+7 7__ ___ __ __" />
+        <div className="dealbtns"><button className="mini" disabled={busy || f.phone.replace(/\D/g, '').length < 10} onClick={() => send({ name: f.name.trim() || null, phone: f.phone.trim() })}>Создать контакт</button>
+          <button className="ghost mini" onClick={() => setOpen(false)}>Отмена</button></div></div>}
+    {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}
+  </div>
+}
+
 export function DealCard({ id, back, place }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
@@ -267,7 +313,7 @@ export function DealCard({ id, back, place }) {
   return <>
     <div className="hero">
       <a className="back" onClick={back}>← к сделкам</a>
-      <h2>№ {d.id} · {cleanTitle(d.title, d.id)}</h2>
+      <h2>№ {d.id} · {cleanTitle(d.title, d.id)} <button className="pencil" aria-label="Изменить название" onClick={() => setSheet({ kind: 'title' })}>✎</button></h2>
       <span className="tag">{d.stage_name}</span>{d.manager && <span className="tag">{d.manager}</span>}
       <div className="kv">
         <div><span className="muted small">Сумма</span><b>{money(d.sum)}</b></div>
@@ -276,6 +322,7 @@ export function DealCard({ id, back, place }) {
         <div><span className="muted small">Город</span><b>{d.city || '—'}</b></div>
       </div>
       <Contact phone={c.phone} name={[c.name, d.contact && d.contact !== c.name ? d.contact : ''].filter(Boolean).join(' · ')} entity="deal" id={d.id} />
+      <ContactFix key={d.modified} d={d} onDone={said} />
       <div className="steps">{st.map(([k, ok], i) => <div key={k} className={(ok ? 'done' : i === nextI ? 'next' : '') + (cur === k ? ' cur' : '')} onClick={() => setPanel(k)}><i />{name(k)}</div>)}</div>
       <FillBar fill={d.fill} onOpen={() => setSheet({ kind: 'fill' })} />
       <div className="nextstep">{nextI >= 0 ? <><div><span className="small muted">Следующий шаг</span><b>{name(st[nextI][0])}</b></div>
@@ -283,6 +330,7 @@ export function DealCard({ id, back, place }) {
         : <div><b>Все шаги пройдены</b><span className="small muted">проект в работе</span></div>}</div>
       <div className="dealbtns wrapbtns">
         <button className="ghost" onClick={() => setSheet({ kind: 'call' })}>Итог звонка</button>
+        <button className="ghost" onClick={() => setSheet({ kind: 'wait' })}>Жду ответа</button>
         <button className="ghost" onClick={say}>Сообщение</button>
         <button className="ghost" onClick={() => setSheet({ kind: 'fill' })}>Заполнить карточку</button>
         <button className="ghost" onClick={() => setSheet({ kind: 'note' })}>Заметка</button>
@@ -346,6 +394,8 @@ export function DealCard({ id, back, place }) {
     </>}
 
     {sheet?.kind === 'call' && <Sheet title="Итог звонка" onClose={() => setSheet(null)}><CallOutcome path={`/bx/deals/${id}`} auto done={() => said('Итог звонка записан.')} /></Sheet>}
+    {sheet?.kind === 'title' && <TitleSheet d={d} onClose={() => setSheet(null)} onDone={said} />}
+    {sheet?.kind === 'wait' && <WaitSheet api={api} path={`/bx/deals/${id}`} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'stage' && <StageSheet d={d} stages={stages} onClose={() => setSheet(null)} onDone={said} onFill={() => setSheet({ kind: 'fill' })} />}
     {sheet?.kind === 'fill' && <FillSheet d={d} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'note' && <NoteSheet d={d} initial={sheet.text} onClose={() => setSheet(null)} onDone={said} />}

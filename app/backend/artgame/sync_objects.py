@@ -112,8 +112,8 @@ def upsert(conn, deals: list[dict]) -> list[int]:
 
 
 def main():
-    if not settings.gateway_url:
-        print("ARTGAME_GATEWAY_URL не задан — пропуск")
+    if not settings.gateway_url and not settings.bitrix_webhook:
+        print("нет ни шлюза (ARTGAME_GATEWAY_URL), ни вебхука (ARTGAME_BITRIX_WEBHOOK) — пропуск")
         return
     p = db.open_pool()
     deals = fetch_deals()

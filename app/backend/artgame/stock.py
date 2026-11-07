@@ -137,8 +137,24 @@ def month(p: dict = Depends(active)):
             spent = _spent(conn, p["id"], a, start, end)
             limits[a] = {"title": TITLE[a], "limit": lim, "spent": spent, "left": max(0.0, lim - spent) if lim else None}
     live = [r for r in rows if r["status"] in LIVE]
-    return {"categories": cats, "limits": limits, "all": head, "items": [with_receipt(r) for r in rows],
+    return {"categories": cats, "limits": limits, "all": head, "me": p["id"], "items": [with_receipt(r) for r in rows],
             "total": sum(float(r["amount"]) for r in live), "waiting": sum(1 for r in rows if r["status"] == "submitted")}
+
+
+@router.post("/stock/expenses/{expense_id}/cancel")
+def cancel(expense_id: int, p: dict = Depends(active)):
+    """Отменить свою покупку (замечание Анны 06.11: такси записали в «Склад» вместо «Трат»). Можно, пока не выплачено:
+    запись не удаляется — помечается «отменено», из лимита, цен «по факту» и возмещения уходит. HEAD отменяет любую."""
+    head = p["role_code"] == "head"
+    with db.pool.connection() as conn, conn.transaction():
+        row = conn.execute("""UPDATE expenses SET status='cancelled', payout_status='none'
+                              WHERE id=%s AND object_id=0 AND (%s OR person_id=%s) AND status = ANY(%s) AND payout_status <> 'paid'
+                              RETURNING id, amount""", (expense_id, head, p["id"], list(LIVE))).fetchone()
+        if not row:
+            raise HTTPException(409, "эту покупку уже нельзя отменить (выплачено или отклонено) — напишите HEAD")
+        conn.execute("UPDATE fin_accruals SET status='cancelled' WHERE kind='reimburse' AND ref=%s AND status='active'", (str(expense_id),))
+        db.audit(conn, p["id"], "expense_cancel", "expenses", expense_id, {"amount": float(row["amount"]), "where": "stock"})
+    return {"ok": True}
 
 
 # ---------- покупка по каталогу: все роли ----------

@@ -311,6 +311,9 @@ export function StockSpend() {
   const [msg, setMsg] = useState('')
   const load = () => api('/stock/expenses').then(setM, err(setE))
   const loadCat = () => api('/stock/catalog').then(setCat, err(setE))
+  // ошиблись разделом (такси — это «Траты», не «Склад») — отменить свою покупку, пока не выплачено
+  const drop = x => confirm(`Отменить покупку на ${money(+x.amount)}? Она уйдёт из лимита и возмещения.`) &&
+    api(`/stock/expenses/${x.id}/cancel`, { method: 'POST' }).then(() => { setMsg('Покупка отменена.'); load(); loadCat() }, ex => setMsg('Не отменилось: ' + ex.message))
   useEffect(() => { load(); loadCat(); const f = () => load(); window.addEventListener('artgame:queue', f); return () => window.removeEventListener('artgame:queue', f) }, [])
   if (e) return <div className="card"><h3>Склад</h3><p className="small muted">{e}</p></div>
   if (!m || !cat) return <div className="card muted">Загрузка…</div>
@@ -331,7 +334,9 @@ export function StockSpend() {
           x.paid_by === 'company' ? 'деньги компании' : x.payout_status === 'to_pay' ? 'к выплате' : x.payout_status === 'paid' ? 'выплачено' : ''].filter(Boolean).join(' · ')}
           {x.receipt_url && <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></>}</div>
         {x.reason && x.status === 'rejected' && <div className="small">Причина: {x.reason}</div>}</div>
-      <span className={'tag st-' + x.status}>{ST[x.status] || x.status}</span>
+      <div className="qbtns"><span className={'tag st-' + x.status}>{ST[x.status] || x.status}</span>
+        {(x.person_id === m.me || m.all) && ['submitted', 'approved'].includes(x.status) && x.payout_status !== 'paid' &&
+          <button className="ghost mini" onClick={() => drop(x)}>Отменить</button>}</div>
     </div>)}
     {!m.items.length && !form && <p className="small muted">В этом месяце покупок нет.</p>}</>}
   </div>
