@@ -345,7 +345,7 @@ export function StockSpend() {
 // ---------- мои выплаты: каждый видит только своё ----------
 
 const LINE = { piece: 'Смены', bonus: 'Бонус', topup: 'Доплата до минимума', salary: 'Оклад', mop_pct: '% от выручки', mop_bonus: 'Бонус за план',
-  reimburse: 'Возмещение чеков', manual: 'Начисление HEAD' }
+  reimburse: 'Возмещение чеков', manual: 'Начисление HEAD', design_units: 'Единицы дизайна сверх нормы', catalog: 'Каталог референсов' }
 export function MyPay() {
   const [m, setM] = useState(ym())
   const [p, setP] = useState(null)
@@ -354,6 +354,9 @@ export function MyPay() {
     {p && <><div className="kv"><div><span className="muted small">Начислено</span><b>{money(p.accrued)}</b></div>
       <div><span className="muted small">Выплачено</span><b>{money(p.paid)}</b></div><div><span className="muted small">Осталось</span><b>{money(p.left)}</b></div></div>
       {p.lines.map((a, i) => <div key={i} className="row small"><span>{a.detail || LINE[a.kind]}</span><b>{money(+a.amount)}</b></div>)}
-      {!p.lines.length && <p className="small muted">За этот месяц начислений пока нет — HEAD считает ФОТ в конце месяца.</p>}</>}
+      {!p.lines.length && <p className="small muted">За этот месяц начислений пока нет — HEAD считает ФОТ в конце месяца.</p>}
+      {p.rate?.length > 0 && <><h3 style={{ marginTop: 14 }}>Моя ставка</h3>
+        {p.rate.map((r, i) => <div key={i} className="row small"><span>{r.label}</span><b>{money(r.amount)}</b></div>)}
+        <p className="small muted">По листу «Значения». Изменения ставок утверждает HEAD.</p></>}</>}
   </div>
 }

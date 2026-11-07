@@ -28,10 +28,10 @@ TZ = ZoneInfo("Asia/Almaty")
 RATE = {"support": ("pay.support.shift", "pay.support.hour"), "artist": ("pay.artist.shift", "pay.artist.hour"),
         "artist_pro": ("pay.pro.shift", "pay.pro.hour"), "lead_artist": ("pay.chief.shift", "pay.chief.hour"),
         "print_operator": ("pay.print.operator", None), "print_master": ("pay.print.master", None),
-        "carpenter": ("pay.carpenter.shift", "pay.carpenter.hour"),
-        "designer_asst": ("pay.designer_asst.shift", None), "lead_designer": ("pay.lead_designer.shift", None)}
-# Роли на окладе (HEAD 06.11): плотник, помощник дизайнера — сумма из «Значений».
-SALARY_ROLE = {"carpenter": "pay.carpenter.month", "designer_asst": "pay.design_assistant.month"}
+        "carpenter": ("pay.carpenter.shift", "pay.carpenter.hour")}
+# Роли на окладе (HEAD 06–07.11): плотник, помощник и главный дизайнер — сумма из «Значений».
+SALARY_ROLE = {"carpenter": "pay.carpenter.month", "designer_asst": "pay.design_assistant.month",
+               "lead_designer": "pay.design.lead.month"}
 MINIMUM = {"lead_artist": "pay.chief.min_month", "artist_pro": "pay.pro.min_month"}
 GROUP = {"support": "support", "artist": "core", "artist_pro": "core", "lead_artist": "core", "print_operator": "print",
          "print_master": "print", "mop": "sales", "mop_vip": "sales", "carpenter": "workshop",
@@ -331,6 +331,9 @@ def compute(conn, ym: str, by: dict) -> dict:
                          (ym, pid, kind, round(amount, 2), detail, ref, by["id"]))
 
     t0, t1 = datetime(start.year, start.month, 1, tzinfo=TZ), datetime(end.year, end.month, 1, tzinfo=TZ)
+    from . import design
+    units_by, cat_by, dwarn = design.accruals(conn, v, t0, t1)
+    warn += dwarn
     for f in payees_:
         role = f["role_code"]
         if f["scheme"] == "shifts" and f["person_id"]:
@@ -363,6 +366,14 @@ def compute(conn, ym: str, by: dict) -> dict:
                 net, pct_sum, plan, step = mop_pay(v, revenue)
                 acc(f["id"], "mop_pct", pct_sum, f"ступень {step}, выручка без НДС {net:,.0f} ₸".replace(",", " "))
                 acc(f["id"], "mop_bonus", plan, "бонус за план")
+        if role == "lead_designer" and f["person_id"] and units_by.get(f["person_id"]):
+            u, norm, rate = units_by[f["person_id"]], v.get("pay.design.norm_units"), v.get("pay.design.unit_over") or 0
+            if norm is None:
+                warn.append(f"{f['name']}: {u:g} ед. дизайна — норма pay.design.norm_units ждёт решения, сверх нормы не начислено")
+            elif u > norm and rate:
+                acc(f["id"], "design_units", (u - norm) * rate, f"{u - norm:g} ед. сверх нормы {norm:g} × {rate:,.0f} ₸".replace(",", " "))
+        for amount, detail, ref in cat_by.get(f["person_id"], []) if f["person_id"] else []:
+            acc(f["id"], "catalog", amount, detail, ref)
         if f["person_id"]:   # свои деньги по одобренным чекам — к возмещению
             for e in conn.execute("""SELECT e.id, e.amount, c.title FROM expenses e JOIN expense_categories c ON c.code=e.category
                                      WHERE e.person_id=%s AND e.paid_by='own' AND e.status='approved' AND e.payout_status IN ('to_pay','paid')
@@ -479,15 +490,43 @@ def my_pay(ym: str | None = None, p: dict = Depends(active)):
     ym = ym or now_ym()
     bounds(ym)
     with db.pool.connection() as conn:
-        f = conn.execute("SELECT id FROM fin_payees WHERE person_id=%s", (p["id"],)).fetchone()
+        f = conn.execute("SELECT * FROM fin_payees WHERE person_id=%s", (p["id"],)).fetchone()
+        rate = my_rate(vals(conn), p["role_code"], f)
         if not f:
-            return {"month": ym, "lines": [], "accrued": 0, "paid": 0, "left": 0}
+            return {"month": ym, "lines": [], "accrued": 0, "paid": 0, "left": 0, "rate": rate}
         lines = conn.execute("""SELECT kind, amount, detail FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='active' ORDER BY id""",
                              (ym, f["id"])).fetchall()
         pays = conn.execute("""SELECT op_date, amount FROM fin_ledger WHERE period=%s AND payee_id=%s AND article_code='payroll'
                                AND status='active' ORDER BY op_date""", (ym, f["id"])).fetchall()
     accrued, paid = sum(_f(x["amount"]) for x in lines), sum(_f(x["amount"]) for x in pays)
-    return {"month": ym, "lines": lines, "payments": pays, "accrued": accrued, "paid": paid, "left": round(accrued - paid, 2)}
+    return {"month": ym, "lines": lines, "payments": pays, "accrued": accrued, "paid": paid, "left": round(accrued - paid, 2), "rate": rate}
+
+
+def my_rate(v: dict, role: str | None, f: dict | None) -> list[dict]:
+    """Своя ставка из «Значений» строками для «Мои» (таблицу всех ставок не показываем)."""
+    out = []
+    if f and f["scheme"] == "salary" or not f and role in SALARY_ROLE:
+        amount = _f(f["amount"]) if f else 0
+        amount = amount or v.get((f or {}).get("amount_key") or SALARY_ROLE.get(role, ""))
+        if amount:
+            out.append({"label": "Оклад в месяц", "amount": amount})
+    elif f and f["scheme"] == "mop" or role in ("mop", "mop_vip"):
+        if v.get("pay.mop.salary"):
+            out.append({"label": "Оклад МОП", "amount": v["pay.mop.salary"]})
+    else:
+        keys = RATE.get(role)
+        if keys and v.get(keys[0]):
+            out.append({"label": f"Смена {v.get('shift.hours', 10):g} ч", "amount": v[keys[0]]})
+        if keys and keys[1] and v.get(keys[1]):
+            out.append({"label": "Час (смена короче)", "amount": v[keys[1]]})
+        if v.get(MINIMUM.get(role, "")):
+            out.append({"label": "Минимум в месяц", "amount": v[MINIMUM[role]]})
+    if role == "lead_designer":
+        if v.get("pay.design.unit_over"):
+            out.append({"label": "Единица дизайна сверх нормы", "amount": v["pay.design.unit_over"]})
+    if role in ("lead_designer", "designer_asst") and v.get("pay.design.catalog"):
+        out.append({"label": "Каталог референсов (двоим — пополам)", "amount": v["pay.design.catalog"]})
+    return out
 
 
 # ---------- сводка месяца ----------

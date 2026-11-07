@@ -93,6 +93,23 @@
   if (P.bx) caps.mcp = mcp
   window.claude = { use: function (n) { return Promise.resolve(caps[n] || null) } }
 
+  // «Учёба» (HEAD 07.11): приложение открывает место с ?hide=pay,grow — эти разделы скрыты (вкладки, плитки, ссылки),
+  // переход на скрытый раздел ведёт на ?home= (по умолчанию первый видимый). Страницу места не перепаковываем.
+  var qp = new URLSearchParams(location.search)
+  var HIDE = (qp.get('hide') || '').split(',').filter(function (x) { return /^[a-z]+$/.test(x) })
+  if (HIDE.length) {
+    var css = HIDE.map(function (h) { return 'a[href="#' + h + '"],a[href^="#' + h + '-"],[data-v="' + h + '"]' }).join(',') + '{display:none!important}'
+    var st = document.createElement('style'); st.textContent = css
+    document.head ? document.head.appendChild(st) : document.documentElement.appendChild(st)
+    var HOME = /^[a-z]+$/.test(qp.get('home') || '') ? qp.get('home') : ''
+    var guard = function () {
+      var h = decodeURIComponent(location.hash.slice(1)).split(/[-=/]/)[0]
+      if (h && HIDE.indexOf(h) >= 0) location.replace('#' + (HOME || ''))
+    }
+    guard()
+    window.addEventListener('hashchange', guard, true)
+  }
+
   // Ссылки на другие артефакты → открыть место в приложении.
   document.addEventListener('click', function (e) {
     var a = e.target.closest && e.target.closest('a[href]')

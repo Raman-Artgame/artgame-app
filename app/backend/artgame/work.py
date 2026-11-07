@@ -14,7 +14,10 @@ from .deps import current_person
 router = APIRouter(prefix="/api")
 
 # Кто проверяет какую зону (ARCHITECTURE.md «Роли и зоны»). HEAD — всё, ГИП — свой объект.
-CHECKS = {"lead_artist": {"mural"}, "print_master": {"print"}, "lead_designer": {"design"}}
+CHECKS = {"lead_artist": {"mural"}, "artist_pro": {"mural"}, "print_master": {"print"}, "lead_designer": {"design"}}
+# Лестница (константы, HEAD 06.11): Саппорт → Художник → Главный → Про. По зоне проверяют только тех, кто ниже по уровню:
+# Главный не проверяет Главного и Про; Про проверяет Главного. ГИП своего объекта и HEAD — всех.
+RANK_SQL = "(SELECT r.level FROM people pp JOIN roles r ON r.code=pp.role_code WHERE pp.id=x.person_id)"
 
 
 def active(p: dict = Depends(current_person)) -> dict:
@@ -210,7 +213,9 @@ def review_filter(p: dict) -> tuple[str, list]:
     if p["role_code"] == "head":
         return "TRUE", []
     zones = sorted(CHECKS.get(p["role_code"], set()))
-    return "(x.zone_code = ANY(%s) OR o.gip_person_id = %s) AND x.person_id <> %s", [zones, p["id"], p["id"]]
+    own = f"(SELECT level FROM roles WHERE code=%s)"
+    return (f"((x.zone_code = ANY(%s) AND COALESCE({RANK_SQL}, 0) < {own}) OR o.gip_person_id = %s) AND x.person_id <> %s",
+            [zones, p["role_code"], p["id"], p["id"]])
 
 
 @router.get("/review")

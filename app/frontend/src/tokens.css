@@ -338,3 +338,13 @@ button.catitem b { white-space: nowrap; text-align: right; font-weight: 600; }
 .fillchips { grid-column: 1 / -1; margin-top: 8px; }
 .fillgrid label.check { display: flex; align-items: center; gap: 8px; }
 .fillgrid label.check input { width: auto; }
+
+/* Сбор на объект (HEAD 07.11): взял / вернул в одну строку на телефоне */
+.kit h3 { margin: 16px 0 4px; }
+.kitrow { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line2); font-size: 14px; }
+.kitrow input { margin: 2px 0; padding: 9px 10px; }
+.kitq { display: grid; grid-template-columns: 64px 64px 30px; gap: 4px; align-items: center; }
+.kitobr { border-top: 1px solid var(--line2); }
+.kitobr .kitq { grid-template-columns: 1fr auto 1fr; padding: 0 0 6px 30px; }
+.kitobr select { margin: 2px 0; padding: 8px; font-size: 13px; }
+.duty li { margin: 4px 0; }

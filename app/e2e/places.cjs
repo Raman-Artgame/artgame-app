@@ -11,14 +11,14 @@ const call = async (id, path, body) => (await fetch(API + path, { method: body ?
   headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': sign(id) }, body: body && JSON.stringify(body) })).json()
 const shots = process.env.SHOTS || '/var/tmp'
 
-async function open(b, id, vp) {
+async function open(b, id, vp, name = 'Место') {
   const ctx = await b.newContext({ viewport: vp || { width: 390, height: 780 } })
   const p = await ctx.newPage()
   const d = sign(id)
   await p.addInitScript(d => { window.Telegram = { WebApp: { initData: d, initDataUnsafe: { user: { first_name: 'Т' } }, ready() {} } } }, d)
   await p.route('https://telegram.org/**', r => r.fulfill({ body: '' }))
   await p.goto('http://127.0.0.1:4173/')
-  await tab(p, 'Место')
+  await tab(p, name)
   return { p, ctx }
 }
 const frame = p => p.frameLocator('iframe.placeframe')
@@ -64,9 +64,22 @@ async function tab(p, name) {
   await pf.evaluate(() => { const a = document.createElement('a'); a.href = 'https://claude.ai/artifact/AUsM36vXPoSqk6J4LQUZqj#gip'; a.textContent = 'x'; document.body.appendChild(a); a.click() })
   await p.waitForFunction(() => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith('Рабочее место художников'))
 
-  // Художник: только своё место
-  const { p: pa } = await open(b, 2100)
-  assert.strictEqual(await pa.locator('.place .chips button').count(), 0)
+  // Художник (кабинеты HEAD 07.11): место художников — это «Учёба» и должностная; «Оплата», «Рост», «Куратор/ГИП» скрыты
+  const { p: pa } = await open(b, 2100, null, 'Учёба')
+  assert.deepStrictEqual(await pa.locator('.place .chips button').allTextContents(), ['Художники', 'Должностная'])
+  await pa.waitForFunction(() => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith('Рабочее место художников'))
+  const af = () => pa.frames().find(f => f.url().includes('/api/p/art/'))
+  await pa.waitForTimeout(800)
+  assert.ok(af().url().includes('hide=pay%2Cgrow%2Cgip%2Cchief'), af().url())
+  const vis = await af().evaluate(() => ['ucheb', 'pay', 'grow', 'gip'].map(h => [...document.querySelectorAll(`a[href="#${h}"]`)].some(a => a.offsetParent)))
+  assert.deepStrictEqual(vis, [true, false, false, false])
+  await af().evaluate(() => { location.hash = '#pay' })
+  await pa.waitForTimeout(300)
+  assert.strictEqual(await af().evaluate(() => location.hash), '#ucheb')
+  await pa.locator('.place .chips button', { hasText: 'Должностная' }).click()
+  await pa.getByText('Обязанности').waitFor()
+  await pa.screenshot({ path: `${shots}/place-artist-duty.png` })
+  await pa.locator('.place .chips button', { hasText: 'Художники' }).click()
   await pa.waitForFunction(() => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith('Рабочее место художников'))
   await pa.waitForTimeout(1200)
   await pa.screenshot({ path: `${shots}/place-artist-phone.png` })
