@@ -1,4 +1,4 @@
-"""Общие зависимости: человек по подписи Telegram."""
+"""Общие зависимости: человек по подписи Telegram или по сессии входа с компьютера."""
 from fastapi import Depends, Header, HTTPException
 
 from . import db
@@ -6,8 +6,8 @@ from .config import settings
 from .telegram import InitDataError, verify_init_data
 
 
-def load_person(conn, tg_id: int):
-    p = conn.execute("SELECT * FROM people WHERE tg_id = %s", (tg_id,)).fetchone()
+def load_person(conn, tg_id: int, by: str = "tg_id"):
+    p = conn.execute(f"SELECT * FROM people WHERE {'id' if by == 'id' else 'tg_id'} = %s", (tg_id,)).fetchone()
     if p:
         p["zones"] = [r["zone_code"] for r in conn.execute(
             "SELECT zone_code FROM person_zones WHERE person_id = %s ORDER BY zone_code", (p["id"],))]
@@ -21,9 +21,19 @@ def tg_user(x_telegram_init_data: str = Header(default="")) -> dict:
         raise HTTPException(401, f"telegram: {e}")
 
 
-def current_person(user: dict = Depends(tg_user)) -> dict:
-    with db.pool.connection() as conn:
-        p = load_person(conn, int(user["id"]))
+def current_person(x_telegram_init_data: str = Header(default=""), authorization: str = Header(default="")) -> dict:
+    """В Telegram — подпись initData; с компьютера — сессия по коду от бота (weblogin)."""
+    if not x_telegram_init_data and authorization:
+        from .weblogin import person_id
+        pid = person_id(authorization)
+        if not pid:
+            raise HTTPException(401, "session expired")
+        with db.pool.connection() as conn:
+            p = load_person(conn, pid, by="id")
+    else:
+        user = tg_user(x_telegram_init_data)
+        with db.pool.connection() as conn:
+            p = load_person(conn, int(user["id"]))
     if not p:
         raise HTTPException(403, "not registered")
     if p["status"] == "blocked":

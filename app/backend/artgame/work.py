@@ -14,7 +14,10 @@ from .deps import current_person
 router = APIRouter(prefix="/api")
 
 # Кто проверяет какую зону (ARCHITECTURE.md «Роли и зоны»). HEAD — всё, ГИП — свой объект.
-CHECKS = {"lead_artist": {"mural"}, "print_master": {"print"}, "lead_designer": {"design"}}
+CHECKS = {"lead_artist": {"mural"}, "artist_pro": {"mural"}, "print_master": {"print"}, "lead_designer": {"design"}}
+# Лестница (константы, HEAD 06.11): Саппорт → Художник → Главный → Про. По зоне проверяют только тех, кто ниже по уровню:
+# Главный не проверяет Главного и Про; Про проверяет Главного. ГИП своего объекта и HEAD — всех.
+RANK_SQL = "(SELECT r.level FROM people pp JOIN roles r ON r.code=pp.role_code WHERE pp.id=x.person_id)"
 
 
 def active(p: dict = Depends(current_person)) -> dict:
@@ -36,7 +39,7 @@ def work_dict(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         return {
             "objects": conn.execute("SELECT id, title, city FROM objects WHERE status='active' ORDER BY id DESC").fetchall(),
-            "categories": conn.execute("SELECT code, title FROM expense_categories WHERE active ORDER BY sort").fetchall(),
+            "categories": conn.execute("SELECT code, title FROM expense_categories WHERE active AND article='project' ORDER BY sort").fetchall(),
             "zones": p["zones"],
             "printer": consts.latest(conn).get("print.tech.printer"),
         }
@@ -140,7 +143,7 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
         if dup:
             return dup
         check_zone(conn, p, e.zone_code, e.object_id)
-        if not conn.execute("SELECT 1 FROM expense_categories WHERE code=%s AND active", (e.category,)).fetchone():
+        if not conn.execute("SELECT 1 FROM expense_categories WHERE code=%s AND active AND article='project'", (e.category,)).fetchone():
             raise HTTPException(400, "bad category")
         drive_id = None
         if e.receipt:
@@ -210,7 +213,9 @@ def review_filter(p: dict) -> tuple[str, list]:
     if p["role_code"] == "head":
         return "TRUE", []
     zones = sorted(CHECKS.get(p["role_code"], set()))
-    return "(x.zone_code = ANY(%s) OR o.gip_person_id = %s) AND x.person_id <> %s", [zones, p["id"], p["id"]]
+    own = f"(SELECT level FROM roles WHERE code=%s)"
+    return (f"((x.zone_code = ANY(%s) AND COALESCE({RANK_SQL}, 0) < {own}) OR o.gip_person_id = %s) AND x.person_id <> %s",
+            [zones, p["role_code"], p["id"], p["id"]])
 
 
 @router.get("/review")
@@ -223,6 +228,21 @@ def review_list(p: dict = Depends(active)):
                 f"""SELECT x.*, o.title AS object_title, pe.full_name AS person_name
                     FROM {t} x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id
                     WHERE x.status='submitted' AND {cond} ORDER BY x.created_at""", args).fetchall()
+        cats = {c["code"]: c for c in conn.execute("SELECT code, title, article FROM expense_categories").fetchall()}
+        flags = {}   # покупки по каталогу: почему ждёт HEAD (выше потолка / нет ориентира)
+        for r in conn.execute("""SELECT expense_id, array_agg(DISTINCT flag) AS f FROM stock_lines
+                                 WHERE expense_id = ANY(%s) AND flag IN ('over_cap','no_ref') GROUP BY expense_id""",
+                              ([e["id"] for e in out["expenses"]],)).fetchall():
+            flags[r["expense_id"]] = [{"over_cap": "выше потолка цены", "no_ref": "нет ориентира цены"}[f] for f in sorted(r["f"], reverse=True)]
+        for e in out["expenses"]:   # трата отдела продаж: вместо «Офис / без объекта» — статья и сделка
+            c = cats.get(e["category"]) or {}
+            e["category_title"] = c.get("title", e["category"])
+            if c.get("article") in ("stock", "canvas"):
+                fl = flags.get(e["id"])
+                tail = (" · " + ", ".join(fl)) if fl else (" · сверх лимита" if e.get("over_limit") else "")
+                e["object_title"] = ("Склад" if c["article"] == "stock" else "Мастерская холстов") + " · " + e["category_title"] + tail
+            if c.get("article") == "sales":
+                e["object_title"] = "Отдел продаж · " + e["category_title"] + (f" · сделка № {e['deal_id']}" if e.get("deal_id") else "") + (" · сверх лимита" if e.get("over_limit") else "")
         out["expenses"] = [with_receipt(e) for e in out["expenses"]]
         if p["role_code"] != "head":
             for x in out["shifts"]:

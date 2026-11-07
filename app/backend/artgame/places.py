@@ -38,17 +38,18 @@ PLACES = {
     "art":   {"title": "Художники", "roles": ART | {"head"}, "aud": {"все", "производство"}},
     "print": {"title": "Печать", "roles": PRINT | {"lead_artist", "head"}, "aud": {"все", "производство"}},
     "mop":   {"title": "МОП", "roles": MOP | {"head"}, "aud": {"все", "моп"}, "editors": {"mop_vip", "head"}},
-    "calc":  {"title": "Калькулятор", "roles": MOP | {"head"}, "aud": {"все", "моп"}},
     "dz":    {"title": "Дизайн", "roles": DZ | {"head"}, "aud": {"все", "дизайн"}, "shared": {"projects"}},
 }
-ORDER = ["art", "print", "mop", "calc", "dz"]
+ORDER = ["art", "print", "mop", "dz"]
+BX_PLACES = {"mop"}  # на этих страницах работает подтяжка сделок Битрикса (bx.py, place_bx.js)
 # Ссылки между артефактами → места приложения (переписывает place_shim.js).
 ARTIFACTS = {"AUsM36vXPoSqk6J4LQUZqj": "art", "QvriqYAuWNEvypeNKAVAcE": "print", "8uecjatZFajVxKQwneyYQp": "mop",
-             "BGKMEr5zCyQxr2pgWXs8oZ": "calc", "73RaYPuD5WLq43NsvkJFVm": "dz"}
+             "BGKMEr5zCyQxr2pgWXs8oZ": "mop", "73RaYPuD5WLq43NsvkJFVm": "dz"}
 
 TTL = 12 * 3600
 ROOT = Path(__file__).resolve().parent.parent / "places"
 SHIM = Path(__file__).resolve().parent / "place_shim.js"
+BX_JS = Path(__file__).resolve().parent / "place_bx.js"
 DL_DIR = Path(tempfile.gettempdir()) / "artgame-dl"
 DL_TTL = 15 * 60
 MAX_DL = 50_000_000
@@ -136,9 +137,26 @@ def places(p: dict = Depends(active)):
             for c in ORDER if allowed(p, c) and (ROOT / c / "index.html.enc").exists()]
 
 
+@router.get("/bx/scripts")
+def mop_scripts(p: dict = Depends(active)):
+    """Скрипты сообщений и шаги алгоритма МОП для карточки сделки (из зашифрованного places/mop/scripts.json)."""
+    if p["role_code"] not in PLACES["mop"]["roles"]:
+        raise HTTPException(403, "только МОП и HEAD")
+    f = ROOT / "mop" / "scripts.json.enc"
+    if not f.exists():
+        raise HTTPException(404, "скрипты не загружены")
+    return Response(decrypt(f.read_bytes(), "mop/scripts.json"), media_type="application/json",
+                    headers={"Cache-Control": "private, max-age=3600"})
+
+
 @router.get("/p/_shim.js")
 def shim():
     return FileResponse(SHIM, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/p/_bx.js")
+def bx_js():
+    return FileResponse(BX_JS, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
 # ---------- цифры из «Значений» (контракт values_spec.md: config/values) ----------
@@ -150,7 +168,7 @@ def config_values(code: str) -> dict:
         return {"id": "values", "exists": False, "data": None}
     aud = PLACES[code]["aud"]
     vals = {k: consts.num(v["value"]) for k, v in row["values"].items()
-            if v["status"] == "Утверждено" and consts.who_set(v["who"]) & aud and str(v["value"]).strip()}
+            if v["status"] == "Утверждено" and consts.who_set(v.get("who") or "") & aud and str(v["value"]).strip()}
     return {"id": "values", "exists": True,
             "data": {"_updated": row["fetched_at"].isoformat(), "_source": "Значения", "values": vals}}
 
@@ -264,9 +282,10 @@ def dl_get(code: str, tok: str, fid: str):
 
 def inject(html: bytes, code: str, p: dict) -> bytes:
     cfg = {"code": code, "editor": is_editor(p, code), "artifacts": ARTIFACTS,
-           "titles": {c: PLACES[c]["title"] for c in ORDER}}
+           "titles": {c: PLACES[c]["title"] for c in ORDER}, "bx": code in BX_PLACES}
     tag = (f'<script>window.ARTGAME_PLACE={json.dumps(cfg, ensure_ascii=False)}</script>'
-           '<script src="/api/p/_shim.js"></script>').encode()
+           '<script src="/api/p/_shim.js"></script>'
+           + ('<script src="/api/p/_bx.js" defer></script>' if code in BX_PLACES else '')).encode()
     head = html.lstrip()[:200].lower()
     if head.startswith(b"<!doctype") or head.startswith(b"<html"):
         i = html[:4000].lower().find(b"<head")

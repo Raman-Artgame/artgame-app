@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { api } from './api.js'
 
-// Рабочие места ролей (бывшие артефакты). Страница места — во фрейме по подписанной ссылке.
-export function Places({ list }) {
+// Рабочие места ролей (бывшие артефакты) во фрейме по подписанной ссылке.
+// mode='study' (HEAD 06.11): место МОП как «Учёба» — только учебник, тест, правила игры; рабочие разделы живут в карточке сделки.
+// opts[code] = { hide: [...], home } — скрыть разделы места (place_shim.js), extra — своя вкладка-чип (должностная).
+export function Places({ list, mode, opts = {}, extra }) {
   const [code, setCode] = useState(() => { try { return localStorage.getItem('artgame.place') || '' } catch { return '' } })
   const [hash, setHash] = useState('')
   const cur = list.find(p => p.code === code) || list[0]
@@ -15,12 +17,33 @@ export function Places({ list }) {
     window.addEventListener('message', on)
     return () => window.removeEventListener('message', on)
   }, [list])
-  useEffect(() => { try { cur && localStorage.setItem('artgame.place', cur.code) } catch { /* без памяти */ } }, [cur])
-  if (!cur) return <div className="card muted">Для твоей роли рабочего места пока нет.</div>
+  useEffect(() => { try { cur && !mode && localStorage.setItem('artgame.place', cur.code) } catch { /* без памяти */ } }, [cur])
+  const onExtra = extra && code === extra.code
+  if (!cur && !extra) return <div className="card muted">Для твоей роли рабочего места пока нет.</div>
+  const o = (cur && opts[cur.code]) || {}
+  const q = new URLSearchParams({ ...(mode ? { mode } : {}), ...(o.hide?.length ? { hide: o.hide.join(','), home: o.home || '' } : {}) }).toString()
+  const src = cur ? cur.url + (q ? '?' + q : '') + (hash || (o.home ? '#' + o.home : mode === 'study' ? '#ucheb' : '')) : ''
   return <div className="place">
-    {list.length > 1 && <div className="chips">{list.map(p =>
-      <button key={p.code} className={p.code === cur.code ? 'on' : ''} onClick={() => { setCode(p.code); setHash('') }}>{p.title}</button>)}</div>}
-    <iframe ref={frame} key={cur.code + hash} title={cur.title} src={cur.url + hash} className="placeframe" />
+    {(list.length > 1 || extra) && <div className="chips">{list.map(p =>
+      <button key={p.code} className={!onExtra && p.code === cur.code ? 'on' : ''} onClick={() => { setCode(p.code); setHash('') }}>{p.title}</button>)}
+      {extra && <button className={onExtra ? 'on' : ''} onClick={() => setCode(extra.code)}>{extra.title}</button>}</div>}
+    {onExtra || !cur ? extra.render() : <iframe ref={frame} key={cur.code + hash + (mode || '')} title={cur.title} src={src} className="placeframe" />}
+  </div>
+}
+
+// Панель рабочего места внутри карточки сделки: один раздел (#kp или #docs), без шапки; сделка и расчёт подставлены (place_bx.js).
+export function Embed({ place, view, dealId, kp, ds, onDoc }) {
+  const [n, setN] = useState(0)
+  useEffect(() => {
+    const on = e => { if (e.origin === location.origin && e.data?.type === 'artgame:doc' && onDoc) onDoc(e.data) }
+    window.addEventListener('message', on)
+    return () => window.removeEventListener('message', on)
+  }, [onDoc])
+  if (!place) return <p className="small muted">Рабочее место МОП недоступно для вашей роли.</p>
+  try { localStorage.setItem('artgame.bx.open', JSON.stringify({ id: dealId, view, kp, ds, t: Date.now() })) } catch { /* без памяти */ }
+  return <div className="embed">
+    <iframe key={view + dealId + n} title={view} src={`${place.url}?mode=embed#${view}`} />
+    <button className="ghost mini" style={{ position: 'absolute', top: 8, right: 8 }} onClick={() => setN(n + 1)}>Заново</button>
   </div>
 }
 

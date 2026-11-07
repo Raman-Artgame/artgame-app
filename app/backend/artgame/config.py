@@ -14,8 +14,12 @@ class Settings(BaseSettings):
     public_origin: str = "https://app.artgame.world"
     gateway_url: str = ""              # шлюз ARTGAME (MCP) на localhost, чтение Битрикса через bitrix_read
     gateway_token: str = ""            # если шлюз требует токен
+    bitrix_webhook: str = ""           # входящий вебхук Битрикса (права CRM): запись из приложения, решение HEAD 05.11
     drive_inbox: str = ""              # папка Диска для чеков «Офис / без объекта»
     google_sa_file: str = ""            # путь к JSON сервисного аккаунта на сервере
+    # Google Таблица-витрина «Финансы 2026 — витрина (из приложения)» (HEAD 06.11): сервер пишет, руками не правим
+    fin_sheet_id: str = "1-beqAb-w27ZJnLepsdCZBbxIRQYWSUFDsJMdoBneS-s"
+    anthropic_key: str = ""             # ARTGAME_ANTHROPIC_KEY: ИИ-помощник карточки сделки; пусто — разбор правилами
     content_key: str = ""               # hex 32 байта: расшифровка рабочих мест (places/*.enc)
 
 
