@@ -47,7 +47,7 @@ async function tab(p, name) {
 
   // 1. Саппорт: меню без склада и «Объектов», промо объекта со сложностью из сделки, расходы — такси и докупка
   const s = await open(b, 2000)
-  assert.deepStrictEqual(await navText(s), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Мои'])
+  assert.deepStrictEqual(await navText(s), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Кабинет'])
   await s.locator('.promo').getByText('Сложный').waitFor()
   await s.locator('.promo').getByText('Кабанбай батыра 5', { exact: false }).waitFor()
   await s.screenshot({ path: `${shots}/support-smena.png`, fullPage: true })
@@ -66,7 +66,7 @@ async function tab(p, name) {
   await s.getByText('ТБ на объекте').waitFor()
   await s.getByText('1,8 м').waitFor()
   await s.screenshot({ path: `${shots}/support-tb.png`, fullPage: true })
-  await s.getByRole('button', { name: 'Художники' }).click()
+  await s.getByRole('button', { name: 'Учебник' }).click()
   await s.waitForFunction(() => !!document.querySelector('iframe.placeframe')?.contentWindow?.document.querySelector('#tabs'), null, { timeout: 20000 })
   const frame = s.frames().find(f => /\/api\/p\//.test(f.url()))
   assert.ok(/dark=1/.test(frame.url()) && /trip/.test(frame.url()))
@@ -78,6 +78,12 @@ async function tab(p, name) {
   // 2. Оператор печати: склада нет
   const op = await open(b, 4000)
   assert.ok(!(await navText(op)).includes('Склад'))
+  assert.deepStrictEqual(await navText(op), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Кабинет'])
+  await tab(op, 'Учёба')   // печать — как у художников: Учебник, Тест, Фотозадание, Клиентам + ТБ и «Правила игры»
+  assert.deepStrictEqual(await op.locator('.place .chips button').allTextContents(), ['Учебник', 'Тест', 'Фотозадание', 'Клиентам', 'ТБ', 'Правила игры'])
+  await op.getByRole('button', { name: 'Правила игры' }).click()
+  await op.getByText('Правила игры · Оператор печати').waitFor()
+  await op.screenshot({ path: `${shots}/print-pravila.png`, fullPage: true })
 
   // 3. Главный художник: «Продакшн» — рилс с объекта (большой файл идёт прямо в Google — здесь подменён)
   const l = await open(b, 3000)

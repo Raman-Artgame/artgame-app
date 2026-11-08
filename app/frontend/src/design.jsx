@@ -26,29 +26,94 @@ function useTeam() {
   return t
 }
 
+// Страница воронки (HEAD 08.11): карточками — что горит, где что лежит, и по каждой стадии: что делать, как, что ожидается.
+// Ключ — код стадии Битрикса «Дизайн РК» (воронка 13); названия стадий — из Битрикса.
+const GUIDE = {
+  NEW: { color: '#1f86ff', todo: 'Принять заказ и проверить, что от МОП есть задача: что рисуем, где, к какому сроку.',
+    how: 'Главный дизайнер назначает дизайнера, размер и срок. Нет задачи — вопрос МОП в сделке, не в личку.', want: 'В тот же день — «Сбор информации» или «Взято в работу».' },
+  FINAL_INVOICE: { color: '#f11716', todo: 'Срочный заказ — берётся первым, остальное ждёт.',
+    how: 'Срок сегодня или завтра. Вопросы к МОП — сразу, не копить. Главный дизайнер следит лично.', want: 'Эскиз клиенту к сроку, без переносов.' },
+  UC_3KZLWD: { color: '#ace9fb', todo: 'Собрать всё для макета: размеры стены, фото объекта, референсы, пожелания клиента.',
+    how: 'Запросить у МОП через сделку. Фото и размеры — в папку проекта, референсы — из каталогов.', want: 'Полная задача без догадок — тогда «Взято в работу».' },
+  PREPARATION: { color: '#30afff', todo: 'Делать макет и эскиз.',
+    how: 'Стиль — по каталогу референсов. На макете для клиента — поля 50 см у краёв; что печать, что руками — отметить. Готовое — в «ДИЗАЙН/Утвержденные дизайны».',
+    want: 'Макет к сроку дизайна и ссылка на него в карточке.' },
+  PREPAYMENT_INVOIC: { color: '#00c0d5', todo: 'Макет у клиента — ждём ответ.',
+    how: 'Клиенту напрямую не пишем: всё через МОП и Битрикс. Тишина больше суток — напомнить МОП.', want: '«Утверждаю» — или список правок от МОП.' },
+  EXECUTING: { color: '#31c469', todo: 'Внести правки клиента.',
+    how: 'Правки — списком от МОП, все за один раз. Каждый вход в «Правки» — новый круг, без доплаты.', want: 'Исправленный макет быстро и без нового круга.' },
+  UC_LC1X2T: { color: '#00c4fb', todo: 'Макет у МОП: КП и договор.',
+    how: 'Проверь, что в карточке есть папка проекта и ссылка на утверждённый эскиз.', want: 'МОП закрывает с клиентом — стадия «УТВЕРЖДЕНО».' },
+  WON: { color: '#7bd500', todo: 'Утверждено — единица засчитана.', how: 'Нужны размер, дизайнер и ссылка на утверждённый эскиз.', want: 'Эскиз уходит в производство.' },
+}
+const code = id => String(id || '').split(':')[1] || ''
+const today = () => new Date(new Date().toDateString())
+const daysLeft = s => s ? Math.round((new Date(s) - today()) / 864e5) : null
+function hot(x, canAssign) {
+  const d = daysLeft(x.deadline), r = []
+  if (d != null && d < 0) r.push('срок прошёл')
+  else if (d === 0) r.push('срок сегодня')
+  else if (d === 1) r.push('срок завтра')
+  if (code(x.stage) === 'FINAL_INVOICE') r.push('срочно')
+  if (x.rounds >= 2) r.push(`правки: круг ${x.rounds}`)
+  if (canAssign && !x.designer_bx) r.push('нет дизайнера')
+  if (canAssign && !x.size) r.push('нет размера')
+  return r
+}
+function Due({ s }) {
+  const d = daysLeft(s)
+  if (d == null) return <span className="due">без срока</span>
+  return <span className={'due' + (d < 0 ? ' late' : d <= 1 ? ' soon' : '')}>{d < 0 ? `просрочено ${-d} дн` : d === 0 ? 'сегодня' : d === 1 ? 'завтра' : 'до ' + dmy(s)}</span>
+}
+
 function Deals() {
   const [d, setD] = useState(null)
   const [e, setE] = useState('')
   const [open, setOpen] = useState(null)
+  const [only, setOnly] = useState('')
+  const [guide, setGuide] = useState(() => { try { return localStorage.getItem('artgame.dzguide') !== '0' } catch { return true } })
   const team = useTeam()
   const load = (fresh = 0) => api('/design/deals?fresh=' + fresh).then(setD, x => setE(x.message))
   useEffect(() => { load() }, [])
   if (e) return <div className="card muted">{e}</div>
   if (!d) return <div className="card muted">Загрузка…</div>
-  return <div className="card">
-    <div className="head"><h2>Воронка «Дизайн РК»</h2><button className="ghost mini" onClick={() => { setD(null); load(1) }}>Обновить</button></div>
-    {!d.bx && <p className="small why">Запись в Битрикс выключена — изменения пишутся только в журнал.</p>}
-    {d.stages.map(s => { const rows = d.deals.filter(x => x.stage === s.id)
-      if (!rows.length) return null
-      return <div key={s.id} className="stage"><div className="stagehead"><b>{s.name}</b> <span className="muted small">{rows.length}</span></div>
-        {rows.map(x => <div key={x.id} className="row" onClick={() => setOpen(x)} style={{ cursor: 'pointer' }}>
-          <div><b>{x.title || 'Сделка ' + x.id}</b>
-            <div className="small muted">{[x.designer || 'дизайнер не назначен', x.size ? x.size.toUpperCase() + ' · ' + x.units + ' ед.' : 'размер не задан',
-              x.deadline && 'срок ' + dmy(x.deadline), x.rounds ? `правки: круг ${x.rounds}` : '', x.city].filter(Boolean).join(' · ')}</div></div>
-          <span className="tag">№ {x.id}</span></div>)}</div> })}
-    {!d.deals.length && <p className="small muted">{d.can_assign ? 'Открытых сделок дизайна нет.' : 'На вас пока нет сделок дизайна.'}</p>}
+  const fire = d.deals.map(x => ({ x, why: hot(x, d.can_assign) })).filter(f => f.why.length)
+  const stages = d.stages.filter(s => code(s.id) !== 'WON')
+  const toggle = () => { setGuide(!guide); try { localStorage.setItem('artgame.dzguide', guide ? '0' : '1') } catch { /* без памяти */ } }
+  const Card = ({ x, why }) => { const g = GUIDE[code(x.stage)] || {}
+    const i = stages.findIndex(s => s.id === x.stage)
+    return <div className="dzcard" style={{ '--sc': g.color || 'var(--line)' }} onClick={() => setOpen(x)}>
+      <div className="dztop"><span className="tag">№ {x.id}</span><Due s={x.deadline} /></div>
+      <b className="dztitle">{x.title || 'Сделка ' + x.id}</b>
+      <div className="small muted">{[x.designer || 'дизайнер не назначен', x.size ? x.size.toUpperCase() + ' · ' + String(x.units).replace('.', ',') + ' ед.' : 'размер не задан', x.city].filter(Boolean).join(' · ')}</div>
+      {why ? <div>{why.map(w => <span key={w} className="miss">{w}</span>)}</div> :
+        x.rounds ? <div><span className="miss">правки: круг {x.rounds}</span></div> : null}
+      <div className="dzdots">{stages.map((s, k) => <i key={s.id} className={k < i ? 'done' : k === i ? 'on' : ''} />)}</div>
+    </div> }
+  return <>
+    <div className="card dzhero">
+      <div className="head"><h2>Воронка «Дизайн РК»</h2><button className="ghost mini" onClick={() => { setD(null); load(1) }}>Обновить</button></div>
+      <p className="small muted">Единица засчитывается на «УТВЕРЖДЕНО». Клиенту пишет только МОП — через Битрикс. Готовые эскизы — в «ДИЗАЙН/Утвержденные дизайны» папки сделки, оттуда их видят художники.</p>
+      {!d.bx && <p className="small why">Запись в Битрикс выключена — изменения пишутся только в журнал.</p>}
+      <div className="dzfunnel">{stages.map(s => { const n = d.deals.filter(x => x.stage === s.id).length, g = GUIDE[code(s.id)] || {}
+        return <button key={s.id} className={'dzstep' + (only === s.id ? ' on' : '') + (n ? '' : ' empty')} style={{ '--sc': g.color || 'var(--line)' }}
+          onClick={() => setOnly(only === s.id ? '' : s.id)}><b>{n}</b><span>{s.name}</span></button> })}</div>
+      <button className="ghost mini" onClick={toggle}>{guide ? 'Скрыть подсказки' : 'Показать подсказки: что делать на каждой стадии'}</button>
+    </div>
+    {!only && fire.length > 0 && <div className="card dzfire"><h3>🔥 Горит · {fire.length}</h3>
+      <div className="dzgrid">{fire.map(f => <Card key={f.x.id} x={f.x} why={f.why} />)}</div></div>}
+    {stages.filter(s => !only || s.id === only).map(s => { const rows = d.deals.filter(x => x.stage === s.id), g = GUIDE[code(s.id)]
+      if (!rows.length && !only) return null
+      return <div key={s.id} className="card dzstage" style={{ '--sc': g?.color || 'var(--line)' }}>
+        <div className="stagehead"><b>{s.name}</b><span className="muted small">{rows.length}</span></div>
+        {guide && g && <div className="dzguide">
+          <div><i>Что делать</i><span>{g.todo}</span></div><div><i>Как</i><span>{g.how}</span></div><div><i>Что ожидается</i><span>{g.want}</span></div></div>}
+        <div className="dzgrid">{rows.map(x => <Card key={x.id} x={x} />)}</div>
+        {!rows.length && <p className="small muted">Здесь сейчас пусто.</p>}
+      </div> })}
+    {!d.deals.length && <div className="card"><p className="small muted">{d.can_assign ? 'Открытых сделок дизайна нет.' : 'На вас пока нет сделок дизайна.'}</p></div>}
     {open && <DealSheet x={open} d={d} team={team} onClose={() => setOpen(null)} onDone={() => { setOpen(null); load(1) }} />}
-  </div>
+  </>
 }
 
 function DealSheet({ x, d, team, onClose, onDone }) {
@@ -126,7 +191,7 @@ function Catalogs({ me }) {
   const mine = r => r.authors.includes(me.id) || r.created_by === me.id
   return <div className="card">
     <div className="head"><h2>Каталог референсов</h2>{!c.is_head && !form && <button className="mini" onClick={() => setForm({ title: '', style: '', url: '', authors: [me.id] })}>+ Новый</button>}</div>
-    <p className="small muted">Собрал каталог (60+ работ) — отправь HEAD. После «утверждаю» {money(c.amount)} в «Мои»; двое исполнителей — пополам.</p>
+    <p className="small muted">Собрал каталог (60+ работ) — отправь HEAD. После «утверждаю» {money(c.amount)} в «Кабинет»; двое исполнителей — пополам.</p>
     {form && <div className="warnbox">
       <input placeholder="Название" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
       <input placeholder="Стиль" value={form.style || ''} onChange={e => setForm({ ...form, style: e.target.value })} />

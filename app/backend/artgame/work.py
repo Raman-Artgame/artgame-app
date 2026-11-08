@@ -1,5 +1,6 @@
 """Раздел «Смены и расходы». Отправка идемпотентна по client_uid (офлайн-очередь на телефоне)."""
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from uuid import UUID, uuid5
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +12,7 @@ from . import constants as consts
 from . import db, drive, sync_objects
 from .deps import current_person
 
+TZ = ZoneInfo("Asia/Almaty")
 router = APIRouter(prefix="/api")
 
 # Кто проверяет какую зону (ARCHITECTURE.md «Роли и зоны»). HEAD — всё, ГИП — свой объект.
@@ -36,12 +38,14 @@ def check_zone(conn, p: dict, zone: str, object_id: int):
 
 # Саппорт тратит только на такси и докупку на объект (HEAD 08.11).
 ROLE_CATS = {"support": ("transport", "purchase")}
+# Категории только для некоторых ролей: проживание в командировке — Главный, Про, Мастер печати (HEAD 08.11)
+CAT_ROLES = {"lodging": {"lead_artist", "artist_pro", "print_master", "head"}}
 
 
 def cats_for(conn, role: str | None) -> list[dict]:
     rows = conn.execute("SELECT code, title FROM expense_categories WHERE active AND article='project' ORDER BY sort").fetchall()
     allow = ROLE_CATS.get(role or "")
-    return [r for r in rows if not allow or r["code"] in allow]
+    return [r for r in rows if (not allow or r["code"] in allow) and (r["code"] not in CAT_ROLES or role in CAT_ROLES[r["code"]])]
 
 
 @router.get("/work/dict")
@@ -204,6 +208,18 @@ def _photo(conn, p, object_id: int, uid: UUID, tag: str, data: str, note: str) -
     return store_photo(conn, p, get_object(conn, object_id), uuid5(uid, tag), data, note)["id"]
 
 
+def is_trip(conn, person_id: int, object_id: int) -> bool:
+    """Командировка (HEAD 08.11): МОП отметил на объекте — так и есть; иначе город сотрудника ≠ город объекта."""
+    o = conn.execute("SELECT city, trip FROM objects WHERE id=%s", (object_id,)).fetchone()
+    if not o or object_id == 0:
+        return False
+    if o["trip"] is not None:
+        return bool(o["trip"])
+    pc = (conn.execute("SELECT city FROM people WHERE id=%s", (person_id,)).fetchone() or {}).get("city")
+    norm = lambda x: (x or "").split("(")[0].strip().casefold()  # noqa: E731
+    return bool(pc and o["city"] and norm(pc) != norm(o["city"]))
+
+
 def _shift_out(conn, row: dict) -> dict:
     out = dict(row)
     o = conn.execute("SELECT title, city FROM objects WHERE id=%s", (row["object_id"],)).fetchone()
@@ -231,13 +247,77 @@ def start_shift(b: StartIn, p: dict = Depends(active)):
             raise HTTPException(409, "Смена уже идёт — сначала закончи её")
         ph = _photo(conn, p, b.object_id, b.client_uid, "before", b.photo_before, "до смены")
         row = conn.execute(
-            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, geo_lat, geo_lon, status, photo_before)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,'open',%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
-            (b.client_uid, p["id"], b.object_id, b.zone_code, b.started_at, b.geo_lat, b.geo_lon, ph)).fetchone()
+            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, geo_lat, geo_lon, status, photo_before, trip)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,'open',%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
+            (b.client_uid, p["id"], b.object_id, b.zone_code, b.started_at, b.geo_lat, b.geo_lon, ph, is_trip(conn, p["id"], b.object_id))).fetchone()
         if not row:
             row = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
         else:
             db.audit(conn, p["id"], "shift_start", "shifts", row["id"])
+        return _shift_out(conn, row)
+
+
+class TripIn(BaseModel):
+    trip: bool | None = None   # None — считать по городу
+
+
+@router.post("/objects/{object_id}/trip")
+def set_trip(object_id: int, b: TripIn, p: dict = Depends(active)):
+    """МОП поправляет командировку на объекте (HEAD 08.11). Пишется только в приложении, в Битрикс — нет."""
+    if p["role_code"] not in ("mop", "mop_vip", "head") or p.get("_view_as"):
+        raise HTTPException(403, "командировку отмечает МОП или HEAD")
+    with db.pool.connection() as conn, conn.transaction():
+        row = conn.execute("UPDATE objects SET trip=%s WHERE id=%s AND id<>0 RETURNING id, trip", (b.trip, object_id)).fetchone()
+        if not row:
+            raise HTTPException(404, "объекта ещё нет в приложении")
+        db.audit(conn, p["id"], "object_trip", "objects", object_id, {"trip": b.trip})
+        return row
+
+
+@router.get("/objects/{object_id}/trip")
+def get_trip(object_id: int, p: dict = Depends(active)):
+    with db.pool.connection() as conn:
+        o = conn.execute("SELECT id, city, trip FROM objects WHERE id=%s", (object_id,)).fetchone()
+        if not o:
+            raise HTTPException(404)
+        return o
+
+
+class RoadIn(BaseModel):
+    client_uid: UUID
+    object_id: int
+    zone_code: str
+    day: datetime                      # день дороги (время — когда выехал)
+    direction: str = "there"           # there | back
+    note: str | None = Field(default=None, max_length=500)
+    ticket: str | None = Field(default=None, max_length=8_000_000)   # фото билета / чека (по желанию)
+
+
+@router.post("/shifts/road")
+def road_day(b: RoadIn, p: dict = Depends(active)):
+    """День дороги в командировку (HEAD 08.11): идёт на проверку как смена и оплачивается по ставке смены роли."""
+    if b.direction not in ("there", "back"):
+        raise HTTPException(400, "bad direction")
+    with db.pool.connection() as conn, conn.transaction():
+        dup = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
+        if dup:
+            return _shift_out(conn, dup)
+        check_zone(conn, p, b.zone_code, b.object_id)
+        if not is_trip(conn, p["id"], b.object_id):
+            raise HTTPException(400, "Объект не командировочный: дорога не считается. Город — в «Команде», отметка — у МОП в сделке")
+        day0 = b.day.astimezone(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+        if conn.execute("SELECT 1 FROM shifts WHERE person_id=%s AND kind='road' AND status IN ('submitted','approved') "
+                        "AND started_at >= %s AND started_at < %s + interval '1 day'", (p["id"], day0, day0)).fetchone():
+            raise HTTPException(409, "Дорога в этот день уже отмечена")
+        ph = _photo(conn, p, b.object_id, b.client_uid, "ticket", b.ticket, "билет / дорога") if b.ticket else None
+        hours = consts.latest(conn).get("shift.hours") or 10
+        start = b.day.astimezone(TZ)
+        row = conn.execute(
+            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status, kind, trip, work_done, note, photo_after)
+               VALUES (%s,%s,%s,%s,%s,%s,'submitted','road',true,%s,%s,%s) RETURNING *""",
+            (b.client_uid, p["id"], b.object_id, b.zone_code, start, start + timedelta(hours=float(hours)),
+             "Дорога " + ("на объект" if b.direction == "there" else "обратно"), b.note, ph)).fetchone()
+        db.audit(conn, p["id"], "shift_road", "shifts", row["id"], {"direction": b.direction})
         return _shift_out(conn, row)
 
 
@@ -282,6 +362,8 @@ def object_promo(object_id: int, zone: str = "mural", p: dict = Depends(active))
         promo.maybe_sync(conn, obj)
         c["sketches"] = promo.sketches(conn, object_id)
         c.update(promo.progress(conn, object_id, c["area"]))
+        c["trip"] = is_trip(conn, p["id"], object_id)   # командировка для этого человека: в смене кнопка «Дорога», суточные
+        c["trip_set"] = obj["trip"]
         c["now"] = [r["full_name"] for r in conn.execute(
             """SELECT DISTINCT pe.full_name FROM shifts s JOIN people pe ON pe.id=s.person_id
                WHERE s.object_id=%s AND s.status='open' ORDER BY 1""", (object_id,)).fetchall()]

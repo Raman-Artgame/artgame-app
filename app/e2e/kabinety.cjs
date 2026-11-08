@@ -51,18 +51,18 @@ async function tab(p, name) {
 
   // 1. Меню по ролям (HEAD 08.11: «Объекты» влиты в «Проекты», склада у художника нет)
   const a = await open(b, 2000)
-  assert.deepStrictEqual(await navText(a), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Мои'])
+  assert.deepStrictEqual(await navText(a), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Кабинет'])
   await tab(a, 'Расход')
   await a.getByRole('button', { name: 'Отправить расход' }).waitFor()
   assert.strictEqual(await a.getByRole('button', { name: 'Закупка на склад' }).count(), 0)
-  await tab(a, 'Мои')
+  await tab(a, 'Кабинет')
   await a.getByText('Моя ставка').waitFor()
   await a.getByText(/15\s000 ₸/).first().waitFor()
   await a.screenshot({ path: `${shots}/kab-artist-moi.png` })
 
   // 2. Главный художник: «Сбор и сдача» по шагам — взяли (счётчики) → вернули → сдать
   const l = await open(b, 3000)
-  assert.deepStrictEqual(await navText(l), ['Смена', 'Расход', 'Проекты', 'Продакшн', 'Проверка', 'Ещё'])
+  assert.deepStrictEqual(await navText(l), ['Сбор', 'Смена', 'Расход', 'Продакшн', 'Проверка', 'Проекты', 'Учёба', 'Кабинет'])
   await tab(l, 'Сбор')
   await l.getByText(obj.title).waitFor()
   await l.locator('.kitobj', { hasText: obj.title }).getByRole('button', { name: /Роспись/ }).click()
@@ -105,17 +105,18 @@ async function tab(p, name) {
 
   // 4. Главный дизайнер: воронка «Дизайн РК», назначает помощника и размер XS, срок; запись в Битрикс
   const dz = await open(b, 7000)
-  assert.deepStrictEqual(await navText(dz), ['Дизайн', 'Проекты', 'Проверка', 'Учёба', 'Мои', 'Расход'])
-  await dz.getByText('Дизайн кафе').waitFor()
-  await dz.screenshot({ path: `${shots}/kab-dizain.png` })
-  await dz.getByText('Дизайн кафе').click()
+  assert.deepStrictEqual(await navText(dz), ['Дизайн', 'Проекты', 'Проверка', 'Учёба', 'Кабинет', 'Расход'])
+  await dz.locator('.dzfire .dzcard', { hasText: 'Дизайн кафе' }).getByText('нет дизайнера').waitFor()   // «Горит»: нет дизайнера и размера
+  await dz.locator('.dzguide').first().getByText('Что делать').waitFor()
+  await dz.screenshot({ path: `${shots}/kab-dizain.png`, fullPage: true })
+  await dz.locator('.dzstage .dzcard', { hasText: 'Дизайн кафе' }).click()
   await dz.locator('.modal select').nth(1).selectOption({ label: 'Помощник Мира' })
   await dz.locator('.modal .chips button', { hasText: 'XS' }).click()
   await dz.locator('.modal input[type=date]').fill('2026-11-12')
   await dz.screenshot({ path: `${shots}/kab-dizain-karta.png` })
   await dz.getByRole('button', { name: 'Сохранить в Битрикс' }).click()
   await dz.locator('.modal').waitFor({ state: 'detached' })
-  await dz.getByText(/Помощник Мира · XS · 0.5 ед./).waitFor()
+  await dz.locator('.dzstage .dzcard').getByText(/Помощник Мира · XS · 0,5 ед./).waitFor()
   const calls = await (await fetch(API + '/_e2e/bx_calls')).json()
   const upd = calls.filter(c => c.method === 'crm.deal.update' && c.params.id === 1647).pop()
   assert.strictEqual(upd.params.fields.UF_CRM_ARTGAME_DESIGNER, 4693)
@@ -123,7 +124,7 @@ async function tab(p, name) {
 
   // 5. Помощник: видит свою сделку, отправляет каталог референсов вдвоём; HEAD утверждает
   const as = await open(b, 7100)
-  await as.getByText('Дизайн кафе').waitFor()
+  await as.locator('.dzstage .dzcard', { hasText: 'Дизайн кафе' }).waitFor()
   await as.getByRole('button', { name: 'Каталоги' }).click()
   await as.getByRole('button', { name: '+ Новый' }).click()
   await as.getByPlaceholder('Название').fill('Лофт')

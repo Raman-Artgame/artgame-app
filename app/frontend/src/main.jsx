@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { api, inTelegram, setViewAs, setWebToken, webToken } from './api.js'
 import { Login } from './login.jsx'
 import { ExpenseForm, Mine, Review, ShiftForm } from './work.jsx'
-import { People } from './people.jsx'
+import { MyIssued, People } from './people.jsx'
 import { Places, usePlaces } from './places.jsx'
 import { DEAL_ROLES, Deals } from './deals.jsx'
 import { Journal } from './journal.jsx'
@@ -75,10 +75,13 @@ const KIT = new Set(['lead_artist', 'artist_pro', 'print_master', 'head'])
 // HEAD 08.11: «Продакшн» — у Главного, Про и Мастера настенной печати (HEAD утверждает); склад — только у них же (и плотника).
 const PROD = new Set(['lead_artist', 'artist_pro', 'print_master', 'head'])
 const STOCK = new Set(['lead_artist', 'artist_pro', 'print_master', 'carpenter'])
+const PRINT = new Set(['print_operator', 'print_master'])
 const STUDY = {
   // HEAD 08.11: в «Учёбе» — База знаний (учебник), Тест, Клиентам; «Выезд» переехал в «Смену» подсказками,
   // «Куратор/ГИП», «Главный художник», «Рост», «Оплата» скрыты. Рядом свои чипы: «ТБ» и «Правила игры».
-  art: () => ({ home: 'ucheb', hide: ['trip', 'gip', 'chief', 'grow', 'pay'] }),
+  art: () => ({ home: 'ucheb', hide: ['trip', 'gip', 'chief', 'grow', 'pay'], sections: [['ucheb', 'Учебник'], ['test', 'Тест'], ['mat', 'Клиентам']] }),
+  // печать — так же: Учебник, Тест, Фотозадание, Клиентам; «Запуск» и «Сборы» — в «Смене» и «Сборе», «Экзамен» со ставками — скрыт
+  print: () => ({ home: 'ucheb', hide: ['start', 'kit', 'exam'], sections: [['ucheb', 'Учебник'], ['test', 'Тест'], ['foto', 'Фотозадание'], ['mat', 'Клиентам']] }),
   dz: () => ({ home: 'learn', hide: ['board', 'handoff'] }),
 }
 const PLAIN = new Set(['today', 'leads', 'deals', 'projects', 'month'])
@@ -90,8 +93,9 @@ function Main({ me, web, logout }) {
   const mopPlace = places.find(p => p.code === 'mop')
   const other = places.filter(p => p.code !== 'mop')
   const role = me.role_code
-  const art = ART.has(role), dz = DZ.has(role), cab = art || dz
-  const studyList = cab ? places.filter(p => STUDY[p.code]) : []
+  const art = ART.has(role), dz = DZ.has(role), prn = PRINT.has(role), cab = art || dz || prn
+  const own = art ? 'art' : prn ? 'print' : 'dz'   // своё место: Главному доступно и «Печать», но в «Учёбе» — только своё
+  const studyList = cab ? places.filter(p => p.code === own) : []
   const isHead = role === 'head'
   const [tab, setTab] = useState(isHead ? 'home' : DEAL_ROLES.has(role) ? 'today' : role === 'carpenter' ? 'stock' : dz ? 'design' : 'shift')
   const [dealId, setDealId] = useState(null)
@@ -114,17 +118,18 @@ function Main({ me, web, logout }) {
     ...(pulse ? { review: +pulse.review.shifts + +pulse.review.expenses, people: pulse.pending.length } : {}) }
   const mop = ['mop', 'mop_vip'].includes(me.role_code)
   const carp = me.role_code === 'carpenter'
-  // Главный и Про: Смена · Расход · Проекты · Продакшн · Проверка, в «Ещё» — Сбор, Учёба, Мои.
-  const tabs = cab ? (SENIOR.has(role) ? [['shift', 'Смена'], ['expense', 'Расход'], ['projects', 'Проекты'], ['prod', 'Продакшн'], ['review', 'Проверка'],
-    ['kit', 'Сбор'], ['study', 'Учёба'], ['mine', 'Мои']] :
-    [...(dz ? [['design', 'Дизайн']] : [['shift', 'Смена'], ['expense', 'Расход']]), ['projects', 'Проекты'],
-      ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['study', 'Учёба'], ['mine', 'Мои'],
-      ...(dz ? [['expense', 'Расход']] : [])]) :
+  // HEAD 08.11 (вечер): у художников и печати всё внизу одной лентой, в таком порядке — Сбор · Смена · Расход · Продакшн ·
+  // Проверка · Проекты · Учёба · Кабинет (у кого что есть). Склад — внутри «Расхода». «Мои» → «Кабинет».
+  const worker = art || PRINT.has(role)
+  const tabs = worker ? [...(KIT.has(role) ? [['kit', 'Сбор']] : []), ['shift', 'Смена'], ['expense', 'Расход'],
+    ...(PROD.has(role) ? [['prod', 'Продакшн']] : []), ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['projects', 'Проекты'],
+    ['study', 'Учёба'], ['mine', 'Кабинет']] :
+    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход']] :
    [...(sales ? [['today', 'Сегодня'], ['leads', 'Лиды'], ['deals', 'Сделки'], ['projects', 'Проекты'], ['month', 'Месяц']] : []),
     ...(mopPlace ? [['study', 'Учёба']] : []),
     ...(other.length ? [['place', 'Место']] : []),
     ...(mop || carp ? [] : [['shift', 'Смена'], ['expense', 'Расход']]),
-    ...(STOCK.has(role) ? [['stock', 'Склад']] : []), ['mine', 'Мои'],
+    ...(STOCK.has(role) ? [['stock', 'Склад']] : []), ['mine', 'Кабинет'],
     ...(!sales ? [['projects', 'Проекты']] : []),
     ...(PROD.has(role) ? [['prod', 'Продакшн']] : []),
     ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []),
@@ -137,10 +142,10 @@ function Main({ me, web, logout }) {
   const duty = DUTIES[role]
   if (tab === 'place' || tab === 'study') return <>
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
-      extra={[art && { code: 'tb', title: 'ТБ', render: () => <Safety /> },
+      extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> },
         duty && { code: 'duty', title: 'Правила игры', render: () => <Duty d={duty} g={GROW[role]} /> }].filter(Boolean)} /> :
     <Places key={tab} list={tab === 'study' ? [mopPlace] : other} mode={tab === 'study' ? 'study' : ''} />}
-    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} />
+    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={worker} />
   </>
   return <>
     <div className="wrap">
@@ -154,10 +159,10 @@ function Main({ me, web, logout }) {
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
         tab === 'fin' ? <Finance /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design me={me} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
-        tab === 'mine' && (mop || carp || !me.zones.length) ? <MyPay /> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><Mine /></> : <Review />}
+        tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyPay /><MyIssued /></> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><MyIssued /><Mine /></> : <Review />}
     </div>
-    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} />
+    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={worker} />
   </>
 }
 
@@ -186,12 +191,18 @@ function Duty({ d, g }) {
   return <div className="wrap"><div className="card duty">
     <span className="tag">{d.step}</span><h2>Правила игры · {d.title}</h2><p>{d.about}</p><p className="small muted">{d.boss}</p>
     <h3>Что ты делаешь</h3><ul>{d.duty.map((x, i) => <li key={i}>{x}</li>)}</ul>
-    <p className="small muted">Ставки — в «Мои».</p>
-  </div>{g && <Grow g={g} />}</div>
+    <p className="small muted">Ставки — в «Кабинете».</p>
+  </div>
+  {d.skills && <div className="card duty"><h3>Какой ты: команда, управление, мастерство</h3>
+    {d.skills.map(([t, x]) => <div key={t} className="skill"><b>{t}</b><p className="small">{x}</p></div>)}</div>}
+  {d.rules && <div className="card duty"><h3>Правила</h3>
+    {d.rules.map(([t, x]) => <div key={t} className="skill"><b>{t}</b><p className="small">{x}</p></div>)}</div>}
+  {d.next && <div className="card duty"><h3>Куда дальше</h3><p className="small">{d.next}</p></div>}
+  {g && <Grow g={g} />}</div>
 }
 
 // ТБ (HEAD 08.11): главное по безопасности с цифрами из «Значений» (safety.*). Полная глава — «База знаний», глава 10.
-function Safety() {
+function Safety({ print }) {
   const [v, setV] = useState(null)
   useEffect(() => { api('/work/dict').then(d => setV(d.safety || {}), () => setV({})) }, [])
   const n = (k, d) => String(v?.[k] ?? d).replace('.', ',')
@@ -203,12 +214,12 @@ function Safety() {
     [`${n('safety.rescue_min', 10)}–${n('safety.rescue_max', 15)} мин`, 'За столько эвакуировать человека, повисшего в привязи. Сразу — скорая.'],
     ['1 + 1', 'Один на высоте не работает: внизу всегда второй.'],
     ['Очки', 'Всегда. Респиратор — распыление, аэрозоль, шлифовка.'],
-    ['Стоп', 'Дым, искрение, вибрация, повреждённый кабель — остановить, отключить, сообщить Главному. Самим не чинить.']]
+    ['Стоп', 'Дым, искрение, вибрация, повреждённый кабель — остановить, отключить, сообщить ' + (print ? 'Мастеру печати' : 'Главному') + '. Самим не чинить.']]
   return <div className="wrap"><div className="card tbcard">
     <span className="tag">Техника безопасности</span><h2>ТБ на объекте</h2>
-    <p className="small muted">Никто не работает на оборудовании без обучения и сданной ТБ. Допуск даёт Главный художник или Художник-Про.</p>
+    <p className="small muted">Никто не работает на оборудовании без обучения и сданной ТБ. Допуск даёт {print ? 'Мастер настенной печати (принтер), к вышкам и инструменту — Главный художник или Художник-Про' : 'Главный художник или Художник-Про'}.</p>
     {rows.map(([k, t]) => <div key={k} className="tbrow"><b>{k}</b><span>{t}</span></div>)}
-    <p className="small muted">Подробно — «База знаний», глава 10 «Техника безопасности». Цифры — из «Значений».</p>
+    <p className="small muted">Подробно — «Учебник», глава {print ? 11 : 10} «Техника безопасности». Цифры — из «Значений».</p>
   </div></div>
 }
 
@@ -217,7 +228,9 @@ const ICON = {
   deals: 'M3 4h18l-7 8v6l-4 2v-8z', month: 'M4 20v-8m6 8V5m6 15v-5M3 20h18', place: 'M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z',
   projects: 'M3 21V8l9-5 9 5v13M9 21v-7h6v7M3 12h18', study: 'M4 5h7a2 2 0 0 1 2 2v13H6a2 2 0 0 1-2-2zm9 2a2 2 0 0 1 2-2h5v13a2 2 0 0 1-2 2h-5',
   shift: 'M4 8h16v11H4zM9 8V5h6v3', expense: 'M3 6h18v12H3zm0 4h18', objects: 'M3 11l9-7 9 7v10H3zm6 10v-6h6v6',
-  mine: 'M4 6h16M4 12h16M4 18h10', review: 'M20 6 9 17l-5-5', journal: 'M5 3h11a3 3 0 0 1 3 3v15H8a3 3 0 0 1-3-3zm4 5h6',
+  mine: 'M3 5h18v14H3zM8 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm-3 5a3 3 0 0 1 6 0M14 9h4M14 13h4',
+  // «Продакшн» (HEAD 08.11): камера с кнопкой записи
+  prod: 'M3 7h12v10H3zm12 3.5 6-3.5v10l-6-3.5M7 10.5l3 1.5-3 1.5z', review: 'M20 6 9 17l-5-5', journal: 'M5 3h11a3 3 0 0 1 3 3v15H8a3 3 0 0 1-3-3zm4 5h6',
   fin: 'M12 3v18M16 7H10a3 3 0 0 0 0 6h4a3 3 0 0 1 0 6H7', stock: 'M3 7l9-4 9 4v10l-9 4-9-4zm0 0 9 4 9-4M12 11v10',
   people: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm7 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM2 20a7 7 0 0 1 14 0zm11 0a6 6 0 0 1 9 0',
   kit: 'M9 4h6l1 3h4v13H4V7h4zm-1 8 3 3 5-5', design: 'M12 3a9 9 0 1 0 0 18c1 0 1.5-.7 1.5-1.5 0-1-.8-1.4-.8-2.3 0-.9.7-1.6 1.6-1.6H17a4 4 0 0 0 4-4c0-4.7-4-8.6-9-8.6zM7.5 12h.01M10 7.5h.01M15 7.5h.01',
@@ -227,16 +240,18 @@ const ICON = {
 const Icon = ({ k }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[k] || ICON.more} /></svg>
 const MAX = 6   // кнопок в меню без листа «Ещё»
 
-function Nav({ tabs, tab, setTab, counts = {} }) {
+// scroll (художники и печать, HEAD 08.11): все кнопки внизу одной лентой без «Ещё», лента листается пальцем.
+function Nav({ tabs, tab, setTab, counts = {}, scroll }) {
   const [more, setMore] = useState(false)
-  const main = tabs.length > MAX ? tabs.slice(0, MAX - 1) : tabs
-  const rest = tabs.length > MAX ? tabs.slice(MAX - 1) : []
+  const fold = !scroll && tabs.length > MAX
+  const main = fold ? tabs.slice(0, MAX - 1) : tabs
+  const rest = fold ? tabs.slice(MAX - 1) : []
   const inRest = rest.find(([k]) => k === tab)
   return <>
     {more && <div className="sheet" onClick={() => setMore(false)}><div className="sheetbox" onClick={e => e.stopPropagation()}>
       {rest.map(([k, t]) => <button key={k} className={'ghost' + (tab === k ? ' on' : '')} onClick={() => { setTab(k); setMore(false) }}><Icon k={k} />{t}</button>)}
     </div></div>}
-    <nav>
+    <nav className={scroll && tabs.length > MAX ? 'scroll' : ''}>
       {main.map(([k, t]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon k={k} />{t}{counts[k] ? <i className="cnt" aria-hidden="true">{counts[k]}</i> : null}</button>)}
       {rest.length > 0 && <button className={inRest ? 'on' : ''} onClick={() => setMore(true)}><Icon k={inRest ? inRest[0] : 'more'} />{inRest ? inRest[1] : 'Ещё'}</button>}
     </nav>

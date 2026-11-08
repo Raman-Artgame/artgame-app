@@ -23,13 +23,18 @@ export function Places({ list, mode, opts = {}, extra: ex }) {
   const onExtra = !!extra
   if (!cur && !extras.length) return <div className="card muted">Для твоей роли рабочего места пока нет.</div>
   const o = (cur && opts[cur.code]) || {}
-  const q = new URLSearchParams({ ...(mode ? { mode } : {}), ...(o.hide?.length ? { hide: o.hide.join(','), home: o.home || '' } : {}), ...(o.nocalc ? { nocalc: '1' } : {}), dark: '1' }).toString()
+  // sections (HEAD 08.11): разделы места — такими же чипами, как «ТБ» и «Правила игры», в одном ряду; свои вкладки места скрыты
+  const secs = o.sections || null
+  const q = new URLSearchParams({ ...(mode ? { mode } : {}), ...(o.hide?.length ? { hide: o.hide.join(','), home: o.home || '' } : {}), ...(o.nocalc ? { nocalc: '1' } : {}),
+    ...(secs ? { notabs: '1' } : {}), dark: '1' }).toString()
   const src = cur ? cur.url + (q ? '?' + q : '') + (hash || (o.home ? '#' + o.home : mode === 'study' ? '#ucheb' : '')) : ''
+  const curSec = (hash || '#' + (o.home || 'ucheb')).slice(1).split('-')[0]
   return <div className="place">
-    {(list.length > 1 || extras.length > 0) && <div className="chips">{list.map(p =>
+    {(list.length > 1 || extras.length > 0 || secs) && <div className="chips placechips">{secs ? secs.map(([h, t]) =>
+      <button key={h} className={!onExtra && curSec === h ? 'on' : ''} onClick={() => { setCode(cur.code); setHash('#' + h) }}>{t}</button>) : list.map(p =>
       <button key={p.code} className={!onExtra && p.code === cur.code ? 'on' : ''} onClick={() => { setCode(p.code); setHash('') }}>{p.title}</button>)}
       {extras.map(x => <button key={x.code} className={code === x.code ? 'on' : ''} onClick={() => setCode(x.code)}>{x.title}</button>)}</div>}
-    {onExtra || !cur ? (extra || extras[0]).render() : <iframe ref={frame} key={cur.code + hash + (mode || '')} title={cur.title} src={src} className="placeframe" />}
+    {onExtra || !cur ? <div className="placeextra">{(extra || extras[0]).render()}</div> : <iframe ref={frame} key={cur.code + hash + (mode || '')} title={cur.title} src={src} className="placeframe" />}
   </div>
 }
 

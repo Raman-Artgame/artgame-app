@@ -346,7 +346,7 @@ export function StockSpend() {
 // ---------- мои выплаты: каждый видит только своё ----------
 
 const LINE = { piece: 'Смены', bonus: 'Бонус', topup: 'Доплата до минимума', salary: 'Оклад', mop_pct: '% от выручки', mop_bonus: 'Бонус за план',
-  reimburse: 'Возмещение чеков', manual: 'Начисление HEAD', design_units: 'Единицы дизайна сверх нормы', catalog: 'Каталог референсов', reels: 'Рилс (утверждены HEAD)' }
+  reimburse: 'Возмещение чеков', manual: 'Начисление HEAD', design_units: 'Единицы дизайна сверх нормы', catalog: 'Каталог референсов', reels: 'Рилс (утверждены HEAD)', trip_food: 'Суточные в командировке' }
 export function MyPay() {
   const [m, setM] = useState(ym())
   const [p, setP] = useState(null)

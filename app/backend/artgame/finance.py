@@ -342,7 +342,7 @@ def compute(conn, ym: str, by: dict) -> dict:
     for f in payees_:
         role = f["role_code"]
         if f["scheme"] == "shifts" and f["person_id"]:
-            shifts = conn.execute("""SELECT id, started_at, ended_at, bonus FROM shifts WHERE person_id=%s AND status='approved'
+            shifts = conn.execute("""SELECT id, started_at, ended_at, bonus, kind, trip FROM shifts WHERE person_id=%s AND status='approved'
                                      AND started_at >= %s AND started_at < %s ORDER BY started_at""", (f["person_id"], t0, t1)).fetchall()
             piece, bonus, missing = 0.0, 0.0, ""
             for s in shifts:
@@ -352,7 +352,16 @@ def compute(conn, ym: str, by: dict) -> dict:
                 bonus += _f(s["bonus"])
             if shifts and missing:
                 warn.append(f"{f['name']}: {missing}")
-            acc(f["id"], "piece", piece, f"{len(shifts)} смен", ",".join(str(s["id"]) for s in shifts))
+            roads = sum(s["kind"] == "road" for s in shifts)
+            acc(f["id"], "piece", piece, f"{len(shifts)} смен" + (f", из них дорога {roads}" if roads else ""), ",".join(str(s["id"]) for s in shifts))
+            # суточные (HEAD 08.11): за каждый день со сменой или дорогой в командировке — pay.trip_food из «Значений»
+            trip_days = sorted({s["started_at"].astimezone(TZ).date() for s in shifts if s["trip"]})
+            if trip_days:
+                food = v.get("pay.trip_food")
+                if food:
+                    acc(f["id"], "trip_food", food * len(trip_days), f"суточные {len(trip_days)} дн. × {food:,.0f} ₸".replace(",", " "))
+                else:
+                    warn.append(f"{f['name']}: {len(trip_days)} дн. командировки, но pay.trip_food в «Значениях» нет — суточные не начислены")
             acc(f["id"], "bonus", bonus, "бонус печати сверх плана")
             fixed = _f(f["amount"]) or (v.get(f["amount_key"]) or 0 if f["amount_key"] else 0)   # оклад сверх смен, если задан
             acc(f["id"], "salary", fixed, "оклад")
@@ -528,6 +537,8 @@ def my_rate(v: dict, role: str | None, f: dict | None) -> list[dict]:
             out.append({"label": "Час (смена короче)", "amount": v[keys[1]]})
         if v.get(MINIMUM.get(role, "")):
             out.append({"label": "Минимум в месяц", "amount": v[MINIMUM[role]]})
+        if keys and v.get("pay.trip_food"):   # командировка (HEAD 08.11): дорога — как смена, плюс суточные
+            out.append({"label": "Суточные в командировке, за день", "amount": v["pay.trip_food"]})
     if role == "lead_designer":
         if v.get("pay.design.unit_over"):
             out.append({"label": "Единица дизайна сверх нормы", "amount": v["pay.design.unit_over"]})

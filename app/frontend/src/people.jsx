@@ -38,10 +38,66 @@ export function People({ ROLE, ZONE }) {
           <option value={0}>— не связан —</option>
           {(bx || []).map(u => <option key={u.id} value={u.id}>{u.name}{u.position ? ` · ${u.position}` : ''}</option>)}
         </select></label>}
+      <label className="small muted">Город сотрудника <span>· объект в другом городе — командировка: дорога как смена и суточные</span>
+        <input defaultValue={p.city || ''} placeholder="Астана" onBlur={e => e.target.value.trim() !== (p.city || '') && save(p.id, { city: e.target.value })} /></label>
+      <IssuedEdit person={p} />
       {p.role_code !== 'head' && p.status !== 'blocked' && <a className="seeas" onClick={() => startViewAs(p.id)}>смотреть как {p.full_name.split(' ')[0]}</a>}
       {p.role_code !== 'head' && (p.status === 'blocked'
         ? <a onClick={() => save(p.id, { status: 'active' })}>открыть вход</a>
         : p.status === 'active' && <a onClick={() => confirm(`Закрыть вход: ${p.full_name}?`) && save(p.id, { status: 'blocked' })}>закрыть вход</a>)}
     </div>)}
+  </div>
+}
+
+// «Выдано и допуски» (HEAD 08.11): что у человека на руках. HEAD выдаёт, человек в «Кабинете» жмёт «Получил».
+export const ITEM_KINDS = [['key', 'Ключи'], ['clothes', 'Одежда'], ['tool', 'Инструмент'], ['access', 'Доступы'], ['permit', 'Допуски'], ['other', 'Другое']]
+const IST = { issued: 'на руках', returned: 'вернул', lost: 'утеряно' }
+export function IssuedEdit({ person, onlyPermit }) {
+  const [open, setOpen] = useState(false)
+  const [l, setL] = useState(null)
+  const [v, set] = useState({ kind: onlyPermit ? 'permit' : 'key', title: '', qty: 1, note: '' })
+  const [err, setErr] = useState('')
+  const load = () => api(`/people/${person.id}/items`).then(r => setL(r.items), e => setErr(e.message))
+  useEffect(() => { if (open) load() }, [open])
+  const add = () => api(`/people/${person.id}/items`, { method: 'POST', body: { ...v, qty: +v.qty || 1, note: v.note || null } })
+    .then(() => { set({ ...v, title: '', note: '' }); load() }, e => setErr(e.message))
+  const close = (it, status) => confirm(status === 'lost' ? `Отметить «${it.title}» утерянным?` : `«${it.title}» вернули?`) &&
+    api(`/items/${it.id}/close`, { method: 'POST', body: { status } }).then(load, e => setErr(e.message))
+  const kinds = onlyPermit ? ITEM_KINDS.filter(k => k[0] === 'permit') : ITEM_KINDS
+  return <div className="issued">
+    <a onClick={() => setOpen(!open)}>{open ? '▴' : '▾'} Выдано и допуски</a>
+    {open && <div className="issued-box">
+      {err && <p className="small why">{err}</p>}
+      {!l ? <p className="small muted">Загрузка…</p> : !l.length ? <p className="small muted">Пока ничего не выдано.</p> :
+        l.map(it => <div key={it.id} className={'row it-' + it.status}><div><b>{it.title}</b>{it.qty > 1 ? ` × ${it.qty}` : ''}
+          <div className="small muted">{(ITEM_KINDS.find(k => k[0] === it.kind) || [, ''])[1]} · {IST[it.status]}{it.ack_at ? ' · получил ✓' : it.status === 'issued' ? ' · ещё не подтвердил' : ''}{it.note ? ` · ${it.note}` : ''}</div></div>
+          {it.status === 'issued' && <span className="acts"><a onClick={() => close(it, 'returned')}>вернул</a> <a onClick={() => close(it, 'lost')}>утеряно</a></span>}</div>)}
+      <div className="chips">{kinds.map(([k, t]) => <button key={k} className={v.kind === k ? 'on' : ''} onClick={() => set({ ...v, kind: k })}>{t}</button>)}</div>
+      <input placeholder={v.kind === 'permit' ? 'К чему допуск: вышка, аэрограф, принтер…' : v.kind === 'access' ? 'Доступ к чему (без паролей)' : 'Что выдали'} value={v.title} onChange={e => set({ ...v, title: e.target.value })} />
+      <div className="seg"><input type="number" min="1" value={v.qty} onChange={e => set({ ...v, qty: e.target.value })} style={{ maxWidth: 90 }} />
+        <input placeholder="Примечание" value={v.note} onChange={e => set({ ...v, note: e.target.value })} /></div>
+      <button className="mini" disabled={v.title.trim().length < 2} onClick={add}>Выдать</button>
+    </div>}
+  </div>
+}
+
+// В «Кабинете» человека: что у него на руках и допуски; «Получил» — подтверждение.
+export function MyIssued() {
+  const [l, setL] = useState(null)
+  const load = () => api('/items/my').then(r => setL(r.items), () => setL([]))
+  useEffect(() => { load() }, [])
+  if (!l) return null
+  const on = l.filter(x => x.status === 'issued')
+  const permits = on.filter(x => x.kind === 'permit'), things = on.filter(x => x.kind !== 'permit')
+  const ack = it => api(`/items/${it.id}/ack`, { method: 'POST' }).then(load)
+  const Row = it => <div key={it.id} className="row"><div><b>{it.title}</b>{it.qty > 1 ? ` × ${it.qty}` : ''}
+    <div className="small muted">{(ITEM_KINDS.find(k => k[0] === it.kind) || [, ''])[1]} · выдал {it.issued_by_name} {new Date(it.issued_at).toLocaleDateString('ru-RU')}{it.note ? ` · ${it.note}` : ''}</div></div>
+    {it.ack_at ? <span className="tag st-approved">✓</span> : <button className="mini" onClick={() => ack(it)}>Получил</button>}</div>
+  return <div className="card issued-my">
+    <h2>Выдано мне</h2>
+    {things.length ? things.map(Row) : <p className="small muted">Ключи, одежда, инструмент, доступы — когда выдадут, появятся здесь.</p>}
+    <h3 style={{ marginTop: 14 }}>Допуски</h3>
+    {permits.length ? permits.map(Row) : <p className="small muted">Допуск к оборудованию даёт Главный художник, Художник-Про или Мастер печати после ТБ.</p>}
+    <p className="small muted">За выданное отвечаешь ты: вернуть при уходе, потерю — сразу сообщить.</p>
   </div>
 }
