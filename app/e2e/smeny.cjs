@@ -49,8 +49,9 @@ async function tab(p, name) {
   const row = h.locator('.person', { hasText: 'Дана' })
   await row.getByText('ждёт роли').waitFor()
   await row.locator('select').selectOption('artist')
-  await row.getByRole('button', { name: 'Роспись' }).click()
-  await h.waitForTimeout(500)
+  // зона роли ставится сама (08.11): «Роспись» уже включена, кликать не нужно
+  await h.waitForFunction(() => [...document.querySelectorAll('.person')].find(r => r.textContent.includes('Дана'))
+    ?.querySelector('.zones button:not(.ghost)')?.textContent === 'Роспись')
   await h.screenshot({ path: `${shots}/0-komanda.png` })
   await a.reload()
 
