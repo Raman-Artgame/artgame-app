@@ -253,3 +253,17 @@ def test_history_import(client, monkeypatch):
     assert client.post("/api/fin/payroll/2026-10/compute", headers=hdr(1000)).status_code == 400
     s = client.get("/api/fin/summary", params={"ym": "2026-11"}, headers=hdr(1000)).json()
     assert all(b["code"] != "hist" or float(b["balance"]) <= 0 for b in s["cash"]["closing"])
+
+
+def test_export_style():
+    """Оформление витрины: старые полосы/правила снимаются, «Лист1» прячется, итог года в «Сводке» — тёмная строка."""
+    from artgame.fin_export import style
+    sheets = [{"properties": {"sheetId": 0, "title": "Лист1"}},
+              {"properties": {"sheetId": 5, "title": "Сводка", "gridProperties": {"rowCount": 1000, "columnCount": 26}},
+               "bandedRanges": [{"bandedRangeId": 77}], "conditionalFormats": [{}, {}]}]
+    r = style(sheets, {"Сводка": [["Месяц"] + [""] * 15, ["Ноябрь"] + [0] * 15, ["Итого 2026"] + [0] * 15]})
+    kinds = [next(iter(x)) for x in r]
+    assert r[0] == {"updateSheetProperties": {"properties": {"sheetId": 0, "hidden": True}, "fields": "hidden"}}
+    assert {"deleteBanding": {"bandedRangeId": 77}} in r and kinds.count("deleteConditionalFormatRule") == 2
+    assert kinds.count("addBanding") == 1 and kinds.count("addConditionalFormatRule") == 2
+    assert all("(" not in x[k].get("fields", "") for x in r for k in x)   # маски полей — через точку, скобки API не принимает

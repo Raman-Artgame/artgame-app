@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     google_sa_file: str = ""            # путь к JSON сервисного аккаунта на сервере
     # Google Таблица-витрина «Финансы 2026 — витрина (из приложения)» (HEAD 06.11): сервер пишет, руками не правим
     fin_sheet_id: str = "1-beqAb-w27ZJnLepsdCZBbxIRQYWSUFDsJMdoBneS-s"
+    fin_sheet_year: int = 2026   # год витрины; новый год — новый файл и новый ARTGAME_FIN_SHEET_ID/_YEAR
     anthropic_key: str = ""             # ARTGAME_ANTHROPIC_KEY: ИИ-помощник карточки сделки; пусто — разбор правилами
     content_key: str = ""               # hex 32 байта: расшифровка рабочих мест (places/*.enc)
 
