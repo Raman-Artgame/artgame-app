@@ -15,6 +15,12 @@ export const testAs = () => viewAs().startsWith('test:')
 export const RO_MSG = 'Режим просмотра: от имени сотрудника ничего не меняется.'
 export const readOnlyHit = (msg = RO_MSG) => window.dispatchEvent(new CustomEvent('artgame:ro', { detail: msg }))
 
+// Две роли (HEAD 08.11): «Я сейчас: …» — выбранная роль в памяти телефона, уходит заголовком X-Act-Role.
+// Сервер принимает только свою дополнительную роль; смена сама запоминает, в какой роли она была.
+const AKEY = 'artgame.act'
+export const actRole = () => { try { return localStorage.getItem(AKEY) || '' } catch { return '' } }
+export const setActRole = r => { try { r ? localStorage.setItem(AKEY, r) : localStorage.removeItem(AKEY) } catch { /* без памяти */ } }
+
 // client_uid: crypto.randomUUID есть не во всех WebView Telegram (старый Android) — без него кнопки молча падали
 export function uuid() {
   if (crypto.randomUUID) return crypto.randomUUID()
@@ -25,7 +31,7 @@ export function uuid() {
 
 export async function api(path, opts = {}) {
   const auth = initData() ? { 'X-Telegram-Init-Data': initData() } : webToken() ? { Authorization: `Bearer ${webToken()}` } : {}
-  const va = !opts.noView && viewAs() ? { 'X-View-As': viewAs() } : {}
+  const va = !opts.noView && viewAs() ? { 'X-View-As': viewAs() } : actRole() ? { 'X-Act-Role': actRole() } : {}
   const r = await fetch(`/api${path}`, {
     ...opts,
     headers: { 'Content-Type': 'application/json', ...auth, ...va, ...(opts.headers || {}) },

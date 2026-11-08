@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { api, inTelegram, setViewAs, setWebToken, webToken } from './api.js'
+import { api, inTelegram, setActRole, setViewAs, setWebToken, viewAs, webToken } from './api.js'
 import { Login } from './login.jsx'
 import { ExpenseForm, Mine, Review, ShiftForm } from './work.jsx'
 import { MyIssued, People } from './people.jsx'
@@ -140,7 +140,9 @@ function Main({ me, web, logout }) {
   const menu = isHead ? [['home', 'Пульт'], ...HEAD_FIRST.map(k => tabs.find(x => x[0] === k)).filter(Boolean),
     ...tabs.filter(x => !HEAD_FIRST.includes(x[0])), ['viewas', 'Смотреть как']] : tabs
   const duty = DUTIES[role]
+  const duties = (me.roles?.length ? me.roles : [role]).map(r => DUTIES[r]).filter(Boolean)   // в «Кабинете» — обе роли
   if (tab === 'place' || tab === 'study') return <>
+    {me.roles?.length > 1 && <div className="wrap"><RoleSwitch me={me} /></div>}
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
       extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> },
         duty && { code: 'duty', title: 'Правила игры', render: () => <Duty d={duty} g={GROW[role]} /> }].filter(Boolean)} /> :
@@ -150,6 +152,7 @@ function Main({ me, web, logout }) {
   return <>
     <div className="wrap">
       {web && <div className="webbar"><b>ARTGAME</b><span className="muted small">{me.full_name}</span><button className="ghost mini" onClick={logout}>Выйти</button></div>}
+      <RoleSwitch me={me} />
       {!PLAIN.has(tab) && tab !== 'home' && <div className="card"><h1>{me.full_name}</h1><span className="tag">{ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
       {toast && <div className="toast">{toast}</div>}
       {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'viewas' ? <ViewAsCard /> :
@@ -159,11 +162,20 @@ function Main({ me, web, logout }) {
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
         tab === 'fin' ? <Finance /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design me={me} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
-        tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyPay /><MyIssued />{duty && <DutyFold d={duty} />}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><MyIssued />{duty && <DutyFold d={duty} />}<Mine /></> : <Review />}
+        tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyPay /><MyIssued />{duties.map(x => <DutyFold key={x.title} d={x} />)}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><MyIssued />{duties.map(x => <DutyFold key={x.title} d={x} />)}<Mine /></> : <Review />}
     </div>
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll />
   </>
+}
+
+// Две роли (HEAD 08.11, «Оба способа»): «Я сейчас: …» — меню, учёба и права по выбранной роли. Смена сама берёт роль по объекту.
+function RoleSwitch({ me }) {
+  const roles = me.roles || []
+  if (roles.length < 2 || viewAs()) return null
+  const pick = r => { setActRole(r === roles[0] ? '' : r); location.reload() }
+  return <div className="roleswitch"><span className="small muted">Я сейчас:</span>
+    {roles.map(r => <button key={r} className={me.role_code === r ? 'on' : ''} onClick={() => me.role_code !== r && pick(r)}>{ROLE[r] || r}</button>)}</div>
 }
 
 // Расход художника и дизайнера: на объект с чеком или закупка на склад (HEAD 06.11 — склад внутри «Расхода»).
