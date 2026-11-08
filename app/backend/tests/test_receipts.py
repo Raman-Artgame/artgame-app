@@ -45,7 +45,7 @@ def test_receipt_folders(monkeypatch):
     drive.save_receipt(conn, "print", "Чек C", jpg)
     assert d.up[-1][0] == f"FIN/03 Печать/{month}"
     drive.save_receipt(conn, "office", "Чек D", jpg, deal_id=None)
-    assert d.up[-1][0] == f"FIN/06 Офис и общее/{month}"
+    assert d.up[-1][0] == f"FIN/06 РАСХОДЫ HEAD/{month}"
     monkeypatch.setattr(drive, "RECEIPTS_ROOT_ID", "")
     try:
         drive.save_receipt(conn, "office", "Чек E", jpg)
