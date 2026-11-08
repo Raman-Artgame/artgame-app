@@ -180,6 +180,8 @@ def test_export_rows(client, monkeypatch):
     assert tr[1][0] == "02 РОСПИСЬ · 1 трата" and tr[2][5] == 731 and tr[2][7] == 5000.0 and tr[-1][7] == 5000.0
     pr = next(r for r in written["Проекты"] if r[1] == 731)
     assert pr[13] == 5000.0 and pr[14] == 95000.0 and pr[15] == "Битрикс"
+    sub = next(r for r in written["Проекты"] if r[0] == "Итого: Ноябрь")
+    assert sub[13] == 5000.0 and sub[14] == 95000.0   # подытог считает и траты
     md = {row[0]: row for row in written["Модель"] if row}
     assert md["Показатель"][-1] == "Итого 2026" and md["ВЫРУЧКА"][1] == "" and "Прибыль до ИПН" in md
     assert written["Сводка"][11][0] == "Ноябрь" and written["Движение денег"][1][3] == 1000.0

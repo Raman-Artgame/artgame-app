@@ -110,7 +110,7 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
                     "Битрикс" if r["origin"] == "bitrix" else "лист 2026"])
     for rows in pay_m.values():   # внутри месяца: по группам, потом по имени
         rows.sort(key=lambda x: (x[2] or "", x[1] or ""))
-    prj = sectioned(prj_h, prj_m, (10, 11, 12), year, ("проект", "проекта", "проектов"))
+    prj = sectioned(prj_h, prj_m, (10, 11, 12, 13, 14), year, ("проект", "проекта", "проектов"))
     pay = sectioned(pay_h, pay_m, (3, 4, 5), year, ("человек", "человека", "человек"))
     buy = sectioned(buy_h, buy_m, (7,), year, ("трата", "траты", "трат"), label=str)
     return {"Сводка": sv, "Модель": model(conn, year, sums), "Проекты": prj, "Движение денег": led, "ФОТ": pay, "Траты": buy}
