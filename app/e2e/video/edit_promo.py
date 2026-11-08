@@ -90,7 +90,7 @@ for p_ in plan:
         SUBS.append((t0, t0 + d, im)); t0 += d
 
 # ---------- телефон с записью роли ----------
-PW, PH, BZ, RAD = 420, 840, 12, 46
+PW, PH, BZ, RAD = 380, 760, 12, 44
 pmask = Image.new('L', (PW, PH), 0); ImageDraw.Draw(pmask).rounded_rectangle((0, 0, PW - 1, PH - 1), RAD - BZ, fill=255)
 PFRAME = Image.new('RGBA', (PW + 2 * BZ, PH + 2 * BZ), (0, 0, 0, 0))
 ImageDraw.Draw(PFRAME).rounded_rectangle((0, 0, PW + 2 * BZ - 1, PH + 2 * BZ - 1), RAD, fill=(24, 20, 23, 255), outline=(70, 60, 66, 255), width=3)
@@ -173,7 +173,7 @@ def draw_scene(im, i, lt, d, t):
             im.alpha_composite(A(T(b_, f_b, PAPER + (255,), 760), aa), (int(166 - 30 * (1 - aa)), yb))
         fr = CLIPS[i]; buf = fr[min(int(lt * FPS), len(fr) - 1)]
         ph = phone(buf); en = ease(lt / .6) * aout
-        x = 1290 + int(300 * (1 - ease(lt / .6))); yph = (H - ph.height) // 2 - 20 + int(6 * math.sin(t * 1.2))
+        x = 1330 + int(300 * (1 - ease(lt / .6))); yph = (H - ph.height) // 2 - 60 + int(6 * math.sin(t * 1.2))
         im.alpha_composite(A(PSHADOW, en), (x - 80, yph - 80)); im.alpha_composite(A(ph, en), (x, yph))
     elif k == 'links':
         y, aout = left_text(im, i, lt, d, 180)
