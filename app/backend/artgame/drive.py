@@ -18,7 +18,7 @@ PROJECTS_ROOT_ID = "1_33LDppwOu02ToP4c3uUS-mPux5mPIJf"
 SUBFOLDERS = {"photo": "Фото объекта", "design": "Дизайн", "receipt": "Расходы чеки", "doc": "Документы"}
 MONTHS = ["ЯНВАРЬ", "ФЕВРАЛЬ", "МАРТ", "АПРЕЛЬ", "МАЙ", "ИЮНЬ", "ИЮЛЬ", "АВГУСТ", "СЕНТЯБРЬ", "ОКТЯБРЬ", "НОЯБРЬ", "ДЕКАБРЬ"]
 # «10 ФИНАНСЫ / Расходы чеки» на диске ARTGAME.KZ; сервисному аккаунту дан доступ только к этой папке.
-RECEIPTS_ROOT_ID = ""
+RECEIPTS_ROOT_ID = "1PCTnoVlAqBhvwUgBRIc8dd4murbKKnkB"
 DEPTS = {"sales": "01 Продажи", "mural": "02 Роспись", "print": "03 Печать", "design": "04 Дизайн",
          "stock": "05 Склад и мастерская холстов", "office": "06 Офис и общее"}
 API = "https://www.googleapis.com/drive/v3/files"
