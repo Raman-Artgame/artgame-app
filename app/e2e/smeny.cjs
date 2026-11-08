@@ -90,10 +90,11 @@ async function tab(p, name) {
 
   // 5. Объекты: фото с объекта и файл дизайна (большой файл идёт прямо в Google — здесь подменён)
   await call(1000, `/people/${(await call(1000, '/people')).find(x => x.full_name === 'Дана').id}`, { zones: ['mural', 'design'] })
+  execSync(`psql "${process.env.ARTGAME_DATABASE_URL}" -qc "INSERT INTO objects (id, title, city) VALUES (731, 'Кафе e2e', 'Астана') ON CONFLICT DO NOTHING"`)
   await a.reload()
   await a.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000001' }) }))
   await tab(a, 'Объекты')
-  await a.getByText('Офис / без объекта').click()
+  await a.getByText('Кафе e2e').click()
   await a.locator('input[type=file]').setInputFiles([__dirname + '/chek.png', __dirname + '/chek.png'])
   await a.locator('.grid img').nth(1).waitFor()
   await a.getByRole('button', { name: 'Дизайн' }).click()

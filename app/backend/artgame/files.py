@@ -71,6 +71,8 @@ def get_object(conn, object_id: int) -> dict:
     o = conn.execute("SELECT * FROM objects WHERE id=%s", (object_id,)).fetchone()
     if not o:
         raise HTTPException(404, "no object")
+    if o["id"] == 0:  # «Офис / без объекта» — только для трат, своей папки на Диске нет (HEAD 08.11)
+        raise HTTPException(400, "files need a deal")
     return o
 
 
@@ -82,7 +84,7 @@ def objects(p: dict = Depends(active)):
                       count(f.id) FILTER (WHERE f.kind='photo')  AS photos,
                       count(f.id) FILTER (WHERE f.kind='design') AS designs
                FROM objects o LEFT JOIN files f ON f.object_id=o.id AND f.status='ready'
-               WHERE o.status='active' GROUP BY o.id ORDER BY o.id=0, o.id DESC""").fetchall()
+               WHERE o.status='active' AND o.id<>0 GROUP BY o.id ORDER BY o.id DESC""").fetchall()
 
 
 @router.get("/objects/{object_id}/files")

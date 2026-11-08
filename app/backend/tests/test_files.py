@@ -156,3 +156,11 @@ def test_gateway_client(monkeypatch):
     deals = sync_objects.fetch_deals()
     assert [d["ID"] for d in deals] == ["100", "150"]
     assert seen[0] == ("initialize", None) and seen[-1] == ("tools/call", "S1")
+
+
+def test_office_has_no_files(client, fake):
+    """«Офис / без объекта» — только для трат: в «Объектах» не виден, файлы к нему не принимаются."""
+    setup_people(client)
+    assert 0 not in [o["id"] for o in client.get("/api/objects", headers=hdr(2000)).json()]
+    body = {"client_uid": str(uuid.uuid4()), "data": "data:image/jpeg;base64,/9j/AA=="}
+    assert client.post("/api/objects/0/photos", json=body, headers=hdr(2000)).status_code == 400
