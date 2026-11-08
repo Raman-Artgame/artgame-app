@@ -4,6 +4,7 @@ from fastapi import Depends, Header, HTTPException
 from . import db
 from .config import settings
 from .telegram import InitDataError, verify_init_data
+from .viewas import VIEW, resolve
 
 
 def load_person(conn, tg_id: int, by: str = "tg_id"):
@@ -38,6 +39,10 @@ def current_person(x_telegram_init_data: str = Header(default=""), authorization
         raise HTTPException(403, "not registered")
     if p["status"] == "blocked":
         raise HTTPException(403, "blocked")
+    d = VIEW.get()
+    if d and d.get("as"):   # HEAD смотрит как сотрудник: дальше всё считается от лица этого человека, запись закрыта
+        with db.pool.connection() as conn:
+            p = resolve(conn, p, d["as"], load_person)
     return p
 
 

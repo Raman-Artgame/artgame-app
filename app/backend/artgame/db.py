@@ -34,6 +34,9 @@ def migrate(p: ConnectionPool) -> list[str]:
 
 def audit(conn, person_id, action, entity=None, entity_id=None, data=None):
     from psycopg.types.json import Jsonb
+
+    from .viewas import audit_owner
+    person_id, data = audit_owner(person_id, data)   # просмотр «как сотрудник» пишется на HEAD
     conn.execute(
         "INSERT INTO audit_log (person_id, action, entity, entity_id, data) VALUES (%s,%s,%s,%s,%s)",
         (person_id, action, entity, None if entity_id is None else str(entity_id), Jsonb(data) if data is not None else None),

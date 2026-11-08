@@ -5,6 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from . import constants as consts
+from . import head, viewas
 from . import bx, bxw, db, design, files, fill, fin_export, finance, kit, leads, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
@@ -35,6 +36,8 @@ app.include_router(projects.router)
 app.include_router(fill.router)
 app.include_router(kit.router)
 app.include_router(design.router)
+app.include_router(head.router)
+viewas.install(app)
 
 
 @app.exception_handler(Exception)

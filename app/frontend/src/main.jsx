@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { api, inTelegram, setWebToken, webToken } from './api.js'
+import { api, inTelegram, setViewAs, setWebToken, webToken } from './api.js'
 import { Login } from './login.jsx'
 import { ExpenseForm, Mine, Review, ShiftForm } from './work.jsx'
 import { People } from './people.jsx'
@@ -15,6 +15,7 @@ import { Finance, MyPay, StockSpend } from './finance.jsx'
 import { Kit } from './kit.jsx'
 import { Design } from './design.jsx'
 import { DUTIES } from './duties.js'
+import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
 import './tokens.css'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
@@ -57,9 +58,10 @@ function App() {
   if (err) return <div className="wrap"><div className="card"><h1>ARTGAME</h1><p className="muted">Открой приложение из бота @artgame_team_bot. ({err})</p></div></div>
   if (me === undefined) return <div className="wrap muted">Загрузка…</div>
   if (me === null) return <div className="wrap"><Register onDone={setMe} /></div>
-  if (me.status !== 'active') return <div className="wrap"><div className="card"><h1>{me.full_name}</h1>
-    <p className="muted">{me.status === 'pending' ? 'Заявка у HEAD. Как только назначат роль, откроются разделы.' : 'Вход закрыт.'}</p></div></div>
-  return <Main me={me} web={web} logout={() => { api('/logout', { method: 'POST' }).catch(() => {}); setWebToken(''); setLogin(true) }} />
+  if (me.status !== 'active') return <><ViewAsBar me={me} ROLE={ROLE} /><div className="wrap"><div className="card"><h1>{me.full_name}</h1>
+    <p className="muted">{me.status === 'pending' ? 'Заявка у HEAD. Как только назначат роль, откроются разделы.' : 'Вход закрыт.'}</p></div></div></>
+  return <><ViewAsBar me={me} ROLE={ROLE} />
+    <Main me={me} web={web} logout={() => { api('/logout', { method: 'POST', noView: true }).catch(() => {}); setWebToken(''); setViewAs(''); setLogin(true) }} /></>
 }
 
 const CHECKERS = new Set(['head', 'lead_artist', 'artist_pro', 'print_master', 'lead_designer'])
@@ -86,7 +88,8 @@ function Main({ me, web, logout }) {
   const role = me.role_code
   const art = ART.has(role), dz = DZ.has(role), cab = art || dz
   const studyList = cab ? places.filter(p => STUDY[p.code]) : []
-  const [tab, setTab] = useState(DEAL_ROLES.has(role) ? 'today' : role === 'carpenter' ? 'stock' : dz ? 'design' : 'shift')
+  const isHead = role === 'head'
+  const [tab, setTab] = useState(isHead ? 'home' : DEAL_ROLES.has(role) ? 'today' : role === 'carpenter' ? 'stock' : dz ? 'design' : 'shift')
   const [dealId, setDealId] = useState(null)
   const [leadId, setLeadId] = useState(null)
   const openDeal = id => { setDealId(id); setTab('deals') }
@@ -97,7 +100,9 @@ function Main({ me, web, logout }) {
   const done = t => { setToast(t); setTab('mine'); setTimeout(() => setToast(''), 4000) }
   const sales = DEAL_ROLES.has(me.role_code)
   const t = useToday(sales)
-  const counts = t ? { today: t.queue.hot.length + t.queue.today.length, leads: [...t.queue.hot, ...t.queue.today].filter(x => x.entity === 'lead').length } : {}
+  const pulse = usePulse(isHead)
+  const counts = { ...(t ? { today: t.queue.hot.length + t.queue.today.length, leads: [...t.queue.hot, ...t.queue.today].filter(x => x.entity === 'lead').length } : {}),
+    ...(pulse ? { review: +pulse.review.shifts + +pulse.review.expenses, people: pulse.pending.length } : {}) }
   const mop = ['mop', 'mop_vip'].includes(me.role_code)
   const carp = me.role_code === 'carpenter'
   // Главный и Про: в меню Смена · Расход · Проверка · Учёба · Мои, в «Ещё» — Проекты, Сбор, Объекты.
@@ -115,19 +120,24 @@ function Main({ me, web, logout }) {
     ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []),
     ...(KIT.has(role) ? [['kit', 'Сбор']] : []),
     ...(role === 'head' ? [['design', 'Дизайн'], ['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда']] : [])]
+  // Кабинет HEAD (08.11): Пульт · Проверка · Сделки · Финансы · Команда, остальное — в «Ещё», там же «Смотреть как».
+  const HEAD_FIRST = ['review', 'deals', 'fin', 'people']
+  const menu = isHead ? [['home', 'Пульт'], ...HEAD_FIRST.map(k => tabs.find(x => x[0] === k)).filter(Boolean),
+    ...tabs.filter(x => !HEAD_FIRST.includes(x[0])), ['viewas', 'Смотреть как']] : tabs
   const duty = DUTIES[role]
   if (tab === 'place' || tab === 'study') return <>
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
       extra={duty && { code: 'duty', title: 'Должностная', render: () => <Duty d={duty} /> }} /> :
     <Places key={tab} list={tab === 'study' ? [mopPlace] : other} mode={tab === 'study' ? 'study' : ''} />}
-    <Nav tabs={tabs} tab={tab} setTab={go} counts={counts} />
+    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} />
   </>
   return <>
     <div className="wrap">
       {web && <div className="webbar"><b>ARTGAME</b><span className="muted small">{me.full_name}</span><button className="ghost mini" onClick={logout}>Выйти</button></div>}
-      {!PLAIN.has(tab) && <div className="card"><h1>{me.full_name}</h1><span className="tag">{ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
+      {!PLAIN.has(tab) && tab !== 'home' && <div className="card"><h1>{me.full_name}</h1><span className="tag">{ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
       {toast && <div className="toast">{toast}</div>}
-      {tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
+      {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'viewas' ? <ViewAsCard /> :
+        tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
         tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> :
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'objects' ? <Objects me={me} /> :
@@ -136,7 +146,7 @@ function Main({ me, web, logout }) {
         tab === 'mine' && (mop || carp || !me.zones.length) ? <MyPay /> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
         tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><Mine /></> : <Review />}
     </div>
-    <Nav tabs={tabs} tab={tab} setTab={go} counts={counts} />
+    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} />
   </>
 }
 
@@ -167,6 +177,8 @@ const ICON = {
   fin: 'M12 3v18M16 7H10a3 3 0 0 0 0 6h4a3 3 0 0 1 0 6H7', stock: 'M3 7l9-4 9 4v10l-9 4-9-4zm0 0 9 4 9-4M12 11v10',
   people: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm7 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM2 20a7 7 0 0 1 14 0zm11 0a6 6 0 0 1 9 0',
   kit: 'M9 4h6l1 3h4v13H4V7h4zm-1 8 3 3 5-5', design: 'M12 3a9 9 0 1 0 0 18c1 0 1.5-.7 1.5-1.5 0-1-.8-1.4-.8-2.3 0-.9.7-1.6 1.6-1.6H17a4 4 0 0 0 4-4c0-4.7-4-8.6-9-8.6zM7.5 12h.01M10 7.5h.01M15 7.5h.01',
+  home: 'M4 13a8 8 0 1 1 16 0M12 13l4-4M4 17h16',
+  viewas: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   more: 'M5 12h.01M12 12h.01M19 12h.01' }
 const Icon = ({ k }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[k] || ICON.more} /></svg>
 const MAX = 6   // кнопок в меню без листа «Ещё»
@@ -181,7 +193,7 @@ function Nav({ tabs, tab, setTab, counts = {} }) {
       {rest.map(([k, t]) => <button key={k} className={'ghost' + (tab === k ? ' on' : '')} onClick={() => { setTab(k); setMore(false) }}><Icon k={k} />{t}</button>)}
     </div></div>}
     <nav>
-      {main.map(([k, t]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon k={k} />{t}{counts[k] ? <i className="cnt">{counts[k]}</i> : null}</button>)}
+      {main.map(([k, t]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon k={k} />{t}{counts[k] ? <i className="cnt" aria-hidden="true">{counts[k]}</i> : null}</button>)}
       {rest.length > 0 && <button className={inRest ? 'on' : ''} onClick={() => setMore(true)}><Icon k={inRest ? inRest[0] : 'more'} />{inRest ? inRest[1] : 'Ещё'}</button>}
     </nav>
   </>

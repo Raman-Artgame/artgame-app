@@ -348,3 +348,28 @@ button.catitem b { white-space: nowrap; text-align: right; font-weight: 600; }
 .kitobr .kitq { grid-template-columns: 1fr auto 1fr; padding: 0 0 6px 30px; }
 .kitobr select { margin: 2px 0; padding: 8px; font-size: 13px; }
 .duty li { margin: 4px 0; }
+
+/* ---- кабинет HEAD: Пульт и «смотреть как» (08.11) ---- */
+.pulse-hero h1 { color: #fff; margin: 4px 0 14px; text-transform: none; }
+.pulse-hero .muted:first-child { text-transform: capitalize; }
+.pulse-kpi { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pulse-kpi button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px; background: var(--dark2); border: 1px solid var(--dark-line); color: var(--dark-text); border-radius: 14px; text-align: left; }
+.pulse-kpi button:hover { background: var(--dark-line); }
+.pulse-kpi button b { font-size: 26px; line-height: 1; font-weight: 800; }
+.pulse-kpi button span { font-size: 12px; color: var(--dark-muted); font-weight: 600; }
+.pulse-kpi button.hot { background: var(--accent); border-color: var(--accent); }
+.pulse-kpi button.hot span { color: #fff; opacity: .85; }
+.teamgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin: 6px 0; }
+.teamgrid > div { display: flex; flex-direction: column; padding: 10px 12px; background: var(--alt); border-radius: var(--r2); }
+.teamgrid b { font-size: 20px; }
+b.neg { color: var(--hot); }
+.person a.seeas { display: inline-block; margin-right: 14px; color: var(--text); font-weight: 600; }
+.viewas-bar { position: sticky; top: 0; z-index: 25; display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--accent); color: #fff; box-shadow: 0 6px 18px -10px rgba(230, 0, 65, .7); }
+.viewas-bar .vtext { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: center; font-size: 14px; line-height: 1.25; }
+.viewas-bar .vtext > span:last-child { overflow-wrap: anywhere; }
+.viewas-bar i { display: block; font-style: normal; font-size: 12px; opacity: .85; }
+.viewas-bar .eye { font-size: 18px; }
+.viewas-bar button { width: auto; flex: none; padding: 9px 12px; font-size: 13px; background: var(--dark); color: #fff; border-radius: 10px; }
+.viewas-bar button:hover { background: var(--dark2); }
+body.viewas .place { height: calc(100dvh - 62px - 52px - env(safe-area-inset-bottom)); }
+body.viewas.web .webbar { margin-top: 0; }

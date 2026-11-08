@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
+import { startViewAs } from './head.jsx'
 
 const ROLE_ZONE = { support: 'mural', artist: 'mural', artist_pro: 'mural', lead_artist: 'mural', print_operator: 'print', print_master: 'print',
   mop: 'sales', mop_vip: 'sales', lead_designer: 'design', designer_asst: 'design' }
@@ -37,6 +38,7 @@ export function People({ ROLE, ZONE }) {
           <option value={0}>— не связан —</option>
           {(bx || []).map(u => <option key={u.id} value={u.id}>{u.name}{u.position ? ` · ${u.position}` : ''}</option>)}
         </select></label>}
+      {p.role_code !== 'head' && p.status !== 'blocked' && <a className="seeas" onClick={() => startViewAs(p.id)}>смотреть как {p.full_name.split(' ')[0]}</a>}
       {p.role_code !== 'head' && (p.status === 'blocked'
         ? <a onClick={() => save(p.id, { status: 'active' })}>открыть вход</a>
         : p.status === 'active' && <a onClick={() => confirm(`Закрыть вход: ${p.full_name}?`) && save(p.id, { status: 'blocked' })}>закрыть вход</a>)}

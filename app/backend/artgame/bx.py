@@ -820,7 +820,7 @@ def api_deal(deal_id: int, fresh: int = 0, p: dict = Depends(active)):
 # ---------- журнал действий ----------
 
 JOURNAL_ACTIONS = ("deal_open", "place_download", "shift_add", "expense_add", "shift_cancel", "expense_cancel",
-                   "bx_write", "place_doc_set", "file_add")
+                   "bx_write", "place_doc_set", "file_add", "view_as_start", "view_as_stop")
 
 
 @router.get("/journal")
@@ -875,6 +875,8 @@ async def place_bx(code: str, tok: str, tool: str, request: Request):
         return my_deals(p, bool(args.get("fresh")))
     if tool == "doc_saved":
         from .bxw import doc_saved
+        from .places import read_only
+        read_only(p)
         return doc_saved(p, int(args.get("deal") or 0), str(args.get("name") or ""), str(args.get("fid") or ""), args.get("fields") or {})
     if tool == "deal_card":
         return deal_card(p, int(args.get("id") or 0), bool(args.get("fresh")))

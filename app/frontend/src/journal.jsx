@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 
 const clean = (id, t) => (t || '').replace(new RegExp(`^№?\\s*${id}\\s*·?\\s*`), '')
-const LABEL = {
+export const LABEL = {
   deal_open: d => `Открыл сделку № ${d.entity_id}${d.data?.title ? ' · ' + clean(d.entity_id, d.data.title) : ''}${d.data?.via === 'kp' ? ' (КП)' : ''}`,
   place_download: d => `Скачал ${d.data?.name || 'файл'}`,
   shift_add: () => 'Отправил смену',
@@ -12,6 +12,8 @@ const LABEL = {
   bx_write: d => `Записал в Битрикс: сделка № ${d.entity_id}${d.data?.what ? ' · ' + d.data.what : ''}`,
   file_add: d => `Загрузил файл${d.data?.name ? ' ' + d.data.name : ''}`,
   place_doc_set: d => `Изменил документ ${d.entity_id}`,
+  view_as_start: d => `Смотрел приложение как ${d.data?.name || d.data?.target || 'сотрудник'}`,
+  view_as_stop: () => 'Вернулся к себе',
 }
 const day = s => new Date(s).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })
 const tm = s => new Date(s).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })

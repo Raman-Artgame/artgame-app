@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, Response
 from psycopg.types.json import Jsonb
 
 from . import constants as consts
-from . import db
+from . import db, viewas
 from .config import settings
 from .deps import load_person
 from .work import active
@@ -94,13 +94,24 @@ def _skey() -> bytes:
     return hashlib.sha256(b"artgame-places:" + settings.bot_token.encode()).digest()
 
 
-def _sig(pid: int, code: str, exp: int) -> str:
-    return hmac.new(_skey(), f"{pid}:{code}:{exp}".encode(), hashlib.sha256).hexdigest()[:32]
+def _sig(pid: int, code: str, exp: int, view: str = "") -> str:
+    msg = f"{pid}:{code}:{exp}" + (f":{view}" if view else "")
+    return hmac.new(_skey(), msg.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _view_tag() -> str:
+    """Ссылка, выданная во время «смотреть как»: v<id HEAD>[-<роль>] — по ней место только для чтения."""
+    d = viewas.ctx()
+    if not d:
+        return ""
+    t = d["target"]
+    return f"v{d['viewer']}" + (f"-{t['role']}" if t.get("kind") == "role" else "")
 
 
 def token(pid: int, code: str, now: float | None = None) -> str:
     exp = int((now or time.time()) + TTL)
-    return f"{pid}.{exp}.{_sig(pid, code, exp)}"
+    view = _view_tag()
+    return f"{pid}.{exp}.{_sig(pid, code, exp, view)}" + (f".{view}" if view else "")
 
 
 def allowed(p: dict, code: str) -> bool:
@@ -111,18 +122,33 @@ def person_by_token(code: str, tok: str) -> dict:
     if code not in PLACES:
         raise HTTPException(404)
     try:
-        pid_s, exp_s, sig = tok.split(".")
+        parts = tok.split(".")
+        pid_s, exp_s, sig = parts[:3]
+        view = parts[3] if len(parts) == 4 else ""
         pid, exp = int(pid_s), int(exp_s)
+        if len(parts) not in (3, 4) or (view and not view.startswith("v")):
+            raise ValueError
     except ValueError:
         raise HTTPException(403, "bad link")
-    if exp < time.time() or not hmac.compare_digest(_sig(pid, code, exp), sig):
+    if exp < time.time() or not hmac.compare_digest(_sig(pid, code, exp, view), sig):
         raise HTTPException(403, "link expired")
     with db.pool.connection() as conn:
         row = conn.execute("SELECT tg_id FROM people WHERE id=%s", (pid,)).fetchone()
         p = load_person(conn, row["tg_id"]) if row else None
+        if p and view:   # ссылка просмотра: HEAD должен быть действующим, место — только чтение
+            vid, _, role = view[1:].partition("-")
+            head = load_person(conn, int(vid), by="id")
+            p = viewas.resolve(conn, head, f"role:{role}" if role else str(pid), load_person) if head else None
+            if p:
+                p["_ro"] = True
     if not p or not allowed(p, code):
         raise HTTPException(403, "no access")
     return p
+
+
+def read_only(p: dict):
+    if p.get("_ro"):
+        raise HTTPException(403, viewas.RO_MSG)
 
 
 def is_editor(p: dict, code: str) -> bool:
@@ -220,6 +246,7 @@ async def db_set(code: str, tok: str, path: str, request: Request):
     coll, doc = _split(path)
     if doc is None:
         raise HTTPException(400, "doc id required")
+    read_only(p)
     if not can_write(p, code, coll):
         raise HTTPException(403, "read only")
     body = await request.body()
