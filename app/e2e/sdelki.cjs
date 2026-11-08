@@ -199,7 +199,7 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   await tab(p, 'Учёба')
   await p.waitForFunction(() => { const w = document.querySelector('iframe.placeframe')?.contentWindow; const t = w && w.document.querySelector('#tabs .tab[data-v=calc]'); return t && w.location.hash === '#ucheb' && w.getComputedStyle(t).display === 'none' }, null, { timeout: 20000 })
   const study = await mopFrame(p).evaluate(() => ({ calc: getComputedStyle(document.querySelector('#tabs .tab[data-v=calc]')).display, ucheb: getComputedStyle(document.querySelector('#tabs .tab[data-v=m]')).display, mode: location.search }))
-  assert.deepStrictEqual(study, { calc: 'none', ucheb: 'block', mode: '?mode=study&dark=1' })
+  assert.deepStrictEqual(study, { calc: 'none', ucheb: 'block', mode: '?mode=study&hide=test&home=ucheb&dark=1' })
   await mopFrame(p).evaluate(() => { location.hash = '#calc' })
   await p.waitForFunction(() => (document.querySelector('iframe.placeframe')?.contentWindow?.location.hash || '') === '#ucheb', null, { timeout: 5000 })
   await p.screenshot({ path: `${shots}/mop-study.png` })

@@ -15,6 +15,7 @@ import { Kit } from './kit.jsx'
 import { Production } from './production.jsx'
 import { Design } from './design.jsx'
 import { DUTIES, GROW } from './duties.js'
+import { Feedback } from './feedback.jsx'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
 import './tokens.css'
 
@@ -79,10 +80,12 @@ const PRINT = new Set(['print_operator', 'print_master'])
 const STUDY = {
   // HEAD 08.11: в «Учёбе» — База знаний (учебник), Тест, Клиентам; «Выезд» переехал в «Смену» подсказками,
   // «Куратор/ГИП», «Главный художник», «Рост», «Оплата» скрыты. Рядом свои чипы: «ТБ» и «Правила игры».
-  art: () => ({ home: 'ucheb', hide: ['trip', 'gip', 'chief', 'grow', 'pay'], sections: [['ucheb', 'Учебник'], ['test', 'Тест'], ['mat', 'Клиентам']] }),
+  // «Тест» убран у всех (HEAD 08.11, 15:27): будет свой для каждой роли
+  art: () => ({ home: 'ucheb', hide: ['trip', 'gip', 'chief', 'grow', 'pay', 'test'], sections: [['ucheb', 'Учебник'], ['mat', 'Клиентам']] }),
   // печать — так же: Учебник, Тест, Фотозадание, Клиентам; «Запуск» и «Сборы» — в «Смене» и «Сборе», «Экзамен» со ставками — скрыт
-  print: () => ({ home: 'ucheb', hide: ['start', 'kit', 'exam'], sections: [['ucheb', 'Учебник'], ['test', 'Тест'], ['foto', 'Фотозадание'], ['mat', 'Клиентам']] }),
-  dz: () => ({ home: 'learn', hide: ['board', 'handoff'] }),
+  print: () => ({ home: 'ucheb', hide: ['start', 'kit', 'exam', 'test'], sections: [['ucheb', 'Учебник'], ['foto', 'Фотозадание'], ['mat', 'Клиентам']] }),
+  dz: () => ({ home: 'learn', hide: ['board', 'handoff', 'test'] }),
+  mop: () => ({ home: 'ucheb', hide: ['test'] }),
 }
 const PLAIN = new Set(['today', 'leads', 'deals', 'projects', 'month'])
 
@@ -146,7 +149,7 @@ function Main({ me, web, logout }) {
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
       extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> },
         duty && { code: 'duty', title: 'Правила игры', render: () => <Duty d={duty} g={GROW[role]} /> }].filter(Boolean)} /> :
-    <Places key={tab} list={tab === 'study' ? [mopPlace] : other} mode={tab === 'study' ? 'study' : ''} />}
+    <Places key={tab} list={tab === 'study' ? [mopPlace] : other} mode={tab === 'study' ? 'study' : ''} opts={tab === 'study' ? { mop: STUDY.mop() } : {}} />}
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll />
   </>
   return <>
@@ -162,8 +165,8 @@ function Main({ me, web, logout }) {
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
         tab === 'fin' ? <Finance /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design me={me} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
-        tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyPay /><MyIssued />{duties.map(x => <DutyFold key={x.title} d={x} />)}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><MyIssued />{duties.map(x => <DutyFold key={x.title} d={x} />)}<Mine /></> : <Review />}
+        tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyPay /><MyIssued /><Feedback />{duties.map(x => <DutyFold key={x.title} d={x} />)}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><MyIssued /><Feedback />{duties.map(x => <DutyFold key={x.title} d={x} />)}<Mine /></> : <Review />}
     </div>
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll />
   </>

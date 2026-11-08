@@ -66,11 +66,11 @@ async function tab(p, name) {
 
   // Художник (HEAD 08.11): «Учёба» — База знаний, Тест, Клиентам + ТБ и «Правила игры»; «Выезд», «Оплата», «Рост», «Куратор/ГИП» скрыты
   const { p: pa } = await open(b, 2100, null, 'Учёба')
-  assert.deepStrictEqual(await pa.locator('.place .chips button').allTextContents(), ['Учебник', 'Тест', 'Клиентам', 'ТБ', 'Правила игры'])
+  assert.deepStrictEqual(await pa.locator('.place .chips button').allTextContents(), ['Учебник', 'Клиентам', 'ТБ', 'Правила игры'])
   await pa.waitForFunction(() => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith('Рабочее место художников'))
   const af = () => pa.frames().find(f => f.url().includes('/api/p/art/'))
   await pa.waitForTimeout(800)
-  assert.ok(af().url().includes('hide=trip%2Cgip%2Cchief%2Cgrow%2Cpay'), af().url())
+  assert.ok(af().url().includes('hide=trip%2Cgip%2Cchief%2Cgrow%2Cpay%2Ctest'), af().url())
   const vis = await af().evaluate(() => ['ucheb', 'pay', 'grow', 'gip', 'trip'].map(h => [...document.querySelectorAll(`a[href="#${h}"]`)].some(a => a.offsetParent)))
   assert.deepStrictEqual(vis, [false, false, false, false, false])   // свои вкладки места спрятаны (notabs=1), разделы — чипами приложения
   assert.ok(af().url().includes('notabs=1'))

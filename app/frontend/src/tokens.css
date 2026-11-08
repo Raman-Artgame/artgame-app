@@ -590,3 +590,10 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .roleswitch button { width: auto; flex: 0 0 auto; padding: 7px 12px; border-radius: 99px; background: var(--alt); color: var(--text); border: 1px solid var(--line); font-size: 13px; }
 .roleswitch button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .roleswitch .muted { flex: 0 0 auto; }
+/* «Обращения» (HEAD 08.11) */
+.fb .fbform { display: grid; gap: 6px; margin-top: 8px; }
+.fb .fblist { margin-top: 10px; display: grid; gap: 8px; }
+.fb .fbrow { padding: 12px; border-radius: var(--r2); background: var(--alt); border: 1px solid var(--line); display: grid; gap: 6px; justify-items: start; }
+.fb .fbans { font-size: 14px; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--dark2); border-radius: 6px; }
+.fb .qbtns { display: flex; gap: 6px; flex-wrap: wrap; }
+.fb .qbtns button { width: auto; }
