@@ -153,7 +153,13 @@ def test_export_rows(client, monkeypatch):
     """Витрина: строки листов собираются из базы; без ARTGAME_FIN_SHEET_ID ничего не пишется."""
     from artgame import fin_export
     from artgame.config import settings
-    setup(client, monkeypatch)
+    ids = setup(client, monkeypatch)
+    with db.pool.connection() as conn:   # трата художника на объект 731 — и в «Траты» (отдел), и в строку проекта
+        cat = conn.execute("SELECT code FROM expense_categories WHERE article='project' AND active ORDER BY sort LIMIT 1").fetchone()["code"]
+        conn.execute("""INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, status)
+                        VALUES (gen_random_uuid(), %s, 731, 'mural', %s, 5000, 'approved')""", (ids[2000], cat))
+        conn.execute("""INSERT INTO fin_projects (year, row_no, deal_id, month, closed, title, revenue, origin)
+                        VALUES (2026, 1000731, 731, 11, '2026-11-05', 'Кафе', 100000, 'bitrix')""")
     client.post("/api/fin/ledger", json={"client_uid": uid(), "op_date": "2026-11-01", "account": "kaspi", "amount": 1000,
                                          "article": "opening"}, headers=hdr(1000))
     monkeypatch.setattr(settings, "fin_sheet_id", "")
@@ -169,7 +175,11 @@ def test_export_rows(client, monkeypatch):
             return cls(2026, 11, 20)
     monkeypatch.setattr(fin_export, "date", D)
     r = client.post("/api/fin/export", headers=hdr(1000)).json()
-    assert r["ok"] and set(written) == {"Сводка", "Модель", "Проекты", "Движение денег", "ФОТ", "Закупки"}
+    assert r["ok"] and set(written) == {"Сводка", "Модель", "Проекты", "Движение денег", "ФОТ", "Траты"}
+    tr = written["Траты"]
+    assert tr[1][0] == "02 РОСПИСЬ · 1 трата" and tr[2][5] == 731 and tr[2][7] == 5000.0 and tr[-1][7] == 5000.0
+    pr = next(r for r in written["Проекты"] if r[1] == 731)
+    assert pr[13] == 5000.0 and pr[14] == 95000.0 and pr[15] == "Битрикс"
     md = {row[0]: row for row in written["Модель"] if row}
     assert md["Показатель"][-1] == "Итого 2026" and md["ВЫРУЧКА"][1] == "" and "Прибыль до ИПН" in md
     assert written["Сводка"][11][0] == "Ноябрь" and written["Движение денег"][1][3] == 1000.0

@@ -1,6 +1,6 @@
 """Витрина финансов в Google Таблице (HEAD 05.11: база главная, Таблица — для просмотра, руками не правим).
 
-Сервер переписывает листы «Сводка», «Движение денег», «ФОТ», «Закупки» таблицы ARTGAME_FIN_SHEET_ID
+Сервер переписывает листы «Сводка», «Движение денег», «ФОТ», «Траты» таблицы ARTGAME_FIN_SHEET_ID
 сервисным аккаунтом (нужен доступ «Редактор» к этой таблице). Запуск: кнопка HEAD и таймер artgame-finexport.
 Пока таблица не задана — ничего не пишет и говорит об этом.
 """
@@ -15,19 +15,21 @@ from .deps import require_head
 
 router = APIRouter(prefix="/api")
 MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
-MONTHS_UP = {m.upper() for m in MONTHS}
+DEPT = {"sales": "01 Продажи", "mural": "02 Роспись", "print": "03 Печать", "design": "04 Дизайн",
+        "stock": "05 Склад и мастерская холстов", "office": "06 HEAD и офис"}   # как папки чеков (drive.DEPTS)
 KIND = {"in": "приход", "out": "расход"}
 PROFIT = 12   # колонка «Прибыль до ИПН» в «Сводке»
-ORDER = ["Сводка", "Модель", "Проекты", "Движение денег", "ФОТ", "Закупки"]
+ORDER = ["Сводка", "Модель", "Проекты", "Траты", "ФОТ", "Движение денег"]
 # Оформление (HEAD 08.11: «красиво, в нашем стиле, поудобнее»): цвета приложения (tokens.css) — светлый фон, чёрная шапка,
 # красный акцент. Для каждого листа: колонки денег, колонки дат, ширины. Применяется при каждой выгрузке, руками не держим.
 LAYOUT = {
     "Сводка": {"money": range(1, 17), "date": (), "w": [110] + [125] * 16 + [360], "freeze_col": 1},
     "Модель": {"money": range(1, 14), "date": (), "w": [300] + [115] * 13, "freeze_col": 1, "rows": True},
-    "Проекты": {"money": (10, 11, 12), "date": (9,), "w": [90, 70, 260, 110, 60, 110, 140, 120, 110, 100, 125, 125, 115, 90], "freeze_col": 3, "sections": True},
+    "Проекты": {"money": (10, 11, 12, 13, 14), "date": (9,), "w": [90, 70, 260, 110, 60, 110, 140, 120, 110, 100, 125, 125, 115, 125, 125, 90], "freeze_col": 3, "sections": True, "collapse": True},
     "Движение денег": {"money": (3,), "date": (0,), "w": [95, 150, 95, 115, 190, 75, 70, 170, 280, 80, 85], "freeze_col": 1},
-    "ФОТ": {"money": (3, 4, 5), "date": (6,), "w": [90, 200, 120, 115, 115, 115, 110, 420], "freeze_col": 2, "sections": True},
-    "Закупки": {"money": (5,), "date": (0,), "w": [95, 170, 150, 170, 200, 110, 90, 110, 95], "freeze_col": 1},
+    "ФОТ": {"money": (3, 4, 5), "date": (6,), "w": [90, 200, 120, 115, 115, 115, 110, 420], "freeze_col": 2, "sections": True, "collapse": True},
+    "Траты": {"money": (7,), "date": (1,), "w": [210, 95, 170, 170, 170, 80, 220, 115, 95, 110, 95], "freeze_col": 2, "sections": True,
+              "collapse": False},
 }
 C = {"dark": "#0B0B0D", "light": "#F1F0EC", "alt": "#F7F6F3", "white": "#FFFFFF", "line": "#DCDBD6", "accent": "#E60041",
      "ok": "#1F7A45", "okbg": "#E5F3EA", "hotbg": "#FBE4E8", "muted": "#6B6B70"}
@@ -76,45 +78,57 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
                WHERE l.op_date >= %s AND l.op_date < %s ORDER BY l.op_date, l.id""", (date(year, 1, 1), date(year + 1, 1, 1))).fetchall():
         led.append([_d(l["op_date"]), l["acc"], KIND[l["direction"]], float(l["amount"]), l["art"], l["period"], l["deal_id"] or "",
                     l["payee"] or "", l["note"] or "", l["source"], "отменено" if l["status"] == "cancelled" else ""])
-    buy = [["Дата", "Кто", "Статья", "Категория", "Объект / сделка", "Сумма", "Чьи деньги", "Статус", "Выплата"]]
+    # Траты (HEAD 08.11: «расходы по проектам — и в проекты, и в траты отделов»): каждая трата — в разделе своего отдела,
+    # а если у неё есть сделка — ещё и в строке проекта («Траты на объект»). Одна запись базы, два места показа.
+    buy_h = ["Отдел", "Дата", "Кто", "Статья", "Категория", "Сделка", "Объект", "Сумма", "Чьи деньги", "Статус", "Выплата"]
+    buy_m, by_deal = {}, {}
     art = {"project": "На объект", "stock": "Склад", "canvas": "Мастерская холстов", "sales": "Отдел продаж"}
     for e in conn.execute(
             """SELECT e.*, c.title AS cat, c.article, pe.full_name AS who, o.title AS obj FROM expenses e
                JOIN expense_categories c ON c.code=e.category JOIN people pe ON pe.id=e.person_id JOIN objects o ON o.id=e.object_id
-               WHERE e.created_at >= %s AND e.created_at < %s AND e.status <> 'cancelled' ORDER BY e.created_at""",
+               WHERE e.created_at >= %s AND e.created_at < %s AND e.status NOT IN ('cancelled', 'rejected') ORDER BY e.created_at""",
             (date(year, 1, 1), date(year + 1, 1, 1))).fetchall():
-        buy.append([_d(e["created_at"].date()), e["who"], art.get(e["article"], e["article"]), e["cat"],
-                    f"№ {e['deal_id']}" if e["deal_id"] else (e["obj"] if e["object_id"] else ""), float(e["amount"]),
-                    "свои" if e["paid_by"] == "own" else "компании",
-                    {"submitted": "ждёт проверки", "approved": "принято", "rejected": "отказ"}.get(e["status"], e["status"]),
-                    {"to_pay": "к выплате", "paid": "выплачено"}.get(e["payout_status"], "")])
+        deal = e["deal_id"] or (e["object_id"] or None)
+        dep = _dept(e["zone_code"], e["article"])
+        buy_m.setdefault(dep, []).append([
+            "", _d(e["created_at"].date()), e["who"], art.get(e["article"], e["article"]), e["cat"], deal or "",
+            e["obj"] if e["object_id"] else "", float(e["amount"]), "свои" if e["paid_by"] == "own" else "компании",
+            {"submitted": "ждёт проверки", "approved": "принято"}.get(e["status"], e["status"]),
+            {"to_pay": "к выплате", "paid": "выплачено"}.get(e["payout_status"], "")])
+        if deal:
+            by_deal[deal] = by_deal.get(deal, 0) + float(e["amount"])
+    for dep, rows in buy_m.items():
+        for r in rows:
+            r[0] = dep
     prj_h = ["Месяц", "Сделка", "Объект", "Город", "Модель", "Категория", "Услуга", "Источник", "ИП", "Конец работ", "Выручка с НДС",
-             "Получено", "Долг", "Откуда"]
+             "Получено", "Долг", "Материалы и траты", "Выручка минус траты", "Откуда"]
     prj_m = {}
     for r in conn.execute("SELECT * FROM fin_projects WHERE year=%s ORDER BY month, city, closed NULLS LAST, row_no", (year,)).fetchall():
         prj_m.setdefault(r["month"], []).append([MONTHS[r["month"] - 1], r["deal_id"] or "", r["title"], r["city"], r["model"], r["category"], r["service"], r["source"],
                     r["ip"], _d(r["closed"]), float(r["revenue"]), float(r["received"]), float(r["debt"]),
+                    (spent := float(r["materials"] + r["transport"] + r["other"]) + by_deal.get(r["deal_id"], 0)), float(r["revenue"]) - spent,
                     "Битрикс" if r["origin"] == "bitrix" else "лист 2026"])
     for rows in pay_m.values():   # внутри месяца: по группам, потом по имени
         rows.sort(key=lambda x: (x[2] or "", x[1] or ""))
     prj = sectioned(prj_h, prj_m, (10, 11, 12), year, ("проект", "проекта", "проектов"))
     pay = sectioned(pay_h, pay_m, (3, 4, 5), year, ("человек", "человека", "человек"))
-    return {"Сводка": sv, "Модель": model(conn, year, sums), "Проекты": prj, "Движение денег": led, "ФОТ": pay, "Закупки": buy}
+    buy = sectioned(buy_h, buy_m, (7,), year, ("трата", "траты", "трат"), label=str)
+    return {"Сводка": sv, "Модель": model(conn, year, sums), "Проекты": prj, "Движение денег": led, "ФОТ": pay, "Траты": buy}
 
 
 def _plural(n: int, w: tuple) -> str:
     return w[0] if n % 10 == 1 and n % 100 != 11 else w[1] if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else w[2]
 
 
-def sectioned(header: list, by_month: dict, money: tuple, year: int, words: tuple) -> list[list]:
+def sectioned(header: list, by_month: dict, money: tuple, year: int, words: tuple, label=lambda m: MONTHS[m - 1]) -> list[list]:
     """Лист разделами по месяцам (HEAD 08.11: «красиво, с разделениями»): шапка месяца «НОЯБРЬ · 2 проекта»,
     строки, «Итого: Ноябрь» с суммами; в конце — «Итого {год}». Разделы сворачиваются (группы строк)."""
     out, tot = [header], [0.0] * len(header)
     for m in sorted(by_month):
         rows = by_month[m]
-        out.append([f"{MONTHS[m - 1].upper()} · {len(rows)} {_plural(len(rows), words)}"] + [""] * (len(header) - 1))
+        out.append([f"{label(m).upper()} · {len(rows)} {_plural(len(rows), words)}"] + [""] * (len(header) - 1))
         out += rows
-        sub = [f"Итого: {MONTHS[m - 1]}"] + [""] * (len(header) - 1)
+        sub = [f"Итого: {label(m)}"] + [""] * (len(header) - 1)
         for c in money:
             sub[c] = sum(float(r[c] or 0) for r in rows)
             tot[c] += sub[c]
@@ -127,11 +141,18 @@ def sectioned(header: list, by_month: dict, money: tuple, year: int, words: tupl
 def _kind(row: list) -> str:
     """Тип строки разделённого листа: section / sub / total / ""."""
     k = str(row[0]) if row else ""
-    if k.split(" · ")[0] in MONTHS_UP:
+    if re.fullmatch(r"[^a-zа-яё]+ · \d+ \S+", k):   # «НОЯБРЬ · 2 проекта», «02 РОСПИСЬ · 5 трат»
         return "section"
     if k.startswith("Итого: "):
         return "sub"
     return "total" if re.fullmatch(r"Итого \d{4}", k) else ""
+
+
+def _dept(zone: str | None, article: str) -> str:
+    """Отдел траты: участок (роспись / печать / дизайн / продажи), иначе по статье; без участка — HEAD и офис."""
+    if zone in DEPT:
+        return DEPT[zone]
+    return DEPT["stock"] if article in ("stock", "canvas") else DEPT["sales"] if article == "sales" else DEPT["office"]
 
 
 def _city(c: str) -> str:
@@ -294,7 +315,7 @@ def style(sheets: list[dict], tabs: dict[str, list[list]]) -> list[dict]:
         if lay.get("sections"):   # разделы по месяцам: без полос и фильтра (фильтр ломает разделы)
             if title in had_filter:
                 req.append({"clearBasicFilter": {"sheetId": sid}})
-            req += _sections_style(sid, rows, rng, cols)
+            req += _sections_style(sid, rows, rng, cols, lay.get("collapse", True))
         else:
             req.append({"addBanding": {"bandedRange": {"range": rng(1, body), "rowProperties": {
                 "firstBandColorStyle": {"rgbColor": _rgb(C["white"])}, "secondBandColorStyle": {"rgbColor": _rgb(C["alt"])}}}}})
@@ -334,14 +355,14 @@ def style(sheets: list[dict], tabs: dict[str, list[list]]) -> list[dict]:
                 "condition": {"type": "CUSTOM_FORMULA", "values": [{"userEnteredValue": '=$K2="отменено"'}]},
                 "format": {"textFormat": {"strikethrough": True, "foregroundColor": _rgb(C["muted"])}}}}}})
         if title in ("ФОТ", "Проекты"):   # долг / «осталось» больше нуля — красным
-            c = 5 if title == "ФОТ" else 12
+            c = 5 if title == "ФОТ" else 12   # и «выручка минус траты» ниже нуля — красным (в формате денег)
             req.append({"addConditionalFormatRule": {"index": 0, "rule": {"ranges": [rng(1, n, c, c + 1)], "booleanRule": {
                 "condition": {"type": "NUMBER_GREATER", "values": [{"userEnteredValue": "0"}]},
                 "format": {"textFormat": {"bold": True, "foregroundColor": _rgb(C["accent"])}}}}}})
     return req
 
 
-def _sections_style(sid: int, rows: list[list], rng, cols: int) -> list[dict]:
+def _sections_style(sid: int, rows: list[list], rng, cols: int, collapse: bool = True) -> list[dict]:
     """Разделы по месяцам: светлая шапка месяца с красным текстом, жирный подытог с линией, тёмный итог года;
     строки месяца сворачиваются, открыты два последних месяца."""
     req, line = [], {"style": "SOLID", "colorStyle": {"rgbColor": _rgb(C["line"])}}
@@ -368,7 +389,7 @@ def _sections_style(sid: int, rows: list[list], rng, cols: int) -> list[dict]:
         if b > a:
             r = {"sheetId": sid, "dimension": "ROWS", "startIndex": a + 1, "endIndex": b + 1}
             req.append({"addDimensionGroup": {"range": r}})
-            if j < len(starts) - 2:
+            if collapse and j < len(starts) - 2:
                 req.append({"updateDimensionGroup": {"dimensionGroup": {"range": r, "depth": 1, "collapsed": True}, "fields": "collapsed"}})
     if starts:   # плюсик группы — над строками (у шапки месяца), не под ними
         req.append({"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {"rowGroupControlAfter": False}},
