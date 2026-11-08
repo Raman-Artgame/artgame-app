@@ -4,6 +4,7 @@
 сервисным аккаунтом (нужен доступ «Редактор» к этой таблице). Запуск: кнопка HEAD и таймер artgame-finexport.
 Пока таблица не задана — ничего не пишет и говорит об этом.
 """
+import re
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +15,7 @@ from .deps import require_head
 
 router = APIRouter(prefix="/api")
 MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
+MONTHS_UP = {m.upper() for m in MONTHS}
 KIND = {"in": "приход", "out": "расход"}
 PROFIT = 12   # колонка «Прибыль до ИПН» в «Сводке»
 ORDER = ["Сводка", "Модель", "Проекты", "Движение денег", "ФОТ", "Закупки"]
@@ -22,9 +24,9 @@ ORDER = ["Сводка", "Модель", "Проекты", "Движение д�
 LAYOUT = {
     "Сводка": {"money": range(1, 17), "date": (), "w": [110] + [125] * 16 + [360], "freeze_col": 1},
     "Модель": {"money": range(1, 14), "date": (), "w": [300] + [115] * 13, "freeze_col": 1, "rows": True},
-    "Проекты": {"money": (10, 11, 12), "date": (9,), "w": [90, 70, 260, 110, 60, 110, 140, 120, 110, 100, 125, 125, 115, 90], "freeze_col": 3},
+    "Проекты": {"money": (10, 11, 12), "date": (9,), "w": [90, 70, 260, 110, 60, 110, 140, 120, 110, 100, 125, 125, 115, 90], "freeze_col": 3, "sections": True},
     "Движение денег": {"money": (3,), "date": (0,), "w": [95, 150, 95, 115, 190, 75, 70, 170, 280, 80, 85], "freeze_col": 1},
-    "ФОТ": {"money": (3, 4, 5), "date": (6,), "w": [90, 200, 120, 115, 115, 115, 110, 420], "freeze_col": 2},
+    "ФОТ": {"money": (3, 4, 5), "date": (6,), "w": [90, 200, 120, 115, 115, 115, 110, 420], "freeze_col": 2, "sections": True},
     "Закупки": {"money": (5,), "date": (0,), "w": [95, 170, 150, 170, 200, 110, 90, 110, 95], "freeze_col": 1},
 }
 C = {"dark": "#0B0B0D", "light": "#F1F0EC", "alt": "#F7F6F3", "white": "#FFFFFF", "line": "#DCDBD6", "accent": "#E60041",
@@ -50,7 +52,8 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
     sv = [["Месяц", "Выручка с НДС", "НДС", "Без НДС", "На объекты (чеки)", "Склад", "Мастерская холстов", "Отдел продаж",
            "Материалы и транспорт (оценка, до ноября)", "ФОТ", "Постоянные", "Переменные", "Прибыль до ИПН", "ИПН (оценка)",
            "Приход денег", "Расход денег", "Остаток на конец", "Примечание"]]
-    pay = [["Месяц", "Получатель", "Группа", "Начислено", "Выплачено", "Осталось", "Последняя выплата", "Из чего"]]
+    pay_h = ["Месяц", "Получатель", "Группа", "Начислено", "Выплачено", "Осталось", "Последняя выплата", "Из чего"]
+    pay_m = {}
     sums = {}
     for m in range(1, last + 1):
         ym = f"{year}-{m:02d}"
@@ -61,7 +64,7 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
                    sum(float(b["balance"]) for b in s["cash"]["closing"]),
                    "история: материалы — оценка старой таблицы, аренда/подписки/реклама — по нынешним ставкам «Значений»" if date(year, m, 1) < finance.HIST_CUT else ""])
         for x in (r for r in finance.payroll(ym, head)["rows"] if r["accrued"] or r["paid"]):   # без пустых строк
-            pay.append([MONTHS[m - 1], x["name"], x["group"], x["accrued"], x["paid"], x["left"], _d(x["last_paid"]),
+            pay_m.setdefault(m, []).append([MONTHS[m - 1], x["name"], x["group"], x["accrued"], x["paid"], x["left"], _d(x["last_paid"]),
                         "; ".join(f"{a['detail'] or a['kind']}: {float(a['amount']):.0f}" for a in x["lines"])])
     if len(sv) > 1:   # итог года: суммы по колонкам, остаток — на конец последнего месяца
         tot = [sum(float(r[i] or 0) for r in sv[1:]) for i in range(1, 16)]
@@ -85,13 +88,50 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
                     "свои" if e["paid_by"] == "own" else "компании",
                     {"submitted": "ждёт проверки", "approved": "принято", "rejected": "отказ"}.get(e["status"], e["status"]),
                     {"to_pay": "к выплате", "paid": "выплачено"}.get(e["payout_status"], "")])
-    prj = [["Месяц", "Сделка", "Объект", "Город", "Модель", "Категория", "Услуга", "Источник", "ИП", "Конец работ", "Выручка с НДС",
-            "Получено", "Долг", "Откуда"]]
-    for r in conn.execute("SELECT * FROM fin_projects WHERE year=%s ORDER BY month, closed NULLS LAST, row_no", (year,)).fetchall():
-        prj.append([MONTHS[r["month"] - 1], r["deal_id"] or "", r["title"], r["city"], r["model"], r["category"], r["service"], r["source"],
+    prj_h = ["Месяц", "Сделка", "Объект", "Город", "Модель", "Категория", "Услуга", "Источник", "ИП", "Конец работ", "Выручка с НДС",
+             "Получено", "Долг", "Откуда"]
+    prj_m = {}
+    for r in conn.execute("SELECT * FROM fin_projects WHERE year=%s ORDER BY month, city, closed NULLS LAST, row_no", (year,)).fetchall():
+        prj_m.setdefault(r["month"], []).append([MONTHS[r["month"] - 1], r["deal_id"] or "", r["title"], r["city"], r["model"], r["category"], r["service"], r["source"],
                     r["ip"], _d(r["closed"]), float(r["revenue"]), float(r["received"]), float(r["debt"]),
                     "Битрикс" if r["origin"] == "bitrix" else "лист 2026"])
+    for rows in pay_m.values():   # внутри месяца: по группам, потом по имени
+        rows.sort(key=lambda x: (x[2] or "", x[1] or ""))
+    prj = sectioned(prj_h, prj_m, (10, 11, 12), year, ("проект", "проекта", "проектов"))
+    pay = sectioned(pay_h, pay_m, (3, 4, 5), year, ("человек", "человека", "человек"))
     return {"Сводка": sv, "Модель": model(conn, year, sums), "Проекты": prj, "Движение денег": led, "ФОТ": pay, "Закупки": buy}
+
+
+def _plural(n: int, w: tuple) -> str:
+    return w[0] if n % 10 == 1 and n % 100 != 11 else w[1] if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else w[2]
+
+
+def sectioned(header: list, by_month: dict, money: tuple, year: int, words: tuple) -> list[list]:
+    """Лист разделами по месяцам (HEAD 08.11: «красиво, с разделениями»): шапка месяца «НОЯБРЬ · 2 проекта»,
+    строки, «Итого: Ноябрь» с суммами; в конце — «Итого {год}». Разделы сворачиваются (группы строк)."""
+    out, tot = [header], [0.0] * len(header)
+    for m in sorted(by_month):
+        rows = by_month[m]
+        out.append([f"{MONTHS[m - 1].upper()} · {len(rows)} {_plural(len(rows), words)}"] + [""] * (len(header) - 1))
+        out += rows
+        sub = [f"Итого: {MONTHS[m - 1]}"] + [""] * (len(header) - 1)
+        for c in money:
+            sub[c] = sum(float(r[c] or 0) for r in rows)
+            tot[c] += sub[c]
+        out.append(sub)
+    if len(out) > 1:
+        out.append([f"Итого {year}"] + ["" if c not in money else tot[c] for c in range(1, len(header))])
+    return out
+
+
+def _kind(row: list) -> str:
+    """Тип строки разделённого листа: section / sub / total / ""."""
+    k = str(row[0]) if row else ""
+    if k.split(" · ")[0] in MONTHS_UP:
+        return "section"
+    if k.startswith("Итого: "):
+        return "sub"
+    return "total" if re.fullmatch(r"Итого \d{4}", k) else ""
 
 
 def _city(c: str) -> str:
@@ -193,7 +233,7 @@ def write(sheet_id: str, tabs: dict[str, list[list]]):
     httpx.post(f"{base}/values:batchClear", json={"ranges": [f"'{t}'!A:Z" for t in tabs]}, headers=h, timeout=30).raise_for_status()
     data = [{"range": f"'{t}'!A1", "values": [["" if v is None else v for v in row] for row in rows]} for t, rows in tabs.items()]
     httpx.post(f"{base}/values:batchUpdate", json={"valueInputOption": "RAW", "data": data}, headers=h, timeout=60).raise_for_status()
-    meta = httpx.get(base, params={"fields": "sheets(properties(sheetId,title,gridProperties),bandedRanges(bandedRangeId),conditionalFormats)"},
+    meta = httpx.get(base, params={"fields": "sheets(properties(sheetId,title,gridProperties),bandedRanges(bandedRangeId),conditionalFormats,rowGroups,basicFilter)"},
                      headers=h, timeout=30).json()
     httpx.post(f"{base}:batchUpdate", json={"requests": style(meta.get("sheets", []), tabs)}, headers=h, timeout=60).raise_for_status()
 
@@ -202,6 +242,7 @@ def style(sheets: list[dict], tabs: dict[str, list[list]]) -> list[dict]:
     """Запросы оформления: старые полосы и условные правила снимаем и ставим заново — повторная выгрузка не копит их."""
     req, ids = [], {s["properties"]["title"]: s["properties"]["sheetId"] for s in sheets}
     grid = {s["properties"]["title"]: s["properties"].get("gridProperties", {}) for s in sheets}
+    had_filter = {s["properties"]["title"] for s in sheets if s.get("basicFilter")}
     for s in sheets:
         sid, title = s["properties"]["sheetId"], s["properties"]["title"]
         if title not in tabs:   # «Лист1» и прочие пустые — прячем (не удаляем)
@@ -210,6 +251,7 @@ def style(sheets: list[dict], tabs: dict[str, list[list]]) -> list[dict]:
             continue
         req += [{"deleteBanding": {"bandedRangeId": b["bandedRangeId"]}} for b in s.get("bandedRanges", [])]
         req += [{"deleteConditionalFormatRule": {"sheetId": sid, "index": 0}} for _ in s.get("conditionalFormats", [])]
+        req += [{"deleteDimensionGroup": {"range": g["range"]}} for g in s.get("rowGroups", [])]
     for pos, title in enumerate(ORDER):
         if title not in ids or title not in tabs:
             continue
@@ -249,11 +291,18 @@ def style(sheets: list[dict], tabs: dict[str, list[list]]) -> list[dict]:
                 "fields": "userEnteredFormat.numberFormat,userEnteredFormat.horizontalAlignment"}})
         # полосы через строку и тонкая линия снизу шапки
         body = n - 1 if title == "Сводка" else n   # строку «Итого» не красим полосами
-        req.append({"addBanding": {"bandedRange": {"range": rng(1, body), "rowProperties": {
-            "firstBandColorStyle": {"rgbColor": _rgb(C["white"])}, "secondBandColorStyle": {"rgbColor": _rgb(C["alt"])}}}}})
-        req.append({"updateBorders": {"range": rng(1, n), "bottom": {"style": "SOLID", "colorStyle": {"rgbColor": _rgb(C["line"])}},
-                                      "innerHorizontal": {"style": "SOLID", "colorStyle": {"rgbColor": _rgb(C["line"])}}}})
-        if not lay.get("rows"):
+        if lay.get("sections"):   # разделы по месяцам: без полос и фильтра (фильтр ломает разделы)
+            if title in had_filter:
+                req.append({"clearBasicFilter": {"sheetId": sid}})
+            req += _sections_style(sid, rows, rng, cols)
+        else:
+            req.append({"addBanding": {"bandedRange": {"range": rng(1, body), "rowProperties": {
+                "firstBandColorStyle": {"rgbColor": _rgb(C["white"])}, "secondBandColorStyle": {"rgbColor": _rgb(C["alt"])}}}}})
+            req.append({"updateBorders": {"range": rng(1, n), "bottom": {"style": "SOLID", "colorStyle": {"rgbColor": _rgb(C["line"])}},
+                                          "innerHorizontal": {"style": "SOLID", "colorStyle": {"rgbColor": _rgb(C["line"])}}}})
+        if lay.get("sections"):
+            pass   # оформлено выше
+        elif not lay.get("rows"):
             req.append({"setBasicFilter": {"filter": {"range": rng(0, body)}}})
         else:   # «Модель»: строки-показатели — проценты, штуки, заголовки разделов, итог года жирным
             for i, row in enumerate(rows):
@@ -289,6 +338,41 @@ def style(sheets: list[dict], tabs: dict[str, list[list]]) -> list[dict]:
             req.append({"addConditionalFormatRule": {"index": 0, "rule": {"ranges": [rng(1, n, c, c + 1)], "booleanRule": {
                 "condition": {"type": "NUMBER_GREATER", "values": [{"userEnteredValue": "0"}]},
                 "format": {"textFormat": {"bold": True, "foregroundColor": _rgb(C["accent"])}}}}}})
+    return req
+
+
+def _sections_style(sid: int, rows: list[list], rng, cols: int) -> list[dict]:
+    """Разделы по месяцам: светлая шапка месяца с красным текстом, жирный подытог с линией, тёмный итог года;
+    строки месяца сворачиваются, открыты два последних месяца."""
+    req, line = [], {"style": "SOLID", "colorStyle": {"rgbColor": _rgb(C["line"])}}
+    kinds = [_kind(r) for r in rows]
+    fmt = lambda i, f, fields: req.append({"repeatCell": {"range": rng(i, i + 1, 0, cols), "cell": {"userEnteredFormat": f},
+                                                         "fields": fields}})
+    starts = [i for i, k in enumerate(kinds) if k == "section"]
+    for i, k in enumerate(kinds):
+        if k == "section":
+            fmt(i, {"backgroundColor": _rgb(C["light"]), "wrapStrategy": "OVERFLOW_CELL",
+                    "textFormat": {"fontFamily": "Inter", "fontSize": 11, "bold": True, "foregroundColor": _rgb(C["accent"])}},
+                "userEnteredFormat.backgroundColor,userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat")
+        elif k == "sub":
+            fmt(i, {"textFormat": {"fontFamily": "Inter", "bold": True}, "borders": {"top": {"style": "SOLID_MEDIUM",
+                                                                                                "colorStyle": {"rgbColor": _rgb(C["dark"])}}}},
+                "userEnteredFormat.textFormat.bold,userEnteredFormat.borders.top")
+        elif k == "total":
+            fmt(i, {"backgroundColor": _rgb(C["dark"]), "textFormat": {"fontFamily": "Inter", "bold": True, "foregroundColor": _rgb(C["light"])}},
+                "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat")
+        elif i:
+            req.append({"updateBorders": {"range": rng(i, i + 1), "bottom": line}})
+    for j, a in enumerate(starts):   # строки месяца (с подытогом) — группа под шапкой месяца
+        b = next((i for i in range(a + 1, len(kinds)) if kinds[i] == "sub"), a)
+        if b > a:
+            r = {"sheetId": sid, "dimension": "ROWS", "startIndex": a + 1, "endIndex": b + 1}
+            req.append({"addDimensionGroup": {"range": r}})
+            if j < len(starts) - 2:
+                req.append({"updateDimensionGroup": {"dimensionGroup": {"range": r, "depth": 1, "collapsed": True}, "fields": "collapsed"}})
+    if starts:   # плюсик группы — над строками (у шапки месяца), не под ними
+        req.append({"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {"rowGroupControlAfter": False}},
+                                              "fields": "gridProperties.rowGroupControlAfter"}})
     return req
 
 

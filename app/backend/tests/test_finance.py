@@ -277,6 +277,25 @@ def test_export_style():
     assert all("(" not in x[k].get("fields", "") for x in r for k in x)   # маски полей — через точку, скобки API не принимает
 
 
+def test_sections():
+    """«Проекты» и «ФОТ» разделами по месяцам: шапка месяца, подытог, итог года; группы строк сворачиваются, старый фильтр снимается."""
+    from artgame.fin_export import _kind, sectioned, style
+    h = ["Месяц", "Кто", "Сумма"]
+    rows = sectioned(h, {10: [["Октябрь", "А", 100], ["Октябрь", "Б", 50]], 11: [["Ноябрь", "В", 10]],
+                         9: [["Сентябрь", "Г", 1]]}, (2,), 2026, ("проект", "проекта", "проектов"))
+    assert rows[1][0] == "СЕНТЯБРЬ · 1 проект" and rows[4][0] == "ОКТЯБРЬ · 2 проекта" and rows[7] == ["Итого: Октябрь", "", 150.0]
+    assert rows[-1] == ["Итого 2026", "", 161.0] and [_kind(r) for r in rows][:4] == ["", "section", "", "sub"]
+    sheets = [{"properties": {"sheetId": 3, "title": "ФОТ", "gridProperties": {"rowCount": 50}}, "basicFilter": {"range": {}},
+               "rowGroups": [{"range": {"sheetId": 3, "dimension": "ROWS", "startIndex": 2, "endIndex": 4}, "depth": 1}]}]
+    r = style(sheets, {"ФОТ": [r + [""] * 5 for r in rows]})
+    kinds = [next(iter(x)) for x in r]
+    assert kinds.count("addDimensionGroup") == 3 and kinds.count("deleteDimensionGroup") == 1 and "clearBasicFilter" in kinds
+    assert "setBasicFilter" not in kinds and "addBanding" not in kinds
+    coll = [x["updateDimensionGroup"]["dimensionGroup"]["range"]["startIndex"] for x in r if "updateDimensionGroup" in x]
+    assert coll == [2]   # свёрнут только сентябрь, два последних месяца открыты
+    assert all("(" not in x[k].get("fields", "") for x in r for k in x)
+
+
 def test_bitrix_projects(client, monkeypatch):
     """С ноября проекты — сданные сделки Битрикса: «Оплата+закрывающие» по дню перевода, «Оплата получена» — по «Окончание факт»;
     сделки из листа не задваиваются; выручка месяца в «Сводке» их видит."""
