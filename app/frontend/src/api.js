@@ -10,6 +10,8 @@ export const setWebToken = t => { try { t ? localStorage.setItem(KEY, t) : local
 const VKEY = 'artgame.viewas'
 export const viewAs = () => { try { return sessionStorage.getItem(VKEY) || '' } catch { return '' } }
 export const setViewAs = t => { try { t ? sessionStorage.setItem(VKEY, t) : sessionStorage.removeItem(VKEY) } catch { /* без памяти */ } }
+// «Пройти как сотрудник» (только test): test:<роль> — запись открыта, всё уходит от тестового сотрудника.
+export const testAs = () => viewAs().startsWith('test:')
 export const RO_MSG = 'Режим просмотра: от имени сотрудника ничего не меняется.'
 export const readOnlyHit = (msg = RO_MSG) => window.dispatchEvent(new CustomEvent('artgame:ro', { detail: msg }))
 

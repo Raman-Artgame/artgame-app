@@ -7,16 +7,23 @@
 - Роль без человека: интерфейс роли на данных самого HEAD (команда ещё не вся зарегистрирована).
 - Рабочие места во фрейме ходят по подписанной ссылке без заголовка — ссылка несёт пометку просмотра (places.token),
   запись в базу места и сохранение документа по ней закрыты.
+- «Пройти как сотрудник» (HEAD 08.11, только на test): значение test:<роль> — HEAD действует от тестового сотрудника
+  этой роли («Тест · Саппорт» и т. п., заводится сам). Запись открыта и идёт по-настоящему (смена, фото на Диск, расходы,
+  проверка), всё на тестового сотрудника; на prod такой режим сервер не принимает.
 """
+import hashlib
+
 from contextvars import ContextVar
 
 from fastapi import Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from . import db
+from .config import settings
 
 HEADER = "x-view-as"
 READ = {"GET", "HEAD", "OPTIONS"}
+TEST = "test:"
 RO_MSG = "Режим просмотра: от имени сотрудника ничего не меняется. Вернитесь к себе, чтобы действовать."
 
 # Роль → зона по умолчанию (как в «Команде»): без зоны «Смена» закрыта.
@@ -45,17 +52,43 @@ class ViewAsMiddleware:
         raw = next((v.decode() for k, v in scope.get("headers", []) if k.decode().lower() == HEADER), "").strip()
         token = VIEW.set({"as": raw or None})
         try:
-            if raw and scope["method"] not in READ:
+            if raw and scope["method"] not in READ and not (raw.startswith(TEST) and test_on()):
                 return await JSONResponse({"detail": RO_MSG, "view_as": True}, status_code=403)(scope, receive, send)
             return await self.app(scope, receive, send)
         finally:
             VIEW.reset(token)
 
 
+def test_on() -> bool:
+    return settings.env_name == "test"
+
+
+def test_person(conn, role: str, load_person) -> dict:
+    """Тестовый сотрудник роли: один на роль, tg_id отрицательный (в Telegram такого нет), зона — как в «Команде»."""
+    r = conn.execute("SELECT code, title FROM roles WHERE code=%s", (role,)).fetchone()
+    if not r or role == "head":
+        raise HTTPException(400, "нет такой роли")
+    tg = -int.from_bytes(hashlib.sha1(role.encode()).digest()[:6], "big")
+    pid = conn.execute("""INSERT INTO people (tg_id, full_name, role_code, status) VALUES (%s, %s, %s, 'active')
+                          ON CONFLICT (tg_id) DO UPDATE SET role_code=EXCLUDED.role_code, status='active' RETURNING id""",
+                       (tg, f"Тест · {r['title']}", role)).fetchone()["id"]
+    if role in ROLE_ZONE:
+        conn.execute("INSERT INTO person_zones (person_id, zone_code) VALUES (%s, %s) ON CONFLICT DO NOTHING", (pid, ROLE_ZONE[role]))
+    return load_person(conn, pid, by="id")
+
+
 def resolve(conn, head: dict, raw: str, load_person) -> dict:
     """HEAD + значение заголовка → человек, которого показываем. Пометки _view_* видит экран (баннер)."""
     if head["role_code"] != "head" or head["status"] != "active":
         raise HTTPException(403, "смотреть как сотрудник может только HEAD")
+    if raw.startswith(TEST):
+        if not test_on():
+            raise HTTPException(403, "тест от лица сотрудника — только на test")
+        p = test_person(conn, raw[len(TEST):], load_person)
+        # запись идёт на тестового сотрудника как есть: журнал не переписываем на HEAD (VIEW без viewer)
+        p["_view_as"] = {"kind": "test", "role": p["role_code"], "viewer_id": head["id"], "viewer_name": head["full_name"],
+                         "status": "active", "role_code": p["role_code"]}
+        return p
     if raw.startswith("role:"):
         role = raw[5:]
         r = conn.execute("SELECT code, title FROM roles WHERE code=%s", (role,)).fetchone()
@@ -122,9 +155,9 @@ def install(app):
             people = conn.execute(
                 """SELECT p.id, p.full_name, p.role_code, p.status, r.title AS role_title, r.level
                    FROM people p LEFT JOIN roles r ON r.code=p.role_code
-                   WHERE p.id<>%s ORDER BY p.status='active' DESC, r.level NULLS LAST, p.full_name""", (p["id"],)).fetchall()
+                   WHERE p.id<>%s AND p.tg_id > 0 ORDER BY p.status='active' DESC, r.level NULLS LAST, p.full_name""", (p["id"],)).fetchall()
             roles = conn.execute("SELECT code, title FROM roles WHERE code<>'head' ORDER BY level NULLS LAST, title").fetchall()
-        return {"people": people, "roles": roles}
+        return {"people": people, "roles": roles, "test": test_on()}
 
     @app.post("/api/view-as/start")
     def view_start(body: StartIn, p: dict = Depends(current_person)):
