@@ -76,8 +76,9 @@ const KIT = new Set(['lead_artist', 'artist_pro', 'print_master', 'head'])
 const PROD = new Set(['lead_artist', 'artist_pro', 'print_master', 'head'])
 const STOCK = new Set(['lead_artist', 'artist_pro', 'print_master', 'carpenter'])
 const STUDY = {
-  // Саппорту калькулятор карточки выезда не нужен (HEAD 08.11) — nocalc прячет его, чек-листы выезда остаются.
-  art: r => ({ home: 'ucheb', hide: ['pay', 'grow', ...(SENIOR.has(r) ? [] : ['gip', 'chief'])], ...(r === 'support' ? { nocalc: 1 } : {}) }),
+  // HEAD 08.11: в «Учёбе» — База знаний (учебник), Тест, Клиентам; «Выезд» переехал в «Смену» подсказками,
+  // «Куратор/ГИП», «Главный художник», «Рост», «Оплата» скрыты. Рядом свои чипы: «ТБ» и «Правила игры».
+  art: () => ({ home: 'ucheb', hide: ['trip', 'gip', 'chief', 'grow', 'pay'] }),
   dz: () => ({ home: 'learn', hide: ['board', 'handoff'] }),
 }
 const PLAIN = new Set(['today', 'leads', 'deals', 'projects', 'month'])
@@ -136,8 +137,8 @@ function Main({ me, web, logout }) {
   const duty = DUTIES[role]
   if (tab === 'place' || tab === 'study') return <>
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
-      extra={[duty && { code: 'duty', title: 'Должностная', render: () => <Duty d={duty} /> },
-        GROW[role] && { code: 'grow', title: GROW[role].title, render: () => <Grow g={GROW[role]} /> }].filter(Boolean)} /> :
+      extra={[art && { code: 'tb', title: 'ТБ', render: () => <Safety /> },
+        duty && { code: 'duty', title: 'Правила игры', render: () => <Duty d={duty} g={GROW[role]} /> }].filter(Boolean)} /> :
     <Places key={tab} list={tab === 'study' ? [mopPlace] : other} mode={tab === 'study' ? 'study' : ''} />}
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} />
   </>
@@ -172,19 +173,42 @@ function ExpenseTab({ done }) {
 
 // «Как стать художником» (HEAD 08.11) — для саппорта: что нужно уметь, как проходит экзамен, кто принимает.
 function Grow({ g }) {
-  return <div className="wrap"><div className="card duty">
+  return <div className="card duty">
     <span className="tag">{g.step}</span><h2>{g.title}</h2><p>{g.about}</p>
     <h3>Что нужно уметь</h3>{g.check.map((x, i) => <div key={i} className="growrow"><span>{i + 1}</span>{x}</div>)}
     <h3>Экзамен</h3>{g.exam.map(([t, how, ok]) => <div key={t} className="growexam"><b>{t}</b><span className="small">{how}</span><span className="small muted">Зачёт: {ok}</span></div>)}
     <p className="small muted">{g.who}</p><p className="small muted">Источник: {g.src}</p>
-  </div></div>
+  </div>
 }
 
-function Duty({ d }) {
+// «Правила игры» (HEAD 08.11 — вместо «Должностной»): роль, кому подчиняешься, что делаешь; ниже — как вырасти на ступень.
+function Duty({ d, g }) {
   return <div className="wrap"><div className="card duty">
-    <span className="tag">{d.step}</span><h2>{d.title}</h2><p>{d.about}</p><p className="small muted">{d.boss}</p>
-    <h3>Обязанности</h3><ul>{d.duty.map((x, i) => <li key={i}>{x}</li>)}</ul>
-    <p className="small muted">Источник: {d.src} Ставки — в «Мои».</p>
+    <span className="tag">{d.step}</span><h2>Правила игры · {d.title}</h2><p>{d.about}</p><p className="small muted">{d.boss}</p>
+    <h3>Что ты делаешь</h3><ul>{d.duty.map((x, i) => <li key={i}>{x}</li>)}</ul>
+    <p className="small muted">Ставки — в «Мои».</p>
+  </div>{g && <Grow g={g} />}</div>
+}
+
+// ТБ (HEAD 08.11): главное по безопасности с цифрами из «Значений» (safety.*). Полная глава — «База знаний», глава 10.
+function Safety() {
+  const [v, setV] = useState(null)
+  useEffect(() => { api('/work/dict').then(d => setV(d.safety || {}), () => setV({})) }, [])
+  const n = (k, d) => String(v?.[k] ?? d).replace('.', ',')
+  if (!v) return <div className="wrap"><div className="card muted">Загрузка…</div></div>
+  const rows = [[`${n('safety.harness_from', '1,8')} м`, 'С этой высоты без ограждения — только со страховкой. Анкер выше плеч, не к трубам и перилам.'],
+    [`${n('safety.anchor_from', 4)} м`, 'Вышки и леса выше — опоры и анкер к стене, колёса на тормозах.'],
+    [`${n('safety.wind.tower_stop', 12)} м/с`, 'Ветер сильнее — на вышке не работаем.'],
+    [`${n('safety.wind.move_stop', 10)} м/с`, 'Ветер сильнее — вышку не передвигаем; люлька и автовышка — стоп.'],
+    [`${n('safety.rescue_min', 10)}–${n('safety.rescue_max', 15)} мин`, 'За столько эвакуировать человека, повисшего в привязи. Сразу — скорая.'],
+    ['1 + 1', 'Один на высоте не работает: внизу всегда второй.'],
+    ['Очки', 'Всегда. Респиратор — распыление, аэрозоль, шлифовка.'],
+    ['Стоп', 'Дым, искрение, вибрация, повреждённый кабель — остановить, отключить, сообщить Главному. Самим не чинить.']]
+  return <div className="wrap"><div className="card tbcard">
+    <span className="tag">Техника безопасности</span><h2>ТБ на объекте</h2>
+    <p className="small muted">Никто не работает на оборудовании без обучения и сданной ТБ. Допуск даёт Главный художник или Художник-Про.</p>
+    {rows.map(([k, t]) => <div key={k} className="tbrow"><b>{k}</b><span>{t}</span></div>)}
+    <p className="small muted">Подробно — «База знаний», глава 10 «Техника безопасности». Цифры — из «Значений».</p>
   </div></div>
 }
 

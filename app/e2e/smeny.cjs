@@ -57,7 +57,7 @@ async function tab(p, name) {
 
   // 2. Смена по шагам (HEAD 08.11): объект в работе, условия заполнил МОП → фото «до» → «Начать» → м², «что сделал», фото «после»
   const psql = q => execSync(`psql "${process.env.ARTGAME_DATABASE_URL}" -qc "${q}"`)
-  psql("INSERT INTO objects (id, title, city, bitrix_stage, level, area_m2, address) VALUES (731, 'Кафе e2e', 'Астана', 'UC_AV00QK', 'medium', 60, 'Мангилик Ел 1') ON CONFLICT (id) DO UPDATE SET bitrix_stage='UC_AV00QK', level='medium'")
+  psql("INSERT INTO objects (id, title, city, bitrix_stage, level, area_m2, address, geo, drive_folder) VALUES (731, 'Кафе e2e', 'Астана', 'UC_AV00QK', 'medium', 60, 'Мангилик Ел 1', '51.09;71.41', 'deal-731') ON CONFLICT (id) DO UPDATE SET bitrix_stage='UC_AV00QK', level='medium', geo='51.09;71.41', drive_folder='deal-731'")
   psql(`INSERT INTO deal_calc (deal_id, data) VALUES (731, '{\\"in\\": {\\"service\\": \\"mural\\", \\"level\\": \\"medium\\", \\"extras\\": [\\"height\\"], \\"surface\\": true}}') ON CONFLICT DO NOTHING`)
   await a.reload()
   await a.getByRole('button', { name: 'Начать смену' }).waitFor()

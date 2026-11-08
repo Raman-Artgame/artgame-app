@@ -116,6 +116,7 @@ def test_test_as_role_writes_for_test_person(client, monkeypatch):
     from artgame import drive, viewas
     FakeDrive.store = {}
     monkeypatch.setattr(drive, "Drive", FakeDrive)
+    monkeypatch.setattr(viewas.settings, "public_origin", "https://test.app.artgame.world")
     setup_people(client)
     with db.pool.connection() as c:
         c.execute("UPDATE objects SET bitrix_stage='UC_AV00QK' WHERE id=731")
@@ -138,7 +139,10 @@ def test_test_as_role_writes_for_test_person(client, monkeypatch):
         assert c.execute("SELECT person_id FROM audit_log WHERE action='shift_finish'").fetchone()["person_id"] == me["id"]
     # тестовые сотрудники не мешают списку «смотреть как»
     assert me["id"] not in {p["id"] for p in client.get("/api/view-as/options", headers=hdr(1000)).json()["people"]}
-    # на prod режима нет
+    # на prod режима нет — ни по ARTGAME_ENV_NAME, ни по адресу (если имя среды забыли)
+    monkeypatch.setattr(viewas.settings, "public_origin", "https://app.artgame.world")
+    assert client.get("/api/me", headers=va(1000, "test:support")).status_code == 403
+    monkeypatch.setattr(viewas.settings, "public_origin", "https://test.app.artgame.world")
     monkeypatch.setattr(viewas.settings, "env_name", "prod")
     assert client.get("/api/me", headers=va(1000, "test:support")).status_code == 403
     r = client.post("/api/shifts/start", json={"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural",

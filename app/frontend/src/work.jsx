@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { clearFailed, enqueue, failed, flush, pending } from './queue.js'
+import { HINT_TITLE, hintsFor } from './hints.js'
 
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
 const ST = { open: 'идёт', submitted: 'на проверке', approved: 'принято', rejected: 'отказ', cancelled: 'отменено' }
@@ -58,22 +59,68 @@ const saveOpen = v => { try { v ? localStorage.setItem(LKEY, JSON.stringify(v)) 
 const hm = ms => { const m = Math.max(0, Math.floor(ms / 60000)); return `${Math.floor(m / 60)} ч ${String(m % 60).padStart(2, '0')} мин` }
 const LV = Object.fromEntries(CX)
 
-// Промо объекта (HEAD 08.11): что предстоит — условия из сделки (заполняет МОП, здесь без выбора), норма на смену, эскизы.
-export function Promo({ id, zone, compact }) {
+// Живая карточка объекта (HEAD 08.11): что предстоит — условия из сделки (без выбора), сложность по сумме, если МОП не указал,
+// эскизы с Диска (утверждённые первыми), карта, ход работ по сменам, этапы, фото «до / после». Тап по картинке — на весь экран.
+const SRC = { calc: 'из расчёта МОП', price: 'оценка по сумме сделки' }
+export function Promo({ id, zone, compact, onData }) {
   const [c, setC] = useState(null)
-  useEffect(() => { if (id) api(`/work/object/${id}?zone=${zone || 'mural'}`).then(setC, () => setC(null)) }, [id, zone])
+  const [big, setBig] = useState(null)
+  const [ba, setBa] = useState(50)
+  useEffect(() => { if (id) api(`/work/object/${id}?zone=${zone || 'mural'}`).then(x => { setC(x); onData?.(x) }, () => setC(null)) }, [id, zone])
   if (!id || !c) return null
   const conds = [['at_height', 'На высоте'], ['outdoor', 'Улица'], ['hard_surface', 'Сложная поверхность']]
-  return <div className="card dark promo">
-    <div className="promo-top"><span className="kick">Что предстоит</span>{c.now.length > 0 && <span className="small muted">сейчас на объекте: {c.now.map(n => n.split(' ')[0]).join(', ')}</span>}</div>
+  const cover = c.sketches.find(f => f.thumb)
+  const last = c.feed?.[0]
+  return <div className="card dark promo live-card">
+    {cover && !compact && <div className="lc-cover" style={{ backgroundImage: `linear-gradient(180deg, rgba(0,0,0,.05), rgba(11,11,13,.92)), url(${cover.thumb})` }}
+      onClick={() => setBig(cover)}>
+      {cover.approved && <span className="badge ok">утверждённый эскиз</span>}
+    </div>}
+    <div className="promo-top"><span className="kick">Что предстоит</span>{c.now.length > 0 && <span className="small live-now">● сейчас: {c.now.map(n => n.split(' ')[0]).join(', ')}</span>}</div>
     {!compact && <h2>{c.title}</h2>}
-    <p className="small muted">{[c.city, c.address, c.area ? `${m2(c.area)} м²` : ''].filter(Boolean).join(' · ') || 'адрес не указан в сделке'}</p>
+    <div className="lc-addr">
+      <p className="small muted">{[c.city, c.address, c.area ? `${m2(c.area)} м²` : ''].filter(Boolean).join(' · ') || 'адрес не указан в сделке'}</p>
+      {c.map && <a className="btn mini ghost" href={c.map} target="_blank" rel="noreferrer">Карта 2ГИС</a>}
+    </div>
     {zone !== 'print' && <>
-      <div className="promo-lvl"><span>Сложность</span><b>{c.complexity ? LV[c.complexity] : 'МОП ещё не указал'}</b></div>
+      <div className="promo-lvl"><span>Сложность</span><b>{c.complexity ? LV[c.complexity] : 'не указана'}</b>{c.complexity_src && SRC[c.complexity_src] && <i>{SRC[c.complexity_src]}</i>}</div>
       <div className="conds">{conds.map(([k, t]) => <span key={k} className={c[k] ? 'on' : ''}>{c[k] ? '● ' : ''}{t}</span>)}</div></>}
+    {c.area ? <div className="lc-prog"><div className="lc-prog-top"><span>Сделано</span><b>{m2(c.done_m2 || 0)} из {m2(c.area)} м²{c.pct != null ? ` · ${c.pct}%` : ''}</b></div>
+      <div className="bar"><i style={{ width: (c.pct || 0) + '%' }} /></div></div> : null}
     {c.plan_m2 ? <p className="small">Норма на твою смену — <b>{m2(c.plan_m2)} м²</b></p> : null}
-    {c.sketches.length > 0 && <div className="sketches">{c.sketches.map(f => <a key={f.id} href={f.url} target="_blank" rel="noreferrer"><img src={f.thumb} alt={f.name} loading="lazy" /></a>)}</div>}
-    <p className="small muted">Условия заполняет МОП в карточке сделки. Не так на объекте — скажи Главному художнику.</p>
+    {c.stages && <div className="lc-stages">{c.stages.map((s, i) => <span key={s.key} className={s.done ? 'done' : ''}><i>{s.done ? '✓' : i + 1}</i>{s.title}</span>)}</div>}
+    {c.sketches.length > 0 && <><h3>Эскизы</h3><div className="sketches">{c.sketches.map(f => f.thumb ?
+      <button key={f.id} className={'sk' + (f.approved ? ' ok' : '')} onClick={() => setBig(f)}><img src={f.thumb} alt={f.name} loading="lazy" /></button> :
+      <a key={f.id} className="sk pdf" href={f.url} target="_blank" rel="noreferrer">PDF<span>{f.name}</span></a>)}</div></>}
+    {!c.sketches.length && <p className="small muted">Эскизов пока нет: они появятся сами, когда дизайнер положит их в папку сделки «ДИЗАЙН».</p>}
+    {last && (last.before || last.after) && !compact && <><h3>До и после · {last.who.split(' ')[0]}, {new Date(last.at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</h3>
+      {last.before && last.after ? <div className="ba">
+        <img src={last.after} alt="после" />
+        <div className="ba-before" style={{ width: ba + '%' }}><img src={last.before} alt="до" /></div>
+        <input type="range" min="0" max="100" value={ba} onChange={e => setBa(+e.target.value)} aria-label="до / после" />
+        <span className="ba-l">до</span><span className="ba-r">после</span>
+      </div> : <img className="before" src={last.after || last.before} alt="фото смены" />}
+      {last.work_done && <p className="small muted">«{last.work_done}»</p>}</>}
+    {c.feed?.length > 1 && !compact && <div className="lc-feed">{c.feed.slice(1).map(f => <button key={f.id} onClick={() => setBig({ thumb: f.after || f.before, url: f.after_full || f.before_full, name: f.work_done })}>
+      <img src={f.after || f.before} alt="" loading="lazy" /><span>{new Date(f.at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</span></button>)}</div>}
+    <p className="small muted">Условия — из сделки. Не так на объекте — скажи Главному художнику.</p>
+    {big && <div className="lightbox" onClick={() => setBig(null)}><img src={big.url && big.mime?.startsWith('image/') ? big.url : big.thumb} alt={big.name || ''} />
+      {big.name && <p>{big.name}{big.path ? ` · ${big.path}` : ''}</p>}<button className="ghost mini">Закрыть</button></div>}
+  </div>
+}
+
+// Подсказки смены — интерактивный чек-лист: тап отмечает, отметки живут на телефоне до конца смены.
+export function Hints({ step, role, cond, v, uid }) {
+  const items = hintsFor(step, role, cond, v)
+  const key = `artgame.hints.${uid || 'new'}.${step}`
+  const [done, setDone] = useState(() => { try { return JSON.parse(localStorage.getItem(key) || '[]') } catch { return [] } })
+  const [open, setOpen] = useState(step !== 'run')
+  if (!items.length) return null
+  const toggle = i => { const n = done.includes(i) ? done.filter(x => x !== i) : [...done, i]; setDone(n); try { localStorage.setItem(key, JSON.stringify(n)) } catch { /* без памяти */ } }
+  const n = items.filter((_, i) => done.includes(i)).length
+  return <div className={'card hints' + (n === items.length ? ' all' : '')}>
+    <button className="hints-head" onClick={() => setOpen(!open)}><span>💡 {HINT_TITLE[step]}</span><b>{n} из {items.length}</b><i>{open ? '▴' : '▾'}</i></button>
+    {open && items.map((t, i) => <button key={i} className={'hint' + (done.includes(i) ? ' on' : '')} onClick={() => toggle(i)}><span className="box">{done.includes(i) ? '✓' : ''}</span>{t}</button>)}
   </div>
 }
 
@@ -106,6 +153,7 @@ function StartShift({ d, onStarted }) {
   const [v, set] = useState({ object_id: objs[0]?.id, zone_code: d.zones[0] })
   const [photo, setPhoto] = useState('')
   const [busy, setBusy] = useState(false)
+  const [cond, setCond] = useState({})
   if (!objs.length) return <div className="card"><h2>Смена</h2><p className="muted">Сейчас нет объектов в работе. Когда МОП переведёт сделку в «Выполнение проекта», объект появится здесь.</p></div>
   const obj = objs.find(o => o.id === v.object_id) || objs[0]
   const start = async () => {
@@ -127,7 +175,8 @@ function StartShift({ d, onStarted }) {
         <b>№{o.id}</b> {o.title}{o.city ? <span> · {o.city}</span> : null}</button>)}</div>
       {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}
     </div>
-    <Promo id={obj.id} zone={v.zone_code} compact={false} />
+    <Promo id={obj.id} zone={v.zone_code} compact={false} onData={setCond} />
+    <Hints step="start" role={d.role} cond={cond} v={d.safety || {}} uid={'start-' + obj.id} />
     <div className="card">
       <h3>Фото стены до начала</h3>
       <Snap value={photo} set={setPhoto} label="Сфотографировать стену" />
@@ -139,9 +188,11 @@ function StartShift({ d, onStarted }) {
 
 function Running({ o, d, done }) {
   const [now, setNow] = useState(Date.now())
-  const [v, set] = useState({ area_m2: '', work_done: '', note: '', printer: d.printer || '' })
+  const [v, set] = useState({ area_m2: '', work_done: '', note: '', printer: d.printer || '', stage: '' })
   const [photo, setPhoto] = useState('')
   const [busy, setBusy] = useState(false)
+  const [cond, setCond] = useState({})
+  const stages = d.stages || []
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
   const print = o.zone_code === 'print'
   const ok = photo && v.work_done.trim().length >= 3
@@ -149,7 +200,7 @@ function Running({ o, d, done }) {
     setBusy(true)
     try {
       const left = await enqueue('/shifts/finish', { client_uid: o.client_uid, ended_at: new Date().toISOString(), area_m2: v.area_m2 === '' ? null : +v.area_m2,
-        work_done: v.work_done.trim(), photo_after: photo, note: v.note || null, printer: print ? v.printer || null : null })
+        work_done: v.work_done.trim(), photo_after: photo, note: v.note || null, printer: print ? v.printer || null : null, stage: v.stage || null })
       done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Смена закончена и ушла на проверку.')
     } catch { setBusy(false) }
   }
@@ -162,7 +213,8 @@ function Running({ o, d, done }) {
       <p className="small muted">с {new Date(o.started_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} · №{o.object_id} {o.object_title} · {ZONE[o.zone_code]}</p>
       {o.before && <img className="before" src={o.before} alt="стена до" />}
     </div>
-    <Promo id={o.object_id} zone={o.zone_code} compact />
+    <Promo id={o.object_id} zone={o.zone_code} compact onData={setCond} />
+    <Hints step="run" role={d.role} cond={cond} v={d.safety || {}} uid={o.client_uid} />
     <div className="card">
       <h2>Закончить смену</h2>
       <label className="muted">{print ? 'Напечатано, м²' : 'Сделано, м²'}</label>
@@ -171,6 +223,9 @@ function Running({ o, d, done }) {
       <textarea rows="3" value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Например: загрунтовал стену, перенёс эскиз, прописал фон слева" />
       {print && <><label className="muted">Принтер</label><input value={v.printer} onChange={e => set({ ...v, printer: e.target.value })} placeholder="Название принтера" /></>}
       <input placeholder="Комментарий (по желанию)" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
+      {!print && stages.length > 0 && <><label className="muted">Какой этап закрыл сегодня</label>
+        <div className="chips stagepick">{stages.map(s => <button key={s.key} className={v.stage === s.key ? 'on' : 'ghost'} onClick={() => set({ ...v, stage: v.stage === s.key ? '' : s.key })}>{s.title}</button>)}</div></>}
+      <Hints step="finish" role={d.role} cond={{ ...cond, handover: v.stage === 'handover' }} v={d.safety || {}} uid={o.client_uid} />
       <h3>Фото в конце смены</h3>
       <Snap value={photo} set={setPhoto} label="Сфотографировать результат" />
       <button disabled={!ok || busy} onClick={finish}>{busy ? 'Отправляю…' : 'Закончить и отправить на проверку'}</button>

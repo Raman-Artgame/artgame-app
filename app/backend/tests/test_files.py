@@ -27,6 +27,11 @@ class FakeDrive:
     def child(self, parent, name):
         return f"{parent}/{name}"
 
+    def ls(self, parent):
+        return FakeDrive.tree.get(parent, [])
+
+    tree = {}
+
     def upload(self, parent, name, data, mime):
         i = self._id()
         FakeDrive.store[i] = {"parents": [parent], "size": str(len(data)), "mimeType": mime, "data": data}

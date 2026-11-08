@@ -60,7 +60,7 @@ def projects(p: dict, fresh: bool = False) -> dict:
     names = {u["id"]: u["name"] for u in bx.users()}
     see_sum = p["role_code"] in bx.BX_ROLES
     ids = [int(d["ID"]) for d in rows]
-    done, who, calc, cond, cover, nfiles, now = {}, {}, {}, {}, {}, {}, {}
+    done, who, calc, cond, cover, nfiles, now, guess = {}, {}, {}, {}, {}, {}, {}, {}
     if ids:
         from .files import sign
         with db.pool.connection() as conn:
@@ -72,8 +72,10 @@ def projects(p: dict, fresh: bool = False) -> dict:
             # обложка карточки — последний эскиз (картинка из «Дизайна»), иначе последнее фото с объекта
             for r in conn.execute("""SELECT DISTINCT ON (object_id) object_id, id FROM files
                                      WHERE object_id = ANY(%s) AND status='ready' AND mime LIKE 'image/%%' AND kind IN ('design','photo','media')
-                                     ORDER BY object_id, (kind='design') DESC, created_at DESC""", (ids,)).fetchall():
+                                     ORDER BY object_id, (kind='design') DESC, (coalesce(note, '') ILIKE '%%утвержд%%') DESC, created_at DESC""", (ids,)).fetchall():
                 cover[r["object_id"]] = sign(r["id"], "thumb")
+            for r in conn.execute("SELECT id, level_guess FROM objects WHERE id = ANY(%s) AND level_guess IS NOT NULL", (ids,)).fetchall():
+                guess[r["id"]] = r["level_guess"]   # МОП не указал сложность — оценка по сумме и площади (promo.guess_level)
             for r in conn.execute("""SELECT object_id, count(*) FILTER (WHERE kind='design') AS design,
                                             count(*) FILTER (WHERE kind IN ('photo','media')) AS media
                                      FROM files WHERE object_id = ANY(%s) AND status='ready' GROUP BY object_id""", (ids,)).fetchall():
@@ -113,7 +115,7 @@ def projects(p: dict, fresh: bool = False) -> dict:
         out.append({"id": did, "title": d.get("TITLE") or "", "stage": d["STAGE_ID"], "stage_name": (st.get(d["STAGE_ID"]) or {}).get("name", d["STAGE_ID"]),
                     "working": working, "city": bx.city_name(d.get(bx.CITY)), "address": (d.get(bx.ADDR) or "").split("|")[0] if isinstance(d.get(bx.ADDR), str) else "",
                     "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), ""), "area": bx._num(d.get(bx.AREA)),
-                    "level": bx.LEVELS.get(bx.level_key(d.get(bx.F_LEVEL)), ""), "sum": bx._num(d.get("OPPORTUNITY")) if see_sum else None,
+                    "level": bx.LEVELS.get(bx.level_key(d.get(bx.F_LEVEL)), "") or (bx.LEVELS.get(guess[did], "") + " · оценка" if guess.get(did) else ""), "sum": bx._num(d.get("OPPORTUNITY")) if see_sum else None,
                     "closing": closing,
                     "norm": {"shifts": shifts_norm, "crew": bx._num(d.get(bx.F_CREW)) or bx._num(cn.get("crew")), "term": term},
                     "start": start.isoformat() if start else None, "due": due.isoformat() if due else None, "left": left,

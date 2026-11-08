@@ -53,8 +53,23 @@ class Drive:
         r.raise_for_status()
         return r.json()["files"]
 
+    def ls(self, parent: str) -> list[dict]:
+        """Содержимое папки (папки и файлы) с типом и размером."""
+        out, token = [], None
+        while True:
+            r = httpx.get(API, headers=self.h, timeout=30, params={**ALL, "corpora": "allDrives", "pageSize": 200,
+                          "q": f"'{parent}' in parents and trashed = false", "fields": "nextPageToken,files(id,name,mimeType,size)",
+                          **({"pageToken": token} if token else {})})
+            r.raise_for_status()
+            j = r.json()
+            out += j.get("files", [])
+            token = j.get("nextPageToken")
+            if not token:
+                return out
+
     def child(self, parent: str, name: str) -> str:
-        found = self.find(f"'{parent}' in parents and name = '{_q(name)}' and mimeType = '{FOLDER}'")
+        # регистр не важен: DRIVE01 создаёт «ДИЗАЙН», приложение искало «Дизайн» и плодило вторую папку
+        found = [f for f in self.ls(parent) if f.get("mimeType") == FOLDER and f["name"].casefold() == name.casefold()]
         if found:
             return found[0]["id"]
         r = httpx.post(API, headers=self.h, timeout=30, params={"supportsAllDrives": "true"},

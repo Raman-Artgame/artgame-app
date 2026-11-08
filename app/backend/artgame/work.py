@@ -53,13 +53,17 @@ def work_dict(p: dict = Depends(active)):
             "categories": cats_for(conn, p["role_code"]),
             "zones": p["zones"],
             "printer": consts.latest(conn).get("print.tech.printer"),
+            "role": p["role_code"],
+            # подсказки смены (HEAD 08.11): ТБ из «Значений», этапы работ
+            "safety": {k: x for k, x in consts.latest(conn).items() if k.startswith("safety.")},
+            "stages": [{"key": k, "title": t} for k, t in __import__("artgame.promo", fromlist=["STAGES"]).STAGES],
         }
 
 
 def object_cond(conn, object_id: int) -> dict:
     """Условия объекта из сделки (заполняет МОП, команда не выбирает — HEAD 08.11): сложность — поле сделки «Сложность»
     (иначе из расчёта), высота / улица / сложная поверхность — из расчёта в карточке сделки, площадь и адрес — из сделки."""
-    o = conn.execute("SELECT id, title, city, level, area_m2, address FROM objects WHERE id=%s", (object_id,)).fetchone()
+    o = conn.execute("SELECT id, title, city, level, area_m2, address, geo, level_guess FROM objects WHERE id=%s", (object_id,)).fetchone()
     if not o:
         raise HTTPException(404, "no object")
     c = conn.execute("SELECT data FROM deal_calc WHERE deal_id=%s", (object_id,)).fetchone()
@@ -71,9 +75,14 @@ def object_cond(conn, object_id: int) -> dict:
             lvl = bx.level_key(o["level"])
         except Exception:  # noqa: BLE001 — Битрикс недоступен: возьмём из расчёта
             lvl = o["level"] if o["level"] in COMPLEXITY else ""
+    src = "deal" if lvl else None
     if not lvl and i.get("service") == "mural" and i.get("level") in COMPLEXITY:
-        lvl = i["level"]
-    return {"id": o["id"], "title": o["title"], "city": o["city"], "address": o["address"],
+        lvl, src = i["level"], "calc"
+    if not lvl and o["level_guess"] in COMPLEXITY and i.get("service") in (None, "mural"):
+        lvl, src = o["level_guess"], "price"   # МОП не указал — оценка по сумме сделки и площади (HEAD 08.11)
+    from .promo import map_url
+    return {"id": o["id"], "title": o["title"], "city": o["city"], "address": o["address"], "complexity_src": src,
+            "map": map_url(o["city"], o["address"], o["geo"]),
             "area": float(o["area_m2"]) if o["area_m2"] is not None else (float(i["area"]) if i.get("area") else None),
             "service": i.get("service"), "complexity": lvl or None,
             "at_height": "height" in (i.get("extras") or []), "outdoor": bool(i.get("outdoor")), "hard_surface": bool(i.get("surface"))}
@@ -187,6 +196,7 @@ class FinishIn(BaseModel):
     photo_after: str = Field(min_length=30, max_length=8_000_000)
     printer: str | None = Field(default=None, max_length=100)
     note: str | None = Field(default=None, max_length=1000)
+    stage: str | None = None            # этап, который закрыла смена (promo.STAGES)
 
 
 def _photo(conn, p, object_id: int, uid: UUID, tag: str, data: str, note: str) -> int:
@@ -241,6 +251,9 @@ def finish_shift(b: FinishIn, p: dict = Depends(active)):
             return _shift_out(conn, row)
         if b.ended_at <= row["started_at"]:
             raise HTTPException(400, "end before start")
+        from .promo import STAGE_KEYS
+        if b.stage and b.stage not in STAGE_KEYS:
+            raise HTTPException(400, "bad stage")
         ph = _photo(conn, p, row["object_id"], b.client_uid, "after", b.photo_after, "после смены")
         s = ShiftIn(client_uid=b.client_uid, object_id=row["object_id"], zone_code=row["zone_code"], started_at=row["started_at"],
                     ended_at=b.ended_at, area_m2=b.area_m2, printer=b.printer if row["zone_code"] == "print" else None)
@@ -248,26 +261,27 @@ def finish_shift(b: FinishIn, p: dict = Depends(active)):
         n = shift_norm(consts.latest(conn), s, p["role_code"])
         row = conn.execute(
             """UPDATE shifts SET status='submitted', ended_at=%s, area_m2=%s, work_done=%s, note=%s, photo_after=%s, printer=%s,
-                   complexity=%s, at_height=%s, outdoor=%s, hard_surface=%s, plan_m2=%s, kpd=%s, bonus=%s
+                   complexity=%s, at_height=%s, outdoor=%s, hard_surface=%s, plan_m2=%s, kpd=%s, bonus=%s, stage=%s
                WHERE id=%s RETURNING *""",
             (b.ended_at, b.area_m2, b.work_done.strip(), b.note, ph, s.printer, s.complexity, s.at_height, s.outdoor, s.hard_surface,
-             n["plan_m2"], n["kpd"], n["bonus"], row["id"])).fetchone()
+             n["plan_m2"], n["kpd"], n["bonus"], b.stage, row["id"])).fetchone()
         db.audit(conn, p["id"], "shift_finish", "shifts", row["id"])
         return _shift_out(conn, row)
 
 
 @router.get("/work/object/{object_id}")
 def object_promo(object_id: int, zone: str = "mural", p: dict = Depends(active)):
-    """Промо объекта перед сменой: что предстоит (условия из сделки), норма на смену, эскизы, кто сейчас на объекте."""
-    from .files import links
+    """Живая карточка объекта: условия из сделки, норма на смену, эскизы с Диска, ход работ, фото до/после, кто на объекте."""
     with db.pool.connection() as conn:
         c = object_cond(conn, object_id)
         probe = ShiftIn(client_uid=UUID(int=0), object_id=object_id, zone_code=zone, started_at=datetime.now(), complexity=c["complexity"],
                         at_height=c["at_height"], outdoor=c["outdoor"], hard_surface=c["hard_surface"])
         c["plan_m2"] = shift_norm(consts.latest(conn), probe, p["role_code"])["plan_m2"]
-        c["sketches"] = [links({**f, "by": f["by"]}) for f in conn.execute(
-            """SELECT f.*, pe.full_name AS by FROM files f JOIN people pe ON pe.id=f.uploaded_by WHERE f.object_id=%s AND f.kind='design'
-               AND f.status='ready' AND f.mime LIKE 'image/%%' ORDER BY f.created_at DESC LIMIT 6""", (object_id,)).fetchall()]
+        from . import promo
+        obj = conn.execute("SELECT * FROM objects WHERE id=%s", (object_id,)).fetchone()
+        promo.maybe_sync(conn, obj)
+        c["sketches"] = promo.sketches(conn, object_id)
+        c.update(promo.progress(conn, object_id, c["area"]))
         c["now"] = [r["full_name"] for r in conn.execute(
             """SELECT DISTINCT pe.full_name FROM shifts s JOIN people pe ON pe.id=s.person_id
                WHERE s.object_id=%s AND s.status='open' ORDER BY 1""", (object_id,)).fetchall()]
