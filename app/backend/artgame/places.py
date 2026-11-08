@@ -115,7 +115,9 @@ def token(pid: int, code: str, now: float | None = None) -> str:
 
 
 def allowed(p: dict, code: str) -> bool:
-    return p["status"] == "active" and p["role_code"] in PLACES[code]["roles"]
+    """Роль — текущая или любая из своих (две роли, HEAD 08.11): ссылка места живёт без заголовка «Я сейчас»."""
+    mine = {p["role_code"], *(p.get("roles") or []), *(p.get("extra_roles") or [])}
+    return p["status"] == "active" and bool(mine & PLACES[code]["roles"])
 
 
 def person_by_token(code: str, tok: str) -> dict:

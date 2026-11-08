@@ -5,6 +5,9 @@ import { startViewAs } from './head.jsx'
 import { BOSS, HINT_TITLE, hintsFor } from './hints.js'
 
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
+const PRINT_ROLES = ['print_master', 'print_operator']
+const ROLE_T = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
+  print_operator: 'Оператор печати', print_master: 'Мастер печати' }
 const ST = { open: 'идёт', submitted: 'на проверке', approved: 'принято', rejected: 'отказ', cancelled: 'отменено' }
 const local = d => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 16) }
 const iso = v => new Date(v).toISOString()
@@ -141,7 +144,7 @@ export function ShiftForm({ done }) {
   useEffect(() => {
     api('/shifts/open').then(r => {
       if (r.shift) { const o = { client_uid: r.shift.client_uid, object_id: r.shift.object_id, object_title: r.shift.object_title,
-        zone_code: r.shift.zone_code, started_at: r.shift.started_at, before: r.shift.photo_before_url }; saveOpen(o); setOpen(o) }
+        zone_code: r.shift.zone_code, role: r.shift.role_code, started_at: r.shift.started_at, before: r.shift.photo_before_url }; saveOpen(o); setOpen(o) }
       else if (!pending()) { saveOpen(null); setOpen(null) }   // закрыта на сервере, а в очереди ничего нет
     }, () => {}).finally(() => setChecked(true))
   }, [])
@@ -187,6 +190,10 @@ function StartShift({ d, onStarted, onRoad }) {
   const looking = viewAs() && !testAs()   // HEAD смотрит как сотрудник: только просмотр — предложить тест
   if (!objs.length) return <div className="card"><h2>Смена</h2><p className="muted">Сейчас нет объектов в работе. Когда МОП переведёт сделку в «Выполнение проекта», объект появится здесь.</p></div>
   const obj = objs.find(o => o.id === v.object_id) || objs[0]
+  // две роли (HEAD 08.11): роль смены — по зоне объекта (печать → роль печати, роспись → роль художника), можно сменить
+  const roles = d.roles || [d.role]
+  const auto = (() => { const p = roles.filter(r => PRINT_ROLES.includes(r) === (v.zone_code === 'print')); return p.includes(d.role) || !p.length ? d.role : p[0] })()
+  const role = v.role && roles.includes(v.role) ? v.role : auto
   // геолокация не держит кнопку дольше 5 с (в Telegram запрос доступа может не ответить вовсе)
   const where = () => new Promise(r => {
     const t = setTimeout(() => r(null), 5000)
@@ -197,10 +204,10 @@ function StartShift({ d, onStarted, onRoad }) {
     setBusy(true); setErr('')
     try {
       const geo = await where()
-      const o = { client_uid: uuid(), object_id: obj.id, object_title: obj.title, zone_code: v.zone_code, started_at: new Date().toISOString(), before: photo }
+      const o = { client_uid: uuid(), object_id: obj.id, object_title: obj.title, zone_code: v.zone_code, started_at: new Date().toISOString(), before: photo, role }
       const was = failed().length
       await enqueue('/shifts/start', { client_uid: o.client_uid, object_id: o.object_id, zone_code: o.zone_code, started_at: o.started_at, photo_before: photo,
-        geo_lat: geo?.latitude ?? null, geo_lon: geo?.longitude ?? null })
+        geo_lat: geo?.latitude ?? null, geo_lon: geo?.longitude ?? null, ...(roles.length > 1 ? { role } : {}) })
       const f = failed()
       if (f.length > was && f[0].path === '/shifts/start') { setErr(`Сервер не принял: ${f[0].error}`); return }   // 4xx — не делаем вид, что смена идёт
       onStarted(o)
@@ -215,11 +222,14 @@ function StartShift({ d, onStarted, onRoad }) {
       <label className="muted">Объект</label>
       <div className="objpick">{objs.map(o => <button key={o.id} className={o.id === obj.id ? 'on' : ''} onClick={() => set({ ...v, object_id: o.id })}>
         <b>№{o.id}</b> {o.title}{o.city ? <span> · {o.city}</span> : null}</button>)}</div>
-      {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}
+      {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z, role: null })}>{ZONE[z]}</button>)}</div>}
+      {roles.length > 1 && <><label className="muted">Роль на смене — по ней ставка</label>
+        <div className="chips">{roles.map(r => <button key={r} className={role === r ? 'on' : ''} onClick={() => set({ ...v, role: r })}>{ROLE_T[r] || r}</button>)}</div>
+        {role === auto && <p className="small muted">Подставлено по объекту: {ZONE[v.zone_code]}.</p>}</>}
     </div>
-    <Promo id={obj.id} zone={v.zone_code} compact={false} onData={setCond} role={d.role} />
+    <Promo id={obj.id} zone={v.zone_code} compact={false} onData={setCond} role={role} />
     {cond.trip && <Road obj={obj} zone={v.zone_code} done={onRoad} />}
-    <Hints step="start" role={d.role} cond={cond} v={d.safety || {}} uid={'start-' + obj.id} />
+    <Hints step="start" role={role} cond={cond} v={d.safety || {}} uid={'start-' + obj.id} />
     <div className="card">
       <h3>Фото стены до начала</h3>
       <Snap value={photo} set={setPhoto} label="Сфотографировать стену" />
@@ -259,8 +269,8 @@ function Running({ o, d, done }) {
       <p className="small muted">с {new Date(o.started_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} · №{o.object_id} {o.object_title} · {ZONE[o.zone_code]}</p>
       {o.before && <img className="before" src={o.before} alt="стена до" />}
     </div>
-    <Promo id={o.object_id} zone={o.zone_code} compact onData={setCond} role={d.role} />
-    <Hints step="run" role={d.role} cond={cond} v={d.safety || {}} uid={o.client_uid} />
+    <Promo id={o.object_id} zone={o.zone_code} compact onData={setCond} role={o.role || d.role} />
+    <Hints step="run" role={o.role || d.role} cond={cond} v={d.safety || {}} uid={o.client_uid} />
     <div className="card">
       <h2>Закончить смену</h2>
       <label className="muted">{print ? 'Напечатано, м²' : 'Сделано, м²'}</label>
@@ -271,7 +281,7 @@ function Running({ o, d, done }) {
       <input placeholder="Комментарий (по желанию)" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
       {!print && stages.length > 0 && <><label className="muted">Какой этап закрыл сегодня</label>
         <div className="chips stagepick">{stages.map(s => <button key={s.key} className={v.stage === s.key ? 'on' : 'ghost'} onClick={() => set({ ...v, stage: v.stage === s.key ? '' : s.key })}>{s.title}</button>)}</div></>}
-      <Hints step="finish" role={d.role} cond={{ ...cond, handover: v.stage === 'handover' }} v={d.safety || {}} uid={o.client_uid} />
+      <Hints step="finish" role={o.role || d.role} cond={{ ...cond, handover: v.stage === 'handover' }} v={d.safety || {}} uid={o.client_uid} />
       <h3>Фото в конце смены</h3>
       <Snap value={photo} set={setPhoto} label="Сфотографировать результат" />
       <button disabled={!ok || busy} onClick={finish}>{busy ? 'Отправляю…' : 'Закончить и отправить на проверку'}</button>

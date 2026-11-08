@@ -29,6 +29,12 @@ export function People({ ROLE, ZONE }) {
         <option value="" disabled>— роль —</option>
         {Object.entries(ROLE).map(([k, t]) => <option key={k} value={k}>{t}</option>)}
       </select>
+      {p.role_code && p.role_code !== 'head' && <label className="small muted">Вторая роль <span>· напр. оператор печати + саппорт: сам переключает «Я сейчас», смена — по ставке своей роли</span>
+        <select value={(p.extra_roles || [])[0] || ''} onChange={e => { const r = e.target.value
+          save(p.id, { extra_roles: r ? [r] : [], ...(r && ROLE_ZONE[r] && !p.zones.includes(ROLE_ZONE[r]) ? { zones: [...p.zones, ROLE_ZONE[r]] } : {}) }) }}>
+          <option value="">— нет —</option>
+          {Object.entries(ROLE).filter(([k]) => k !== 'head' && k !== p.role_code).map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+        </select></label>}
       <div className="zones">{Object.entries(ZONE).map(([z, t]) => {
         const on = p.zones.includes(z)
         return <button key={z} className={on ? '' : 'ghost'} onClick={() => save(p.id, { zones: on ? p.zones.filter(x => x !== z) : [...p.zones, z] })}>{t}</button>

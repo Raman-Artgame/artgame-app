@@ -58,7 +58,7 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   // HEAD: связывает МОП с пользователем Битрикса во вкладке «Команда», видит все сделки
   const h = await open(b, 1000)
   await tab(h, 'Команда')
-  await h.locator('.person', { hasText: 'Ануар' }).locator('label select').selectOption({ label: 'Ануар Минкеев' })
+  await h.locator('.person', { hasText: 'Ануар' }).locator('label', { hasText: 'В Битриксе' }).locator('select').selectOption({ label: 'Ануар Минкеев' })
   await h.waitForTimeout(500)
   assert.strictEqual((await call(1000, '/people')).find(x => x.id === m.id).bitrix_user_id, 4565)
   await dealsOpen(h)

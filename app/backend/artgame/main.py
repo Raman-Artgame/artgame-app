@@ -101,7 +101,7 @@ def me(p: dict = Depends(current_person)):
 def people(_: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         return conn.execute(
-            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city,
+            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city, p.extra_roles,
                       coalesce(array_agg(z.zone_code ORDER BY z.zone_code) FILTER (WHERE z.zone_code IS NOT NULL), '{}') AS zones
                FROM people p LEFT JOIN person_zones z ON z.person_id = p.id
                GROUP BY p.id ORDER BY p.created_at""").fetchall()
@@ -113,6 +113,7 @@ class AssignIn(BaseModel):
     status: str | None = None   # active | blocked (уход: вход закрыт, история остаётся)
     bitrix_user_id: int | None = None   # пользователь Битрикса (0 — снять связку): по нему МОП видит свои сделки
     city: str | None = None             # город сотрудника: объект в другом городе — командировка (HEAD 08.11)
+    extra_roles: list[str] | None = None  # вторая роль (HEAD 08.11): напр. оператор печати + саппорт; ставки — по роли смены
 
 
 @app.post("/api/people/{person_id}")
@@ -136,12 +137,18 @@ def assign(person_id: int, body: AssignIn, head: dict = Depends(require_head)):
             conn.execute("UPDATE people SET bitrix_user_id=%s, updated_at=now() WHERE id=%s", (uid, person_id))
         if body.city is not None:
             conn.execute("UPDATE people SET city=%s, updated_at=now() WHERE id=%s", (body.city.strip() or None, person_id))
+        if body.extra_roles is not None:
+            main = conn.execute("SELECT role_code FROM people WHERE id=%s", (person_id,)).fetchone()["role_code"]
+            extra = list(dict.fromkeys(r for r in body.extra_roles if r and r not in ("head", main)))
+            if extra and len(conn.execute("SELECT code FROM roles WHERE code = ANY(%s)", (extra,)).fetchall()) != len(extra):
+                raise HTTPException(400, "bad role")
+            conn.execute("UPDATE people SET extra_roles=%s, updated_at=now() WHERE id=%s", (extra, person_id))
         if body.zones is not None:
             conn.execute("DELETE FROM person_zones WHERE person_id=%s", (person_id,))
             for z in body.zones:
                 conn.execute("INSERT INTO person_zones (person_id, zone_code) VALUES (%s,%s)", (person_id, z))
         db.audit(conn, head["id"], "assign", "people", person_id, body.model_dump(exclude_none=True))
-        return conn.execute("SELECT id, role_code, status FROM people WHERE id=%s", (person_id,)).fetchone()
+        return conn.execute("SELECT id, role_code, status, extra_roles FROM people WHERE id=%s", (person_id,)).fetchone()
 
 
 @app.get("/api/constants")

@@ -281,6 +281,11 @@ def payee_edit(payee_id: int, b: PayeeIn, p: dict = Depends(require_head)):
 
 # ---------- начисление ФОТ ----------
 
+def role_title(conn, code: str) -> str:
+    r = conn.execute("SELECT title FROM roles WHERE code=%s", (code,)).fetchone()
+    return r["title"] if r else code
+
+
 def shift_pay(v: dict, role: str, hours: float) -> tuple[float, str]:
     """Оплата одной смены: полная смена (от 90 % нормы часов) — ставка смены, короче — по часу (или доля смены)."""
     keys = RATE.get(role)
@@ -342,18 +347,24 @@ def compute(conn, ym: str, by: dict) -> dict:
     for f in payees_:
         role = f["role_code"]
         if f["scheme"] == "shifts" and f["person_id"]:
-            shifts = conn.execute("""SELECT id, started_at, ended_at, bonus, kind, trip FROM shifts WHERE person_id=%s AND status='approved'
+            shifts = conn.execute("""SELECT id, started_at, ended_at, bonus, kind, trip, role_code FROM shifts WHERE person_id=%s AND status='approved'
                                      AND started_at >= %s AND started_at < %s ORDER BY started_at""", (f["person_id"], t0, t1)).fetchall()
             piece, bonus, missing = 0.0, 0.0, ""
-            for s in shifts:
+            by_role: dict[str, int] = {}
+            for s in shifts:   # две роли (HEAD 08.11): каждая смена — по ставке своей роли
                 hours = ((s["ended_at"] - s["started_at"]).total_seconds() / 3600) if s["ended_at"] else (v.get("shift.hours") or 10)
-                pay, missing = shift_pay(v, role, hours)
+                r = s["role_code"] or role
+                pay, miss = shift_pay(v, r, hours)
+                missing = miss or missing
                 piece += pay
                 bonus += _f(s["bonus"])
+                by_role[r] = by_role.get(r, 0) + 1
             if shifts and missing:
                 warn.append(f"{f['name']}: {missing}")
             roads = sum(s["kind"] == "road" for s in shifts)
-            acc(f["id"], "piece", piece, f"{len(shifts)} смен" + (f", из них дорога {roads}" if roads else ""), ",".join(str(s["id"]) for s in shifts))
+            split = ", ".join(f"{role_title(conn, r)} {n}" for r, n in by_role.items()) if len(by_role) > 1 else ""
+            acc(f["id"], "piece", piece, f"{len(shifts)} смен" + (f" ({split})" if split else "") + (f", из них дорога {roads}" if roads else ""),
+                ",".join(str(s["id"]) for s in shifts))
             # суточные (HEAD 08.11): за каждый день со сменой или дорогой в командировке — pay.trip_food из «Значений»
             trip_days = sorted({s["started_at"].astimezone(TZ).date() for s in shifts if s["trip"]})
             if trip_days:
@@ -507,7 +518,15 @@ def my_pay(ym: str | None = None, p: dict = Depends(active)):
     bounds(ym)
     with db.pool.connection() as conn:
         f = conn.execute("SELECT * FROM fin_payees WHERE person_id=%s", (p["id"],)).fetchone()
-        rate = my_rate(vals(conn), p["role_code"], f)
+        v = vals(conn)
+        roles = p.get("roles") or [p["role_code"]]
+        rate = my_rate(v, roles[0], f)
+        for r in roles[1:]:   # вторая роль (HEAD 08.11): её ставки — отдельными строками с названием роли
+            t = role_title(conn, r)
+            rate += [{**x, "label": f"{t} · {x['label']}"} for x in my_rate(v, r, None) if "Минимум" not in x["label"] and "Суточные" not in x["label"]]
+        if len(roles) > 1:
+            t0 = role_title(conn, roles[0])
+            rate = [x if " · " in x["label"] else {**x, "label": f"{t0} · {x['label']}"} for x in rate]
         if not f:
             return {"month": ym, "lines": [], "accrued": 0, "paid": 0, "left": 0, "rate": rate}
         lines = conn.execute("""SELECT kind, amount, detail FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='active' ORDER BY id""",

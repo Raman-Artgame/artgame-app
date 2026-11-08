@@ -58,6 +58,7 @@ def work_dict(p: dict = Depends(active)):
             "zones": p["zones"],
             "printer": consts.latest(conn).get("print.tech.printer"),
             "role": p["role_code"],
+            "roles": p.get("roles") or [p["role_code"]],   # две роли: в какой роли смена — по зоне объекта, можно сменить
             # подсказки смены (HEAD 08.11): ТБ из «Значений», этапы работ
             "safety": {k: x for k, x in consts.latest(conn).items() if k.startswith("safety.")},
             "stages": [{"key": k, "title": t} for k, t in __import__("artgame.promo", fromlist=["STAGES"]).STAGES],
@@ -190,6 +191,19 @@ class StartIn(BaseModel):
     photo_before: str = Field(min_length=30, max_length=8_000_000)
     geo_lat: float | None = None
     geo_lon: float | None = None
+    role: str | None = None             # две роли (HEAD 08.11): в какой роли смена; по умолчанию — по зоне объекта
+
+
+PRINT_ROLES = ("print_master", "print_operator")
+
+
+def shift_role(p: dict, zone: str, want: str | None = None) -> str:
+    """Роль смены: выбранная (из своих), иначе по зоне — печать → роль печати, роспись → роль художника, иначе текущая."""
+    roles = p.get("roles") or [p["role_code"]]
+    if want and want in roles:
+        return want
+    pick = [r for r in roles if (r in PRINT_ROLES) == (zone == "print")]
+    return p["role_code"] if p["role_code"] in pick or not pick else pick[0]
 
 
 class FinishIn(BaseModel):
@@ -247,9 +261,10 @@ def start_shift(b: StartIn, p: dict = Depends(active)):
             raise HTTPException(409, "Смена уже идёт — сначала закончи её")
         ph = _photo(conn, p, b.object_id, b.client_uid, "before", b.photo_before, "до смены")
         row = conn.execute(
-            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, geo_lat, geo_lon, status, photo_before, trip)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,'open',%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
-            (b.client_uid, p["id"], b.object_id, b.zone_code, b.started_at, b.geo_lat, b.geo_lon, ph, is_trip(conn, p["id"], b.object_id))).fetchone()
+            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, geo_lat, geo_lon, status, photo_before, trip, role_code)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,'open',%s,%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
+            (b.client_uid, p["id"], b.object_id, b.zone_code, b.started_at, b.geo_lat, b.geo_lon, ph, is_trip(conn, p["id"], b.object_id),
+             shift_role(p, b.zone_code, b.role))).fetchone()
         if not row:
             row = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
         else:
@@ -313,10 +328,10 @@ def road_day(b: RoadIn, p: dict = Depends(active)):
         hours = consts.latest(conn).get("shift.hours") or 10
         start = b.day.astimezone(TZ)
         row = conn.execute(
-            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status, kind, trip, work_done, note, photo_after)
-               VALUES (%s,%s,%s,%s,%s,%s,'submitted','road',true,%s,%s,%s) RETURNING *""",
+            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status, kind, trip, work_done, note, photo_after, role_code)
+               VALUES (%s,%s,%s,%s,%s,%s,'submitted','road',true,%s,%s,%s,%s) RETURNING *""",
             (b.client_uid, p["id"], b.object_id, b.zone_code, start, start + timedelta(hours=float(hours)),
-             "Дорога " + ("на объект" if b.direction == "there" else "обратно"), b.note, ph)).fetchone()
+             "Дорога " + ("на объект" if b.direction == "there" else "обратно"), b.note, ph, shift_role(p, b.zone_code))).fetchone()
         db.audit(conn, p["id"], "shift_road", "shifts", row["id"], {"direction": b.direction})
         return _shift_out(conn, row)
 

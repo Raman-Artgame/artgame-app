@@ -90,6 +90,27 @@ async function tab(p, name) {
   await op.getByText('Правила игры · Оператор печати').waitFor()
   await op.screenshot({ path: `${shots}/print-pravila.png`, fullPage: true })
 
+  // 2б. Две роли (HEAD 08.11, «Оба способа»): HEAD даёт оператору вторую роль «Саппорт» — «Я сейчас», роль смены по объекту, обе ставки
+  await call(1000, `/people/${ids[4000]}`, { extra_roles: ['support'], zones: ['print', 'mural'] })
+  await op.reload()
+  await op.locator('.roleswitch').waitFor()
+  await op.locator('.roleswitch button', { hasText: 'Саппорт' }).click()
+  await op.waitForLoadState('load')
+  await op.locator('.roleswitch button.on', { hasText: 'Саппорт' }).waitFor()
+  await tab(op, 'Смена')
+  await op.getByText('Роль на смене — по ней ставка').waitFor()
+  await op.locator('.segf button', { hasText: 'Печать' }).click()   // объект печати — роль сама «Оператор печати»
+  await op.locator('.chips button.on', { hasText: 'Оператор печати' }).waitFor()
+  await op.locator('.segf button', { hasText: 'Роспись' }).click()
+  await op.locator('.chips button.on', { hasText: 'Саппорт' }).waitFor()
+  await op.screenshot({ path: `${shots}/dve-roli-smena.png`, fullPage: true })
+  await tab(op, 'Кабинет')
+  assert.strictEqual(await op.locator('.dutyfold').count(), 2)   // «Правила игры» обеих ролей
+  await op.screenshot({ path: `${shots}/dve-roli-kabinet.png`, fullPage: true })
+  await op.locator('.roleswitch button', { hasText: 'Оператор' }).click()
+  await op.waitForLoadState('load')
+  await op.locator('.roleswitch button.on', { hasText: 'Оператор' }).waitFor()
+
   // 3. Главный художник: «Продакшн» — рилс с объекта (большой файл идёт прямо в Google — здесь подменён)
   const l = await open(b, 3000)
   await l.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000077' }) }))

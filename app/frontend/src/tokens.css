@@ -585,3 +585,8 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .dzdots i.on { background: var(--sc); }
 @media (max-width: 480px) { .dzguide div { grid-template-columns: 1fr; gap: 2px; } }
 .dutyfold h3 { margin: 6px 0 2px; } .dutyfold .dutybody .wrap { padding: 0; } .dutyfold .dutybody .card { box-shadow: none; background: var(--alt); }
+/* Две роли: «Я сейчас» (HEAD 08.11) */
+.roleswitch { display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 8px 0; margin: 0 0 4px; scrollbar-width: none; }
+.roleswitch button { width: auto; flex: 0 0 auto; padding: 7px 12px; border-radius: 99px; background: var(--alt); color: var(--text); border: 1px solid var(--line); font-size: 13px; }
+.roleswitch button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.roleswitch .muted { flex: 0 0 auto; }
