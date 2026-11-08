@@ -130,7 +130,7 @@ function Calc({ d, saved, onSaved }) {
   const set = p => setF({ ...f, ...p })
   const tog = k => set({ extras: f.extras.includes(k) ? f.extras.filter(x => x !== k) : [...f.extras, k] })
   const save = () => { setBusy(true); setMsg(''); api(`/bx/deals/${d.id}/price/save`, { method: 'POST', body: { ...f, area: +f.area || 0, cash: +f.cash || 0 } })
-    .then(x => { setMsg((x.bx === 'off' ? 'Расчёт сохранён, в Битрикс не записан (ключ записи не задан).' : 'Записано в сделку: сумма, площадь' + (x.norm_fields ? ', смены и срок.' : '. Полей для смен и срока в Битриксе ещё нет — задание Кодексу.')) ); onSaved() }, e => setMsg('Не записалось: ' + e.message)).finally(() => setBusy(false)) }
+    .then(x => onSaved(x.bx === 'off' ? 'Расчёт сохранён, в Битрикс не записан (ключ записи не задан).' : 'Записано в сделку: сумма, площадь' + (x.norm_fields ? ', смены и срок.' : '. Полей для смен и срока в Битриксе ещё нет — задание Кодексу.')), e => setMsg('Не записалось: ' + e.message)).finally(() => setBusy(false)) }
   const n = r?.norm || {}
   const isArea = f.service !== 'fix'
   return <div className="card">
@@ -346,7 +346,7 @@ export function DealCard({ id, back, place }) {
       {portal && <a className="btn" href={bxLink(portal, 'deal', d.id)} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 10 }}>Позвонить · WhatsApp в Битриксе</a>}
       <Qualify key={d.modified} d={d} onDone={() => load(true)} />
     </div>}
-    {cur === 'calc' && <Calc key={calc?.at || 'new'} d={d} saved={calc} onSaved={() => { loadCalc(); load(true) }} />}
+    {cur === 'calc' && <Calc key={calc?.at || 'new'} d={d} saved={calc} onSaved={t => { loadCalc(); said(t) }} />}
     {cur === 'kp' && <>
       <div className="card">
         <div className="panelhead"><h3>Коммерческое предложение</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>

@@ -18,7 +18,7 @@ def people(client, roles):
     with db.pool.connection() as conn:
         conn.execute("INSERT INTO constants_versions (checksum, values) VALUES (%s, %s)",
                      ("t", Jsonb({k: {"value": str(v), "status": "Утверждено", "who": "head"} for k, v in VALS.items()})))
-        conn.execute("INSERT INTO objects (id, title, city) VALUES (731, 'Кафе', 'Астана')")
+        conn.execute("INSERT INTO objects (id, title, city, bitrix_stage) VALUES (731, 'Кафе', 'Астана', 'UC_AV00QK')")
     client.post("/api/register", json={"full_name": "HEAD"}, headers=hdr(1000))
     ids = {}
     for tg, role, zones in roles:

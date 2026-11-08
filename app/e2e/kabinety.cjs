@@ -45,7 +45,7 @@ async function tab(p, name) {
     await call(1000, `/people/${ids[tg]}`, { role_code: role, zones, ...(bxu ? { bitrix_user_id: bxu } : {}) })
   }
   // объект в работе (на сервере их заводит синхронизация со сделками) — прямо в тестовую базу
-  execSync(`psql "${process.env.ARTGAME_DATABASE_URL}" -qc "INSERT INTO objects (id, title, city) VALUES (731, 'Кафе e2e', 'Астана') ON CONFLICT DO NOTHING"`)
+  execSync(`psql "${process.env.ARTGAME_DATABASE_URL}" -qc "INSERT INTO objects (id, title, city, bitrix_stage) VALUES (731, 'Кафе e2e', 'Астана', 'UC_AV00QK') ON CONFLICT (id) DO UPDATE SET bitrix_stage='UC_AV00QK'"`)
   const obj = (await call(3000, '/work/dict')).objects.find(o => o.id)
   assert.ok(obj, 'нужен активный объект')
 

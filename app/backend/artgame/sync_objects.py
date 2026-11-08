@@ -13,6 +13,7 @@ from .config import settings
 CATEGORY = 0
 ACTIVE = ("FINAL_INVOICE", "UC_AV00QK", "UC_BMKDS4")
 DONE = ("WON",)
+WORK = "UC_AV00QK"   # «Выполнение проекта»: только такие сделки можно выбрать для смен, трат и сборов (HEAD 08.11)
 FOLDER_FIELD = "UF_CRM_ARTGAME_PROJECT_FOLDER_ID"  # папку сделки уже создаёт DRIVE01 — берём её, не плодим вторую
 
 

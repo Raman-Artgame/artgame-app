@@ -37,7 +37,7 @@ async function tab(p, name) {
   const dana = (await call(2000, '/register', { full_name: 'Дана Художник' })).id
   await call(1000, `/people/${dana}`, { role_code: 'artist', zones: ['mural'] })
   await call(2600, '/register', { full_name: 'Новенький' })
-  execSync(`psql "${process.env.ARTGAME_DATABASE_URL}" -qc "INSERT INTO objects (id, title, city) VALUES (731, 'Кафе e2e', 'Астана') ON CONFLICT DO NOTHING"`)
+  execSync(`psql "${process.env.ARTGAME_DATABASE_URL}" -qc "INSERT INTO objects (id, title, city, bitrix_stage) VALUES (731, 'Кафе e2e', 'Астана', 'UC_AV00QK') ON CONFLICT (id) DO UPDATE SET bitrix_stage='UC_AV00QK'"`)
   const now = Date.now()
   await call(2000, '/shifts', { client_uid: crypto.randomUUID(), object_id: 731, zone_code: 'mural', started_at: new Date(now - 3 * 3600e3).toISOString(),
     ended_at: new Date(now - 600e3).toISOString(), area_m2: 6, complexity: 'medium' })

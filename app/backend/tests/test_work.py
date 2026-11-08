@@ -16,7 +16,8 @@ def setup_people(client):
         client.post(f"/api/people/{pid}", json={"role_code": role, "zones": zones}, headers=hdr(1000))
         ids[tg] = pid
     with db.pool.connection() as c:
-        c.execute("INSERT INTO objects (id, title, city, gip_person_id) VALUES (731, 'Кафе', 'Астана', %s)", (ids[5000],))
+        c.execute("INSERT INTO objects (id, title, city, gip_person_id, bitrix_stage) VALUES (731, 'Кафе', 'Астана', %s, 'UC_AV00QK')", (ids[5000],))
+        c.execute("INSERT INTO objects (id, title, city, bitrix_stage) VALUES (732, 'Ждёт договора', 'Астана', 'FINAL_INVOICE')")
     return ids
 
 

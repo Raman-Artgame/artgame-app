@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import db
+from . import db, sync_objects
 from .work import active
 
 router = APIRouter(prefix="/api")
@@ -131,7 +131,8 @@ def api_dict(p: dict = Depends(active)):
 def api_list(p: dict = Depends(active)):
     """Списки по активным объектам: свои зоны. Кто может править — для каждого списка."""
     with db.pool.connection() as conn:
-        objs = conn.execute("SELECT id, title, city, gip_person_id FROM objects WHERE status='active' ORDER BY id DESC").fetchall()
+        objs = conn.execute("SELECT id, title, city, gip_person_id FROM objects WHERE status='active' AND (id=0 OR bitrix_stage=%s) ORDER BY id DESC",
+                            (sync_objects.WORK,)).fetchall()
         lists = conn.execute("""SELECT k.id, k.object_id, k.zone_code, k.status, k.updated_at, k.closed_at, pe.full_name AS updated_name
                                 FROM kit_lists k LEFT JOIN people pe ON pe.id = coalesce(k.updated_by, k.created_by)""").fetchall()
     zones = [z for z in KIT if p["role_code"] == "head" or z in p["zones"]]

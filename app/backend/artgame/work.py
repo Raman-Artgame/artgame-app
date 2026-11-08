@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 import math
 
 from . import constants as consts
-from . import db, drive
+from . import db, drive, sync_objects
 from .deps import current_person
 
 router = APIRouter(prefix="/api")
@@ -38,7 +38,8 @@ def check_zone(conn, p: dict, zone: str, object_id: int):
 def work_dict(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         return {
-            "objects": conn.execute("SELECT id, title, city FROM objects WHERE status='active' ORDER BY id DESC").fetchall(),
+            "objects": conn.execute("SELECT id, title, city FROM objects WHERE status='active' AND (id=0 OR bitrix_stage=%s) ORDER BY id DESC",
+                                    (sync_objects.WORK,)).fetchall(),
             "categories": conn.execute("SELECT code, title FROM expense_categories WHERE active AND article='project' ORDER BY sort").fetchall(),
             "zones": p["zones"],
             "printer": consts.latest(conn).get("print.tech.printer"),

@@ -90,7 +90,7 @@ async function tab(p, name) {
 
   // 5. Объекты: фото с объекта и файл дизайна (большой файл идёт прямо в Google — здесь подменён)
   await call(1000, `/people/${(await call(1000, '/people')).find(x => x.full_name === 'Дана').id}`, { zones: ['mural', 'design'] })
-  execSync(`psql "${process.env.ARTGAME_DATABASE_URL}" -qc "INSERT INTO objects (id, title, city) VALUES (731, 'Кафе e2e', 'Астана') ON CONFLICT DO NOTHING"`)
+  execSync(`psql "${process.env.ARTGAME_DATABASE_URL}" -qc "INSERT INTO objects (id, title, city, bitrix_stage) VALUES (731, 'Кафе e2e', 'Астана', 'UC_AV00QK') ON CONFLICT (id) DO UPDATE SET bitrix_stage='UC_AV00QK'"`)
   await a.reload()
   await a.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000001' }) }))
   await tab(a, 'Объекты')
