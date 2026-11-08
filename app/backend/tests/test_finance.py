@@ -256,6 +256,9 @@ def test_history_import(client, monkeypatch):
     assert s["costs"]["materials"] == 0                                       # с ноября — живой учёт, без оценок
     s = client.get("/api/fin/summary", params={"ym": "2026-10"}, headers=hdr(1000)).json()
     assert s["costs"]["materials"] == 174000 + 40000 + 6000 and any("история" in w for w in s["warn"])
+    # до ноября постоянные/переменные — оценка по ставкам «Значений»: студия 300к + Битрикс 120к/12; таргет 1000 ₸ × 31 день
+    assert s["costs"]["fixed"] == 300000 + 10000 and s["costs"]["variable"] == 31000
+    assert next(b for b in s["budget"] if b["code"] == "rent_studio")["estimate"] is True
 
 
 def test_export_style():

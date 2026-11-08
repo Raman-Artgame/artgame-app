@@ -49,7 +49,7 @@ function Summary({ m }) {
       {s.cash.company_paid_receipts > 0 && <p className="small muted">Чеки «деньги компании»: {money(s.cash.company_paid_receipts)} — внесите их списание со счёта в «Деньги».</p>}</div>
     {s.budget.length > 0 && <div className="card"><h3>Бюджет: план и факт</h3>
       {s.budget.map(b => <div key={b.code} className="row"><span>{b.title}<div className="small muted">{KIND[b.kind]}</div></span>
-        <span className="small">{money(b.fact)} <span className="muted">/ {b.plan ? money(b.plan) : 'план не задан'}</span></span></div>)}</div>}
+        <span className="small">{money(b.fact)}{b.estimate ? ' (оценка)' : ''} <span className="muted">/ {b.plan ? money(b.plan) : 'план не задан'}</span></span></div>)}</div>}
     {s.warn.map(w => <p key={w} className="small why">{w}</p>)}
     <div className="card"><button className="ghost" onClick={sync}>Обновить Google Таблицу</button>{exp && <p className="small muted">{exp}</p>}</div>
   </>

@@ -584,6 +584,10 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
         b["plan"] = plan
     if net is not None and v.get("fin.var.ads_pct"):
         budget.setdefault("ads", {"title": "Реклама", "kind": "variable", "fact": 0.0, "plan": None})["plan"] = round(net * v["fin.var.ads_pct"] / 100)
+    if hist:   # HEAD 08.11: до ноября факта нет — постоянные и переменные считаем по нынешним ставкам «Значений» (оценка)
+        for code, b in budget.items():
+            if b["plan"] and not b["fact"] and code != "ads":   # «ads» (% от выручки) — не поверх отдельных статей рекламы
+                b["fact"], b["estimate"] = float(b["plan"]), True
     fixed = sum(b["fact"] for b in budget.values() if b["kind"] == "fixed")
     variable = sum(b["fact"] for b in budget.values() if b["kind"] == "variable")
     taxes_paid = sum(b["fact"] for b in budget.values() if b["kind"] == "tax")
@@ -591,8 +595,8 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
     costs = {"project": exp.get("project", 0.0), "stock": exp.get("stock", 0.0), "canvas": exp.get("canvas", 0.0),
              "sales": exp.get("sales", 0.0), "payroll": payroll_acc - reimb, "fixed": fixed, "variable": variable, "materials": hist_mat}
     if hist:
-        warn.append("до ноября 2026 — история: материалы и транспорт — оценки из «Проекты 2026»; аренда, подписки, реклама, "
-                    "оклады вне «ФОТ 2026» в старых таблицах не велись и сюда не входят — прибыль завышена")
+        warn.append("до ноября 2026 — история: материалы и транспорт — оценки из «Проекты 2026»; постоянные и переменные (аренда, "
+                    "подписки, реклама) — по нынешним ставкам «Значений»; оклады вне «ФОТ 2026» не входят")
     profit = None if net is None else round(net - sum(costs.values()), 2)
     ipn_pct = v.get("fin.tax.ipn")
     if not ipn_pct:

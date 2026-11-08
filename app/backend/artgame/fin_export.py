@@ -57,7 +57,7 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
         sv.append([MONTHS[m - 1], r["gross"], r["vat"], r["net"], c["project"], c["stock"], c["canvas"], c["sales"], c.get("materials", 0),
                    c["payroll"], c["fixed"], c["variable"], s["profit"], s["ipn"], s["cash"]["in"], s["cash"]["out"],
                    sum(float(b["balance"]) for b in s["cash"]["closing"]),
-                   "история: аренда, подписки, реклама не велись — прибыль завышена" if date(year, m, 1) < finance.HIST_CUT else ""])
+                   "история: материалы — оценка старой таблицы, аренда/подписки/реклама — по нынешним ставкам «Значений»" if date(year, m, 1) < finance.HIST_CUT else ""])
         for x in (r for r in finance.payroll(ym, head)["rows"] if r["accrued"] or r["paid"]):   # без пустых строк
             pay.append([MONTHS[m - 1], x["name"], x["group"], x["accrued"], x["paid"], x["left"], _d(x["last_paid"]),
                         "; ".join(f"{a['detail'] or a['kind']}: {float(a['amount']):.0f}" for a in x["lines"])])
