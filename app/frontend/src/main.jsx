@@ -145,7 +145,7 @@ function Main({ me, web, logout }) {
       extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> },
         duty && { code: 'duty', title: 'Правила игры', render: () => <Duty d={duty} g={GROW[role]} /> }].filter(Boolean)} /> :
     <Places key={tab} list={tab === 'study' ? [mopPlace] : other} mode={tab === 'study' ? 'study' : ''} />}
-    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={worker} />
+    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll />
   </>
   return <>
     <div className="wrap">
@@ -159,10 +159,10 @@ function Main({ me, web, logout }) {
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
         tab === 'fin' ? <Finance /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design me={me} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
-        tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyPay /><MyIssued /></> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><MyIssued /><Mine /></> : <Review />}
+        tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyPay /><MyIssued />{duty && <DutyFold d={duty} />}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><MyIssued />{duty && <DutyFold d={duty} />}<Mine /></> : <Review />}
     </div>
-    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={worker} />
+    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll />
   </>
 }
 
@@ -187,6 +187,17 @@ function Grow({ g }) {
 }
 
 // «Правила игры» (HEAD 08.11 — вместо «Должностной»): роль, кому подчиняешься, что делаешь; ниже — как вырасти на ступень.
+// «Правила игры» в «Кабинете» у всех (HEAD 08.11): свёрнуто одной карточкой, раскрывается целиком.
+function DutyFold({ d }) {
+  const [open, setOpen] = useState(false)
+  return <div className="card dutyfold">
+    <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
+      <div><span className="tag">Правила игры</span><h3>{d.title}</h3><p className="small muted">{d.about}</p></div>
+      <button className="ghost mini">{open ? 'Свернуть' : 'Открыть'}</button></div>
+    {open && <div className="dutybody"><Duty d={d} /></div>}
+  </div>
+}
+
 function Duty({ d, g }) {
   return <div className="wrap"><div className="card duty">
     <span className="tag">{d.step}</span><h2>Правила игры · {d.title}</h2><p>{d.about}</p><p className="small muted">{d.boss}</p>
@@ -240,7 +251,7 @@ const ICON = {
 const Icon = ({ k }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[k] || ICON.more} /></svg>
 const MAX = 6   // кнопок в меню без листа «Ещё»
 
-// scroll (художники и печать, HEAD 08.11): все кнопки внизу одной лентой без «Ещё», лента листается пальцем.
+// scroll (HEAD 08.11, у всех): все кнопки внизу одной лентой без «Ещё», лента листается пальцем; открытая вкладка — в поле зрения.
 function Nav({ tabs, tab, setTab, counts = {}, scroll }) {
   const [more, setMore] = useState(false)
   const fold = !scroll && tabs.length > MAX
@@ -252,7 +263,8 @@ function Nav({ tabs, tab, setTab, counts = {}, scroll }) {
       {rest.map(([k, t]) => <button key={k} className={'ghost' + (tab === k ? ' on' : '')} onClick={() => { setTab(k); setMore(false) }}><Icon k={k} />{t}</button>)}
     </div></div>}
     <nav className={scroll && tabs.length > MAX ? 'scroll' : ''}>
-      {main.map(([k, t]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon k={k} />{t}{counts[k] ? <i className="cnt" aria-hidden="true">{counts[k]}</i> : null}</button>)}
+      {main.map(([k, t]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}
+        ref={el => { if (el && tab === k && scroll) el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }) }}><Icon k={k} />{t}{counts[k] ? <i className="cnt" aria-hidden="true">{counts[k]}</i> : null}</button>)}
       {rest.length > 0 && <button className={inRest ? 'on' : ''} onClick={() => setMore(true)}><Icon k={inRest ? inRest[0] : 'more'} />{inRest ? inRest[1] : 'Ещё'}</button>}
     </nav>
   </>
