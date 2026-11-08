@@ -92,7 +92,11 @@ async function tab(p, name) {
 
   // 7. «Пройти как сотрудник · тест»: HEAD работает как «Тест · Саппорт» — смена уходит по-настоящему на проверку
   await tab(h, 'Пульт')
-  await h.locator('.testas').getByRole('button', { name: 'Саппорт', exact: true }).click()
+  // HEAD открыл саппорта «просмотром»: в «Смене» видно, что это просмотр, и есть кнопка перейти в тест
+  await h.locator('.viewas-card > .chips').getByRole('button', { name: 'Саппорт', exact: true }).click()
+  await h.locator('.viewas-bar').getByText('Пример: Саппорт').waitFor()
+  await h.getByText('это только просмотр, смена не начнётся').waitFor()
+  await h.getByRole('button', { name: 'Пройти как сотрудник · тест' }).click()
   await h.locator('.viewas-bar').getByText('Тест · Саппорт').waitFor()
   await h.locator('.viewas-bar').getByText('всё сохраняется по-настоящему').waitFor()
   await h.locator('.snap input[type=file]').setInputFiles(__dirname + '/chek.png')

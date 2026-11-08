@@ -15,6 +15,14 @@ export const testAs = () => viewAs().startsWith('test:')
 export const RO_MSG = 'Режим просмотра: от имени сотрудника ничего не меняется.'
 export const readOnlyHit = (msg = RO_MSG) => window.dispatchEvent(new CustomEvent('artgame:ro', { detail: msg }))
 
+// client_uid: crypto.randomUUID есть не во всех WebView Telegram (старый Android) — без него кнопки молча падали
+export function uuid() {
+  if (crypto.randomUUID) return crypto.randomUUID()
+  const b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128
+  const h = [...b].map(x => x.toString(16).padStart(2, '0')).join('')
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+}
+
 export async function api(path, opts = {}) {
   const auth = initData() ? { 'X-Telegram-Init-Data': initData() } : webToken() ? { Authorization: `Bearer ${webToken()}` } : {}
   const va = !opts.noView && viewAs() ? { 'X-View-As': viewAs() } : {}

@@ -60,8 +60,9 @@ class ViewAsMiddleware:
 
 
 def test_on() -> bool:
-    """Только test: и ARTGAME_ENV_NAME=test, и адрес test.… — забытый ARTGAME_ENV_NAME на prod режим не откроет."""
-    return settings.env_name == "test" and "://test." in settings.public_origin
+    """Только test: ARTGAME_ENV_NAME=test и ещё один признак test — адрес test.… или база artgame_test.
+    Забытый ARTGAME_ENV_NAME на prod (адрес app.…, база artgame_prod) режим не откроет."""
+    return settings.env_name == "test" and ("://test." in settings.public_origin or "artgame_test" in settings.database_url)
 
 
 def test_person(conn, role: str, load_person) -> dict:

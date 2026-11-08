@@ -141,7 +141,10 @@ def test_test_as_role_writes_for_test_person(client, monkeypatch):
     assert me["id"] not in {p["id"] for p in client.get("/api/view-as/options", headers=hdr(1000)).json()["people"]}
     # на prod режима нет — ни по ARTGAME_ENV_NAME, ни по адресу (если имя среды забыли)
     monkeypatch.setattr(viewas.settings, "public_origin", "https://app.artgame.world")
+    monkeypatch.setattr(viewas.settings, "database_url", "postgresql://artgame@localhost/artgame_prod")
     assert client.get("/api/me", headers=va(1000, "test:support")).status_code == 403
+    monkeypatch.setattr(viewas.settings, "database_url", "postgresql://artgame@localhost/artgame_test")   # адрес не задан, база test — можно
+    assert client.get("/api/me", headers=va(1000, "test:support")).status_code == 200
     monkeypatch.setattr(viewas.settings, "public_origin", "https://test.app.artgame.world")
     monkeypatch.setattr(viewas.settings, "env_name", "prod")
     assert client.get("/api/me", headers=va(1000, "test:support")).status_code == 403

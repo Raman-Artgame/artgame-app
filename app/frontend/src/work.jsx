@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { api } from './api.js'
+import { api, testAs, uuid, viewAs } from './api.js'
 import { clearFailed, enqueue, failed, flush, pending } from './queue.js'
+import { startViewAs } from './head.jsx'
 import { HINT_TITLE, hintsFor } from './hints.js'
 
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
@@ -154,17 +155,30 @@ function StartShift({ d, onStarted }) {
   const [photo, setPhoto] = useState('')
   const [busy, setBusy] = useState(false)
   const [cond, setCond] = useState({})
+  const [err, setErr] = useState('')
+  const looking = viewAs() && !testAs()   // HEAD смотрит как сотрудник: только просмотр — предложить тест
   if (!objs.length) return <div className="card"><h2>Смена</h2><p className="muted">Сейчас нет объектов в работе. Когда МОП переведёт сделку в «Выполнение проекта», объект появится здесь.</p></div>
   const obj = objs.find(o => o.id === v.object_id) || objs[0]
+  // геолокация не держит кнопку дольше 5 с (в Telegram запрос доступа может не ответить вовсе)
+  const where = () => new Promise(r => {
+    const t = setTimeout(() => r(null), 5000)
+    try { navigator.geolocation ? navigator.geolocation.getCurrentPosition(p => { clearTimeout(t); r(p.coords) }, () => { clearTimeout(t); r(null) }, { timeout: 4000 }) : r(null) }
+    catch { clearTimeout(t); r(null) }
+  })
   const start = async () => {
-    setBusy(true)
-    const geo = await new Promise(r => navigator.geolocation ? navigator.geolocation.getCurrentPosition(p => r(p.coords), () => r(null), { timeout: 4000 }) : r(null))
-    const o = { client_uid: crypto.randomUUID(), object_id: obj.id, object_title: obj.title, zone_code: v.zone_code, started_at: new Date().toISOString(), before: photo }
+    setBusy(true); setErr('')
     try {
+      const geo = await where()
+      const o = { client_uid: uuid(), object_id: obj.id, object_title: obj.title, zone_code: v.zone_code, started_at: new Date().toISOString(), before: photo }
+      const was = failed().length
       await enqueue('/shifts/start', { client_uid: o.client_uid, object_id: o.object_id, zone_code: o.zone_code, started_at: o.started_at, photo_before: photo,
         geo_lat: geo?.latitude ?? null, geo_lon: geo?.longitude ?? null })
+      const f = failed()
+      if (f.length > was && f[0].path === '/shifts/start') { setErr(`Сервер не принял: ${f[0].error}`); return }   // 4xx — не делаем вид, что смена идёт
       onStarted(o)
-    } catch { /* режим просмотра */ } finally { setBusy(false) }
+    } catch (e) {
+      setErr(e.status === 403 && looking ? 'Это режим просмотра — смену отсюда не начать.' : `Не получилось начать: ${e.message || e}`)
+    } finally { setBusy(false) }
   }
   return <>
     <div className="card">
@@ -180,7 +194,10 @@ function StartShift({ d, onStarted }) {
     <div className="card">
       <h3>Фото стены до начала</h3>
       <Snap value={photo} set={setPhoto} label="Сфотографировать стену" />
+      {looking && <div className="warnbox">Вы смотрите как сотрудник — это только просмотр, смена не начнётся.
+        {d.role && <button className="mini" style={{ marginTop: 8 }} onClick={() => startViewAs('test:' + d.role)}>Пройти как сотрудник · тест</button>}</div>}
       <button disabled={!photo || busy} onClick={start}>{busy ? 'Начинаю…' : 'Начать смену'}</button>
+      {err && <p className="small why">{err}</p>}
       {!photo && <p className="small muted">Без фото «до» смену не начать: по нему Главный художник видит, что сделано за день.</p>}
     </div>
   </>
