@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
-import { enqueue, flush, pending } from './queue.js'
+import { clearFailed, enqueue, failed, flush, pending } from './queue.js'
 
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
 const ST = { submitted: 'на проверке', approved: 'принято', rejected: 'отказ', cancelled: 'отменено' }
@@ -132,6 +132,10 @@ export function Mine() {
   const cancel = (k, id) => api(`/${k}/${id}/cancel`, { method: 'POST' }).then(load)
   return <>
     {pending() > 0 && <div className="card">Ждут сети: {pending()}</div>}
+    {failed().length > 0 && <div className="card"><h3>Не принято сервером</h3>
+      {failed().map((x, i) => <div key={i} className="row"><div><b>{x.amount ? money(x.amount) : x.path}</b>{x.note ? ` · ${x.note}` : ''}
+        <div className="small why">{x.error}</div></div></div>)}
+      <button className="ghost mini" onClick={() => { clearFailed(); load() }}>Понятно, скрыть</button></div>}
     <div className="card"><h2>Мои смены</h2>
       {m.shifts.length ? m.shifts.map(s => <div key={s.id} className="row">
         <div><b>{s.object_title}</b><br /><span className="muted small">{when(s.started_at, s.ended_at)}{s.area_m2 ? ` · ${+s.area_m2} м²` : ''}</span>

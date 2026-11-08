@@ -98,6 +98,11 @@ function Main({ me, web, logout }) {
   const go = t => { if (t === 'deals') setDealId(null); if (t === 'leads') setLeadId(null); setTab(t) }
   const [toast, setToast] = useState('')
   const done = t => { setToast(t); setTab('mine'); setTimeout(() => setToast(''), 4000) }
+  useEffect(() => {   // офлайн-очередь: сервер не принял запись — сказать сразу, а не терять молча
+    const on = e => { setToast('Не отправлено: ' + e.detail); setTimeout(() => setToast(''), 8000) }
+    window.addEventListener('artgame:dropped', on)
+    return () => window.removeEventListener('artgame:dropped', on)
+  }, [])
   const sales = DEAL_ROLES.has(me.role_code)
   const t = useToday(sales)
   const pulse = usePulse(isHead)
