@@ -63,8 +63,13 @@ async def tg_hook(request: Request, x_telegram_bot_api_secret_token: str = Heade
     if chat.get("type") != "private" or not chat.get("id"):
         return {"ok": True}
     try:
-        CALL("sendMessage", chat_id=chat["id"], text=welcome((msg.get("from") or {}).get("first_name", "")),
-             reply_markup={"inline_keyboard": [[{"text": "Открыть ARTGAME", "web_app": {"url": app_url()}}]]})
+        kb = {"inline_keyboard": [[{"text": "Открыть ARTGAME", "web_app": {"url": app_url()}}]]}
+        text = welcome((msg.get("from") or {}).get("first_name", ""))
+        try:   # баннер «Добро пожаловать» (frontend/public/bot-welcome.jpg); не вышло — просто текст
+            CALL("sendPhoto", chat_id=chat["id"], photo=app_url() + "bot-welcome.jpg", caption=text, reply_markup=kb)
+        except Exception as e:
+            print("tg_hook photo:", e, file=sys.stderr)
+            CALL("sendMessage", chat_id=chat["id"], text=text, reply_markup=kb)
     except Exception as e:   # Telegram не должен получать 500 и повторять
         print("tg_hook:", e, file=sys.stderr)
     return {"ok": True}

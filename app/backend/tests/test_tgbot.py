@@ -16,7 +16,7 @@ def test_hook_replies_only_with_secret(monkeypatch):
     r = c.post("/api/tg/hook", json=upd, headers={"X-Telegram-Bot-Api-Secret-Token": tgbot.hook_secret()})
     assert r.json() == {"ok": True}
     m, p = sent[0]
-    assert m == "sendMessage" and p["chat_id"] == 42 and "Аня" in p["text"]
+    assert m == "sendPhoto" and p["chat_id"] == 42 and "Аня" in p["caption"] and p["photo"].endswith("/bot-welcome.jpg")
     assert p["reply_markup"]["inline_keyboard"][0][0]["web_app"]["url"].endswith("/")
     # группы бот молча пропускает
     upd["message"]["chat"]["type"] = "group"
@@ -41,3 +41,16 @@ def test_setup_changes_only_diff(monkeypatch):
     wh = dict(calls)["setWebhook"]
     assert wh["url"].endswith("/api/tg/hook") and wh["secret_token"] == tgbot.hook_secret() and wh["drop_pending_updates"]
     assert "webhook (был: script.google.com)" in done
+
+
+def test_hook_falls_back_to_text(monkeypatch):
+    sent = []
+
+    def fake(m, **p):
+        if m == "sendPhoto":
+            raise RuntimeError("sendPhoto: wrong file")
+        sent.append((m, p))
+    monkeypatch.setattr(tgbot, "CALL", fake)
+    upd = {"message": {"chat": {"id": 7, "type": "private"}, "from": {}, "text": "/start"}}
+    TestClient(app).post("/api/tg/hook", json=upd, headers={"X-Telegram-Bot-Api-Secret-Token": tgbot.hook_secret()})
+    assert sent[0][0] == "sendMessage" and sent[0][1]["text"].startswith("Привет!")
