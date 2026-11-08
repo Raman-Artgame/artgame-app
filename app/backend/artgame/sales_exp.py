@@ -81,7 +81,7 @@ def add(e: SalesExpenseIn, p: dict = Depends(active)):
         ok = limit > 0 and spent + e.amount <= limit
         name = f"Чек {datetime.now(TZ):%Y-%m-%d %H-%M} {p['full_name']} {e.amount:.0f}" + (f" сделка {e.deal_id}" if e.deal_id else "")
         try:
-            drive_id = drive.save_sales_receipt(name, e.receipt)
+            drive_id = drive.save_receipt(conn, "sales", name, e.receipt, deal_id=e.deal_id)
         except Exception as ex:  # Диск недоступен — телефон повторит позже
             raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         data, mime = drive.decode_data_url(e.receipt)

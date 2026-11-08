@@ -26,7 +26,7 @@ def setup(client, monkeypatch):
         conn.execute("INSERT INTO constants_versions (checksum, values) VALUES (%s, %s)",
                      ("t", Jsonb({k: {"value": str(v), "status": "Утверждено", "who": "head"} for k, v in VALS.items()})))
         conn.execute("INSERT INTO objects (id, title, city) VALUES (731, 'Кафе', 'Астана')")
-    monkeypatch.setattr(drive, "save_office_receipt", lambda folder, name, data: f"drv-{folder}")
+    monkeypatch.setattr(drive, "save_receipt", lambda conn, dept, name, data, deal_id=None: f"drv-{dept}")
     monkeypatch.setattr(drive, "save_photo", lambda *a, **k: "drv-obj")
     # выручка ноября по листу «Проекты 2026»: 11 600 000 с НДС → 10 000 000 без НДС → ступень 2 (4 %)
     monkeypatch.setattr(fin, "month_rows", lambda y, m, fresh=False: [{"id": 1, "sum": 11_600_000.0}])

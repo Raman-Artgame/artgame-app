@@ -96,11 +96,11 @@ class LedgerIn(BaseModel):
     receipt: str | None = Field(default=None, max_length=8_000_000)
 
 
-def _receipt(conn, p: dict, name: str, data_url: str) -> int:
+def _receipt(conn, p: dict, name: str, data_url: str, deal_id: int | None = None) -> int:
     if not data_url.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
         raise HTTPException(400, "Чек — фото jpeg или png")
     try:
-        drive_id = drive.save_office_receipt("Финансы — чеки", name, data_url)
+        drive_id = drive.save_receipt(conn, "office", name, data_url, deal_id=deal_id)
     except Exception as ex:  # Диск недоступен — повторить позже
         raise HTTPException(502, f"drive: {ex.__class__.__name__}")
     data, mime = drive.decode_data_url(data_url)
@@ -139,7 +139,7 @@ def ledger_add(e: LedgerIn, p: dict = Depends(require_head)):
             raise HTTPException(400, "выплату людям отмечайте в «ФОТ», там видно, сколько осталось")
         if e.payee_id and not conn.execute("SELECT 1 FROM fin_payees WHERE id=%s", (e.payee_id,)).fetchone():
             raise HTTPException(400, "нет такого получателя")
-        fid = _receipt(conn, p, f"{e.op_date} {art['title']} {e.amount:.0f}", e.receipt) if e.receipt else None
+        fid = _receipt(conn, p, f"{e.op_date} {art['title']} {e.amount:.0f}", e.receipt, e.deal_id) if e.receipt else None
         if art["kind"] == "transfer":
             if e.to_account not in accounts or e.to_account == e.account:
                 raise HTTPException(400, "перевод: укажите другой счёт, куда")

@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     gateway_url: str = ""              # шлюз ARTGAME (MCP) на localhost, чтение Битрикса через bitrix_read
     gateway_token: str = ""            # если шлюз требует токен
     bitrix_webhook: str = ""           # входящий вебхук Битрикса (права CRM): запись из приложения, решение HEAD 05.11
-    drive_inbox: str = ""              # папка Диска для чеков «Офис / без объекта»
+    drive_inbox: str = ""              # устарело: чеки без сделки — drive.RECEIPTS_ROOT_ID / drive_receipts
+    drive_receipts: str = ""           # запасной ID папки «10 ФИНАНСЫ / Расходы чеки» (если RECEIPTS_ROOT_ID пуст)
     google_sa_file: str = ""            # путь к JSON сервисного аккаунта на сервере
     # Google Таблица-витрина «Финансы 2026 — витрина (из приложения)» (HEAD 06.11): сервер пишет, руками не правим
     fin_sheet_id: str = "1-beqAb-w27ZJnLepsdCZBbxIRQYWSUFDsJMdoBneS-s"

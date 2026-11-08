@@ -149,10 +149,9 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
         if e.receipt:
             if not e.receipt.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
                 raise HTTPException(400, "bad receipt")
-            obj = conn.execute("SELECT * FROM objects WHERE id=%s", (e.object_id,)).fetchone()
             name = f"Чек {datetime.now():%Y-%m-%d %H-%M} {p['full_name']} {e.amount:.0f}"
             try:
-                drive_id = drive.save_photo(conn, obj, name, e.receipt, kind="receipt")
+                drive_id = drive.save_receipt(conn, e.zone_code, name, e.receipt, deal_id=e.object_id or None)
             except Exception as ex:  # Диск недоступен — телефон повторит позже
                 raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         row = conn.execute(

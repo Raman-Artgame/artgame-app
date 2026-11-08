@@ -19,7 +19,7 @@ def test_stock_purchase(client, monkeypatch):
     with db.pool.connection() as conn:
         conn.execute("INSERT INTO constants_versions (checksum, values) VALUES (%s, %s)",
                      ("t", Jsonb({"stock.price_tolerance_pct": {"value": "15", "status": "Утверждено", "who": "head"}})))
-    monkeypatch.setattr(drive, "save_office_receipt", lambda folder, name, data: f"drv-{folder}")
+    monkeypatch.setattr(drive, "save_receipt", lambda conn, dept, name, data, deal_id=None: f"drv-{dept}")
     client.post("/api/register", json={"full_name": "HEAD"}, headers=hdr(1000))
     for tg, role in [(2000, "artist"), (6000, "mop"), (8000, "carpenter")]:
         pid = client.post("/api/register", json={"full_name": f"P{tg}"}, headers=hdr(tg)).json()["id"]

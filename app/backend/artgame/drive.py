@@ -1,7 +1,10 @@
 """Google Диск — хранилище файлов объектов. Команда работает только через приложение (HEAD 04.11).
 
 Раскладка как в прототипе: ПРОЕКТЫ → год → «ММ МЕСЯЦ» → «№ · НАЗВАНИЕ — ГОРОД» → подпапки SUBFOLDERS.
-ID папок запоминаются в objects.drive_folder и objects.folders. Офис (объект 0) — папка ARTGAME_DRIVE_INBOX.
+ID папок запоминаются в objects.drive_folder и objects.folders.
+
+Чеки расходов (HEAD 08.11): есть сделка → папка сделки / «Расходы чеки»; нет сделки (или у сделки ещё нет папки)
+→ ARTGAME.KZ / 10 ФИНАНСЫ / Расходы чеки / <отдел> / год / «ММ МЕСЯЦ». Этот путь — единственный для всех трат.
 """
 import base64
 import json
@@ -12,8 +15,12 @@ import httpx
 from .config import settings
 
 PROJECTS_ROOT_ID = "1_33LDppwOu02ToP4c3uUS-mPux5mPIJf"
-SUBFOLDERS = {"photo": "Фото объекта", "design": "Дизайн", "receipt": "Чеки", "doc": "Документы"}
+SUBFOLDERS = {"photo": "Фото объекта", "design": "Дизайн", "receipt": "Расходы чеки", "doc": "Документы"}
 MONTHS = ["ЯНВАРЬ", "ФЕВРАЛЬ", "МАРТ", "АПРЕЛЬ", "МАЙ", "ИЮНЬ", "ИЮЛЬ", "АВГУСТ", "СЕНТЯБРЬ", "ОКТЯБРЬ", "НОЯБРЬ", "ДЕКАБРЬ"]
+# «10 ФИНАНСЫ / Расходы чеки» на диске ARTGAME.KZ; сервисному аккаунту дан доступ только к этой папке.
+RECEIPTS_ROOT_ID = ""
+DEPTS = {"sales": "01 Продажи", "mural": "02 Роспись", "print": "03 Печать", "design": "04 Дизайн",
+         "stock": "05 Склад и мастерская холстов", "office": "06 Офис и общее"}
 API = "https://www.googleapis.com/drive/v3/files"
 UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 ALL = {"supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
@@ -101,9 +108,9 @@ class Drive:
 
 
 def ensure_folders(conn, obj: dict, d: Drive | None = None) -> dict:
-    """Папка сделки и подпапки; создаёт недостающие, запоминает ID в базе."""
+    """Папка сделки и подпапки; создаёт недостающие, запоминает ID в базе. Объект 0 «Офис» папки не имеет."""
     if obj["id"] == 0:
-        return {k: settings.drive_inbox for k in SUBFOLDERS}
+        raise ValueError("у «Офис / без объекта» нет папки сделки")
     folders = dict(obj.get("folders") or {})
     if all(k in folders for k in SUBFOLDERS) and obj.get("drive_folder"):
         return folders
@@ -121,29 +128,37 @@ def decode_data_url(data_url: str) -> tuple[bytes, str]:
     return base64.b64decode(b64), mime
 
 
-def save_photo(conn, obj: dict, name: str, data_url: str, kind: str = "receipt") -> str:
-    """Сохраняет сжатое фото (чек или фото объекта) в подпапку. Возвращает ID файла на Диске."""
-    data, mime = decode_data_url(data_url)
-    d = Drive()
-    folders = ensure_folders(conn, obj, d)
-    return d.upload(folders[kind], name + (".png" if mime == "image/png" else ".jpg"), data, mime)
+def _ext(mime: str) -> str:
+    return ".png" if mime == "image/png" else ".jpg"
 
 
-def save_sales_receipt(name: str, data_url: str) -> str:
-    """Чек трат отдела продаж: «Отдел продаж — чеки / год / ММ МЕСЯЦ» (в папке офиса, а если её нет — в ПРОЕКТЫ)."""
+def save_photo(conn, obj: dict, name: str, data_url: str, kind: str = "photo") -> str:
+    """Фото объекта (или другой файл) в подпапку сделки. Возвращает ID файла на Диске."""
     data, mime = decode_data_url(data_url)
     d = Drive()
+    return d.upload(ensure_folders(conn, obj, d)[kind], name + _ext(mime), data, mime)
+
+
+def receipt_folder(conn, d: Drive, dept: str, deal_id: int | None) -> tuple[str, bool]:
+    """Куда класть чек: (ID папки, в папку сделки ли). Сделка без папки в приложении → папка отдела."""
+    if deal_id:
+        obj = conn.execute("SELECT * FROM objects WHERE id=%s", (deal_id,)).fetchone()
+        if obj and obj["id"] != 0:
+            return ensure_folders(conn, obj, d)["receipt"], True
+    root = RECEIPTS_ROOT_ID or settings.drive_receipts
+    if not root:
+        raise RuntimeError("не задана папка «10 ФИНАНСЫ / Расходы чеки»")
     now = datetime.now()
-    root = d.child(settings.drive_inbox or PROJECTS_ROOT_ID, "Отдел продаж — чеки")
-    month = d.child(d.child(root, str(now.year)), f"{now.month:02d} {MONTHS[now.month - 1]}")
-    return d.upload(month, name + (".png" if mime == "image/png" else ".jpg"), data, mime)
+    month = d.child(d.child(d.child(root, DEPTS.get(dept, DEPTS["office"])), str(now.year)),
+                    f"{now.month:02d} {MONTHS[now.month - 1]}")
+    return month, False
 
 
-def save_office_receipt(folder: str, name: str, data_url: str) -> str:
-    """Чеки не по объекту (финансы, склад, мастерская холстов): «<папка> / год / ММ МЕСЯЦ» в папке офиса."""
+def save_receipt(conn, dept: str, name: str, data_url: str, deal_id: int | None = None) -> str:
+    """Единая точка для чеков всех трат (смены, МОП, склад, финансы). Возвращает ID файла на Диске."""
     data, mime = decode_data_url(data_url)
     d = Drive()
-    now = datetime.now()
-    root = d.child(settings.drive_inbox or PROJECTS_ROOT_ID, folder)
-    month = d.child(d.child(root, str(now.year)), f"{now.month:02d} {MONTHS[now.month - 1]}")
-    return d.upload(month, name + (".png" if mime == "image/png" else ".jpg"), data, mime)
+    folder, in_deal = receipt_folder(conn, d, dept, deal_id)
+    if deal_id and not in_deal and f"сделка {deal_id}" not in name:
+        name += f" сделка {deal_id}"
+    return d.upload(folder, name + _ext(mime), data, mime)

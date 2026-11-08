@@ -24,7 +24,7 @@ def test_sales_expenses(bxc, monkeypatch):  # noqa: F811
     c, ids = bxc
     c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
     saved = []
-    monkeypatch.setattr(drive, "save_sales_receipt", lambda name, data: saved.append(name) or f"drv-{len(saved)}")
+    monkeypatch.setattr(drive, "save_receipt", lambda conn, dept, name, data, deal_id=None: saved.append(name) or f"drv-{len(saved)}")
     # без чека — нельзя; чужая статья (проектная) — нельзя; художнику — нельзя
     assert c.post("/api/sales/expenses", json={**body(1000), "receipt": ""}, headers=hdr(6000)).status_code == 422
     assert c.post("/api/sales/expenses", json=body(1000, category="paint"), headers=hdr(6000)).status_code == 400
@@ -57,5 +57,5 @@ def test_sales_expenses(bxc, monkeypatch):  # noqa: F811
     # карточка сделки: стоимость привлечения
     assert c.get("/api/bx/deals/1601/full", headers=hdr(6000)).json()["acq"] == {"sum": 12000.0, "count": 1}
     # Диск недоступен — 502, трата не записана (телефон повторит)
-    monkeypatch.setattr(drive, "save_sales_receipt", lambda *a: (_ for _ in ()).throw(RuntimeError("down")))
+    monkeypatch.setattr(drive, "save_receipt", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
     assert c.post("/api/sales/expenses", json=body(100), headers=hdr(6100)).status_code == 502
