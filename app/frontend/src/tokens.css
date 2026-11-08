@@ -597,3 +597,8 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .fb .fbans { font-size: 14px; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--dark2); border-radius: 6px; }
 .fb .qbtns { display: flex; gap: 6px; flex-wrap: wrap; }
 .fb .qbtns button { width: auto; }
+/* Правила игры: черновик, запрещено, политика (HEAD 08.11) */
+.tag.draft { background: transparent; border-style: dashed; color: var(--muted); font-weight: 500; margin-left: 8px; vertical-align: middle; }
+.card.duty.forbid { border-left: 4px solid var(--hot); }
+.card.duty.forbid li { margin: 4px 0; }
+.card.duty.policy { border-left: 4px solid var(--accent); }

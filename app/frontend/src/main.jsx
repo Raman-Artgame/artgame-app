@@ -14,7 +14,7 @@ import { Finance, MyPay, StockSpend } from './finance.jsx'
 import { Kit } from './kit.jsx'
 import { Production } from './production.jsx'
 import { Design } from './design.jsx'
-import { DUTIES, GROW } from './duties.js'
+import { DUTIES, GROW, POLICY } from './duties.js'
 import { Feedback } from './feedback.jsx'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
 import './tokens.css'
@@ -216,15 +216,39 @@ function DutyFold({ d }) {
 function Duty({ d, g }) {
   return <div className="wrap"><div className="card duty">
     <span className="tag">{d.step}</span><h2>Правила игры · {d.title}</h2><p>{d.about}</p><p className="small muted">{d.boss}</p>
+    {d.goal && <><h3>Зачем ты в команде{dr(d, 'goal')}</h3><p>{d.goal}</p></>}
     <h3>Что ты делаешь</h3><ul>{d.duty.map((x, i) => <li key={i}>{x}</li>)}</ul>
     <p className="small muted">Ставки — в «Кабинете».</p>
   </div>
+  <DutyList d={d} k="req" t="Требования" />
+  <DutyList d={d} k="kpi" t="Показатели: как понять, что ты молодец" />
+  <DutyList d={d} k="rights" t="Твои права" />
+  <DutyList d={d} k="resp" t="За что отвечаешь" />
   {d.skills && <div className="card duty"><h3>Какой ты: команда, управление, мастерство</h3>
     {d.skills.map(([t, x]) => <div key={t} className="skill"><b>{t}</b><p className="small">{x}</p></div>)}</div>}
   {d.rules && <div className="card duty"><h3>Правила</h3>
     {d.rules.map(([t, x]) => <div key={t} className="skill"><b>{t}</b><p className="small">{x}</p></div>)}</div>}
+  <div className="card duty forbid"><h3>Что запрещено{dr(d, 'forbidden')}</h3>
+    <ul>{POLICY.forbidden.concat(d.forbidden || []).map((x, i) => <li key={i}>{x}</li>)}</ul>
+    <p className="small">{POLICY.after}</p></div>
+  <Policy />
   {d.next && <div className="card duty"><h3>Куда дальше</h3><p className="small">{d.next}</p></div>}
-  {g && <Grow g={g} />}</div>
+  {g && <Grow g={g} />}
+  <p className="small muted">Источник: {d.src}{d.drafts?.length ? ' «Черновик» — нет в документах компании, ждёт утверждения HEAD.' : ''}</p></div>
+}
+
+// Полная должностная (HEAD 08.11): разделы без источника помечены «черновик».
+const dr = (d, k) => d.drafts?.includes(k) ? <span className="tag draft">черновик</span> : null
+function DutyList({ d, k, t }) {
+  if (!d[k]?.length) return null
+  return <div className="card duty"><h3>{t}{dr(d, k)}</h3><ul>{d[k].map((x, i) => <li key={i}>{x}</li>)}</ul></div>
+}
+
+// Политика ARTGAME — одна для всех ролей (HEAD 08.11).
+function Policy() {
+  return <div className="card duty policy"><h3>Политика ARTGAME — для всех</h3>
+    {POLICY.principles.map(([t, x]) => <div key={t} className="skill"><b>{t}</b><p className="small">{x}</p></div>)}
+    <h3>Правила для всех</h3><ul>{POLICY.all.map((x, i) => <li key={i}>{x}</li>)}</ul></div>
 }
 
 // ТБ (HEAD 08.11): главное по безопасности с цифрами из «Значений» (safety.*). Полная глава — «База знаний», глава 10.
