@@ -2,7 +2,7 @@
 import numpy as np, wave, sys, json
 
 SR = 44100
-BPM = 120
+BPM = 128
 BEAT = 60 / BPM
 
 def env(n, a, d, sus=0.0, curve=6.0):
@@ -89,7 +89,8 @@ def render(total, cuts, intro, outro, path):
                 place(drums, K, tb, 0.95)
                 i = int(tb * SR); m = min(N, i + int(0.22 * SR))
                 duck[i:m] = np.minimum(duck[i:m], 0.35 + 0.65 * np.linspace(0, 1, m - i) ** 0.6)
-                if q in (1, 3): place(drums, C, tb, 0.55)
+                if q in (1, 3): place(drums, C, tb, 0.7)
+                if q == 3 and b % 2: place(drums, K, tb + BEAT / 2, 0.6)   # синкопа бочки
                 place(drums, hat(rng, q == 3), tb + BEAT / 2, 1.0)
                 place(drums, hat(rng), tb + BEAT / 4, 0.45); place(drums, hat(rng), tb + 3 * BEAT / 4, 0.45)
             # бас восьмыми
@@ -99,16 +100,19 @@ def render(total, cuts, intro, outro, path):
                     f = note(root - 24 + (12 if (q * 2 + e8) % 4 == 3 else 0))
                     place(bass, lp(saw(f, nb, 8), 6) * env(nb, 0.005, 0.18, 0.4, 3) * 0.42, tb + e8 * BEAT / 2)
             # арпеджио шестнадцатыми — в середине для энергии
-            if drums_on and t0 >= intro + 2 * bar:
+            if drums_on:
                 for s in range(4):
                     m = chords[root][(q * 4 + s) % len(chords[root])] + 12
                     ns = int(BEAT / 4 * SR)
-                    place(arp, saw(note(m), ns, 5) * env(ns, 0.003, 0.09, 0.0, 5) * 0.07, tb + s * BEAT / 4)
+                    place(arp, saw(note(m), ns, 5) * env(ns, 0.003, 0.09, 0.0, 5) * 0.085, tb + s * BEAT / 4)
     for c in cuts:
-        place(fx, whoosh(rng), c - 0.65, 0.35)
+        place(fx, whoosh(rng), c - 0.65, 0.4)
+        for r in range(4):   # дробь клэпа перед сменой главы
+            place(fx, C, c - BEAT + r * BEAT / 4, 0.25 + 0.12 * r)
+        place(fx, K, c, 0.7)
     place(fx, impact(), intro, 0.8)
     place(fx, impact(), total - outro, 0.6)
-    mix = drums * 0.9 + (bass + pad + arp) * duck + fx
+    mix = drums * 1.0 + (bass * 1.25 + pad * 0.8 + arp) * duck + fx
     # выход: затухание в конце
     t = np.arange(N) / SR
     mix *= np.clip((total - t) / 1.8, 0, 1) * np.clip(t / 0.4, 0, 1)

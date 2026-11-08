@@ -219,7 +219,7 @@ for p_ in plan:
     a = int((p_['t'] + LEAD) * SR); b = min(len(voice), a + len(v)); voice[a:b] += v[:b - a]
 env = np.convolve((np.abs(voice) > 0.02).astype(np.float32), np.ones(int(.35 * SR)) / int(.35 * SR), 'same')
 env = np.clip(env * 3, 0, 1)
-gain = 0.55 - 0.40 * env
+gain = 0.62 - 0.38 * env
 mix = mus * gain[:, None] + (voice / max(1e-6, np.abs(voice).max()) * 0.92)[:, None]
 mix /= max(1.0, np.abs(mix).max() / 0.97)
 aw = OUTF + '.a.wav'
