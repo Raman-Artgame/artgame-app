@@ -7,6 +7,12 @@ case "$ENV" in test|prod) ;; *) echo "только test или prod" >&2; exit 2
 SRC=$(cd "$(dirname "$0")/.." && pwd)
 DST=/srv/artgame-app/$ENV
 test -f "/etc/artgame-app/$ENV.env" || { echo "нет /etc/artgame-app/$ENV.env (см. env.example)" >&2; exit 1; }
+# Папка ночных копий базы на Google Диске: ARTGAME.HEAD / 05 СЕРВЕР / «Бэкапы базы» (сервисный аккаунт — «Редактор»). ID не секрет.
+BACKUP_FOLDER_ID=1Bpg4-bxqZ0AAt6CsabObjeNpmRBrMrmm
+if ! grep -q '^BACKUP_DRIVE_FOLDER=.' "/etc/artgame-app/$ENV.env"; then
+  sed -i '/^BACKUP_DRIVE_FOLDER=/d' "/etc/artgame-app/$ENV.env"
+  echo "BACKUP_DRIVE_FOLDER=$BACKUP_FOLDER_ID" >> "/etc/artgame-app/$ENV.env"
+fi
 
 # Экран: сборка во временной папке, чтобы не мусорить в репозитории
 BUILD=$(mktemp -d)
