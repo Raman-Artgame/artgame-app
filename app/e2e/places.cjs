@@ -85,6 +85,10 @@ async function tab(p, name) {
   await pa.waitForFunction(() => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith('Рабочее место художников'))
   await pa.waitForTimeout(1200)
   await pa.screenshot({ path: `${shots}/place-artist-phone.png` })
+  await af().evaluate(() => { location.hash = '#u9' })   // «Холсты и картины» (HEAD 08.11): общая информация
+  await af().locator('h2', { hasText: 'Кто за что' }).waitFor()
+  await pa.waitForTimeout(800)
+  await pa.screenshot({ path: `${shots}/place-artist-kartiny.png`, fullPage: true })
   const urls = await call(2100, '/places')
   assert.deepStrictEqual(urls.map(x => x.code), ['art'])
   const mopUrl = urls[0].url.replace('/p/art/', '/p/mop/')

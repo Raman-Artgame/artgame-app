@@ -584,3 +584,4 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .dzdots i.done { background: var(--muted); }
 .dzdots i.on { background: var(--sc); }
 @media (max-width: 480px) { .dzguide div { grid-template-columns: 1fr; gap: 2px; } }
+.dutyfold h3 { margin: 6px 0 2px; } .dutyfold .dutybody .wrap { padding: 0; } .dutyfold .dutybody .card { box-shadow: none; background: var(--alt); }

@@ -75,6 +75,11 @@ async function tab(p, name) {
   assert.notStrictEqual(await frame.evaluate(() => location.hash), '#trip')   // «Выезд» переехал в «Смену»
   await s.screenshot({ path: `${shots}/support-baza.png`, fullPage: true })
 
+  await tab(s, 'Кабинет')   // «Правила игры» в «Кабинете» у всех (HEAD 08.11)
+  await s.locator('.dutyfold').getByRole('button', { name: 'Открыть' }).click()
+  await s.locator('.dutyfold').getByText('Что ты делаешь').waitFor()
+  await s.screenshot({ path: `${shots}/kabinet-pravila.png`, fullPage: true })
+
   // 2. Оператор печати: склада нет
   const op = await open(b, 4000)
   assert.ok(!(await navText(op)).includes('Склад'))
