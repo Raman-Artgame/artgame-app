@@ -145,7 +145,9 @@ function Calc({ d, saved, onSaved }) {
       <div className="chips">{DESIGNS.map(k => <button key={k} className={(f.design || autoDesign(+f.area || 0)) === k ? 'on' : ''} onClick={() => set({ design: k })}>{k}</button>)}</div>
       <label>Надбавки и условия</label>
       <div className="chips">{EXTRAS.map(([k, v]) => <button key={k} className={f.extras.includes(k) ? 'on' : ''} onClick={() => tog(k)}>{v} +10%</button>)}
-        <button className={f.outdoor ? 'on' : ''} onClick={() => set({ outdoor: !f.outdoor })}>Улица</button></div></>}
+        <button className={f.outdoor ? 'on' : ''} onClick={() => set({ outdoor: !f.outdoor })}>Улица</button>
+        <button className={f.surface ? 'on' : ''} onClick={() => set({ surface: !f.surface })}>Сложная поверхность</button></div>
+      <p className="small muted">Сложность, высоту, улицу и поверхность команда видит в смене без выбора — заполняй как есть на объекте.</p></>}
     {isArea && <><label>Где объект</label><div className="chips">{PLACES.map(([k, v]) => <button key={k} className={f.place === k ? 'on' : ''} onClick={() => set({ place: k })}>{v}</button>)}</div></>}
     <label>Скидка за наличные, % (до 15)<input type="number" min="0" max="15" value={f.cash} onChange={e => set({ cash: e.target.value })} /></label>
     {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}

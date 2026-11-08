@@ -3,14 +3,14 @@ import { api } from './api.js'
 import { enqueue } from './queue.js'
 import { shrink } from './work.jsx'
 
-const KIND = { photo: 'Фото', design: 'Дизайн', doc: 'Документы' }
+export const KIND = { design: 'Эскизы', photo: 'Фото', media: 'Продакшн', doc: 'Документы' }
 const DOC_ROLES = new Set(['head', 'mop', 'mop_vip', 'lead_artist', 'print_master', 'lead_designer'])
 const size = b => b > 1e6 ? (b / 1e6).toFixed(1) + ' МБ' : Math.ceil(b / 1e3) + ' КБ'
 
 // Большой файл грузится с телефона прямо в Google; сервер только выдаёт ссылку и проверяет результат.
-function uploadBig(objectId, kind, file, onProgress) {
+export function uploadBig(objectId, kind, file, onProgress, extra = {}) {
   return api(`/objects/${objectId}/uploads`, { method: 'POST',
-    body: { client_uid: crypto.randomUUID(), kind, name: file.name, mime: file.type || 'application/octet-stream', size: file.size } })
+    body: { client_uid: crypto.randomUUID(), kind, name: file.name, mime: file.type || 'application/octet-stream', size: file.size, ...extra } })
     .then(r => r.done ? r : new Promise((ok, fail) => {
       const x = new XMLHttpRequest()
       x.open('PUT', r.upload_url)
@@ -21,15 +21,17 @@ function uploadBig(objectId, kind, file, onProgress) {
     }).then(g => api(`/files/${r.file_id}/done`, { method: 'POST', body: { drive_id: g.id } })))
 }
 
-function Files({ obj, me, back }) {
-  const [kind, setKind] = useState('photo')
+// Галерея проекта (HEAD 08.11, «Проекты» и «Объекты» — один раздел): эскизы, фото с объекта, продакшн, документы.
+export function Gallery({ obj, me, start = 'design' }) {
+  const [kind, setKind] = useState(start)
   const [list, setList] = useState(null)
   const [busy, setBusy] = useState('')
-  const load = () => api(`/objects/${obj.id}/files?kind=${kind}`).then(setList, () => setList([]))
+  const load = () => (kind === 'media' ? api(`/media?scope=object&object_id=${obj.id}`).then(r => r.items) : api(`/objects/${obj.id}/files?kind=${kind}`))
+    .then(setList, () => setList([]))
   useEffect(() => { setList(null); load() }, [kind])
   useEffect(() => { window.addEventListener('artgame:queue', load); return () => window.removeEventListener('artgame:queue', load) }, [kind])
   const kinds = Object.keys(KIND).filter(k => k !== 'doc' || DOC_ROLES.has(me.role_code))
-  const canBig = kind === 'photo' || (kind === 'design' && (me.role_code === 'head' || me.zones.includes('design'))) || (kind === 'doc' && DOC_ROLES.has(me.role_code))
+  const canBig = (kind === 'design' && (me.role_code === 'head' || me.zones.includes('design'))) || (kind === 'doc' && DOC_ROLES.has(me.role_code))
 
   const addPhotos = async files => {
     setBusy(`Фото: 0 из ${files.length}`)
@@ -47,40 +49,22 @@ function Files({ obj, me, back }) {
       setBusy(''); load()
     } catch (e) { setBusy(`Не загрузилось: ${e.message}. Нужна сеть, попробуй ещё раз.`) }
   }
-
-  return <>
-    <div className="card">
-      <a onClick={back}>← объекты</a>
-      <h2>{obj.id ? `№${obj.id} · ` : ''}{obj.title}</h2>
-      <div className="seg">{kinds.map(k => <button key={k} className={k === kind ? '' : 'ghost'} onClick={() => setKind(k)}>{KIND[k]}</button>)}</div>
-      {kind === 'photo' && <label className="photo"><span>📷 Добавить фото</span>
-        <input type="file" accept="image/*" multiple hidden onChange={e => e.target.files.length && addPhotos(e.target.files)} /></label>}
-      {kind !== 'photo' && canBig && <label className="photo"><span>⬆ Загрузить файл</span>
-        <input type="file" hidden onChange={e => e.target.files[0] && addBig(e.target.files[0])} /></label>}
-      {busy && <p className="muted small">{busy}</p>}
-    </div>
-    <div className="card">
-      {!list ? <p className="muted">Загрузка…</p> : !list.length ? <p className="muted">Пока пусто</p> :
-        kind === 'photo'
-          ? <div className="grid">{list.map(f => <a key={f.id} href={f.url} target="_blank" rel="noreferrer"><img src={f.thumb} alt={f.name} loading="lazy" /></a>)}</div>
-          : list.map(f => <div key={f.id} className="row">
-              <div><a href={f.url} target="_blank" rel="noreferrer"><b>{f.name}</b></a><br />
-                <span className="muted small">{size(f.size)} · {f.by} · {new Date(f.created_at).toLocaleDateString('ru-RU')}</span></div>
-            </div>)}
-    </div>
-  </>
-}
-
-export function Objects({ me }) {
-  const [list, setList] = useState(null)
-  const [open, setOpen] = useState(null)
-  useEffect(() => { api('/objects').then(setList, () => setList([])) }, [])
-  if (open) return <Files obj={open} me={me} back={() => setOpen(null)} />
-  return <div className="card"><h2>Объекты</h2>
-    {!list ? <p className="muted">Загрузка…</p> : list.map(o => <div key={o.id} className="row" onClick={() => setOpen(o)} style={{ cursor: 'pointer' }}>
-      <div><b>{o.id ? `№${o.id} · ` : ''}{o.title}</b>{o.city && <span className="muted"> — {o.city}</span>}<br />
-        <span className="muted small">фото {o.photos} · дизайн {o.designs}</span></div>
-      <span className="muted">›</span>
-    </div>)}
+  const grid = kind === 'photo'   // фото — сеткой; эскизы, продакшн, документы — списком с названием
+  const pics = list && (grid ? list.filter(f => f.thumb) : [])
+  return <div className="card">
+    <div className="segf">{kinds.map(k => <button key={k} className={k === kind ? 'on' : ''} onClick={() => setKind(k)}>{KIND[k]}</button>)}</div>
+    {kind === 'photo' && <label className="photo"><span>📷 Добавить фото с объекта</span>
+      <input type="file" accept="image/*" multiple hidden onChange={e => e.target.files.length && addPhotos(e.target.files)} /></label>}
+    {canBig && <label className="photo"><span>⬆ Загрузить {kind === 'design' ? 'эскиз' : 'файл'}</span>
+      <input type="file" hidden onChange={e => e.target.files[0] && addBig(e.target.files[0])} /></label>}
+    {busy && <p className="muted small">{busy}</p>}
+    {!list ? <p className="muted">Загрузка…</p> : !list.length ? <p className="muted small">{kind === 'design' ? 'Эскизов пока нет — их загружает дизайнер.' :
+      kind === 'media' ? 'Утверждённого материала пока нет.' : 'Пока пусто.'}</p> : <>
+      {pics.length > 0 && <div className="grid">{pics.map(f => <a key={f.id} href={f.url} target="_blank" rel="noreferrer"><img src={f.thumb} alt={f.name} loading="lazy" /></a>)}</div>}
+      {list.filter(f => !grid || !f.thumb).map(f => <div key={f.id} className="mitem">
+        <a className="mthumb" href={f.url} target="_blank" rel="noreferrer">{f.thumb ? <img src={f.thumb} alt="" loading="lazy" /> : <span>{f.media_type && f.media_type !== 'photo' ? '▶' : '📄'}</span>}</a>
+        <div className="mbody"><a href={f.url} target="_blank" rel="noreferrer"><b>{f.media_type === 'reels' ? '🎬 ' : f.media_type === 'video' ? '▶ ' : ''}{f.name}</b></a><br />
+          <span className="muted small">{size(f.size)} · {f.by} · {new Date(f.created_at).toLocaleDateString('ru-RU')}</span></div>
+      </div>)}</>}
   </div>
 }

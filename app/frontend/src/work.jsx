@@ -3,7 +3,7 @@ import { api } from './api.js'
 import { clearFailed, enqueue, failed, flush, pending } from './queue.js'
 
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
-const ST = { submitted: 'на проверке', approved: 'принято', rejected: 'отказ', cancelled: 'отменено' }
+const ST = { open: 'идёт', submitted: 'на проверке', approved: 'принято', rejected: 'отказ', cancelled: 'отменено' }
 const local = d => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 16) }
 const iso = v => new Date(v).toISOString()
 const money = n => Number(n).toLocaleString('ru-RU') + ' ₸'
@@ -51,43 +51,133 @@ export const when = (a, b) => new Date(a).toLocaleString('ru-RU', { day: 'numeri
   (b ? '–' + new Date(b).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '')
 const m2 = x => Number(x).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 
-function Check({ v, set, k, t }) {
-  return <label className="check"><input type="checkbox" checked={!!v[k]} onChange={e => set({ ...v, [k]: e.target.checked })} /> {t}</label>
+
+const LKEY = 'artgame.shift.open'
+const loadOpen = () => { try { return JSON.parse(localStorage.getItem(LKEY) || 'null') } catch { return null } }
+const saveOpen = v => { try { v ? localStorage.setItem(LKEY, JSON.stringify(v)) : localStorage.removeItem(LKEY) } catch { /* без памяти */ } }
+const hm = ms => { const m = Math.max(0, Math.floor(ms / 60000)); return `${Math.floor(m / 60)} ч ${String(m % 60).padStart(2, '0')} мин` }
+const LV = Object.fromEntries(CX)
+
+// Промо объекта (HEAD 08.11): что предстоит — условия из сделки (заполняет МОП, здесь без выбора), норма на смену, эскизы.
+export function Promo({ id, zone, compact }) {
+  const [c, setC] = useState(null)
+  useEffect(() => { if (id) api(`/work/object/${id}?zone=${zone || 'mural'}`).then(setC, () => setC(null)) }, [id, zone])
+  if (!id || !c) return null
+  const conds = [['at_height', 'На высоте'], ['outdoor', 'Улица'], ['hard_surface', 'Сложная поверхность']]
+  return <div className="card dark promo">
+    <div className="promo-top"><span className="kick">Что предстоит</span>{c.now.length > 0 && <span className="small muted">сейчас на объекте: {c.now.map(n => n.split(' ')[0]).join(', ')}</span>}</div>
+    {!compact && <h2>{c.title}</h2>}
+    <p className="small muted">{[c.city, c.address, c.area ? `${m2(c.area)} м²` : ''].filter(Boolean).join(' · ') || 'адрес не указан в сделке'}</p>
+    {zone !== 'print' && <>
+      <div className="promo-lvl"><span>Сложность</span><b>{c.complexity ? LV[c.complexity] : 'МОП ещё не указал'}</b></div>
+      <div className="conds">{conds.map(([k, t]) => <span key={k} className={c[k] ? 'on' : ''}>{c[k] ? '● ' : ''}{t}</span>)}</div></>}
+    {c.plan_m2 ? <p className="small">Норма на твою смену — <b>{m2(c.plan_m2)} м²</b></p> : null}
+    {c.sketches.length > 0 && <div className="sketches">{c.sketches.map(f => <a key={f.id} href={f.url} target="_blank" rel="noreferrer"><img src={f.thumb} alt={f.name} loading="lazy" /></a>)}</div>}
+    <p className="small muted">Условия заполняет МОП в карточке сделки. Не так на объекте — скажи Главному художнику.</p>
+  </div>
 }
 
+function Snap({ value, set, label }) {
+  return <label className={'photo snap' + (value ? ' has' : '')}>
+    {value ? <img src={value} alt={label} /> : <span>📷 {label}</span>}
+    <input type="file" accept="image/*" capture="environment" hidden onChange={async e => e.target.files[0] && set(await shrink(e.target.files[0]))} />
+  </label>
+}
+
+// Смена по шагам (HEAD 08.11): «Начать» с фото стены до → смена идёт → «Закончить» с фото в конце, м² и «что сделал».
 export function ShiftForm({ done }) {
   const d = useDict()
-  const [v, set] = useState(null)
-  useEffect(() => { if (d) set({ object_id: d.objects[0]?.id, zone_code: d.zones[0], started_at: local(Date.now() - 9 * 3600e3), ended_at: local(Date.now()), area_m2: '', note: '',
-    complexity: 'medium', printer: d.printer || '', at_height: false, outdoor: false, hard_surface: false }) }, [d])
-  if (!d || !v) return <div className="card muted">Загрузка…</div>
-  const send = async () => {
+  const [open, setOpen] = useState(loadOpen)
+  const [checked, setChecked] = useState(false)
+  useEffect(() => {
+    api('/shifts/open').then(r => {
+      if (r.shift) { const o = { client_uid: r.shift.client_uid, object_id: r.shift.object_id, object_title: r.shift.object_title,
+        zone_code: r.shift.zone_code, started_at: r.shift.started_at, before: r.shift.photo_before_url }; saveOpen(o); setOpen(o) }
+      else if (!pending()) { saveOpen(null); setOpen(null) }   // закрыта на сервере, а в очереди ничего нет
+    }, () => {}).finally(() => setChecked(true))
+  }, [])
+  if (!d) return <div className="card muted">Загрузка…</div>
+  if (open) return <Running o={open} d={d} done={t => { saveOpen(null); setOpen(null); done(t) }} />
+  return <StartShift d={d} checked={checked} onStarted={o => { saveOpen(o); setOpen(o) }} />
+}
+
+function StartShift({ d, onStarted }) {
+  const objs = d.objects.filter(o => o.id)
+  const [v, set] = useState({ object_id: objs[0]?.id, zone_code: d.zones[0] })
+  const [photo, setPhoto] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!objs.length) return <div className="card"><h2>Смена</h2><p className="muted">Сейчас нет объектов в работе. Когда МОП переведёт сделку в «Выполнение проекта», объект появится здесь.</p></div>
+  const obj = objs.find(o => o.id === v.object_id) || objs[0]
+  const start = async () => {
+    setBusy(true)
     const geo = await new Promise(r => navigator.geolocation ? navigator.geolocation.getCurrentPosition(p => r(p.coords), () => r(null), { timeout: 4000 }) : r(null))
-    const mural = v.zone_code === 'mural', print = v.zone_code === 'print'
-    const left = await enqueue('/shifts', { ...v, complexity: mural ? v.complexity : null, printer: print ? v.printer || null : null,
-      at_height: mural && v.at_height, outdoor: mural && v.outdoor, hard_surface: mural && v.hard_surface, started_at: iso(v.started_at), ended_at: iso(v.ended_at), area_m2: v.area_m2 === '' ? null : +v.area_m2,
-      geo_lat: geo?.latitude ?? null, geo_lon: geo?.longitude ?? null })
-    done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Смена отправлена на проверку.')
+    const o = { client_uid: crypto.randomUUID(), object_id: obj.id, object_title: obj.title, zone_code: v.zone_code, started_at: new Date().toISOString(), before: photo }
+    try {
+      await enqueue('/shifts/start', { client_uid: o.client_uid, object_id: o.object_id, zone_code: o.zone_code, started_at: o.started_at, photo_before: photo,
+        geo_lat: geo?.latitude ?? null, geo_lon: geo?.longitude ?? null })
+      onStarted(o)
+    } catch { /* режим просмотра */ } finally { setBusy(false) }
   }
-  return <div className="card">
-    <h2>Смена</h2>
-    <Common d={d} v={v} set={set} />
-    <label className="muted">Начало</label><input type="datetime-local" value={v.started_at} onChange={e => set({ ...v, started_at: e.target.value })} />
-    <label className="muted">Конец</label><input type="datetime-local" value={v.ended_at} onChange={e => set({ ...v, ended_at: e.target.value })} />
-    <label className="muted">{v.zone_code === 'print' ? 'Напечатано, м²' : 'Сделано, м²'}</label>
-    <input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.') })} />
-    {v.zone_code === 'mural' && <>
-      <label className="muted">Сложность росписи</label>
-      <div className="seg grid2">{CX.map(([k, t]) => <button key={k} className={v.complexity === k ? '' : 'ghost'} onClick={() => set({ ...v, complexity: k })}>{t}</button>)}</div>
-      <Check v={v} set={set} k="at_height" t="На высоте" />
-      <Check v={v} set={set} k="outdoor" t="Улица" />
-      <Check v={v} set={set} k="hard_surface" t="Сложная поверхность" />
-    </>}
-    {v.zone_code === 'print' && <><label className="muted">Принтер</label>
-      <input value={v.printer} onChange={e => set({ ...v, printer: e.target.value })} placeholder="Название принтера" /></>}
-    <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
-    <button onClick={send}>Отправить смену</button>
-  </div>
+  return <>
+    <div className="card">
+      <div className="steps"><span className="on">1 Начало</span><span>2 Работа</span><span>3 Конец смены</span></div>
+      <h2>Начать смену</h2>
+      <label className="muted">Объект</label>
+      <div className="objpick">{objs.map(o => <button key={o.id} className={o.id === obj.id ? 'on' : ''} onClick={() => set({ ...v, object_id: o.id })}>
+        <b>№{o.id}</b> {o.title}{o.city ? <span> · {o.city}</span> : null}</button>)}</div>
+      {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}
+    </div>
+    <Promo id={obj.id} zone={v.zone_code} compact={false} />
+    <div className="card">
+      <h3>Фото стены до начала</h3>
+      <Snap value={photo} set={setPhoto} label="Сфотографировать стену" />
+      <button disabled={!photo || busy} onClick={start}>{busy ? 'Начинаю…' : 'Начать смену'}</button>
+      {!photo && <p className="small muted">Без фото «до» смену не начать: по нему Главный художник видит, что сделано за день.</p>}
+    </div>
+  </>
+}
+
+function Running({ o, d, done }) {
+  const [now, setNow] = useState(Date.now())
+  const [v, set] = useState({ area_m2: '', work_done: '', note: '', printer: d.printer || '' })
+  const [photo, setPhoto] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
+  const print = o.zone_code === 'print'
+  const ok = photo && v.work_done.trim().length >= 3
+  const finish = async () => {
+    setBusy(true)
+    try {
+      const left = await enqueue('/shifts/finish', { client_uid: o.client_uid, ended_at: new Date().toISOString(), area_m2: v.area_m2 === '' ? null : +v.area_m2,
+        work_done: v.work_done.trim(), photo_after: photo, note: v.note || null, printer: print ? v.printer || null : null })
+      done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Смена закончена и ушла на проверку.')
+    } catch { setBusy(false) }
+  }
+  const cancel = () => { if (confirm('Отменить смену? Она не уйдёт на проверку.')) api('/shifts/open').then(r => r.shift && api(`/shift/${r.shift.id}/cancel`, { method: 'POST' })).finally(() => done('Смена отменена.')) }
+  return <>
+    <div className="card dark live">
+      <div className="steps dark"><span className="done">1 Начало</span><span className="on">2 Работа</span><span>3 Конец смены</span></div>
+      <span className="kick">Смена идёт</span>
+      <div className="timer">{hm(now - new Date(o.started_at).getTime())}</div>
+      <p className="small muted">с {new Date(o.started_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} · №{o.object_id} {o.object_title} · {ZONE[o.zone_code]}</p>
+      {o.before && <img className="before" src={o.before} alt="стена до" />}
+    </div>
+    <Promo id={o.object_id} zone={o.zone_code} compact />
+    <div className="card">
+      <h2>Закончить смену</h2>
+      <label className="muted">{print ? 'Напечатано, м²' : 'Сделано, м²'}</label>
+      <input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.') })} placeholder="например, 4,5" />
+      <label className="muted">Что сделал за смену</label>
+      <textarea rows="3" value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Например: загрунтовал стену, перенёс эскиз, прописал фон слева" />
+      {print && <><label className="muted">Принтер</label><input value={v.printer} onChange={e => set({ ...v, printer: e.target.value })} placeholder="Название принтера" /></>}
+      <input placeholder="Комментарий (по желанию)" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
+      <h3>Фото в конце смены</h3>
+      <Snap value={photo} set={setPhoto} label="Сфотографировать результат" />
+      <button disabled={!ok || busy} onClick={finish}>{busy ? 'Отправляю…' : 'Закончить и отправить на проверку'}</button>
+      {!ok && <p className="small muted">Нужно фото в конце смены и пара слов, что сделано.</p>}
+      <p className="small"><a onClick={cancel}>Отменить смену</a></p>
+    </div>
+  </>
 }
 
 export function ExpenseForm({ done }) {
@@ -140,6 +230,8 @@ export function Mine() {
       {m.shifts.length ? m.shifts.map(s => <div key={s.id} className="row">
         <div><b>{s.object_title}</b><br /><span className="muted small">{when(s.started_at, s.ended_at)}{s.area_m2 ? ` · ${+s.area_m2} м²` : ''}</span>
           {s.plan_m2 && <div className="small">{s.zone_code === 'print' ? 'План' : 'Норма'} {m2(s.plan_m2)} м²{s.kpd != null && <> · КПД <b>{pct(s.kpd)}</b></>}{+s.bonus > 0 && <> · бонус <b>{money(s.bonus)}</b></>}</div>}
+          {s.work_done && <div className="small">Сделал: {s.work_done}</div>}
+          {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <img src={s.photo_before_url} alt="до" />}{s.photo_after_url && <img src={s.photo_after_url} alt="после" />}</div>}
           {s.reason && <div className="small">Причина: {s.reason}</div>}</div>
         <span className={`tag st-${s.status}`}>{ST[s.status]}</span>
         {s.status === 'submitted' && <a onClick={() => cancel('shift', s.id)}>отменить</a>}
@@ -168,7 +260,10 @@ export function Review() {
     api(`/${k}/${id}/review`, { method: 'POST', body: { approve, reason } }).then(load)
   }
   const Item = ({ k, x, children }) => <div className="row">
-    <div><b>{x.person_name}</b> · {x.object_title}<br /><span className="muted small">{children}</span></div>
+    <div><b>{x.person_name}</b> · {x.object_title}<br /><span className="muted small">{children}</span>
+      {x.work_done && <div className="small">Сделал: {x.work_done}</div>}
+      {(x.photo_before_url || x.photo_after_url) && <div className="pair">{x.photo_before_url && <a href={x.photo_before_full} target="_blank" rel="noreferrer"><img src={x.photo_before_url} alt="до" /></a>}
+        {x.photo_after_url && <a href={x.photo_after_full} target="_blank" rel="noreferrer"><img src={x.photo_after_url} alt="после" /></a>}</div>}</div>
     <div className="seg"><button onClick={() => decide(k, x.id, true)}>✓</button><button className="ghost" onClick={() => decide(k, x.id, false)}>✕</button></div>
   </div>
   return <>

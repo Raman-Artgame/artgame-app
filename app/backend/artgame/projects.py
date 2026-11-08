@@ -60,11 +60,27 @@ def projects(p: dict, fresh: bool = False) -> dict:
     names = {u["id"]: u["name"] for u in bx.users()}
     see_sum = p["role_code"] in bx.BX_ROLES
     ids = [int(d["ID"]) for d in rows]
-    done, who, calc = {}, {}, {}
+    done, who, calc, cond, cover, nfiles, now = {}, {}, {}, {}, {}, {}, {}
     if ids:
+        from .files import sign
         with db.pool.connection() as conn:
             for r in conn.execute("SELECT deal_id, data FROM deal_calc WHERE deal_id = ANY(%s)", (ids,)).fetchall():
                 calc[r["deal_id"]] = ((r["data"] or {}).get("out") or {}).get("norm") or {}
+                i = (r["data"] or {}).get("in") or {}
+                cond[r["deal_id"]] = {"at_height": "height" in (i.get("extras") or []), "outdoor": bool(i.get("outdoor")),
+                                      "hard_surface": bool(i.get("surface")), "service": i.get("service")}
+            # обложка карточки — последний эскиз (картинка из «Дизайна»), иначе последнее фото с объекта
+            for r in conn.execute("""SELECT DISTINCT ON (object_id) object_id, id FROM files
+                                     WHERE object_id = ANY(%s) AND status='ready' AND mime LIKE 'image/%%' AND kind IN ('design','photo','media')
+                                     ORDER BY object_id, (kind='design') DESC, created_at DESC""", (ids,)).fetchall():
+                cover[r["object_id"]] = sign(r["id"], "thumb")
+            for r in conn.execute("""SELECT object_id, count(*) FILTER (WHERE kind='design') AS design,
+                                            count(*) FILTER (WHERE kind IN ('photo','media')) AS media
+                                     FROM files WHERE object_id = ANY(%s) AND status='ready' GROUP BY object_id""", (ids,)).fetchall():
+                nfiles[r["object_id"]] = {"design": r["design"], "media": r["media"]}
+            for r in conn.execute("""SELECT DISTINCT s.object_id, pe.full_name FROM shifts s JOIN people pe ON pe.id=s.person_id
+                                     WHERE s.object_id = ANY(%s) AND s.status='open' ORDER BY 2""", (ids,)).fetchall():
+                now.setdefault(r["object_id"], []).append(r["full_name"])
             for r in conn.execute("""SELECT object_id, count(*) AS n, coalesce(sum(area_m2), 0) AS m2, max(started_at) AS last
                                      FROM shifts WHERE object_id = ANY(%s) AND status <> 'rejected' GROUP BY object_id""", (ids,)).fetchall():
                 done[r["object_id"]] = r
@@ -102,7 +118,9 @@ def projects(p: dict, fresh: bool = False) -> dict:
                     "norm": {"shifts": shifts_norm, "crew": bx._num(d.get(bx.F_CREW)) or bx._num(cn.get("crew")), "term": term},
                     "start": start.isoformat() if start else None, "due": due.isoformat() if due else None, "left": left,
                     "done": {"shifts": shifts_done, "m2": float(dn["m2"]) if dn else 0, "last": dn["last"].isoformat() if dn and dn["last"] else None},
-                    "progress": progress, "people": who.get(did, []), "state": state})
+                    "progress": progress, "people": who.get(did, []), "state": state,
+                    "cond": cond.get(did, {}), "cover": cover.get(did), "files": nfiles.get(did, {"design": 0, "media": 0}),
+                    "now": now.get(did, [])})
     order = {"late": 0, "today": 1, "quiet": 2, "idle": 3, "ok": 4, "soon": 5, "closing": 6}
     out.sort(key=lambda x: (order[x["state"]], x["left"] if x["left"] is not None else 999))
     return {"projects": out, "today": today.isoformat(),

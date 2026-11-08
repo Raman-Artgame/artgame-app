@@ -819,7 +819,7 @@ def api_deal(deal_id: int, fresh: int = 0, p: dict = Depends(active)):
 
 # ---------- журнал действий ----------
 
-JOURNAL_ACTIONS = ("deal_open", "place_download", "shift_add", "expense_add", "shift_cancel", "expense_cancel",
+JOURNAL_ACTIONS = ("deal_open", "place_download", "shift_add", "shift_start", "shift_finish", "media_review", "expense_add", "shift_cancel", "expense_cancel",
                    "bx_write", "place_doc_set", "file_add", "view_as_start", "view_as_stop")
 
 

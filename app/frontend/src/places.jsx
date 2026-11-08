@@ -4,7 +4,8 @@ import { api } from './api.js'
 // Рабочие места ролей (бывшие артефакты) во фрейме по подписанной ссылке.
 // mode='study' (HEAD 06.11): место МОП как «Учёба» — только учебник, тест, правила игры; рабочие разделы живут в карточке сделки.
 // opts[code] = { hide: [...], home } — скрыть разделы места (place_shim.js), extra — своя вкладка-чип (должностная).
-export function Places({ list, mode, opts = {}, extra }) {
+export function Places({ list, mode, opts = {}, extra: ex }) {
+  const extras = (Array.isArray(ex) ? ex : ex ? [ex] : []).filter(Boolean)
   const [code, setCode] = useState(() => { try { return localStorage.getItem('artgame.place') || '' } catch { return '' } })
   const [hash, setHash] = useState('')
   const cur = list.find(p => p.code === code) || list[0]
@@ -18,16 +19,17 @@ export function Places({ list, mode, opts = {}, extra }) {
     return () => window.removeEventListener('message', on)
   }, [list])
   useEffect(() => { try { cur && !mode && localStorage.setItem('artgame.place', cur.code) } catch { /* без памяти */ } }, [cur])
-  const onExtra = extra && code === extra.code
-  if (!cur && !extra) return <div className="card muted">Для твоей роли рабочего места пока нет.</div>
+  const extra = extras.find(x => x.code === code)
+  const onExtra = !!extra
+  if (!cur && !extras.length) return <div className="card muted">Для твоей роли рабочего места пока нет.</div>
   const o = (cur && opts[cur.code]) || {}
-  const q = new URLSearchParams({ ...(mode ? { mode } : {}), ...(o.hide?.length ? { hide: o.hide.join(','), home: o.home || '' } : {}) }).toString()
+  const q = new URLSearchParams({ ...(mode ? { mode } : {}), ...(o.hide?.length ? { hide: o.hide.join(','), home: o.home || '' } : {}), ...(o.nocalc ? { nocalc: '1' } : {}) }).toString()
   const src = cur ? cur.url + (q ? '?' + q : '') + (hash || (o.home ? '#' + o.home : mode === 'study' ? '#ucheb' : '')) : ''
   return <div className="place">
-    {(list.length > 1 || extra) && <div className="chips">{list.map(p =>
+    {(list.length > 1 || extras.length > 0) && <div className="chips">{list.map(p =>
       <button key={p.code} className={!onExtra && p.code === cur.code ? 'on' : ''} onClick={() => { setCode(p.code); setHash('') }}>{p.title}</button>)}
-      {extra && <button className={onExtra ? 'on' : ''} onClick={() => setCode(extra.code)}>{extra.title}</button>}</div>}
-    {onExtra || !cur ? extra.render() : <iframe ref={frame} key={cur.code + hash + (mode || '')} title={cur.title} src={src} className="placeframe" />}
+      {extras.map(x => <button key={x.code} className={code === x.code ? 'on' : ''} onClick={() => setCode(x.code)}>{x.title}</button>)}</div>}
+    {onExtra || !cur ? (extra || extras[0]).render() : <iframe ref={frame} key={cur.code + hash + (mode || '')} title={cur.title} src={src} className="placeframe" />}
   </div>
 }
 

@@ -25,6 +25,11 @@ class FakeDrive:
             STORE[fid] = PENDING.pop("next")
         return STORE[fid]
 
+    def copy(self, fid, parent, name=None):
+        i = f"drv{len(STORE):08d}"
+        STORE[i] = {**STORE[fid], "parents": [parent]}
+        return i
+
     def stream(self, fid): yield STORE[fid]["data"]
     def thumbnail(self, fid): return STORE[fid]["data"]
 

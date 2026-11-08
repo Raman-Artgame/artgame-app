@@ -336,6 +336,9 @@ def compute(conn, ym: str, by: dict) -> dict:
     from . import design
     units_by, cat_by, dwarn = design.accruals(conn, v, t0, t1)
     warn += dwarn
+    from . import media
+    reels_by, rwarn = media.reels_accruals(conn, v, t0, t1)
+    warn += rwarn
     for f in payees_:
         role = f["role_code"]
         if f["scheme"] == "shifts" and f["person_id"]:
@@ -376,6 +379,8 @@ def compute(conn, ym: str, by: dict) -> dict:
                 acc(f["id"], "design_units", (u - norm) * rate, f"{u - norm:g} ед. сверх нормы {norm:g} × {rate:,.0f} ₸".replace(",", " "))
         for amount, detail, ref in cat_by.get(f["person_id"], []) if f["person_id"] else []:
             acc(f["id"], "catalog", amount, detail, ref)
+        if f["person_id"] in reels_by:   # рилс, утверждённые HEAD («Продакшн»)
+            acc(f["id"], "reels", *reels_by[f["person_id"]])
         if f["person_id"]:   # свои деньги по одобренным чекам — к возмещению
             for e in conn.execute("""SELECT e.id, e.amount, c.title FROM expenses e JOIN expense_categories c ON c.code=e.category
                                      WHERE e.person_id=%s AND e.paid_by='own' AND e.status='approved' AND e.payout_status IN ('to_pay','paid')
@@ -526,6 +531,9 @@ def my_rate(v: dict, role: str | None, f: dict | None) -> list[dict]:
     if role == "lead_designer":
         if v.get("pay.design.unit_over"):
             out.append({"label": "Единица дизайна сверх нормы", "amount": v["pay.design.unit_over"]})
+    if role in ("lead_artist", "artist_pro", "print_master") and v.get("pay.reels"):
+        out.append({"label": "Рилс после утверждения HEAD" + (f" (до {v['pay.reels.max']:g} в месяц)" if v.get("pay.reels.max") else ""),
+                    "amount": v["pay.reels"]})
     if role in ("lead_designer", "designer_asst") and v.get("pay.design.catalog"):
         out.append({"label": "Каталог референсов (двоим — пополам)", "amount": v["pay.design.catalog"]})
     return out
