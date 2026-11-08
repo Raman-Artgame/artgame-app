@@ -75,7 +75,7 @@ def fetch_deals() -> list[dict]:
     while start is not None:
         j = rd("crm.deal.list", {
             "filter": {"CATEGORY_ID": CATEGORY, "STAGE_ID": list(ACTIVE + DONE)},
-            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD, F_LEVEL, F_AREA, F_ADDR], "start": start})
+            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD, F_LEVEL, F_AREA, F_ADDR, "OPPORTUNITY"], "start": start})
         if isinstance(j, list):  # шлюз может вернуть сразу список
             out += j
             break
@@ -103,23 +103,28 @@ def _area(v) -> float | None:
 
 
 def upsert(conn, deals: list[dict]) -> list[int]:
-    """Возвращает ID новых объектов."""
+    """Возвращает ID новых объектов. Сумма сделки не хранится: только оценка сложности по ней (promo.guess_level)."""
+    from . import constants as consts
+    from .promo import guess_level, parse_geo
+    v = consts.latest(conn)
     new = []
     for d in deals:
         status = "done" if d["STAGE_ID"] in DONE else "active"
         title, city = split_title(d["ID"], d["TITLE"])
         addr = d.get(F_ADDR)
+        geo = parse_geo(addr)
         addr = (addr.split("|")[0].strip() or None) if isinstance(addr, str) else None
+        guess = guess_level(v, _area(d.get(F_AREA)), d.get("OPPORTUNITY"))
         row = conn.execute(
-            """INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at, level, area_m2, address)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,now(),%s,%s,%s)
+            """INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at, level, area_m2, address, geo, level_guess)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,now(),%s,%s,%s,%s,%s)
                ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, city=EXCLUDED.city, bitrix_stage=EXCLUDED.bitrix_stage,
-                   level=EXCLUDED.level, area_m2=EXCLUDED.area_m2, address=EXCLUDED.address,
+                   level=EXCLUDED.level, area_m2=EXCLUDED.area_m2, address=EXCLUDED.address, geo=EXCLUDED.geo, level_guess=EXCLUDED.level_guess,
                    drive_folder=coalesce(objects.drive_folder, EXCLUDED.drive_folder),
                    status=CASE WHEN objects.status='archived' THEN 'archived' ELSE EXCLUDED.status END, synced_at=now()
                RETURNING (xmax = 0) AS inserted""",
             (int(d["ID"]), title, city, d["STAGE_ID"], int(d["CATEGORY_ID"]), status, d.get(FOLDER_FIELD) or None,
-             str(d.get(F_LEVEL) or "") or None, _area(d.get(F_AREA)), addr)).fetchone()
+             str(d.get(F_LEVEL) or "") or None, _area(d.get(F_AREA)), addr, geo, guess)).fetchone()
         if row["inserted"]:
             new.append(int(d["ID"]))
     return new
@@ -140,9 +145,19 @@ def main():
                 made += 1
             except Exception as ex:
                 print(f"folder {o['id']}: {ex}")
+        # эскизы из «ДИЗАЙН» сделки на Диске — для живой карточки (объекты в работе, не чаще раза в 30 мин)
+        from .promo import sync_designs
+        got = 0
+        for o in conn.execute("""SELECT * FROM objects WHERE status='active' AND id<>0 AND drive_folder IS NOT NULL
+                                 AND (design_synced_at IS NULL OR design_synced_at < now() - interval '30 minutes')
+                                 ORDER BY (bitrix_stage=%s) DESC LIMIT 30""", (WORK,)).fetchall():
+            try:
+                got += sync_designs(conn, o)
+            except Exception as ex:
+                print(f"designs {o['id']}: {ex}")
         if new:
             db.audit(conn, None, "objects_sync", data={"new": new})
-    print(f"deals={len(deals)} new={len(new)} folders={made}")
+    print(f"deals={len(deals)} new={len(new)} folders={made} designs+={got}")
 
 
 if __name__ == "__main__":

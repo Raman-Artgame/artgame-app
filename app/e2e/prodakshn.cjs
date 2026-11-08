@@ -55,20 +55,25 @@ async function tab(p, name) {
   await s.getByRole('button', { name: 'Отправить расход' }).waitFor()
   const opts = await s.locator('select').nth(1).locator('option').allTextContents()
   assert.deepStrictEqual(opts, ['Такси / доставка', 'Докупка на объект'], opts.join(','))
-  // «Учёба»: чип «Как стать художником», в «Выезде» калькулятора нет
+  // «Учёба» (HEAD 08.11): База знаний, Тест, Клиентам + ТБ и «Правила игры» (внутри — как стать художником); «Выезда» нет
   await tab(s, 'Учёба')
-  await s.getByRole('button', { name: 'Как стать художником' }).click()
+  await s.getByRole('button', { name: 'Правила игры' }).click()
+  await s.getByText('Правила игры · Саппорт').waitFor()
   await s.getByText('Что нужно уметь').waitFor()
-  await s.getByText('Перенос эскиза').waitFor()
-  await s.screenshot({ path: `${shots}/support-kak-stat.png`, fullPage: true })
+  assert.strictEqual(await s.getByText('Чек-лист выезда').count(), 0)
+  await s.screenshot({ path: `${shots}/support-pravila.png`, fullPage: true })
+  await s.getByRole('button', { name: 'ТБ', exact: true }).click()
+  await s.getByText('ТБ на объекте').waitFor()
+  await s.getByText('1,8 м').waitFor()
+  await s.screenshot({ path: `${shots}/support-tb.png`, fullPage: true })
   await s.getByRole('button', { name: 'Художники' }).click()
-  const fr = s.frameLocator('iframe.placeframe')
   await s.waitForFunction(() => !!document.querySelector('iframe.placeframe')?.contentWindow?.document.querySelector('#tabs'), null, { timeout: 20000 })
   const frame = s.frames().find(f => /\/api\/p\//.test(f.url()))
+  assert.ok(/dark=1/.test(frame.url()) && /trip/.test(frame.url()))
   await frame.evaluate(() => { location.hash = '#trip' })
-  await fr.locator('.calc').first().waitFor({ state: 'attached', timeout: 20000 })
-  assert.strictEqual(await frame.evaluate(() => getComputedStyle(document.querySelector('.calc')).display), 'none')
-  assert.ok(/nocalc=1/.test(frame.url()))
+  await s.waitForTimeout(300)
+  assert.notStrictEqual(await frame.evaluate(() => location.hash), '#trip')   // «Выезд» переехал в «Смену»
+  await s.screenshot({ path: `${shots}/support-baza.png`, fullPage: true })
 
   // 2. Оператор печати: склада нет
   const op = await open(b, 4000)

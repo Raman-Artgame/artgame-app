@@ -23,7 +23,7 @@ export function Places({ list, mode, opts = {}, extra: ex }) {
   const onExtra = !!extra
   if (!cur && !extras.length) return <div className="card muted">Для твоей роли рабочего места пока нет.</div>
   const o = (cur && opts[cur.code]) || {}
-  const q = new URLSearchParams({ ...(mode ? { mode } : {}), ...(o.hide?.length ? { hide: o.hide.join(','), home: o.home || '' } : {}), ...(o.nocalc ? { nocalc: '1' } : {}) }).toString()
+  const q = new URLSearchParams({ ...(mode ? { mode } : {}), ...(o.hide?.length ? { hide: o.hide.join(','), home: o.home || '' } : {}), ...(o.nocalc ? { nocalc: '1' } : {}), dark: '1' }).toString()
   const src = cur ? cur.url + (q ? '?' + q : '') + (hash || (o.home ? '#' + o.home : mode === 'study' ? '#ucheb' : '')) : ''
   return <div className="place">
     {(list.length > 1 || extras.length > 0) && <div className="chips">{list.map(p =>

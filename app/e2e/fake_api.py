@@ -2,7 +2,10 @@
 import uvicorn
 
 from artgame import drive
-from artgame.main import app
+from artgame.config import settings
+
+settings.public_origin = "https://test.app.artgame.world"   # e2e = среда test: открыт «Пройти как сотрудник · тест»
+from artgame.main import app  # noqa: E402
 
 STORE, PENDING = {}, {}
 
@@ -10,6 +13,19 @@ STORE, PENDING = {}, {}
 class FakeDrive:
     def project_folder(self, obj): return f"deal-{obj['id']}"
     def child(self, parent, name): return f"{parent}/{name}"
+
+    def ls(self, parent):
+        """Папка сделки 731 на Диске: ДИЗАЙН / Утвержденные дизайны / эскиз — для живой карточки."""
+        F = "application/vnd.google-apps.folder"
+        if parent == "deal-731":
+            return [{"id": "dz731", "name": "ДИЗАЙН", "mimeType": F}]
+        if parent == "dz731":
+            return [{"id": "ok731", "name": "Утвержденные дизайны", "mimeType": F}]
+        if parent == "ok731":
+            STORE.setdefault("drvSKETCH731", {"parents": ["ok731"], "size": "1", "mimeType": "image/png",
+                                              "data": open(__file__.replace("fake_api.py", "chek.png"), "rb").read()})
+            return [{"id": "drvSKETCH731", "name": "Эскиз кафе.png", "mimeType": "image/png", "size": "1"}]
+        return []
 
     def upload(self, parent, name, data, mime):
         i = f"drv{len(STORE):08d}"
