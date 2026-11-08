@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api, testAs, uuid, viewAs } from './api.js'
 import { clearFailed, enqueue, failed, flush, pending } from './queue.js'
 import { startViewAs } from './head.jsx'
-import { HINT_TITLE, hintsFor } from './hints.js'
+import { BOSS, HINT_TITLE, hintsFor } from './hints.js'
 
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
 const ST = { open: 'идёт', submitted: 'на проверке', approved: 'принято', rejected: 'отказ', cancelled: 'отменено' }
@@ -63,7 +63,7 @@ const LV = Object.fromEntries(CX)
 // Живая карточка объекта (HEAD 08.11): что предстоит — условия из сделки (без выбора), сложность по сумме, если МОП не указал,
 // эскизы с Диска (утверждённые первыми), карта, ход работ по сменам, этапы, фото «до / после». Тап по картинке — на весь экран.
 const SRC = { calc: 'из расчёта МОП', price: 'оценка по сумме сделки' }
-export function Promo({ id, zone, compact, onData }) {
+export function Promo({ id, zone, compact, onData, role }) {
   const [c, setC] = useState(null)
   const [big, setBig] = useState(null)
   const [ba, setBa] = useState(50)
@@ -104,7 +104,8 @@ export function Promo({ id, zone, compact, onData }) {
       {last.work_done && <p className="small muted">«{last.work_done}»</p>}</>}
     {c.feed?.length > 1 && !compact && <div className="lc-feed">{c.feed.slice(1).map(f => <button key={f.id} onClick={() => setBig({ thumb: f.after || f.before, url: f.after_full || f.before_full, name: f.work_done })}>
       <img src={f.after || f.before} alt="" loading="lazy" /><span>{new Date(f.at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</span></button>)}</div>}
-    <p className="small muted">Условия — из сделки. Не так на объекте — скажи Главному художнику.</p>
+    {c.trip && <p className="small trip-note">✈ Командировка: день дороги — кнопкой «Дорога», суточные начислятся сами.</p>}
+    <p className="small muted">Условия — из сделки. Не так на объекте — скажи {BOSS[role] || 'Главному художнику'}.</p>
     {big && <div className="lightbox" onClick={() => setBig(null)}><img src={big.url && big.mime?.startsWith('image/') ? big.url : big.thumb} alt={big.name || ''} />
       {big.name && <p>{big.name}{big.path ? ` · ${big.path}` : ''}</p>}<button className="ghost mini">Закрыть</button></div>}
   </div>
@@ -146,10 +147,37 @@ export function ShiftForm({ done }) {
   }, [])
   if (!d) return <div className="card muted">Загрузка…</div>
   if (open) return <Running o={open} d={d} done={t => { saveOpen(null); setOpen(null); done(t) }} />
-  return <StartShift d={d} checked={checked} onStarted={o => { saveOpen(o); setOpen(o) }} />
+  return <StartShift d={d} checked={checked} onStarted={o => { saveOpen(o); setOpen(o) }} onRoad={done} />
 }
 
-function StartShift({ d, onStarted }) {
+// День дороги в командировку (HEAD 08.11): одна кнопка; оплата — как смена по ставке роли, суточные — сами (pay.trip_food).
+function Road({ obj, zone, done }) {
+  const [dir, setDir] = useState('there')
+  const [ticket, setTicket] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const go = async () => {
+    setBusy(true); setErr('')
+    try {
+      const was = failed().length
+      const left = await enqueue('/shifts/road', { object_id: obj.id, zone_code: zone, day: new Date().toISOString(), direction: dir, ticket: ticket || null })
+      const f = failed()
+      if (f.length > was && f[0].path === '/shifts/road') { setErr(`Сервер не принял: ${f[0].error}`); return }
+      done(left ? 'Дорога сохранена на телефоне, отправится, когда будет сеть.' : 'День дороги отмечен и ушёл на проверку.')
+    } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }
+  }
+  return <div className="card road">
+    <h3>✈ Сегодня в дороге?</h3>
+    <p className="small muted">Объект в другом городе — день дороги оплачивается как смена, суточные начисляются сами.</p>
+    <div className="segf"><button className={dir === 'there' ? 'on' : ''} onClick={() => setDir('there')}>На объект</button>
+      <button className={dir === 'back' ? 'on' : ''} onClick={() => setDir('back')}>Обратно</button></div>
+    <Snap value={ticket} set={setTicket} label="Билет или чек (по желанию)" />
+    <button className="dark" disabled={busy} onClick={go}>{busy ? 'Отмечаю…' : 'Отметить день дороги'}</button>
+    {err && <p className="small why">{err}</p>}
+  </div>
+}
+
+function StartShift({ d, onStarted, onRoad }) {
   const objs = d.objects.filter(o => o.id)
   const [v, set] = useState({ object_id: objs[0]?.id, zone_code: d.zones[0] })
   const [photo, setPhoto] = useState('')
@@ -189,7 +217,8 @@ function StartShift({ d, onStarted }) {
         <b>№{o.id}</b> {o.title}{o.city ? <span> · {o.city}</span> : null}</button>)}</div>
       {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}
     </div>
-    <Promo id={obj.id} zone={v.zone_code} compact={false} onData={setCond} />
+    <Promo id={obj.id} zone={v.zone_code} compact={false} onData={setCond} role={d.role} />
+    {cond.trip && <Road obj={obj} zone={v.zone_code} done={onRoad} />}
     <Hints step="start" role={d.role} cond={cond} v={d.safety || {}} uid={'start-' + obj.id} />
     <div className="card">
       <h3>Фото стены до начала</h3>
@@ -230,7 +259,7 @@ function Running({ o, d, done }) {
       <p className="small muted">с {new Date(o.started_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} · №{o.object_id} {o.object_title} · {ZONE[o.zone_code]}</p>
       {o.before && <img className="before" src={o.before} alt="стена до" />}
     </div>
-    <Promo id={o.object_id} zone={o.zone_code} compact onData={setCond} />
+    <Promo id={o.object_id} zone={o.zone_code} compact onData={setCond} role={d.role} />
     <Hints step="run" role={d.role} cond={cond} v={d.safety || {}} uid={o.client_uid} />
     <div className="card">
       <h2>Закончить смену</h2>

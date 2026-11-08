@@ -540,3 +540,47 @@ body.viewas.web .webbar { margin-top: 0; }
 .stagepick button { font-size: 13px; }
 .tbcard .tbrow { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line2); }
 .tbcard .tbrow b { flex: none; min-width: 82px; color: var(--accent2); font-size: 18px; }
+/* Нижнее меню лентой (художники и печать, HEAD 08.11): 8 кнопок, листается */
+nav.scroll { display: flex; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
+nav.scroll::-webkit-scrollbar { display: none; }
+nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-snap-align: start; }
+/* Выдано и допуски */
+.issued { margin: 6px 0; }
+.issued > a { color: var(--muted); font-size: 13px; cursor: pointer; }
+.issued-box { margin-top: 8px; padding: 10px 12px; border-radius: var(--r2); background: var(--alt); border: 1px solid var(--line2); }
+.issued-box .acts a { margin-left: 8px; }
+.issued-box .it-returned b, .issued-box .it-lost b { text-decoration: line-through; color: var(--muted); }
+.place .placechips { flex: none; flex-wrap: nowrap; scrollbar-width: none; }
+.place .placeextra { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }   /* ТБ и «Правила игры» листаются (HEAD: «из него не выйти») */
+.trip-note { color: var(--warn); font-weight: 600; }
+.card.road { border-color: #6B4A1C; }
+.duty .skill { margin: 8px 0; } .duty .skill p { margin: 2px 0 0; }
+/* «Дизайн» карточками (HEAD 08.11) */
+.dzfunnel { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 10px; margin: 6px 0; scrollbar-width: none; }
+.dzstep { flex: 0 0 auto; width: auto; min-width: 92px; max-width: 130px; padding: 10px; border-radius: var(--r2); background: var(--alt); border: 1px solid var(--line);
+  border-top: 3px solid var(--sc); color: var(--text); text-align: left; display: flex; flex-direction: column; gap: 4px; }
+.dzstep b { font-size: 22px; }
+.dzstep span { font: 500 12px/1.2 Onest, Inter, system-ui; color: var(--muted); }
+.dzstep.on { background: var(--dark); border-color: var(--sc); }
+.dzstep.empty b { color: var(--muted); }
+.dzstep:hover { background: var(--dark); }
+.dzfire { border-color: var(--hot); background: linear-gradient(180deg, var(--hotbg), var(--surface) 70%); }
+.dzfire h3 { margin: 0 0 10px; color: var(--hot); }
+.dzstage { border-left: 4px solid var(--sc); }
+.dzstage .stagehead { cursor: default; padding-top: 0; }
+.dzguide { display: grid; gap: 8px; margin: 0 0 12px; padding: 12px; border-radius: var(--r2); background: var(--alt); }
+.dzguide div { display: grid; grid-template-columns: 110px 1fr; gap: 10px; font-size: 14px; }
+.dzguide i { font-style: normal; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--sc); font-weight: 700; padding-top: 2px; }
+.dzgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.dzcard { padding: 14px; border-radius: var(--r2); background: var(--alt); border: 1px solid var(--line); border-top: 3px solid var(--sc); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
+.dzcard:hover { border-color: var(--sc); }
+.dztop { display: flex; justify-content: space-between; align-items: center; }
+.dztitle { font-size: 16px; line-height: 1.25; }
+.due { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--dark); color: var(--muted); white-space: nowrap; }
+.due.soon { background: var(--warnbg); color: var(--warn); }
+.due.late { background: var(--hotbg); color: var(--hot); }
+.dzdots { display: flex; gap: 4px; margin-top: 4px; }
+.dzdots i { flex: 1; height: 4px; border-radius: 99px; background: var(--line); }
+.dzdots i.done { background: var(--muted); }
+.dzdots i.on { background: var(--sc); }
+@media (max-width: 480px) { .dzguide div { grid-template-columns: 1fr; gap: 2px; } }

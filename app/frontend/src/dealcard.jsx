@@ -113,6 +113,19 @@ function NoteSheet({ d, onClose, onDone, initial = '' }) {
 }
 
 // Объединённый расчёт: цена клиенту + срок и состав одной формой. Считает сервер (POST /price), «Записать в сделку» — /price/save.
+// Командировка (HEAD 08.11): по умолчанию — сама по городу сотрудника и объекта; МОП может поправить. Только в приложении.
+function Trip({ id }) {
+  const [t, setT] = useState(undefined)
+  const [msg, setMsg] = useState('')
+  useEffect(() => { api(`/objects/${id}/trip`).then(o => setT(o.trip), () => setT('none')) }, [id])
+  if (t === undefined) return null
+  if (t === 'none') return <p className="small muted">Командировка: объект появится в приложении со стадии «Отправка счёта», тогда можно отметить.</p>
+  const put = v => api(`/objects/${id}/trip`, { method: 'POST', body: { trip: v } }).then(o => { setT(o.trip); setMsg('') }, e => setMsg(e.message))
+  return <><label>Командировка <span className="muted">· суточные и дорога команде считаются сами</span></label>
+    <div className="chips">{[[null, 'По городу'], [true, 'Да, выезд'], [false, 'Нет, в городе']].map(([v, n]) => <button key={String(v)} className={t === v ? 'on' : ''} onClick={() => put(v)}>{n}</button>)}</div>
+    {msg && <p className="small why">{msg}</p>}</>
+}
+
 function Calc({ d, saved, onSaved }) {
   const svc0 = /печат/i.test(d.service || '') ? 'print' : 'mural'
   const [f, setF] = useState(() => saved?.in || { service: svc0, area: d.area || '', level: d.level || 'medium', design: null, extras: [], outdoor: false, place: 'base', cash: 0, qty: 1 })
@@ -147,7 +160,8 @@ function Calc({ d, saved, onSaved }) {
       <div className="chips">{EXTRAS.map(([k, v]) => <button key={k} className={f.extras.includes(k) ? 'on' : ''} onClick={() => tog(k)}>{v} +10%</button>)}
         <button className={f.outdoor ? 'on' : ''} onClick={() => set({ outdoor: !f.outdoor })}>Улица</button>
         <button className={f.surface ? 'on' : ''} onClick={() => set({ surface: !f.surface })}>Сложная поверхность</button></div>
-      <p className="small muted">Сложность, высоту, улицу и поверхность команда видит в смене без выбора — заполняй как есть на объекте.</p></>}
+      <p className="small muted">Сложность, высоту, улицу и поверхность команда видит в смене без выбора — заполняй как есть на объекте.</p>
+      <Trip id={d.id} /></>}
     {isArea && <><label>Где объект</label><div className="chips">{PLACES.map(([k, v]) => <button key={k} className={f.place === k ? 'on' : ''} onClick={() => set({ place: k })}>{v}</button>)}</div></>}
     <label>Скидка за наличные, % (до 15)<input type="number" min="0" max="15" value={f.cash} onChange={e => set({ cash: e.target.value })} /></label>
     {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}

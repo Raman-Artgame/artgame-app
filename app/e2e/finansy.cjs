@@ -56,7 +56,8 @@ async function tab(p, name) {
 
   // 1б. Мастер печати (склад — только у Главных, Про и Мастера печати, HEAD 08.11): хозтовары, своя позиция без ориентира — уходит HEAD
   const mp = await open(b, 6000)
-  await tab(mp, 'Склад')
+  await tab(mp, 'Расход')                     // склад — внутри «Расхода» (HEAD 08.11)
+  await mp.getByRole('button', { name: 'Закупка на склад' }).click()
   await mp.getByRole('button', { name: '+ Покупка' }).click()
   await mp.locator('.chips button', { hasText: 'Хозтовары' }).click()
   await mp.getByPlaceholder('Найти позицию').fill('Чайник')
@@ -115,7 +116,7 @@ async function tab(p, name) {
   await h.screenshot({ path: `${shots}/fin-summary.png`, fullPage: true })
 
   // 6. Плотник видит «Мои выплаты»: выплачено 12 000, чужих сумм нет
-  await tab(w, 'Мои')
+  await tab(w, 'Кабинет')
   await w.getByText('Мои выплаты').waitFor()
   await w.locator('.kv > div', { hasText: 'Выплачено' }).getByText(/12\s000/).waitFor()
   const my = await call(4000, '/fin/my')

@@ -116,6 +116,12 @@
     document.head ? document.head.appendChild(st2) : document.documentElement.appendChild(st2)
   }
 
+  // Разделы места — чипами приложения (HEAD 08.11): ?notabs=1 прячет свои вкладки места, поиск остаётся.
+  if (qp.get('notabs') === '1') {
+    var st4 = document.createElement('style'); st4.textContent = '#tabs{display:none!important}'
+    document.head ? document.head.appendChild(st4) : document.documentElement.appendChild(st4)
+  }
+
   // Тёмный стиль приложения (HEAD 08.11): ?dark=1 — палитра места в тон приложению. Страницы мест не перепаковываем.
   if (qp.get('dark') === '1') {
     var st3 = document.createElement('style')

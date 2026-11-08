@@ -87,7 +87,7 @@ async function tab(p, name) {
   await ctx.setOffline(false)
   await a.evaluate(() => window.dispatchEvent(new Event('online')))
   await a.waitForTimeout(800)
-  await tab(a, 'Мои')
+  await tab(a, 'Кабинет')
   await a.screenshot({ path: `${shots}/2-moi.png` })
   await a.getByText(/15\s000 ₸/).waitFor()
   await a.screenshot({ path: `${shots}/2-moi.png` })
