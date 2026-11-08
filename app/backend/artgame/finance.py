@@ -21,6 +21,8 @@ from . import db, drive
 from .deps import require_head
 from .work import active, with_receipt
 
+HIST_CUT = date(2026, 11, 1)   # живой учёт с ноября 2026 (= fin_bx.START); раньше — история из старых таблиц
+
 router = APIRouter(prefix="/api")
 TZ = ZoneInfo("Asia/Almaty")
 
@@ -562,6 +564,9 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
                                           AND e.paid_by='company' AND e.created_at >= %s AND e.created_at < %s""", (t0, t1)).fetchone()["s"])
         opening, closing = balances(conn, start), balances(conn, end)
         plans = conn.execute("SELECT code, title, kind, plan_key FROM fin_articles WHERE plan_key IS NOT NULL AND active ORDER BY sort").fetchall()
+        hist = start < HIST_CUT   # до ноября 2026: расходы проектов — оценки старой таблицы «Проекты 2026»
+        hist_mat = _f(conn.execute("""SELECT coalesce(sum(materials + transport + other), 0) AS s FROM fin_projects
+                                      WHERE year=%s AND month=%s""", (start.year, start.month)).fetchone()["s"]) if hist else 0.0
     vat_pct = v.get("vat") or 0
     net = gross / (1 + vat_pct / 100) if gross is not None else None
     budget = {}
@@ -584,7 +589,10 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
     taxes_paid = sum(b["fact"] for b in budget.values() if b["kind"] == "tax")
     # чеки «своими» уже сидят в ФОТ как возмещение — в расходах статей их не считаем второй раз
     costs = {"project": exp.get("project", 0.0), "stock": exp.get("stock", 0.0), "canvas": exp.get("canvas", 0.0),
-             "sales": exp.get("sales", 0.0), "payroll": payroll_acc - reimb, "fixed": fixed, "variable": variable}
+             "sales": exp.get("sales", 0.0), "payroll": payroll_acc - reimb, "fixed": fixed, "variable": variable, "materials": hist_mat}
+    if hist:
+        warn.append("до ноября 2026 — история: материалы и транспорт — оценки из «Проекты 2026»; аренда, подписки, реклама, "
+                    "оклады вне «ФОТ 2026» в старых таблицах не велись и сюда не входят — прибыль завышена")
     profit = None if net is None else round(net - sum(costs.values()), 2)
     ipn_pct = v.get("fin.tax.ipn")
     if not ipn_pct:

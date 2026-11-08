@@ -228,7 +228,7 @@ def test_history_import(client, monkeypatch):
     assert by["Владимир"]["piece"] == 394000 and by["Владимир"]["bonus"] == 212000 and by["Владимир"]["advance"] == 200000
     assert by["Асель"]["piece"] == 235000 and by["Анна"]["salary"] == 200000 and by["Анна"]["city"] == "Шымкент"
     projects = [["171", "Октябрь", "ЦУМ", "Караганда", "B2B", "Спорт", "", "Роспись", "Instagram", "", "Яковлев", "", "", "20.10.2026",
-                 "1 160 000", "1 000 000", "160 000"], ["", "Октябрь", ""]]
+                 "1 160 000", "1 000 000", "160 000", "174 000", "40 000", "", "", "", "", "", "", "", "6 000"], ["", "Октябрь", ""]]
 
     def sheet(sid, rng):
         if sid == fin.SHEET_ID:
@@ -253,6 +253,9 @@ def test_history_import(client, monkeypatch):
     assert client.post("/api/fin/payroll/2026-10/compute", headers=hdr(1000)).status_code == 400
     s = client.get("/api/fin/summary", params={"ym": "2026-11"}, headers=hdr(1000)).json()
     assert all(b["code"] != "hist" or float(b["balance"]) <= 0 for b in s["cash"]["closing"])
+    assert s["costs"]["materials"] == 0                                       # с ноября — живой учёт, без оценок
+    s = client.get("/api/fin/summary", params={"ym": "2026-10"}, headers=hdr(1000)).json()
+    assert s["costs"]["materials"] == 174000 + 40000 + 6000 and any("история" in w for w in s["warn"])
 
 
 def test_export_style():

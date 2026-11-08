@@ -23,10 +23,10 @@ def _num(v) -> float:
 
 
 def import_projects(conn, year: int = YEAR) -> int:
-    rows = fin.sheet_values(fin.SHEET_ID, f"Проекты {year}!A2:Q")
+    rows = fin.sheet_values(fin.SHEET_ID, f"Проекты {year}!A2:AA")
     n, seen = 0, []
     for i, r in enumerate(rows, start=2):
-        r = list(r) + [""] * (17 - len(r))
+        r = list(r) + [""] * (27 - len(r))
         mon_name = str(r[1]).strip().lower()
         closed = fin._date(r[13])
         mon = int(closed[5:7]) if closed else (fin.MONTHS.index(mon_name) + 1 if mon_name in fin.MONTHS else 0)
@@ -34,14 +34,15 @@ def import_projects(conn, year: int = YEAR) -> int:
             continue
         conn.execute(
             """INSERT INTO fin_projects (year, row_no, deal_id, month, closed, title, city, model, category, service, source, ip,
-                                         revenue, received, debt, synced_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+                                         revenue, received, debt, materials, transport, other, synced_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
                ON CONFLICT (year, row_no) DO UPDATE SET deal_id=EXCLUDED.deal_id, month=EXCLUDED.month, closed=EXCLUDED.closed,
                  title=EXCLUDED.title, city=EXCLUDED.city, model=EXCLUDED.model, category=EXCLUDED.category, service=EXCLUDED.service,
                  source=EXCLUDED.source, ip=EXCLUDED.ip, revenue=EXCLUDED.revenue, received=EXCLUDED.received, debt=EXCLUDED.debt,
-                 synced_at=now()""",
+                 materials=EXCLUDED.materials, transport=EXCLUDED.transport, other=EXCLUDED.other, synced_at=now()""",
             (year, i, int(r[0]) if str(r[0]).strip().isdigit() else None, mon, closed or None, str(r[2]).strip(), str(r[3]).strip(),
-             r[4] or None, r[5] or None, r[7] or None, r[8] or None, r[10] or None, _num(r[14]), _num(r[15]), _num(r[16])))
+             r[4] or None, r[5] or None, r[7] or None, r[8] or None, r[10] or None, _num(r[14]), _num(r[15]), _num(r[16]),
+             _num(r[17]), _num(r[18]), _num(r[20]) + _num(r[26])))   # R материалы, S транспорт, U расходы проекта + AA иные
         n += 1
         seen.append(i)
     # строки, которых больше нет в листе, — убираем из копии (это зеркало листа, не учётные записи)

@@ -15,11 +15,12 @@ from .deps import require_head
 router = APIRouter(prefix="/api")
 MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
 KIND = {"in": "приход", "out": "расход"}
+PROFIT = 12   # колонка «Прибыль до ИПН» в «Сводке»
 ORDER = ["Сводка", "Проекты", "Движение денег", "ФОТ", "Закупки"]
 # Оформление (HEAD 08.11: «красиво, в нашем стиле, поудобнее»): цвета приложения (tokens.css) — светлый фон, чёрная шапка,
 # красный акцент. Для каждого листа: колонки денег, колонки дат, ширины. Применяется при каждой выгрузке, руками не держим.
 LAYOUT = {
-    "Сводка": {"money": range(1, 16), "date": (), "w": [110] + [125] * 15, "freeze_col": 1},
+    "Сводка": {"money": range(1, 17), "date": (), "w": [110] + [125] * 16 + [360], "freeze_col": 1},
     "Проекты": {"money": (10, 11, 12), "date": (9,), "w": [90, 70, 260, 110, 60, 110, 140, 120, 110, 100, 125, 125, 115], "freeze_col": 3},
     "Движение денег": {"money": (3,), "date": (0,), "w": [95, 150, 95, 115, 190, 75, 70, 170, 280, 80, 85], "freeze_col": 1},
     "ФОТ": {"money": (3, 4, 5), "date": (6,), "w": [90, 200, 120, 115, 115, 115, 110, 420], "freeze_col": 2},
@@ -46,21 +47,23 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
     """Строки листов за год. Месяцы до запуска (ноябрь 2026) остаются пустыми — история в старой таблице."""
     last = date.today().month if date.today().year == year else 12
     sv = [["Месяц", "Выручка с НДС", "НДС", "Без НДС", "На объекты (чеки)", "Склад", "Мастерская холстов", "Отдел продаж",
-           "ФОТ", "Постоянные", "Переменные", "Прибыль", "ИПН (оценка)", "Приход денег", "Расход денег", "Остаток на конец"]]
+           "Материалы и транспорт (оценка, до ноября)", "ФОТ", "Постоянные", "Переменные", "Прибыль до ИПН", "ИПН (оценка)",
+           "Приход денег", "Расход денег", "Остаток на конец", "Примечание"]]
     pay = [["Месяц", "Получатель", "Группа", "Начислено", "Выплачено", "Осталось", "Последняя выплата", "Из чего"]]
     for m in range(1, last + 1):
         ym = f"{year}-{m:02d}"
         s = finance.summary(ym, head)
         c, r = s["costs"], s["revenue"]
-        sv.append([MONTHS[m - 1], r["gross"], r["vat"], r["net"], c["project"], c["stock"], c["canvas"], c["sales"], c["payroll"],
-                   c["fixed"], c["variable"], s["profit"], s["ipn"], s["cash"]["in"], s["cash"]["out"],
-                   sum(float(b["balance"]) for b in s["cash"]["closing"])])
+        sv.append([MONTHS[m - 1], r["gross"], r["vat"], r["net"], c["project"], c["stock"], c["canvas"], c["sales"], c.get("materials", 0),
+                   c["payroll"], c["fixed"], c["variable"], s["profit"], s["ipn"], s["cash"]["in"], s["cash"]["out"],
+                   sum(float(b["balance"]) for b in s["cash"]["closing"]),
+                   "история: аренда, подписки, реклама не велись — прибыль завышена" if date(year, m, 1) < finance.HIST_CUT else ""])
         for x in (r for r in finance.payroll(ym, head)["rows"] if r["accrued"] or r["paid"]):   # без пустых строк
             pay.append([MONTHS[m - 1], x["name"], x["group"], x["accrued"], x["paid"], x["left"], _d(x["last_paid"]),
                         "; ".join(f"{a['detail'] or a['kind']}: {float(a['amount']):.0f}" for a in x["lines"])])
     if len(sv) > 1:   # итог года: суммы по колонкам, остаток — на конец последнего месяца
-        tot = [sum(float(r[i] or 0) for r in sv[1:]) for i in range(1, 15)]
-        sv.append([f"Итого {year}", *tot, sv[-1][15]])
+        tot = [sum(float(r[i] or 0) for r in sv[1:]) for i in range(1, 16)]
+        sv.append([f"Итого {year}", *tot, sv[-1][16], ""])
     led = [["Дата", "Счёт", "Приход/расход", "Сумма", "Статья", "За месяц", "Сделка", "Получатель", "Комментарий", "Источник", "Статус"]]
     for l in conn.execute(
             """SELECT l.*, a.title AS art, ac.title AS acc, py.name AS payee FROM fin_ledger l JOIN fin_articles a ON a.code=l.article_code
@@ -176,7 +179,7 @@ def style(sheets: list[dict], tabs: dict[str, list[list]]) -> list[dict]:
                 "backgroundColor": _rgb(C["dark"]), "textFormat": {"fontFamily": "Inter", "bold": True, "foregroundColor": _rgb(C["light"])}}},
                 "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat"}})
             for kind, fg, bg in (("NUMBER_GREATER", C["ok"], C["okbg"]), ("NUMBER_LESS", C["accent"], C["hotbg"])):
-                req.append({"addConditionalFormatRule": {"index": 0, "rule": {"ranges": [rng(1, n - 1, 11, 12)], "booleanRule": {
+                req.append({"addConditionalFormatRule": {"index": 0, "rule": {"ranges": [rng(1, n - 1, PROFIT, PROFIT + 1)], "booleanRule": {
                     "condition": {"type": kind, "values": [{"userEnteredValue": "0"}]},
                     "format": {"backgroundColor": _rgb(bg), "textFormat": {"bold": True, "foregroundColor": _rgb(fg)}}}}}})
         if title == "Движение денег":   # расход — красным, отменённые — серым зачёркнутым

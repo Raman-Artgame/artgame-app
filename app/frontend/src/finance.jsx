@@ -29,6 +29,7 @@ function Summary({ m }) {
   if (!s) return <p className="small muted">Загрузка…</p>
   const c = s.costs
   const rows = [['На объекты (чеки)', c.project], ['Склад расходников', c.stock], ['Мастерская холстов', c.canvas], ['Отдел продаж', c.sales],
+    ...(c.materials ? [['Материалы и транспорт (оценка старой таблицы)', c.materials]] : []),
     ['ФОТ', c.payroll], ['Постоянные', c.fixed], ['Переменные', c.variable]]
   const sync = () => { setExp('Обновляю…'); api('/fin/export', { method: 'POST' }).then(r => setExp(r.ok ? 'Таблица обновлена.' : r.detail), err(setExp)) }
   return <>
@@ -36,7 +37,7 @@ function Summary({ m }) {
       <div className="kv"><div><span className="muted small">Выручка с НДС</span><b>{money(s.revenue.gross)}</b></div>
         <div><span className="muted small">Без НДС</span><b>{money(s.revenue.net)}</b></div>
         <div><span className="muted small">Расходы</span><b>{money(Object.values(c).reduce((a, x) => a + x, 0))}</b></div>
-        <div><span className="muted small">Прибыль</span><b>{money(s.profit)}</b></div>
+        <div><span className="muted small">Прибыль до ИПН</span><b>{money(s.profit)}</b></div>
         {s.ipn != null && <div><span className="muted small">ИПН (оценка)</span><b>{money(s.ipn)}</b></div>}</div>
       {rows.map(([t, v]) => <div key={t} className="row"><span>{t}</span><b>{money(v)}</b></div>)}
       <p className="small muted">Выручка — по дате конца работ (лист «Проекты»). ФОТ — начислено за месяц.</p></div>
