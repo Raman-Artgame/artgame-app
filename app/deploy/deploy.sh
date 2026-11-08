@@ -42,7 +42,11 @@ install -m 644 "$SRC"/deploy/artgame-*.service "$SRC"/deploy/artgame-*.timer /et
 systemctl daemon-reload
 systemctl enable --now "artgame-api@$ENV" "artgame-constants@$ENV.timer" "artgame-objects@$ENV.timer" "artgame-notify@$ENV.timer" "artgame-finexport@$ENV.timer"
 systemctl restart "artgame-api@$ENV"
-if [ "$ENV" = prod ]; then systemctl enable --now artgame-backup.timer; fi
+# Ночная копия базы — для каждого окружения (команда работает на test с 09.11). Старый общий таймер только для prod убран.
+systemctl disable --now artgame-backup.timer 2>/dev/null || true
+rm -f /etc/systemd/system/artgame-backup.service /etc/systemd/system/artgame-backup.timer
+systemctl daemon-reload
+systemctl enable --now "artgame-backup@$ENV.timer"
 
 PORT=$(grep '^PORT=' "/etc/artgame-app/$ENV.env" | cut -d= -f2)
 for i in 1 2 3 4 5 6 7 8 9 10; do

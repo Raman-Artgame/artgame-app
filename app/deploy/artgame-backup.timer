@@ -1,9 +1,0 @@
-[Unit]
-Description=ARTGAME: копия базы каждую ночь в 03:00 (Астана)
-
-[Timer]
-OnCalendar=*-*-* 03:00:00 Asia/Almaty
-Persistent=true
-
-[Install]
-WantedBy=timers.target
