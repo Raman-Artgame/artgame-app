@@ -163,10 +163,10 @@ def kind_of(name: str) -> str | None:
     return None
 
 
-def norm_fields(area, level, service="mural", height=False, outdoor=False) -> tuple[dict, dict]:
+def norm_fields(area, level, service="mural", height=False, outdoor=False, surface=False) -> tuple[dict, dict]:
     """Поля сделки «Сложность / Смен по норме / Художников по норме / Срок» из расчёта. Пишем только те поля,
     что уже созданы в Битриксе (до задания Кодексу BX-MOP-FIELDS-20261105 их нет)."""
-    r = bx.resources(area, level, service, height, outdoor)
+    r = bx.resources(area, level, service, height, outdoor, surface)
     if not r:
         return {}, {}
     have = bx.deal_fields()

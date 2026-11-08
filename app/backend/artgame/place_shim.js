@@ -110,6 +110,12 @@
     window.addEventListener('hashchange', guard, true)
   }
 
+  // Саппорту калькулятор «Карточки объекта» в «Выезде» не нужен (HEAD 08.11): ?nocalc=1 прячет его, чек-листы остаются.
+  if (qp.get('nocalc') === '1') {
+    var st2 = document.createElement('style'); st2.textContent = '.calc{display:none!important}'
+    document.head ? document.head.appendChild(st2) : document.documentElement.appendChild(st2)
+  }
+
   // Ссылки на другие артефакты → открыть место в приложении.
   document.addEventListener('click', function (e) {
     var a = e.target.closest && e.target.closest('a[href]')

@@ -4,7 +4,6 @@ import { api, inTelegram, setViewAs, setWebToken, webToken } from './api.js'
 import { Login } from './login.jsx'
 import { ExpenseForm, Mine, Review, ShiftForm } from './work.jsx'
 import { People } from './people.jsx'
-import { Objects } from './objects.jsx'
 import { Places, usePlaces } from './places.jsx'
 import { DEAL_ROLES, Deals } from './deals.jsx'
 import { Journal } from './journal.jsx'
@@ -13,8 +12,9 @@ import { Projects } from './projects.jsx'
 import { LeadCard, Leads, Today, useToday } from './crm.jsx'
 import { Finance, MyPay, StockSpend } from './finance.jsx'
 import { Kit } from './kit.jsx'
+import { Production } from './production.jsx'
 import { Design } from './design.jsx'
-import { DUTIES } from './duties.js'
+import { DUTIES, GROW } from './duties.js'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
 import './tokens.css'
 
@@ -65,18 +65,21 @@ function App() {
 }
 
 const CHECKERS = new Set(['head', 'lead_artist', 'artist_pro', 'print_master', 'lead_designer'])
-// Кабинеты команды (HEAD 07.11). Художники: Смена · Расход (внутри «Закупка на склад») · Проекты · Учёба · Мои;
-// Главному и Про ещё Проверка, Объекты, Сбор на объект. Дизайнеры: Дизайн · Проекты · Учёба · Мои · Расход, без «Смены».
+// Кабинеты команды (HEAD 07.11, правки 08.11). Художники: Смена · Расход · Проекты · Учёба · Мои; Главному и Про ещё Проверка,
+// Продакшн, Сбор. «Объекты» влиты в «Проекты» (карточка проекта: эскизы, фото, продакшн). Дизайнеры: Дизайн · Проекты · Учёба · Мои · Расход.
 // В «Учёбе» скрыто то, что ещё в разработке: «Оплата», «Рост и экзамены»; у дизайна — «Проекты» и «Передача» места.
 const ART = new Set(['support', 'artist', 'lead_artist', 'artist_pro'])
 const SENIOR = new Set(['lead_artist', 'artist_pro'])
 const DZ = new Set(['lead_designer', 'designer_asst'])
 const KIT = new Set(['lead_artist', 'artist_pro', 'print_master', 'head'])
+// HEAD 08.11: «Продакшн» — у Главного, Про и Мастера настенной печати (HEAD утверждает); склад — только у них же (и плотника).
+const PROD = new Set(['lead_artist', 'artist_pro', 'print_master', 'head'])
+const STOCK = new Set(['lead_artist', 'artist_pro', 'print_master', 'carpenter'])
 const STUDY = {
-  art: r => ({ home: 'ucheb', hide: ['pay', 'grow', ...(SENIOR.has(r) ? [] : ['gip', 'chief'])] }),
+  // Саппорту калькулятор карточки выезда не нужен (HEAD 08.11) — nocalc прячет его, чек-листы выезда остаются.
+  art: r => ({ home: 'ucheb', hide: ['pay', 'grow', ...(SENIOR.has(r) ? [] : ['gip', 'chief'])], ...(r === 'support' ? { nocalc: 1 } : {}) }),
   dz: () => ({ home: 'learn', hide: ['board', 'handoff'] }),
 }
-// Закупки на склад (HEAD 06.11): у каждой роли; HEAD — в «Финансы → Закупки».
 const PLAIN = new Set(['today', 'leads', 'deals', 'projects', 'month'])
 
 // Единое рабочее поле МОП (HEAD 06.11): вся работа по клиенту — в карточке сделки; «Место» МОП стало «Учёбой»
@@ -110,18 +113,19 @@ function Main({ me, web, logout }) {
     ...(pulse ? { review: +pulse.review.shifts + +pulse.review.expenses, people: pulse.pending.length } : {}) }
   const mop = ['mop', 'mop_vip'].includes(me.role_code)
   const carp = me.role_code === 'carpenter'
-  // Главный и Про: в меню Смена · Расход · Проверка · Учёба · Мои, в «Ещё» — Проекты, Сбор, Объекты.
-  const tabs = cab ? (SENIOR.has(role) ? [['shift', 'Смена'], ['expense', 'Расход'], ['review', 'Проверка'], ['study', 'Учёба'], ['mine', 'Мои'],
-    ['projects', 'Проекты'], ['kit', 'Сбор'], ['objects', 'Объекты']] :
+  // Главный и Про: Смена · Расход · Проекты · Продакшн · Проверка, в «Ещё» — Сбор, Учёба, Мои.
+  const tabs = cab ? (SENIOR.has(role) ? [['shift', 'Смена'], ['expense', 'Расход'], ['projects', 'Проекты'], ['prod', 'Продакшн'], ['review', 'Проверка'],
+    ['kit', 'Сбор'], ['study', 'Учёба'], ['mine', 'Мои']] :
     [...(dz ? [['design', 'Дизайн']] : [['shift', 'Смена'], ['expense', 'Расход']]), ['projects', 'Проекты'],
       ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['study', 'Учёба'], ['mine', 'Мои'],
-      ...(dz ? [['expense', 'Расход']] : [['objects', 'Объекты']])]) :   // «Объекты» — фото с объекта на Диск
+      ...(dz ? [['expense', 'Расход']] : [])]) :
    [...(sales ? [['today', 'Сегодня'], ['leads', 'Лиды'], ['deals', 'Сделки'], ['projects', 'Проекты'], ['month', 'Месяц']] : []),
     ...(mopPlace ? [['study', 'Учёба']] : []),
     ...(other.length ? [['place', 'Место']] : []),
-    ...(mop || carp ? [] : [['shift', 'Смена'], ['expense', 'Расход'], ['objects', 'Объекты']]),
-    ...(me.role_code !== 'head' ? [['stock', 'Склад']] : []), ['mine', 'Мои'],
+    ...(mop || carp ? [] : [['shift', 'Смена'], ['expense', 'Расход']]),
+    ...(STOCK.has(role) ? [['stock', 'Склад']] : []), ['mine', 'Мои'],
     ...(!sales ? [['projects', 'Проекты']] : []),
+    ...(PROD.has(role) ? [['prod', 'Продакшн']] : []),
     ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []),
     ...(KIT.has(role) ? [['kit', 'Сбор']] : []),
     ...(role === 'head' ? [['design', 'Дизайн'], ['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда']] : [])]
@@ -132,7 +136,8 @@ function Main({ me, web, logout }) {
   const duty = DUTIES[role]
   if (tab === 'place' || tab === 'study') return <>
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
-      extra={duty && { code: 'duty', title: 'Должностная', render: () => <Duty d={duty} /> }} /> :
+      extra={[duty && { code: 'duty', title: 'Должностная', render: () => <Duty d={duty} /> },
+        GROW[role] && { code: 'grow', title: GROW[role].title, render: () => <Grow g={GROW[role]} /> }].filter(Boolean)} /> :
     <Places key={tab} list={tab === 'study' ? [mopPlace] : other} mode={tab === 'study' ? 'study' : ''} />}
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} />
   </>
@@ -145,9 +150,9 @@ function Main({ me, web, logout }) {
         tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
         tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> :
-        tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'objects' ? <Objects me={me} /> :
+        tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
         tab === 'fin' ? <Finance /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design me={me} /> :
-        tab === 'expense' && cab && me.zones.length ? <ExpenseTab done={done} /> :
+        tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
         tab === 'mine' && (mop || carp || !me.zones.length) ? <MyPay /> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
         tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><Mine /></> : <Review />}
     </div>
@@ -163,6 +168,16 @@ function ExpenseTab({ done }) {
       <button className={v === 'stock' ? 'on' : ''} onClick={() => setV('stock')}>Закупка на склад</button></div>
     {v === 'obj' ? <ExpenseForm done={done} /> : <StockSpend />}
   </>
+}
+
+// «Как стать художником» (HEAD 08.11) — для саппорта: что нужно уметь, как проходит экзамен, кто принимает.
+function Grow({ g }) {
+  return <div className="wrap"><div className="card duty">
+    <span className="tag">{g.step}</span><h2>{g.title}</h2><p>{g.about}</p>
+    <h3>Что нужно уметь</h3>{g.check.map((x, i) => <div key={i} className="growrow"><span>{i + 1}</span>{x}</div>)}
+    <h3>Экзамен</h3>{g.exam.map(([t, how, ok]) => <div key={t} className="growexam"><b>{t}</b><span className="small">{how}</span><span className="small muted">Зачёт: {ok}</span></div>)}
+    <p className="small muted">{g.who}</p><p className="small muted">Источник: {g.src}</p>
+  </div></div>
 }
 
 function Duty({ d }) {

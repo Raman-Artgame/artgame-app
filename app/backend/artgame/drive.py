@@ -15,7 +15,10 @@ import httpx
 from .config import settings
 
 PROJECTS_ROOT_ID = "1_33LDppwOu02ToP4c3uUS-mPux5mPIJf"
-SUBFOLDERS = {"photo": "Фото объекта", "design": "Дизайн", "receipt": "Расходы чеки", "doc": "Документы"}
+# HEAD 08.11: фото и видео с объекта — в «МЕДИА / Отчёты» (всё от всех), утверждённое HEAD — копией в «МЕДИА / Продакшн».
+# «МЕДИА» папку сделки создаёт DRIVE01; «Фото объекта» больше не заводим (старые остаются как есть).
+SUBFOLDERS = {"report": "МЕДИА/Отчёты", "prod": "МЕДИА/Продакшн", "design": "Дизайн", "receipt": "Расходы чеки", "doc": "Документы"}
+FOLDER_OF = {"photo": "report", "media": "report"}   # вид файла в базе → подпапка сделки
 MONTHS = ["ЯНВАРЬ", "ФЕВРАЛЬ", "МАРТ", "АПРЕЛЬ", "МАЙ", "ИЮНЬ", "ИЮЛЬ", "АВГУСТ", "СЕНТЯБРЬ", "ОКТЯБРЬ", "НОЯБРЬ", "ДЕКАБРЬ"]
 # «10 ФИНАНСЫ / Расходы чеки» на диске ARTGAME.KZ; сервисному аккаунту дан доступ только к этой папке.
 RECEIPTS_ROOT_ID = "1PCTnoVlAqBhvwUgBRIc8dd4murbKKnkB"
@@ -99,6 +102,13 @@ class Drive:
             r.raise_for_status()
             yield from r.iter_bytes(256 * 1024)
 
+    def copy(self, file_id: str, parent: str, name: str | None = None) -> str:
+        """Копия файла в другую папку (утверждённый материал → «Продакшн»). Оригинал остаётся в «Отчётах»."""
+        r = httpx.post(f"{API}/{file_id}/copy", headers=self.h, timeout=120, params={"supportsAllDrives": "true", "fields": "id"},
+                       json={"parents": [parent], **({"name": name} if name else {})})
+        r.raise_for_status()
+        return r.json()["id"]
+
     def thumbnail(self, file_id: str) -> bytes | None:
         link = self.meta(file_id).get("thumbnailLink")
         if not link:
@@ -117,7 +127,11 @@ def ensure_folders(conn, obj: dict, d: Drive | None = None) -> dict:
     d = d or Drive()
     root = obj.get("drive_folder") or d.project_folder(obj)
     for k, name in SUBFOLDERS.items():
-        folders.setdefault(k, d.child(root, name))
+        if k not in folders:
+            parent = root
+            for part in name.split("/"):
+                parent = d.child(parent, part)
+            folders[k] = parent
     conn.execute("UPDATE objects SET drive_folder=%s, folders=%s WHERE id=%s", (root, json.dumps(folders), obj["id"]))
     return folders
 
@@ -136,7 +150,12 @@ def save_photo(conn, obj: dict, name: str, data_url: str, kind: str = "photo") -
     """Фото объекта (или другой файл) в подпапку сделки. Возвращает ID файла на Диске."""
     data, mime = decode_data_url(data_url)
     d = Drive()
-    return d.upload(ensure_folders(conn, obj, d)[kind], name + _ext(mime), data, mime)
+    return d.upload(ensure_folders(conn, obj, d)[FOLDER_OF.get(kind, kind)], name + _ext(mime), data, mime)
+
+
+def folder_of(conn, obj: dict, kind: str, d: "Drive | None" = None) -> str:
+    """ID подпапки сделки для вида файла (photo/media → МЕДИА / Отчёты)."""
+    return ensure_folders(conn, obj, d)[FOLDER_OF.get(kind, kind)]
 
 
 def receipt_folder(conn, d: Drive, dept: str, deal_id: int | None) -> tuple[str, bool]:

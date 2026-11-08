@@ -35,8 +35,8 @@ async function tab(p, name) {
   await call(1000, '/_e2e/consts', { 'stock.price_tolerance_pct': 15, 'fin.tax.ipn': 10, vat: 16 })
   const c = await call(4000, '/register', { full_name: 'Плотник Арман' })
   await call(1000, `/people/${c.id}`, { role_code: 'carpenter', zones: [] })
-  const mo = await call(6000, '/register', { full_name: 'МОП Дана' })
-  await call(1000, `/people/${mo.id}`, { role_code: 'mop', zones: ['sales'] })
+  const mo = await call(6000, '/register', { full_name: 'Мастер печати Дана' })
+  await call(1000, `/people/${mo.id}`, { role_code: 'print_master', zones: ['print'] })
 
   // 1. Мастер-плотник: «Склад» открывается сразу на «Мастерской», рейка 50 м за 12 000 (240 ₸/м: выше ориентира 230, в потолке) — принято само
   const w = await open(b, 4000)
@@ -54,11 +54,11 @@ async function tab(p, name) {
   await w.locator('.row', { hasText: 'Мастерская холстов' }).getByText('принято').waitFor()
   await w.screenshot({ path: `${shots}/fin-carpenter.png` })
 
-  // 1б. МОП: «Склад» → хозтовары, своя позиция без ориентира — уходит HEAD
+  // 1б. Мастер печати (склад — только у Главных, Про и Мастера печати, HEAD 08.11): хозтовары, своя позиция без ориентира — уходит HEAD
   const mp = await open(b, 6000)
   await tab(mp, 'Склад')
   await mp.getByRole('button', { name: '+ Покупка' }).click()
-  await mp.locator('.chips button.on', { hasText: 'Хозтовары' }).waitFor()
+  await mp.locator('.chips button', { hasText: 'Хозтовары' }).click()
   await mp.getByPlaceholder('Найти позицию').fill('Чайник')
   await mp.getByRole('button', { name: /Нет в списке/ }).click()
   await mp.getByLabel('Сумма').fill('9000')

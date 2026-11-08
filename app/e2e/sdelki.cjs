@@ -184,10 +184,16 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
 
   // «Проекты»: общая вкладка — объект в работе у другого МОП, срок и сколько осталось
   await tab(p, 'Проекты')
-  await p.locator('.proj').waitFor()
-  assert.match(await p.locator('.proj').first().textContent(), /№ 1700.*Школа — Шымкент.*120 м².*МОП Тимур.*старт.*сдача.*осталось \d+ дн.*смен 0 из 12.*(Идёт|Смен ещё нет)/)
-  assert.match(await p.locator('.segf').textContent(), /В работе.*1.*Старт скоро.*0/)
+  // HEAD 08.11: карточки проектов; внутри — что за объект, ход работ, эскизы и фото; МОП — «Открыть сделку»
+  await p.locator('.pcard').first().waitFor()
+  assert.match(await p.locator('.pcard').first().textContent(), /(Идёт|Смен ещё нет).*\d+ дн\..*Школа — Шымкент.*№ 1700.*120 м²/)
+  assert.match(await p.locator('.segf').textContent(), /В работе.*1.*Скоро.*0/)
   await p.screenshot({ path: `${shots}/mop-projects.png`, fullPage: true })
+  await p.locator('.pcard').first().click()
+  await p.locator('.phero').getByText(/осталось \d+ дн/).waitFor()
+  assert.match(await p.locator('.kvgrid').textContent(), /Площадь120 м².*Старт.*Сдача.*Смены0 из 12.*МОПТимур/)
+  await p.screenshot({ path: `${shots}/mop-project-card.png`, fullPage: true })
+  await p.getByRole('button', { name: '← Проекты' }).click()
 
   // «Учёба»: рабочее место только с учебником, тестом и правилами игры
   await tab(p, 'Учёба')

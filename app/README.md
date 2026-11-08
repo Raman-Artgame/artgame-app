@@ -18,4 +18,4 @@ AES-256-GCM, потому что репозиторий публичный, а �
 скачать файлы артефакта в папку и `ARTGAME_CONTENT_KEY=… python -m artgame.pack_places <папка> <место>` (из `backend/`).
 `window.claude` на странице заменяет `place_shim.js`: общая база → таблица `place_docs`, `config/values` → «Значения»
 (по аудитории места), скачивание → через сервер (в Telegram — `downloadFile`). ИИ-помощник и Битрикс в местах пока выключены.
-Тест: тот же API с ключом, затем `node e2e/places.cjs`, `node e2e/sdelki.cjs` и `node e2e/kabinety.cjs` (кабинеты команды) (сделки МОП; Битрикс в fake_api подменён ответами из `tests/test_bx.py`).
+Тест: тот же API с ключом, затем `node e2e/places.cjs`, `node e2e/sdelki.cjs`, `node e2e/kabinety.cjs` (кабинеты команды) и `node e2e/prodakshn.cjs` (саппорт, продакшн) (сделки МОП; Битрикс в fake_api подменён ответами из `tests/test_bx.py`).

@@ -28,6 +28,7 @@ export function Pulse({ me, pulse, go }) {
     r.expenses && { k: 'review', t: `Расходы на проверке: ${r.expenses}`, s: `на ${money(r.expenses_sum)}` + (r.over_cap ? ` · ${r.over_cap} выше потолка цены` : ''), hot: r.expenses_late || r.over_cap },
     p.pending.length && { k: 'people', t: `Ждут роли: ${p.pending.length}`, s: p.pending.map(x => x.full_name).join(', '), hot: true },
     p.catalogs && { k: 'design', t: `Каталоги дизайна на утверждение: ${p.catalogs}`, s: 'утвердить или вернуть' },
+    p.media && { k: 'prod', t: `Материал с объектов на утверждение: ${p.media}`, s: 'в «Продакшн» и рилс к оплате' },
   ].filter(Boolean)
   const name = (me.full_name || '').split(' ')[0]
   const active = p.team.reduce((n, t) => n + +t.active, 0)

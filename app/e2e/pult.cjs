@@ -62,7 +62,8 @@ async function tab(p, name) {
   assert.ok(anav.includes('Смена') && !anav.includes('Пульт') && !anav.includes('Финансы'), anav.join(','))
   await h.screenshot({ path: `${shots}/pult-viewas.png` })
   // 3. запись закрыта: смена не уходит ни сейчас, ни потом из очереди
-  await h.getByRole('button', { name: 'Отправить смену' }).click()
+  await h.locator('.snap input[type=file]').setInputFiles(__dirname + '/chek.png')
+  await h.getByRole('button', { name: 'Начать смену' }).click()
   await h.locator('.viewas-bar').getByText(/Режим просмотра/).waitFor()
   const q = await h.evaluate(() => localStorage.getItem('artgame.queue.v1'))
   assert.ok(!q || q === '[]', 'в очередь ничего не легло: ' + q)

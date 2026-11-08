@@ -29,7 +29,7 @@ def test_pending_cannot_submit(client):
 def test_shift_flow(client):
     setup_people(client)
     d = client.get("/api/work/dict", headers=hdr(2000)).json()
-    assert {o["id"] for o in d["objects"]} == {0, 731} and len(d["categories"]) == 10
+    assert {o["id"] for o in d["objects"]} == {0, 731} and len(d["categories"]) == 11   # + «Докупка на объект» (022)
     body = {"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural",
             "started_at": T0, "ended_at": T1, "area_m2": 12.5, "complexity": "medium"}
     s1 = client.post("/api/shifts", json=body, headers=hdr(2000)).json()

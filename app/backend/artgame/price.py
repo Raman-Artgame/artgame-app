@@ -53,6 +53,7 @@ class PriceIn(BaseModel):
     design: str | None = None         # XS|S|M|L|XL — пусто: по площади
     extras: list[str] = []            # urgent, height, night, lacquer
     outdoor: bool = False             # улица — только для нормы
+    surface: bool = False             # сложная поверхность — только для нормы (команда видит в смене, HEAD 08.11)
     place: str = "base"               # base | near | far
     cash: float = 0                   # скидка за наличные, %
     qty: int = 1                      # фикс-прайс: количество работ
@@ -206,7 +207,7 @@ def compute(inp: PriceIn, v: dict) -> dict:
            "total": total, "base": round(base), "design": design, "dprice": dprice, "no_vat": no_vat, "pay": pay, "flags": flags,
            "client_text": client, "ladder": ladder, "rate": round(total / m2) if m2 else 0}
     if t in ("mural", "print") and m2 > 0:
-        out["norm"] = bx.resources(m2, inp.level if t == "mural" else "medium", t, "height" in inp.extras, inp.outdoor, v=v)
+        out["norm"] = bx.resources(m2, inp.level if t == "mural" else "medium", t, "height" in inp.extras, inp.outdoor, inp.surface, v=v)
     else:
         out["norm"] = {}
     return out
@@ -231,7 +232,7 @@ def api_price_save(deal_id: int, body: PriceIn, p: dict = Depends(active)):
         parts.append(f"{body.area:g} м²")
     if r["norm"]:
         nf, _ = bxw.norm_fields(body.area, body.level if body.service == "mural" else "medium", body.service,
-                                "height" in body.extras, body.outdoor)
+                                "height" in body.extras, body.outdoor, body.surface)
         fields.update(nf)
         n = r["norm"]
         parts.append(f"по норме {n['shifts']:g} смен, {n['crew']} чел., {n['client']} раб. дн. клиенту")

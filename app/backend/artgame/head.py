@@ -10,7 +10,7 @@ from .deps import require_head
 
 router = APIRouter(prefix="/api")
 
-FEED = ("deal_open", "place_download", "shift_add", "expense_add", "shift_cancel", "expense_cancel",
+FEED = ("deal_open", "place_download", "shift_add", "shift_start", "shift_finish", "media_review", "expense_add", "shift_cancel", "expense_cancel",
         "bx_write", "place_doc_set", "file_add", "register")
 
 
@@ -27,6 +27,7 @@ def pulse(p: dict = Depends(require_head)):
                            (SELECT count(DISTINCT expense_id) FROM stock_lines l JOIN expenses e ON e.id=l.expense_id
                              WHERE e.status='submitted' AND l.flag IN ('over_cap','no_ref')) AS over_cap""")
         catalogs = one("SELECT count(*) AS n FROM design_catalogs WHERE status='sent'")["n"]
+        media = one("SELECT count(*) AS n FROM files WHERE kind='media' AND status='ready' AND review='pending'")["n"]
         today = conn.execute(
             """SELECT s.id, pe.full_name, r.title AS role_title, o.title AS object_title, s.zone_code, s.started_at, s.ended_at, s.status
                FROM shifts s JOIN people pe ON pe.id=s.person_id LEFT JOIN roles r ON r.code=pe.role_code JOIN objects o ON o.id=s.object_id
@@ -44,5 +45,5 @@ def pulse(p: dict = Depends(require_head)):
         week = one("""SELECT count(*) FILTER (WHERE status='approved') AS approved, count(*) FILTER (WHERE status='rejected') AS rejected,
                              count(DISTINCT person_id) AS people
                       FROM shifts WHERE started_at > now() - interval '7 days' AND status<>'cancelled'""")
-    return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"])}, "catalogs": catalogs,
+    return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"])}, "catalogs": catalogs, "media": media,
             "today": today, "team": team, "feed": feed, "week": week}

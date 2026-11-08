@@ -14,7 +14,9 @@ CATEGORY = 0
 ACTIVE = ("FINAL_INVOICE", "UC_AV00QK", "UC_BMKDS4")
 DONE = ("WON",)
 WORK = "UC_AV00QK"   # «Выполнение проекта»: только такие сделки можно выбрать для смен, трат и сборов (HEAD 08.11)
-FOLDER_FIELD = "UF_CRM_ARTGAME_PROJECT_FOLDER_ID"  # папку сделки уже создаёт DRIVE01 — берём её, не плодим вторую
+FOLDER_FIELD = "UF_CRM_ARTGAME_PROJECT_FOLDER_ID"
+# Условия объекта для смены (HEAD 08.11 — заполняет МОП, команда видит без выбора): сложность, площадь, адрес
+F_LEVEL, F_AREA, F_ADDR = "UF_CRM_ARTGAME_COMPLEXITY", "UF_CRM_ARTGAME_AREA_M2", "UF_CRM_1755520919823"  # папку сделки уже создаёт DRIVE01 — берём её, не плодим вторую
 
 
 class Gateway:
@@ -73,7 +75,7 @@ def fetch_deals() -> list[dict]:
     while start is not None:
         j = rd("crm.deal.list", {
             "filter": {"CATEGORY_ID": CATEGORY, "STAGE_ID": list(ACTIVE + DONE)},
-            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD], "start": start})
+            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD, F_LEVEL, F_AREA, F_ADDR], "start": start})
         if isinstance(j, list):  # шлюз может вернуть сразу список
             out += j
             break
@@ -93,20 +95,31 @@ def split_title(deal_id: str, title: str) -> tuple[str, str | None]:
     return (name.strip(), city.strip() or None) if sep and name.strip() else (t, None)
 
 
+def _area(v) -> float | None:
+    try:
+        return float(str(v).replace(",", ".")) if v not in (None, "") else None
+    except ValueError:
+        return None
+
+
 def upsert(conn, deals: list[dict]) -> list[int]:
     """Возвращает ID новых объектов."""
     new = []
     for d in deals:
         status = "done" if d["STAGE_ID"] in DONE else "active"
         title, city = split_title(d["ID"], d["TITLE"])
+        addr = d.get(F_ADDR)
+        addr = (addr.split("|")[0].strip() or None) if isinstance(addr, str) else None
         row = conn.execute(
-            """INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,now())
+            """INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at, level, area_m2, address)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,now(),%s,%s,%s)
                ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, city=EXCLUDED.city, bitrix_stage=EXCLUDED.bitrix_stage,
+                   level=EXCLUDED.level, area_m2=EXCLUDED.area_m2, address=EXCLUDED.address,
                    drive_folder=coalesce(objects.drive_folder, EXCLUDED.drive_folder),
                    status=CASE WHEN objects.status='archived' THEN 'archived' ELSE EXCLUDED.status END, synced_at=now()
                RETURNING (xmax = 0) AS inserted""",
-            (int(d["ID"]), title, city, d["STAGE_ID"], int(d["CATEGORY_ID"]), status, d.get(FOLDER_FIELD) or None)).fetchone()
+            (int(d["ID"]), title, city, d["STAGE_ID"], int(d["CATEGORY_ID"]), status, d.get(FOLDER_FIELD) or None,
+             str(d.get(F_LEVEL) or "") or None, _area(d.get(F_AREA)), addr)).fetchone()
         if row["inserted"]:
             new.append(int(d["ID"]))
     return new
