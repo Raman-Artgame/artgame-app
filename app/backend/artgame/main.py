@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from . import constants as consts
-from . import head, items, viewas
+from . import head, items, tgbot, viewas
 from . import bx, bxw, db, design, files, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
@@ -39,6 +39,7 @@ app.include_router(kit.router)
 app.include_router(design.router)
 app.include_router(head.router)
 app.include_router(items.router)
+app.include_router(tgbot.router)   # бот: ответ на «Старт» (HEAD 08.11)
 viewas.install(app)
 
 
