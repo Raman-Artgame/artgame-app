@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from . import constants as consts
 from . import db, drive
 from .config import settings
-from .work import active, with_receipt
+from .work import active, with_receipt, self_approve
 
 router = APIRouter(prefix="/api")
 TZ = ZoneInfo("Asia/Almaty")
@@ -103,6 +103,7 @@ def add(e: StockIn, p: dict = Depends(active)):
             (e.client_uid, p["id"], e.category, e.amount, e.paid_by, e.note, e.deal_id, f["id"], bool(limit) and not ok,
              "approved" if ok else "submitted", "to_pay" if ok and e.paid_by == "own" else "none",
              datetime.now(TZ) if ok else None, "в пределах лимита" if ok else None)).fetchone()
+        row = self_approve(conn, p, row)
         db.audit(conn, p["id"], "stock_expense_add", "expenses", row["id"], {"article": art, "over_limit": bool(limit) and not ok})
     if not ok and settings.head_tg_id and settings.bot_token and p["role_code"] != "head":
         try:
@@ -112,7 +113,7 @@ def add(e: StockIn, p: dict = Depends(active)):
                                              f"{e.amount:,.0f} ₸, {why}. Вкладка «Проверка».".replace(",", " "))
         except Exception as ex:  # noqa: BLE001
             print("stock notify:", ex)
-    return {**with_receipt(row), "auto": ok}
+    return {**with_receipt(row), "auto": row["status"] == "approved"}
 
 
 @router.get("/stock/expenses")
@@ -279,6 +280,7 @@ def purchase(e: PurchaseIn, p: dict = Depends(active)):
             (e.client_uid, p["id"], d["category"], total, e.paid_by, note, e.deal_id, f["id"], bool(bad),
              "approved" if ok else "submitted", "to_pay" if ok and e.paid_by == "own" else "none",
              datetime.now(TZ) if ok else None, "в пределах потолка цены" if ok else None)).fetchone()
+        row = self_approve(conn, p, row)
         for x in lines:
             conn.execute("""INSERT INTO stock_lines (expense_id, item_code, name, unit, qty, amount, ref_price, cap_price, flag)
                             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
@@ -293,7 +295,7 @@ def purchase(e: PurchaseIn, p: dict = Depends(active)):
                                              f"{why}. Вкладка «Проверка».")
         except Exception as ex:  # noqa: BLE001
             print("stock notify:", ex)
-    return {**with_receipt(row), "auto": ok, "lines": lines}
+    return {**with_receipt(row), "auto": row["status"] == "approved", "lines": lines}
 
 
 class ItemIn(BaseModel):

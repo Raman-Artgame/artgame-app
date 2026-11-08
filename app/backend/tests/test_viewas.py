@@ -96,3 +96,15 @@ def test_pulse(client):
     assert p["review"]["shifts"] == 1 and p["review"]["expenses"] == 0
     assert any(t["code"] == "artist" and t["active"] == 2 for t in p["team"])
     assert p["feed"][0]["action"] in ("shift_add", "register")
+
+
+def test_head_own_expense_no_review(client):
+    """Трата самого HEAD сразу принята и не висит у него же в «Проверке»; трата художника — ждёт."""
+    setup_people(client)
+    body = {"object_id": 731, "zone_code": "mural", "category": "other", "amount": 250000, "paid_by": "company", "note": "планшет"}
+    h = client.post("/api/expenses", json={**body, "client_uid": str(uuid.uuid4())}, headers=hdr(1000)).json()
+    a = client.post("/api/expenses", json={**body, "client_uid": str(uuid.uuid4())}, headers=hdr(2000)).json()
+    assert h["status"] == "approved" and a["status"] == "submitted"
+    assert [x["id"] for x in client.get("/api/review", headers=hdr(1000)).json()["expenses"]] == [a["id"]]
+    # глазами художника HEAD ничего не пишет вовсе
+    assert client.post("/api/expenses", json={**body, "client_uid": str(uuid.uuid4())}, headers=va(1000, 2)).status_code == 403

@@ -168,8 +168,19 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
                                 VALUES (gen_random_uuid(), %s, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",
                              (e.object_id, name, mime, len(data), drive_id, p["id"])).fetchone()
             row = conn.execute("UPDATE expenses SET receipt_file_id=%s WHERE id=%s RETURNING *", (f["id"], row["id"])).fetchone()
+        row = self_approve(conn, p, row)
         db.audit(conn, p["id"], "expense_add", "expenses", row["id"])
         return with_receipt(row)
+
+
+def self_approve(conn, p: dict, row: dict) -> dict:
+    """Трата самого HEAD (HEAD 08.11: «расход на планшет никуда не подгрузился») не ждёт проверки у него же:
+    сразу «принято», свои деньги — «к выплате», и она сразу в «Финансах»."""
+    if p["role_code"] != "head" or p.get("_view_as") or row["status"] != "submitted":
+        return row
+    return conn.execute("""UPDATE expenses SET status='approved', checked_by=%s, checked_at=now(),
+                             payout_status=CASE WHEN paid_by='own' THEN 'to_pay' ELSE payout_status END,
+                             reason=coalesce(reason, 'трата HEAD — без проверки') WHERE id=%s RETURNING *""", (p["id"], row["id"])).fetchone()
 
 
 def with_receipt(e: dict) -> dict:

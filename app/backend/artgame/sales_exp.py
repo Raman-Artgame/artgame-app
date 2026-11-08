@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from . import db, drive
 from .config import settings
-from .work import active, with_receipt
+from .work import active, with_receipt, self_approve
 
 router = APIRouter(prefix="/api")
 TZ = ZoneInfo("Asia/Almaty")
@@ -95,6 +95,7 @@ def add(e: SalesExpenseIn, p: dict = Depends(active)):
             (e.client_uid, p["id"], e.category, e.amount, e.paid_by, e.note, e.deal_id, f["id"], not ok,
              "approved" if ok else "submitted", "to_pay" if ok and e.paid_by == "own" else "none",
              datetime.now(TZ) if ok else None, "в пределах лимита" if ok else None)).fetchone()
+        row = self_approve(conn, p, row)
         db.audit(conn, p["id"], "sales_expense_add", "expenses", row["id"], {"over_limit": not ok, "deal": e.deal_id})
     if not ok and settings.head_tg_id and settings.bot_token and p["role_code"] != "head":
         try:
@@ -104,7 +105,7 @@ def add(e: SalesExpenseIn, p: dict = Depends(active)):
                                              f"{e.amount:,.0f} ₸ — {why}. Вкладка «Проверка».".replace(",", " "))
         except Exception as ex:  # noqa: BLE001
             print("sales expense notify:", ex)
-    return {**with_receipt(row), "auto": ok}
+    return {**with_receipt(row), "auto": row["status"] == "approved"}
 
 
 @router.get("/sales/expenses")
