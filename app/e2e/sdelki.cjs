@@ -28,7 +28,8 @@ const mopFrame = p => p.frames().find(f => f.url().includes('/api/p/mop/'))
 async function tab(p, name) {
   const nav = p.locator('nav')
   const re = new RegExp(`^${name}\\s*\\d*$`)   // у кнопки может быть счётчик: «Лиды1»
-  if (await nav.getByRole('button', { name: re }).count()) return nav.getByRole('button', { name: re }).click()
+  await nav.locator('button').first().waitFor()   // меню успело появиться (у HEAD «Команда» теперь в нижней строке)
+  if (await nav.getByRole('button', { name: re }).waitFor({ timeout: 1500 }).then(() => true, () => false)) return nav.getByRole('button', { name: re }).click()
   await nav.locator('button').last().click()   // «Ещё» (или имя открытой оттуда вкладки)
   await p.locator('.sheetbox').getByRole('button', { name, exact: true }).click()
 }
