@@ -67,7 +67,8 @@ def import_payments(conn, since: date = START, until: date | None = None, ids: l
 # ── Проекты с ноября — из Битрикса (HEAD 08.11) ─────────────────────────────────────────────────────────────────────
 DONE = ("UC_BMKDS4", "WON")        # «Оплата+закрывающие документы» (работы сданы) и «Оплата получена»
 F_END = "UF_CRM_ARTGAME_PROJECT_END_ACTUAL"
-P_SELECT = ["ID", "TITLE", "STAGE_ID", "OPPORTUNITY", "MOVED_TIME", F_END, bx.CITY, bx.OBJECT,
+F_MODEL = "UF_CRM_ARTGAME_PROJECT_MODEL"
+P_SELECT = ["ID", "TITLE", "STAGE_ID", "OPPORTUNITY", "MOVED_TIME", F_END, bx.CITY, bx.OBJECT, F_MODEL,
             "UF_CRM_ARTGAME_FIN03_RECEIVED", "UF_CRM_ARTGAME_FIN03_DEBT"]
 ROW0 = 1_000_000
 
@@ -92,6 +93,16 @@ def end_of_works(d: dict) -> date | None:
     return end or _day(d.get("MOVED_TIME"))
 
 
+def _model(v) -> str | None:
+    """Модель проекта сделки (список Битрикса) → «B2B» / «B2G» / «B2C»."""
+    try:
+        name = bx.enum_map(F_MODEL).get(str(v or ""), "")
+    except Exception:  # noqa: BLE001
+        return None
+    up = name.upper().replace(" ", "")
+    return next((m for m in ("B2B", "B2G", "B2C") if m in up), name or None)
+
+
 def import_projects(conn, since: date = START) -> dict:
     """Сделки «1.1 Продажи РК», сданные с `since`, → fin_projects (origin='bitrix'). Сделки, что уже есть в листе, не берём."""
     in_sheet = {r["deal_id"] for r in conn.execute("SELECT DISTINCT deal_id FROM fin_projects WHERE origin='sheet' AND deal_id IS NOT NULL")}
@@ -106,12 +117,12 @@ def import_projects(conn, since: date = START) -> dict:
         row_no = ROW0 + did
         title = (d.get(bx.OBJECT) or "").strip() or str(d.get("TITLE") or "").split("·", 1)[-1].split("—")[0].strip()
         added += conn.execute(
-            """INSERT INTO fin_projects (year, row_no, deal_id, month, closed, title, city, revenue, received, debt, origin, synced_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'bitrix', now())
+            """INSERT INTO fin_projects (year, row_no, deal_id, month, closed, title, city, model, revenue, received, debt, origin, synced_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'bitrix', now())
                ON CONFLICT (year, row_no) DO UPDATE SET month=EXCLUDED.month, closed=EXCLUDED.closed, title=EXCLUDED.title,
-                 city=EXCLUDED.city, revenue=EXCLUDED.revenue, received=EXCLUDED.received, debt=EXCLUDED.debt, synced_at=now()
+                 city=EXCLUDED.city, model=EXCLUDED.model, revenue=EXCLUDED.revenue, received=EXCLUDED.received, debt=EXCLUDED.debt, synced_at=now()
                RETURNING (xmax = 0) AS ins""",
-            (end.year, row_no, did, end.month, end, title, bx.city_name(d.get(bx.CITY)), bx._money(d.get("OPPORTUNITY")),
+            (end.year, row_no, did, end.month, end, title, bx.city_name(d.get(bx.CITY)), _model(d.get(F_MODEL)), bx._money(d.get("OPPORTUNITY")),
              bx._money(d.get("UF_CRM_ARTGAME_FIN03_RECEIVED")), bx._money(d.get("UF_CRM_ARTGAME_FIN03_DEBT")))).fetchone()["ins"]
         seen.append(row_no)
     # сделку вернули со стадии или перенесли в лист — убираем из копии

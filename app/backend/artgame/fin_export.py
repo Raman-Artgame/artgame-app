@@ -16,11 +16,12 @@ router = APIRouter(prefix="/api")
 MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
 KIND = {"in": "приход", "out": "расход"}
 PROFIT = 12   # колонка «Прибыль до ИПН» в «Сводке»
-ORDER = ["Сводка", "Проекты", "Движение денег", "ФОТ", "Закупки"]
+ORDER = ["Сводка", "Модель", "Проекты", "Движение денег", "ФОТ", "Закупки"]
 # Оформление (HEAD 08.11: «красиво, в нашем стиле, поудобнее»): цвета приложения (tokens.css) — светлый фон, чёрная шапка,
 # красный акцент. Для каждого листа: колонки денег, колонки дат, ширины. Применяется при каждой выгрузке, руками не держим.
 LAYOUT = {
     "Сводка": {"money": range(1, 17), "date": (), "w": [110] + [125] * 16 + [360], "freeze_col": 1},
+    "Модель": {"money": range(1, 14), "date": (), "w": [300] + [115] * 13, "freeze_col": 1, "rows": True},
     "Проекты": {"money": (10, 11, 12), "date": (9,), "w": [90, 70, 260, 110, 60, 110, 140, 120, 110, 100, 125, 125, 115, 90], "freeze_col": 3},
     "Движение денег": {"money": (3,), "date": (0,), "w": [95, 150, 95, 115, 190, 75, 70, 170, 280, 80, 85], "freeze_col": 1},
     "ФОТ": {"money": (3, 4, 5), "date": (6,), "w": [90, 200, 120, 115, 115, 115, 110, 420], "freeze_col": 2},
@@ -50,9 +51,10 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
            "Материалы и транспорт (оценка, до ноября)", "ФОТ", "Постоянные", "Переменные", "Прибыль до ИПН", "ИПН (оценка)",
            "Приход денег", "Расход денег", "Остаток на конец", "Примечание"]]
     pay = [["Месяц", "Получатель", "Группа", "Начислено", "Выплачено", "Осталось", "Последняя выплата", "Из чего"]]
+    sums = {}
     for m in range(1, last + 1):
         ym = f"{year}-{m:02d}"
-        s = finance.summary(ym, head)
+        s = sums[m] = finance.summary(ym, head)
         c, r = s["costs"], s["revenue"]
         sv.append([MONTHS[m - 1], r["gross"], r["vat"], r["net"], c["project"], c["stock"], c["canvas"], c["sales"], c.get("materials", 0),
                    c["payroll"], c["fixed"], c["variable"], s["profit"], s["ipn"], s["cash"]["in"], s["cash"]["out"],
@@ -89,7 +91,84 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
         prj.append([MONTHS[r["month"] - 1], r["deal_id"] or "", r["title"], r["city"], r["model"], r["category"], r["service"], r["source"],
                     r["ip"], _d(r["closed"]), float(r["revenue"]), float(r["received"]), float(r["debt"]),
                     "Битрикс" if r["origin"] == "bitrix" else "лист 2026"])
-    return {"Сводка": sv, "Проекты": prj, "Движение денег": led, "ФОТ": pay, "Закупки": buy}
+    return {"Сводка": sv, "Модель": model(conn, year, sums), "Проекты": prj, "Движение денег": led, "ФОТ": pay, "Закупки": buy}
+
+
+def _city(c: str) -> str:
+    c = (c or "").lower()
+    return "Астана" if "астан" in c else "Шымкент" if "шымкент" in c else "Регионы"
+
+
+def _seg(m: str) -> str:
+    m = (m or "").upper().replace(" ", "")
+    return m if m in ("B2B", "B2G", "B2C") else "без модели"
+
+
+MODEL_PCT = {"Материалы и транспорт, % выручки", "ФОТ, % выручки", "Маржинальный доход, %", "Реклама, % выручки",
+             "Рентабельность до ИПН, %"}
+MODEL_CNT = {"Проектов, шт", "Астана, шт", "Шымкент, шт", "Регионы, шт"}
+
+
+def model(conn, year: int, sums: dict) -> list[list]:
+    """Финмодель по факту (HEAD 08.11: «объединить финмодели в одну актуальную»): строки как в «ФМ Artgame 2026»,
+    колонки — месяцы и итог года; всё из базы (проекты, ФОТ, расходы), без ручных цифр."""
+    months = sorted(sums)
+    prj = conn.execute("SELECT month, city, model, revenue FROM fin_projects WHERE year=%s", (year,)).fetchall()
+    by = {m: [r for r in prj if r["month"] == m] for m in months}
+
+    def col(m):
+        s, rows = sums[m], by[m]
+        c, gross = s["costs"], float(s["revenue"]["gross"] or 0)
+        net = float(s["revenue"]["net"] or 0)
+        city = {k: sum(float(r["revenue"]) for r in rows if _city(r["city"]) == k) for k in ("Астана", "Шымкент", "Регионы")}
+        ncity = {k: sum(1 for r in rows if _city(r["city"]) == k) for k in city}
+        seg = {k: sum(float(r["revenue"]) for r in rows if _seg(r["model"]) == k) for k in ("B2B", "B2G", "B2C", "без модели")}
+        n = len(rows)
+        direct = float(c["project"] + c.get("materials", 0))
+        pay = float(c["payroll"])
+        ads = float(c["variable"])
+        fixed = float(c["fixed"] + c["stock"] + c["canvas"] + c["sales"])
+        profit = float(s["profit"] or 0)
+        pct = lambda x: round(x / net, 4) if net else ""  # noqa: E731
+        return {"Выручка с НДС": gross, "Выручка без НДС": net,
+                "Астана": city["Астана"], "Шымкент": city["Шымкент"], "Регионы": city["Регионы"],
+                "B2B": seg["B2B"], "B2G": seg["B2G"], "B2C": seg["B2C"], "Без модели (новые сделки)": seg["без модели"],
+                "Проектов, шт": n, "Астана, шт": ncity["Астана"], "Шымкент, шт": ncity["Шымкент"], "Регионы, шт": ncity["Регионы"],
+                "Средний чек": round(gross / n) if n else "",
+                "Материалы и транспорт": direct, "Материалы и транспорт, % выручки": pct(direct),
+                "ФОТ": pay, "ФОТ, % выручки": pct(pay),
+                "Маржинальный доход": net - direct - pay, "Маржинальный доход, %": pct(net - direct - pay),
+                "Реклама": ads, "Реклама, % выручки": pct(ads), "Цена клиента (реклама / проект)": round(ads / n) if n else "",
+                "Постоянные, склад, мастерская, отдел продаж": fixed,
+                "Прибыль до ИПН": profit, "Рентабельность до ИПН, %": pct(profit), "ИПН (оценка)": float(s["ipn"] or 0)}
+
+    cols = {m: col(m) for m in months}
+    keys = list(next(iter(cols.values())).keys()) if cols else []
+    out = [["Показатель", *[MONTHS[m - 1] for m in months], f"Итого {year}"]]
+    sect = {"Выручка с НДС": "ВЫРУЧКА", "Астана": "ПО ГОРОДАМ", "B2B": "ПО СЕГМЕНТАМ", "Проектов, шт": "ПРОЕКТЫ",
+            "Материалы и транспорт": "СЕБЕСТОИМОСТЬ И МАРЖА", "Реклама": "МАРКЕТИНГ", "Постоянные, склад, мастерская, отдел продаж": "РАСХОДЫ И ПРИБЫЛЬ"}
+    tot = {}
+    for k in keys:
+        vals = [cols[m][k] for m in months]
+        nums = [v for v in vals if v != ""]
+        tot[k] = sum(nums) if nums else ""
+    t = tot
+    if keys:   # итог года для долей и средних — от итоговых сумм
+        net = t["Выручка без НДС"] or 0
+        n = t["Проектов, шт"] or 0
+        for k, num in (("Материалы и транспорт, % выручки", "Материалы и транспорт"), ("ФОТ, % выручки", "ФОТ"),
+                       ("Маржинальный доход, %", "Маржинальный доход"), ("Реклама, % выручки", "Реклама"),
+                       ("Рентабельность до ИПН, %", "Прибыль до ИПН")):
+            t[k] = round(t[num] / net, 4) if net else ""
+        t["Средний чек"] = round(t["Выручка с НДС"] / n) if n else ""
+        t["Цена клиента (реклама / проект)"] = round(t["Реклама"] / n) if n else ""
+    for k in keys:
+        if k in sect:
+            out.append([sect[k]] + [""] * (len(months) + 1))
+        out.append([k, *[cols[m][k] for m in months], t[k]])
+    out.append([])
+    out.append(["Янв–окт: материалы — оценки старой таблицы, аренда и реклама — по нынешним ставкам «Значений». С ноября — живой учёт."])
+    return out
 
 
 def write(sheet_id: str, tabs: dict[str, list[list]]):
@@ -174,7 +253,22 @@ def style(sheets: list[dict], tabs: dict[str, list[list]]) -> list[dict]:
             "firstBandColorStyle": {"rgbColor": _rgb(C["white"])}, "secondBandColorStyle": {"rgbColor": _rgb(C["alt"])}}}}})
         req.append({"updateBorders": {"range": rng(1, n), "bottom": {"style": "SOLID", "colorStyle": {"rgbColor": _rgb(C["line"])}},
                                       "innerHorizontal": {"style": "SOLID", "colorStyle": {"rgbColor": _rgb(C["line"])}}}})
-        req.append({"setBasicFilter": {"filter": {"range": rng(0, body)}}})
+        if not lay.get("rows"):
+            req.append({"setBasicFilter": {"filter": {"range": rng(0, body)}}})
+        else:   # «Модель»: строки-показатели — проценты, штуки, заголовки разделов, итог года жирным
+            for i, row in enumerate(rows):
+                k = row[0] if row else ""
+                if k in MODEL_PCT or k in MODEL_CNT:
+                    pat = "0.0%" if k in MODEL_PCT else "0"
+                    req.append({"repeatCell": {"range": rng(i, i + 1, 1, cols), "cell": {"userEnteredFormat": {
+                        "numberFormat": {"type": "NUMBER", "pattern": pat}}}, "fields": "userEnteredFormat.numberFormat"}})
+                elif k and k.isupper():
+                    req.append({"repeatCell": {"range": rng(i, i + 1, 0, cols), "cell": {"userEnteredFormat": {
+                        "backgroundColor": _rgb(C["light"]), "textFormat": {"fontFamily": "Inter", "bold": True,
+                                                                           "foregroundColor": _rgb(C["accent"])}}},
+                        "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat"}})
+            req.append({"repeatCell": {"range": rng(1, n, cols - 1, cols), "cell": {"userEnteredFormat": {
+                "textFormat": {"fontFamily": "Inter", "bold": True}}}, "fields": "userEnteredFormat.textFormat.bold"}})
         if title == "Сводка":   # итог года — тёмная строка; прибыль: зелёная/красная
             req.append({"repeatCell": {"range": rng(n - 1, n), "cell": {"userEnteredFormat": {
                 "backgroundColor": _rgb(C["dark"]), "textFormat": {"fontFamily": "Inter", "bold": True, "foregroundColor": _rgb(C["light"])}}},

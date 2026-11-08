@@ -169,7 +169,9 @@ def test_export_rows(client, monkeypatch):
             return cls(2026, 11, 20)
     monkeypatch.setattr(fin_export, "date", D)
     r = client.post("/api/fin/export", headers=hdr(1000)).json()
-    assert r["ok"] and set(written) == {"Сводка", "Проекты", "Движение денег", "ФОТ", "Закупки"}
+    assert r["ok"] and set(written) == {"Сводка", "Модель", "Проекты", "Движение денег", "ФОТ", "Закупки"}
+    md = {row[0]: row for row in written["Модель"] if row}
+    assert md["Показатель"][-1] == "Итого 2026" and md["ВЫРУЧКА"][1] == "" and "Прибыль до ИПН" in md
     assert written["Сводка"][11][0] == "Ноябрь" and written["Движение денег"][1][3] == 1000.0
 
 
@@ -293,12 +295,15 @@ def test_bitrix_projects(client, monkeypatch):
     monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False: deals)
     monkeypatch.setattr(bx, "read", lambda m, p, fresh=False, **k: {"result": {"items": [{"CREATED_TIME": "2026-09-30T10:00:00+03:00"}]}})
     monkeypatch.setattr(bx, "city_name", lambda v: "Астана")
+    monkeypatch.setattr(bx, "enum_map", lambda code: {"43243": "B2B — бизнес"})
+    deals[0][fin_bx.F_MODEL] = "43243"
     with db.pool.connection() as conn, conn.transaction():
         r = fin_bx.import_projects(conn)
         got = {x["deal_id"]: x for x in conn.execute("SELECT * FROM fin_projects WHERE origin='bitrix'").fetchall()}
     assert r["projects"] == 2 and set(got) == {1579, 1611}                       # 943 есть в листе, 1700 сдана в сентябре
     assert str(got[1579]["closed"]) == "2026-11-04" and got[1579]["title"] == "Детская площадка" and float(got[1579]["debt"]) == 300000
     assert str(got[1611]["closed"]) == "2026-11-05" and got[1611]["title"] == "УЙДОМДОНЕР"
+    assert got[1579]["model"] == "B2B"
     monkeypatch.setattr(fin, "sheet_values", lambda sid, rng: [])
     monkeypatch.setattr(fin, "month_rows", lambda y, m, fresh=False: [r for r in fin.rows(y, fresh) if r["month"] == m])
     fin._cache.clear()
