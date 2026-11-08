@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { FeedbackInbox } from './feedback.jsx'
 import { api, setViewAs, viewAs } from './api.js'
 import { flush } from './queue.js'
 import { money } from './crm.jsx'
@@ -20,6 +21,7 @@ export function usePulse(on) {
 export function Pulse({ me, pulse, go }) {
   const p = pulse
   const [fin, setFin] = useState(null)
+  const [fb, setFb] = useState(null)   // обращения после ответа — заново с сервера
   useEffect(() => { api('/fin/summary?ym=' + ym()).then(setFin, e => setFin({ err: e.message })) }, [])
   if (p === null) return <div className="card muted">Загрузка…</div>
   if (p === false) return <div className="card muted">Пульт не загрузился. Обновите страницу.</div>
@@ -49,6 +51,8 @@ export function Pulse({ me, pulse, go }) {
         <div className="qmain"><b>{a.t}</b><div className={'small ' + (a.hot ? 'why' : 'muted')}>{a.s}</div></div><span className="muted">›</span>
       </div>)}
     </div>}
+
+    <FeedbackInbox items={fb ?? p.feedback} reload={() => api('/head/pulse').then(x => setFb(x.feedback))} />
 
     <div className="card"><div className="head"><h3>Деньги · {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</h3>
       <button className="ghost mini" onClick={() => go('fin')}>Финансы</button></div>

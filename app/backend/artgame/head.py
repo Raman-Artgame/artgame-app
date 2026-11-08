@@ -11,7 +11,7 @@ from .deps import require_head
 router = APIRouter(prefix="/api")
 
 FEED = ("deal_open", "place_download", "shift_add", "shift_start", "shift_finish", "media_review", "expense_add", "shift_cancel", "expense_cancel",
-        "bx_write", "place_doc_set", "file_add", "register")
+        "bx_write", "place_doc_set", "file_add", "register", "feedback_add")
 
 
 @router.get("/head/pulse")
@@ -27,6 +27,10 @@ def pulse(p: dict = Depends(require_head)):
                            (SELECT count(DISTINCT expense_id) FROM stock_lines l JOIN expenses e ON e.id=l.expense_id
                              WHERE e.status='submitted' AND l.flag IN ('over_cap','no_ref')) AS over_cap""")
         catalogs = one("SELECT count(*) AS n FROM design_catalogs WHERE status='sent'")["n"]
+        feedback = conn.execute(   # «Обращения» (HEAD 08.11): новые и в работе
+            """SELECT f.id, f.kind, f.text, f.place, f.status, f.created_at, pe.full_name, r.title AS role_title
+               FROM feedback f JOIN people pe ON pe.id=f.person_id LEFT JOIN roles r ON r.code=f.role_code
+               WHERE f.status<>'done' ORDER BY f.status='work', f.created_at DESC LIMIT 20""").fetchall()
         media = one("SELECT count(*) AS n FROM files WHERE kind='media' AND status='ready' AND review='pending'")["n"]
         today = conn.execute(
             """SELECT s.id, pe.full_name, r.title AS role_title, o.title AS object_title, s.zone_code, s.started_at, s.ended_at, s.status
@@ -45,5 +49,5 @@ def pulse(p: dict = Depends(require_head)):
         week = one("""SELECT count(*) FILTER (WHERE status='approved') AS approved, count(*) FILTER (WHERE status='rejected') AS rejected,
                              count(DISTINCT person_id) AS people
                       FROM shifts WHERE started_at > now() - interval '7 days' AND status<>'cancelled'""")
-    return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"])}, "catalogs": catalogs, "media": media,
+    return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"])}, "catalogs": catalogs, "media": media, "feedback": feedback,
             "today": today, "team": team, "feed": feed, "week": week}
