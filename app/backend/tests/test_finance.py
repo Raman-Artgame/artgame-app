@@ -273,3 +273,34 @@ def test_export_style():
     assert {"deleteBanding": {"bandedRangeId": 77}} in r and kinds.count("deleteConditionalFormatRule") == 2
     assert kinds.count("addBanding") == 1 and kinds.count("addConditionalFormatRule") == 2
     assert all("(" not in x[k].get("fields", "") for x in r for k in x)   # маски полей — через точку, скобки API не принимает
+
+
+def test_bitrix_projects(client, monkeypatch):
+    """С ноября проекты — сданные сделки Битрикса: «Оплата+закрывающие» по дню перевода, «Оплата получена» — по «Окончание факт»;
+    сделки из листа не задваиваются; выручка месяца в «Сводке» их видит."""
+    from artgame import bx, fin, fin_bx
+    setup(client, monkeypatch)
+    with db.pool.connection() as conn:
+        conn.execute("""INSERT INTO fin_projects (year, row_no, deal_id, month, closed, title, revenue) VALUES (2026, 5, 943, 10, '2026-10-14', 'ФОК', 100)""")
+    deals = [{"ID": "1579", "TITLE": "1579 · ДЕТСКАЯ ПЛОЩАДКА — АСТАНА", "STAGE_ID": "UC_BMKDS4", "OPPORTUNITY": "300000.00",
+              "MOVED_TIME": "2026-11-04T13:13:22+03:00", fin_bx.F_END: "", bx.OBJECT: "Детская площадка", bx.CITY: "1",
+              "UF_CRM_ARTGAME_FIN03_RECEIVED": "0|KZT", "UF_CRM_ARTGAME_FIN03_DEBT": "300000|KZT"},
+             {"ID": "1611", "TITLE": "1611 · УЙДОМДОНЕР — АСТАНА", "STAGE_ID": "WON", "OPPORTUNITY": "110000",
+              "MOVED_TIME": "2026-11-06T10:00:00+03:00", fin_bx.F_END: "2026-11-05T03:00:00+03:00", bx.OBJECT: "", bx.CITY: "1"},
+             {"ID": "943", "TITLE": "943 · ФОК", "STAGE_ID": "UC_BMKDS4", "OPPORTUNITY": "9787500", "MOVED_TIME": "2026-11-02T10:00:00+03:00"},
+             {"ID": "1700", "TITLE": "1700 · СТАРАЯ", "STAGE_ID": "WON", "OPPORTUNITY": "50000", "MOVED_TIME": "2026-11-03T10:00:00+03:00",
+              fin_bx.F_END: ""}]
+    monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False: deals)
+    monkeypatch.setattr(bx, "read", lambda m, p, fresh=False, **k: {"result": {"items": [{"CREATED_TIME": "2026-09-30T10:00:00+03:00"}]}})
+    monkeypatch.setattr(bx, "city_name", lambda v: "Астана")
+    with db.pool.connection() as conn, conn.transaction():
+        r = fin_bx.import_projects(conn)
+        got = {x["deal_id"]: x for x in conn.execute("SELECT * FROM fin_projects WHERE origin='bitrix'").fetchall()}
+    assert r["projects"] == 2 and set(got) == {1579, 1611}                       # 943 есть в листе, 1700 сдана в сентябре
+    assert str(got[1579]["closed"]) == "2026-11-04" and got[1579]["title"] == "Детская площадка" and float(got[1579]["debt"]) == 300000
+    assert str(got[1611]["closed"]) == "2026-11-05" and got[1611]["title"] == "УЙДОМДОНЕР"
+    monkeypatch.setattr(fin, "sheet_values", lambda sid, rng: [])
+    monkeypatch.setattr(fin, "month_rows", lambda y, m, fresh=False: [r for r in fin.rows(y, fresh) if r["month"] == m])
+    fin._cache.clear()
+    s = client.get("/api/fin/summary", params={"ym": "2026-11"}, headers=hdr(1000)).json()
+    assert s["revenue"]["gross"] == 410000

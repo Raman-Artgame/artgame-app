@@ -1,4 +1,4 @@
-"""Выручка месяца — из таблицы HEAD «Финансовый учёт 2026 (единый)», лист «Проекты <год>».
+"""Выручка месяца — до октября 2026 из листа «Проекты <год>» (ведётся руками), с ноября — сданные сделки Битрикса.
 
 HEAD ведёт её по дате завершения работ, и только там актуальные цифры (05.11). В Битриксе CLOSEDATE — день перевода
 в «успех» (сделки закрывают пачками), а «Фактическая дата завершения проекта» заполнена у малой части сделок.
@@ -69,9 +69,23 @@ def rows(year: int, fresh: bool = False) -> list[dict]:
             continue
         out.append({"id": int(r[0]), "title": r[2].strip(), "city": r[3].strip(), "closed": closed or f"{year}-{mon:02d}-01",
                     "month": mon, "sum": _num(r[14])})
+    out += bitrix_rows(year)
     with _lock:
         _cache[key] = (now, out)
     return out
+
+
+def bitrix_rows(year: int) -> list[dict]:
+    """С ноября 2026 проекты — сданные сделки Битрикса (fin_bx.import_projects, раз в 15 минут), а не ручной лист."""
+    from . import db
+    try:
+        with db.pool.connection() as conn:
+            got = conn.execute("""SELECT deal_id, title, city, closed, month, revenue FROM fin_projects
+                                  WHERE year=%s AND origin='bitrix' ORDER BY closed""", (year,)).fetchall()
+    except Exception:  # noqa: BLE001 — базы нет (тесты листа) — только лист
+        return []
+    return [{"id": r["deal_id"], "title": r["title"], "city": r["city"], "closed": str(r["closed"]), "month": r["month"],
+             "sum": float(r["revenue"])} for r in got]
 
 
 def month_rows(y: int, m: int, fresh: bool = False) -> list[dict]:

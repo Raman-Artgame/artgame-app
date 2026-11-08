@@ -21,7 +21,7 @@ ORDER = ["Сводка", "Проекты", "Движение денег", "ФО�
 # красный акцент. Для каждого листа: колонки денег, колонки дат, ширины. Применяется при каждой выгрузке, руками не держим.
 LAYOUT = {
     "Сводка": {"money": range(1, 17), "date": (), "w": [110] + [125] * 16 + [360], "freeze_col": 1},
-    "Проекты": {"money": (10, 11, 12), "date": (9,), "w": [90, 70, 260, 110, 60, 110, 140, 120, 110, 100, 125, 125, 115], "freeze_col": 3},
+    "Проекты": {"money": (10, 11, 12), "date": (9,), "w": [90, 70, 260, 110, 60, 110, 140, 120, 110, 100, 125, 125, 115, 90], "freeze_col": 3},
     "Движение денег": {"money": (3,), "date": (0,), "w": [95, 150, 95, 115, 190, 75, 70, 170, 280, 80, 85], "freeze_col": 1},
     "ФОТ": {"money": (3, 4, 5), "date": (6,), "w": [90, 200, 120, 115, 115, 115, 110, 420], "freeze_col": 2},
     "Закупки": {"money": (5,), "date": (0,), "w": [95, 170, 150, 170, 200, 110, 90, 110, 95], "freeze_col": 1},
@@ -84,10 +84,11 @@ def build(conn, year: int, head: dict) -> dict[str, list[list]]:
                     {"submitted": "ждёт проверки", "approved": "принято", "rejected": "отказ"}.get(e["status"], e["status"]),
                     {"to_pay": "к выплате", "paid": "выплачено"}.get(e["payout_status"], "")])
     prj = [["Месяц", "Сделка", "Объект", "Город", "Модель", "Категория", "Услуга", "Источник", "ИП", "Конец работ", "Выручка с НДС",
-            "Получено", "Долг"]]
+            "Получено", "Долг", "Откуда"]]
     for r in conn.execute("SELECT * FROM fin_projects WHERE year=%s ORDER BY month, closed NULLS LAST, row_no", (year,)).fetchall():
         prj.append([MONTHS[r["month"] - 1], r["deal_id"] or "", r["title"], r["city"], r["model"], r["category"], r["service"], r["source"],
-                    r["ip"], _d(r["closed"]), float(r["revenue"]), float(r["received"]), float(r["debt"])])
+                    r["ip"], _d(r["closed"]), float(r["revenue"]), float(r["received"]), float(r["debt"]),
+                    "Битрикс" if r["origin"] == "bitrix" else "лист 2026"])
     return {"Сводка": sv, "Проекты": prj, "Движение денег": led, "ФОТ": pay, "Закупки": buy}
 
 

@@ -46,7 +46,7 @@ def import_projects(conn, year: int = YEAR) -> int:
         n += 1
         seen.append(i)
     # строки, которых больше нет в листе, — убираем из копии (это зеркало листа, не учётные записи)
-    conn.execute("DELETE FROM fin_projects WHERE year=%s AND NOT (row_no = ANY(%s))", (year, seen))
+    conn.execute("DELETE FROM fin_projects WHERE year=%s AND origin='sheet' AND NOT (row_no = ANY(%s))", (year, seen))
     return n
 
 
@@ -153,7 +153,8 @@ def import_payroll(conn, year: int = YEAR, by: int | None = None) -> dict:
 
 def run(conn, by: int | None = None) -> dict:
     out = {}
-    for name, fn in (("projects", lambda: import_projects(conn)), ("payments", lambda: import_client_payments(conn)),
+    for name, fn in (("projects", lambda: import_projects(conn)), ("bitrix_projects", lambda: fin_bx.import_projects(conn)),
+                     ("payments", lambda: import_client_payments(conn)),
                      ("payroll", lambda: import_payroll(conn, by=by))):
         try:
             with conn.transaction():

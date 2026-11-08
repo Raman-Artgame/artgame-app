@@ -62,3 +62,58 @@ def import_payments(conn, since: date = START, until: date | None = None, ids: l
                  f"{day:%Y-%m}", did, f"{(d.get('TITLE') or '')[:120]} · поступление {n}", ref))
             added += 0 if old else 1
     return {"deals": len(deals), "added": added, "changed": changed}
+
+
+# ── Проекты с ноября — из Битрикса (HEAD 08.11) ─────────────────────────────────────────────────────────────────────
+DONE = ("UC_BMKDS4", "WON")        # «Оплата+закрывающие документы» (работы сданы) и «Оплата получена»
+F_END = "UF_CRM_ARTGAME_PROJECT_END_ACTUAL"
+P_SELECT = ["ID", "TITLE", "STAGE_ID", "OPPORTUNITY", "MOVED_TIME", F_END, bx.CITY, bx.OBJECT,
+            "UF_CRM_ARTGAME_FIN03_RECEIVED", "UF_CRM_ARTGAME_FIN03_DEBT"]
+ROW0 = 1_000_000
+
+
+def _entered(did: int, stage: str) -> date | None:
+    """День, когда сделка попала на стадию (история стадий Битрикса)."""
+    try:
+        hist = bx._rows(bx.read("crm.stagehistory.list", {"entityTypeId": 2, "filter": {"OWNER_ID": did, "STAGE_ID": stage},
+                                                         "order": {"ID": "ASC"}}, fresh=True))
+    except Exception:  # noqa: BLE001
+        return None
+    return _day(hist[0].get("CREATED_TIME")) if hist else None
+
+
+def end_of_works(d: dict) -> date | None:
+    """Конец работ: «Окончание факт», иначе день перевода в «Оплата+закрывающие», иначе последнее движение по стадиям."""
+    end = _day(d.get(F_END))
+    if end:
+        return end
+    if d.get("STAGE_ID") == "WON":
+        end = _entered(int(d["ID"]), "UC_BMKDS4")
+    return end or _day(d.get("MOVED_TIME"))
+
+
+def import_projects(conn, since: date = START) -> dict:
+    """Сделки «1.1 Продажи РК», сданные с `since`, → fin_projects (origin='bitrix'). Сделки, что уже есть в листе, не берём."""
+    in_sheet = {r["deal_id"] for r in conn.execute("SELECT DISTINCT deal_id FROM fin_projects WHERE origin='sheet' AND deal_id IS NOT NULL")}
+    deals = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": list(DONE), ">=MOVED_TIME": since.isoformat()},
+                                          "select": P_SELECT}, fresh=True)
+    seen, added = [], 0
+    for d in deals:
+        did = int(d["ID"])
+        end = end_of_works(d)
+        if did in in_sheet or not end or end < since:
+            continue
+        row_no = ROW0 + did
+        title = (d.get(bx.OBJECT) or "").strip() or str(d.get("TITLE") or "").split("·", 1)[-1].split("—")[0].strip()
+        added += conn.execute(
+            """INSERT INTO fin_projects (year, row_no, deal_id, month, closed, title, city, revenue, received, debt, origin, synced_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'bitrix', now())
+               ON CONFLICT (year, row_no) DO UPDATE SET month=EXCLUDED.month, closed=EXCLUDED.closed, title=EXCLUDED.title,
+                 city=EXCLUDED.city, revenue=EXCLUDED.revenue, received=EXCLUDED.received, debt=EXCLUDED.debt, synced_at=now()
+               RETURNING (xmax = 0) AS ins""",
+            (end.year, row_no, did, end.month, end, title, bx.city_name(d.get(bx.CITY)), bx._money(d.get("OPPORTUNITY")),
+             bx._money(d.get("UF_CRM_ARTGAME_FIN03_RECEIVED")), bx._money(d.get("UF_CRM_ARTGAME_FIN03_DEBT")))).fetchone()["ins"]
+        seen.append(row_no)
+    # сделку вернули со стадии или перенесли в лист — убираем из копии
+    conn.execute("DELETE FROM fin_projects WHERE origin='bitrix' AND closed >= %s AND NOT (row_no = ANY(%s))", (since, seen))
+    return {"projects": len(seen), "added": added}
