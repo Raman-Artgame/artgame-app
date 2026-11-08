@@ -46,6 +46,9 @@ function Common({ d, v, set }) {
 
 const CX = [['easy', 'Лёгкий'], ['medium', 'Средний'], ['hard', 'Сложный'], ['author', 'Авторский']]
 const pct = k => Math.round(k * 100) + '%'
+// «7 нояб., 09:00–18:00» — без секунд, с концом смены
+export const when = (a, b) => new Date(a).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) +
+  (b ? '–' + new Date(b).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '')
 const m2 = x => Number(x).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 
 function Check({ v, set, k, t }) {
@@ -131,7 +134,7 @@ export function Mine() {
     {pending() > 0 && <div className="card">Ждут сети: {pending()}</div>}
     <div className="card"><h2>Мои смены</h2>
       {m.shifts.length ? m.shifts.map(s => <div key={s.id} className="row">
-        <div><b>{s.object_title}</b><br /><span className="muted small">{new Date(s.started_at).toLocaleString('ru-RU')}{s.area_m2 ? ` · ${+s.area_m2} м²` : ''}</span>
+        <div><b>{s.object_title}</b><br /><span className="muted small">{when(s.started_at, s.ended_at)}{s.area_m2 ? ` · ${+s.area_m2} м²` : ''}</span>
           {s.plan_m2 && <div className="small">{s.zone_code === 'print' ? 'План' : 'Норма'} {m2(s.plan_m2)} м²{s.kpd != null && <> · КПД <b>{pct(s.kpd)}</b></>}{+s.bonus > 0 && <> · бонус <b>{money(s.bonus)}</b></>}</div>}
           {s.reason && <div className="small">Причина: {s.reason}</div>}</div>
         <span className={`tag st-${s.status}`}>{ST[s.status]}</span>
@@ -166,7 +169,7 @@ export function Review() {
   </div>
   return <>
     <div className="card"><h2>Смены на проверку</h2>
-      {r.shifts.length ? r.shifts.map(x => <Item key={x.id} k="shift" x={x}>{new Date(x.started_at).toLocaleString('ru-RU')}{x.area_m2 ? ` · ${+x.area_m2} м²` : ''} · {ZONE[x.zone_code]}{x.plan_m2 ? ` · ${x.zone_code === 'print' ? 'план' : 'норма'} ${m2(x.plan_m2)} м²` : ''}{x.kpd != null ? ` · КПД ${pct(x.kpd)}` : ''}{x.printer ? ` · ${x.printer}` : ''}</Item>) : <p className="muted">Всё проверено</p>}
+      {r.shifts.length ? r.shifts.map(x => <Item key={x.id} k="shift" x={x}>{when(x.started_at, x.ended_at)}{x.area_m2 ? ` · ${+x.area_m2} м²` : ''} · {ZONE[x.zone_code]}{x.plan_m2 ? ` · ${x.zone_code === 'print' ? 'план' : 'норма'} ${m2(x.plan_m2)} м²` : ''}{x.kpd != null ? ` · КПД ${pct(x.kpd)}` : ''}{x.printer ? ` · ${x.printer}` : ''}</Item>) : <p className="muted">Всё проверено</p>}
     </div>
     <div className="card"><h2>Расходы на проверку</h2>
       {r.expenses.length ? r.expenses.map(x => <Item key={x.id} k="expense" x={x}>{money(x.amount)} · {x.paid_by === 'own' ? 'свои' : 'компании'}{x.note ? ' · ' + x.note : ''}{x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</Item>) : <p className="muted">Всё проверено</p>}
