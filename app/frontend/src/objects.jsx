@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { api } from './api.js'
+import { api, uuid } from './api.js'
 import { enqueue } from './queue.js'
 import { shrink } from './work.jsx'
 
@@ -10,7 +10,7 @@ const size = b => b > 1e6 ? (b / 1e6).toFixed(1) + ' МБ' : Math.ceil(b / 1e3) 
 // Большой файл грузится с телефона прямо в Google; сервер только выдаёт ссылку и проверяет результат.
 export function uploadBig(objectId, kind, file, onProgress, extra = {}) {
   return api(`/objects/${objectId}/uploads`, { method: 'POST',
-    body: { client_uid: crypto.randomUUID(), kind, name: file.name, mime: file.type || 'application/octet-stream', size: file.size, ...extra } })
+    body: { client_uid: uuid(), kind, name: file.name, mime: file.type || 'application/octet-stream', size: file.size, ...extra } })
     .then(r => r.done ? r : new Promise((ok, fail) => {
       const x = new XMLHttpRequest()
       x.open('PUT', r.upload_url)

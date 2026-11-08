@@ -1,6 +1,6 @@
 // Офлайн-очередь: запись сохраняется на телефоне и уходит, когда появится сеть.
 // client_uid не даёт серверу создать дубль при повторной отправке.
-import { api, readOnlyHit, testAs, viewAs } from './api.js'
+import { api, readOnlyHit, testAs, uuid, viewAs } from './api.js'
 const KEY = 'artgame.queue.v1'
 const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '[]') } catch { return [] } }
 const save = q => { try { localStorage.setItem(KEY, JSON.stringify(q)) } catch {} }
@@ -13,7 +13,7 @@ export const clearFailed = () => { try { localStorage.removeItem(FKEY) } catch {
 export function enqueue(path, body) {
   // HEAD смотрит как сотрудник: в очередь не кладём, иначе после выхода запись ушла бы от имени HEAD
   if (viewAs() && !testAs()) { readOnlyHit(); return Promise.reject(Object.assign(new Error('read only'), { status: 403 })) }
-  const q = load(); q.push({ path, body: { client_uid: crypto.randomUUID(), ...body } }); save(q)
+  const q = load(); q.push({ path, body: { client_uid: uuid(), ...body } }); save(q)
   return flush()
 }
 

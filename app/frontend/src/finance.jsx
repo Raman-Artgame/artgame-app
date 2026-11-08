@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { api } from './api.js'
+import { api, uuid } from './api.js'
 import { enqueue, pending } from './queue.js'
 import { shrink } from './work.jsx'
 import { money } from './crm.jsx'
@@ -63,7 +63,7 @@ function LedgerForm({ d, done, cancel }) {
   const kind = arts.find(a => a.code === v.article)?.kind
   const send = () => {
     setBusy(true); setE('')
-    api('/fin/ledger', { method: 'POST', body: { client_uid: crypto.randomUUID(), op_date: v.op_date, account: v.account, article: v.article, amount: +v.amount,
+    api('/fin/ledger', { method: 'POST', body: { client_uid: uuid(), op_date: v.op_date, account: v.account, article: v.article, amount: +v.amount,
       to_account: kind === 'transfer' ? v.to_account : null, deal_id: +v.deal_id || null, note: v.note || null, period: v.period || null, receipt: v.receipt || null } })
       .then(done, err(setE)).finally(() => setBusy(false))
   }
@@ -116,7 +116,7 @@ function PayRow({ r, m, d, reload }) {
   const [open, setOpen] = useState(false)
   const [v, set] = useState({ amount: '', account: d.accounts[0]?.code, op_date: today(), adj: '', detail: '' })
   const [e, setE] = useState('')
-  const pay = () => api(`/fin/payroll/${m}/pay`, { method: 'POST', body: { client_uid: crypto.randomUUID(), payee_id: r.id, amount: +v.amount, account: v.account, op_date: v.op_date } })
+  const pay = () => api(`/fin/payroll/${m}/pay`, { method: 'POST', body: { client_uid: uuid(), payee_id: r.id, amount: +v.amount, account: v.account, op_date: v.op_date } })
     .then(() => { setOpen(false); reload() }, err(setE))
   const adj = () => api(`/fin/payroll/${m}/accrual`, { method: 'POST', body: { payee_id: r.id, amount: +v.adj, detail: v.detail } }).then(reload, err(setE))
   const drop = id => api(`/fin/accruals/${id}/cancel`, { method: 'POST' }).then(reload, err(setE))
