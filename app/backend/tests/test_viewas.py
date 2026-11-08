@@ -108,3 +108,39 @@ def test_head_own_expense_no_review(client):
     assert [x["id"] for x in client.get("/api/review", headers=hdr(1000)).json()["expenses"]] == [a["id"]]
     # глазами художника HEAD ничего не пишет вовсе
     assert client.post("/api/expenses", json={**body, "client_uid": str(uuid.uuid4())}, headers=va(1000, 2)).status_code == 403
+
+
+def test_test_as_role_writes_for_test_person(client, monkeypatch):
+    """«Пройти как сотрудник» (test): HEAD действует от «Тест · Саппорт» — смена по шагам доходит до проверки по-настоящему."""
+    from test_files import JPEG, FakeDrive
+    from artgame import drive, viewas
+    FakeDrive.store = {}
+    monkeypatch.setattr(drive, "Drive", FakeDrive)
+    setup_people(client)
+    with db.pool.connection() as c:
+        c.execute("UPDATE objects SET bitrix_stage='UC_AV00QK' WHERE id=731")
+    opts = client.get("/api/view-as/options", headers=hdr(1000)).json()
+    assert opts["test"] is True
+    me = client.get("/api/me", headers=va(1000, "test:support")).json()
+    assert me["role_code"] == "support" and me["full_name"] == "Тест · Саппорт" and me["_view_as"]["kind"] == "test"
+    assert me["zones"] == ["mural"]
+    assert client.get("/api/me", headers=va(1000, "test:support")).json()["id"] == me["id"]   # один на роль
+    assert client.get("/api/me", headers=va(2000, "test:support")).status_code == 403          # только HEAD
+    uid = str(uuid.uuid4())
+    s = client.post("/api/shifts/start", json={"client_uid": uid, "object_id": 731, "zone_code": "mural", "started_at": T0,
+                                               "photo_before": JPEG}, headers=va(1000, "test:support"))
+    assert s.status_code == 200, s.text
+    f = client.post("/api/shifts/finish", json={"client_uid": uid, "ended_at": T1, "area_m2": 2, "work_done": "Грунт и разметка",
+                                                "photo_after": JPEG}, headers=va(1000, "test:support")).json()
+    assert f["status"] == "submitted" and f["person_id"] == me["id"]
+    assert len(FakeDrive.store) == 2
+    with db.pool.connection() as c:
+        assert c.execute("SELECT person_id FROM audit_log WHERE action='shift_finish'").fetchone()["person_id"] == me["id"]
+    # тестовые сотрудники не мешают списку «смотреть как»
+    assert me["id"] not in {p["id"] for p in client.get("/api/view-as/options", headers=hdr(1000)).json()["people"]}
+    # на prod режима нет
+    monkeypatch.setattr(viewas.settings, "env_name", "prod")
+    assert client.get("/api/me", headers=va(1000, "test:support")).status_code == 403
+    r = client.post("/api/shifts/start", json={"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural",
+                                               "started_at": T0, "photo_before": JPEG}, headers=va(1000, "test:support"))
+    assert r.status_code == 403

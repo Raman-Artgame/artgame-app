@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { api, setViewAs, viewAs } from './api.js'
+import { flush } from './queue.js'
 import { money } from './crm.jsx'
 import { LABEL } from './journal.jsx'
 
@@ -92,8 +93,9 @@ export function startViewAs(target) {
   return api('/view-as/start', { method: 'POST', body: { target: String(target) }, noView: true })
     .then(() => { setViewAs(String(target)); location.reload() })
 }
-export function stopViewAs() {
+export async function stopViewAs() {
   const t = viewAs()
+  if (t.startsWith('test:')) await flush().catch(() => {})   // тест: отправить своё неотправленное от тестового сотрудника
   setViewAs('')
   return api('/view-as/stop', { method: 'POST', body: { target: t || '-' }, noView: true }).catch(() => {}).finally(() => location.reload())
 }
@@ -116,6 +118,11 @@ export function ViewAsCard() {
       </div>) : <p className="small muted">В приложении пока никого, кроме вас.</p>}
       <p className="small muted" style={{ marginTop: 14 }}>Или роль целиком — меню и разделы роли на ваших данных (если человека ещё нет):</p>
       <div className="chips">{o.roles.map(r => <button key={r.code} className="ghost" disabled={!!busy} onClick={() => go('role:' + r.code)}>{r.title}</button>)}</div>
+      {o.test && <div className="testas">
+        <h3>Пройти как сотрудник · тест</h3>
+        <p className="small muted">Здесь можно действовать: начать и закончить смену, загрузить фото, отправить расход. Всё идёт по-настоящему — в базу, на Диск в папку сделки, на проверку — от тестового сотрудника «Тест · роль». Только на test.</p>
+        <div className="chips">{o.roles.map(r => <button key={r.code} disabled={!!busy} onClick={() => go('test:' + r.code)}>{r.title}</button>)}</div>
+      </div>}
     </>}
   </div>
 }
@@ -132,8 +139,8 @@ export function ViewAsBar({ me, ROLE = {} }) {
   }, [v])
   if (!v) return null
   return <div className="viewas-bar" role="status">
-    <div className="vtext"><span className="eye">👁</span><span>Вы смотрите как <b>{me.full_name}</b>{v.kind === 'person' && me.role_code ? ` · ${ROLE[me.role_code] || me.role_code}` : ''}{v.note ? ` · ${v.note}` : ''}
-      <i>{msg || 'только просмотр'}</i></span></div>
+    <div className="vtext"><span className="eye">{v.kind === 'test' ? '🧪' : '👁'}</span><span>{v.kind === 'test' ? 'Тест: вы работаете как ' : 'Вы смотрите как '}<b>{me.full_name}</b>{v.kind === 'person' && me.role_code ? ` · ${ROLE[me.role_code] || me.role_code}` : ''}{v.note ? ` · ${v.note}` : ''}
+      <i>{msg || (v.kind === 'test' ? 'всё сохраняется по-настоящему' : 'только просмотр')}</i></span></div>
     <button onClick={stopViewAs}>Вернуться к себе</button>
   </div>
 }
