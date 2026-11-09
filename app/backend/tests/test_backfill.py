@@ -1,6 +1,11 @@
 """Задним числом с 1.11 (HEAD 09.11): «Прошлая смена» и расход с датой — на проверку, с пометкой; окно — из настроек."""
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+
+def _today() -> date:   # дата по Алматы, как у сервера (после 19:00 UTC в Алматы уже завтра)
+    return datetime.now(ZoneInfo("Asia/Almaty")).date()
 
 from artgame import db
 from artgame.config import settings
@@ -10,9 +15,9 @@ from test_production import VALS, Copying, team  # noqa: F401
 
 
 def test_past_shift_and_expense(client, team, monkeypatch):  # noqa: F811
-    y = date.today() - timedelta(days=1)
+    y = _today() - timedelta(days=1)
     monkeypatch.setattr(settings, "backfill_from", (y - timedelta(days=5)).isoformat())
-    monkeypatch.setattr(settings, "backfill_until", date.today().isoformat())
+    monkeypatch.setattr(settings, "backfill_until", _today().isoformat())
     with db.pool.connection() as c:
         c.execute("INSERT INTO objects (id, title, city, bitrix_stage, status) VALUES (732, 'Сдан', 'Астана', 'WON', 'done')")
         c.execute("INSERT INTO objects (id, title, city, bitrix_stage, status) VALUES (733, 'Снова в работе', 'Астана', 'UC_AV00QK', 'active')")
@@ -30,7 +35,7 @@ def test_past_shift_and_expense(client, team, monkeypatch):  # noqa: F811
     mine = next(x for x in client.get("/api/my", headers=hdr(5000)).json()["shifts"] if x["id"] == s["id"])
     assert len(mine["photos"]) == 3
     assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4())}, headers=hdr(5000)).status_code == 409
-    assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "day": date.today().isoformat()},
+    assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "day": _today().isoformat()},
                        headers=hdr(5000)).status_code == 400
     assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "day": (y - timedelta(days=9)).isoformat()},
                        headers=hdr(5000)).status_code == 400
@@ -48,9 +53,9 @@ def test_past_shift_and_expense(client, team, monkeypatch):  # noqa: F811
 
 def test_past_shift_long_night(client, team, monkeypatch):  # noqa: F811
     """HEAD 09.11: ночные проекты и смены дольше 16 ч — одной записью до 48 ч, с временем начала (ночь считает ФОТ)."""
-    y = date.today() - timedelta(days=2)
+    y = _today() - timedelta(days=2)
     monkeypatch.setattr(settings, "backfill_from", (y - timedelta(days=5)).isoformat())
-    monkeypatch.setattr(settings, "backfill_until", date.today().isoformat())
+    monkeypatch.setattr(settings, "backfill_until", _today().isoformat())
     body = {"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "day": y.isoformat(), "hours": 34,
             "start_time": "18:00", "area_m2": 22, "work_done": "Ночной проект", "photo_after": JPEG}
     s = client.post("/api/shifts/past", json=body, headers=hdr(5000)).json()

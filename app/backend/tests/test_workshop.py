@@ -3,6 +3,7 @@ import uuid
 
 from artgame import db
 from conftest import hdr
+from test_backfill import _today
 from test_production import VALS, Copying, team  # noqa: F401
 
 
@@ -20,10 +21,10 @@ def test_workshop_shift(client, team):  # noqa: F811
                                                 "work_done": "Чистка головы, замена демпферов"}, headers=hdr(6300)).json()
     assert f["status"] == "submitted" and f["bonus"] is None and f["plan_m2"] is None
     # задним числом — тоже можно мастерскую (HEAD 09.11)
-    from datetime import date, timedelta
+    from datetime import timedelta
     from artgame.config import settings
-    y = date.today() - timedelta(days=1)
-    settings.backfill_from, settings.backfill_until = (y - timedelta(days=3)).isoformat(), date.today().isoformat()
+    y = _today() - timedelta(days=1)
+    settings.backfill_from, settings.backfill_until = (y - timedelta(days=3)).isoformat(), _today().isoformat()
     ps = client.post("/api/shifts/past", json={"client_uid": str(uuid.uuid4()), "object_id": 0, "zone_code": "print", "day": y.isoformat(),
                                                "hours": 4.5, "work_done": "Замена демпферов", "workshop": "Ремонт и запчасти"}, headers=hdr(6300)).json()
     assert ps["kind"] == "workshop" and ps["object_title"] == "Мастерская · Ремонт и запчасти" and ps["backfill"]
