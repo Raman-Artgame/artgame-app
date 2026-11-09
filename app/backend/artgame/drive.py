@@ -110,9 +110,9 @@ class Drive:
         r.raise_for_status()
         return r.json()
 
-    def stream(self, file_id: str):
-        """Отдаёт содержимое файла кусками (для просмотра в приложении)."""
-        with httpx.stream("GET", f"{API}/{file_id}", headers=self.h, timeout=120,
+    def stream(self, file_id: str, rng: str | None = None):
+        """Отдаёт содержимое файла кусками (для просмотра в приложении). rng — заголовок Range (видео на iPhone без него не играет)."""
+        with httpx.stream("GET", f"{API}/{file_id}", headers={**self.h, **({"Range": rng} if rng else {})}, timeout=120,
                           params={"alt": "media", "supportsAllDrives": "true"}) as r:
             r.raise_for_status()
             yield from r.iter_bytes(256 * 1024)

@@ -69,3 +69,10 @@ export function WaitSheet({ path, title, onClose, onDone, api }) {
     <button disabled={!next || busy} onClick={send}>{busy ? 'Записываю…' : 'Ждать ответа'}</button>
   </Sheet>
 }
+
+// Статус смены / расхода значком (HEAD 09.11: «принято» ломалось по буквам — «может просто галочка»)
+const MARK = { approved: ['✓', 'принято'], rejected: ['✕', 'отказ'], submitted: ['⏳', 'на проверке'], open: ['●', 'идёт'], cancelled: ['–', 'отменено'] }
+export function StatusMark({ status }) {
+  const [i, t] = MARK[status] || ['?', status]
+  return <span className={'stmark st-' + status} title={t} aria-label={t}>{i}</span>
+}

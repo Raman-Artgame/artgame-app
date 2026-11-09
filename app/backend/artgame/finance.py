@@ -350,15 +350,19 @@ def mop_pay(v: dict, gross: float) -> tuple[float, float, float, int]:
     return round(net), round(net * pct / 100), (v.get("pay.mop.bonus_plan") or 0) if step == 3 else 0, step
 
 
-def compute(conn, ym: str, by: dict) -> dict:
-    """Пересчёт начислений месяца. Старые автоначисления помечаются «отменено», ручные остаются. Ничего не удаляется."""
+def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
+    """Пересчёт начислений месяца. Старые автоначисления помечаются «отменено», ручные остаются. Ничего не удаляется.
+    only_person — пересчёт одного человека (онлайн-«Мои выплаты» в откатываемой транзакции, my_pay)."""
     start, end = bounds(ym)
     v = vals(conn)
     sync_payees(conn)
     warn: list[str] = []
-    conn.execute("UPDATE fin_accruals SET status='cancelled' WHERE period=%s AND status='active' AND kind <> 'manual'", (ym,))
+    one = "" if only_person is None else " AND payee_id IN (SELECT id FROM fin_payees WHERE person_id=%s)"
+    conn.execute("UPDATE fin_accruals SET status='cancelled' WHERE period=%s AND status='active' AND kind <> 'manual'" + one,
+                 (ym,) if only_person is None else (ym, only_person))
     payees_ = conn.execute("""SELECT f.*, pe.role_code FROM fin_payees f LEFT JOIN people pe ON pe.id=f.person_id
-                              WHERE f.status='active'""").fetchall()
+                              WHERE f.status='active'""" + ("" if only_person is None else " AND f.person_id=%s"),
+                           () if only_person is None else (only_person,)).fetchall()
     revenue, rev_warn = (None, "")
     if any(x["scheme"] == "mop" for x in payees_):
         revenue, rev_warn = company_revenue(start.year, start.month)
@@ -446,7 +450,8 @@ def compute(conn, ym: str, by: dict) -> dict:
                                      WHERE e.person_id=%s AND e.paid_by='own' AND e.status='approved' AND e.payout_status IN ('to_pay','paid')
                                        AND e.created_at >= %s AND e.created_at < %s""", (f["person_id"], t0, t1)).fetchall():
                 acc(f["id"], "reimburse", _f(e["amount"]), f"чек: {e['title']}", str(e["id"]))
-    db.audit(conn, by["id"], "fin_payroll_compute", "fin_accruals", ym, {"warn": warn})
+    if only_person is None:
+        db.audit(conn, by["id"], "fin_payroll_compute", "fin_accruals", ym, {"warn": warn})
     return {"warn": warn}
 
 
@@ -570,14 +575,27 @@ def my_pay(ym: str | None = None, p: dict = Depends(active)):
         if len(roles) > 1:
             t0 = role_title(conn, roles[0])
             rate = [x if " · " in x["label"] else {**x, "label": f"{t0} · {x['label']}"} for x in rate]
+        # онлайн (HEAD 09.11: «почему цифры не считаются»): начислено считается сразу по принятым сменам —
+        # тот же compute, только для себя и в транзакции, которая откатывается; ФОТ месяца закрывает HEAD.
+        from .fin_bx import START
+        live = ym >= f"{START:%Y-%m}" and p["role_code"] != "head"
+        lines = []
+        if live:
+            with conn.transaction(force_rollback=True):
+                compute(conn, ym, p, only_person=p["id"])
+                f = conn.execute("SELECT * FROM fin_payees WHERE person_id=%s", (p["id"],)).fetchone()
+                if f:
+                    lines = conn.execute("""SELECT kind, amount, detail FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='active'
+                                            ORDER BY id""", (ym, f["id"])).fetchall()
         if not f:
-            return {"month": ym, "lines": [], "accrued": 0, "paid": 0, "left": 0, "rate": rate}
-        lines = conn.execute("""SELECT kind, amount, detail FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='active' ORDER BY id""",
-                             (ym, f["id"])).fetchall()
+            return {"month": ym, "lines": [], "accrued": 0, "paid": 0, "left": 0, "rate": rate, "live": live}
+        if not live:
+            lines = conn.execute("""SELECT kind, amount, detail FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='active' ORDER BY id""",
+                                 (ym, f["id"])).fetchall()
         pays = conn.execute("""SELECT op_date, amount FROM fin_ledger WHERE period=%s AND payee_id=%s AND article_code='payroll'
                                AND status='active' ORDER BY op_date""", (ym, f["id"])).fetchall()
     accrued, paid = sum(_f(x["amount"]) for x in lines), sum(_f(x["amount"]) for x in pays)
-    return {"month": ym, "lines": lines, "payments": pays, "accrued": accrued, "paid": paid, "left": round(accrued - paid, 2), "rate": rate}
+    return {"month": ym, "lines": lines, "payments": pays, "accrued": accrued, "paid": paid, "left": round(accrued - paid, 2), "rate": rate, "live": live}
 
 
 def my_rate(v: dict, role: str | None, f: dict | None) -> list[dict]:

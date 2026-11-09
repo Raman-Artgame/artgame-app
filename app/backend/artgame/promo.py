@@ -123,20 +123,26 @@ def sketches(conn, object_id: int, limit: int = 12) -> list[dict]:
     return [{**links(f), "approved": APPROVED in (f["note"] or "").casefold(), "path": (f["note"] or "").removeprefix("Диск: ")} for f in rows]
 
 
-def progress(conn, object_id: int, area) -> dict:
-    """Ход работ по сменам: м², этапы, лента «до / после»."""
+def progress(conn, object_id: int, area, viewer: dict | None = None) -> dict:
+    """Ход работ по сменам: м², этапы, лента «до / после».
+    Текст отчёта чужой смены (HEAD 09.11: «почему у Бейбарыса виден отчёт Лизы») видят только автор, ГИП объекта, Про и HEAD;
+    остальным — фото и этап, без текста и м²."""
     from .files import sign
+    from .gip import can_see
+    full = viewer is None or can_see(conn, viewer, object_id)
     r = conn.execute("""SELECT count(*) AS n, coalesce(sum(area_m2), 0) AS m2 FROM shifts
                         WHERE object_id=%s AND status IN ('submitted', 'approved')""", (object_id,)).fetchone()
     done_st = {x["stage"] for x in conn.execute("SELECT DISTINCT stage FROM shifts WHERE object_id=%s AND stage IS NOT NULL "
                                                  "AND status IN ('submitted', 'approved')", (object_id,))}
     feed = []
-    for s in conn.execute("""SELECT s.id, s.started_at, s.area_m2, s.work_done, s.stage, s.photo_before, s.photo_after, pe.full_name
+    for s in conn.execute("""SELECT s.id, s.person_id, s.started_at, s.area_m2, s.work_done, s.stage, s.photo_before, s.photo_after, pe.full_name
                              FROM shifts s JOIN people pe ON pe.id=s.person_id
                              WHERE s.object_id=%s AND s.status IN ('submitted', 'approved') AND (s.photo_before IS NOT NULL OR s.photo_after IS NOT NULL)
                              ORDER BY s.started_at DESC LIMIT 8""", (object_id,)).fetchall():
-        feed.append({"id": s["id"], "at": s["started_at"].isoformat(), "who": s["full_name"], "m2": float(s["area_m2"]) if s["area_m2"] else None,
-                     "work_done": s["work_done"], "stage": s["stage"],
+        own = full or (viewer and s["person_id"] == viewer["id"])
+        feed.append({"id": s["id"], "at": s["started_at"].isoformat(), "who": s["full_name"],
+                     "m2": float(s["area_m2"]) if s["area_m2"] and own else None,
+                     "work_done": s["work_done"] if own else None, "stage": s["stage"],
                      "before": sign(s["photo_before"], "thumb") if s["photo_before"] else None,
                      "after": sign(s["photo_after"], "thumb") if s["photo_after"] else None,
                      "before_full": sign(s["photo_before"], "content") if s["photo_before"] else None,

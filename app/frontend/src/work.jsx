@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { StatusMark } from './ui.jsx'
 import { api, testAs, uuid, viewAs } from './api.js'
 import { clearFailed, enqueue, failed, flush, pending } from './queue.js'
 import { startViewAs } from './head.jsx'
@@ -477,7 +478,7 @@ export function Mine() {
           <More x={s} />
           {s.backfill && s.status === 'submitted' && s.object_id ? <AddPics id={s.id} done={load} /> : null}
           {s.reason && <div className="small">Причина: {s.reason}</div>}</div>
-        <span className={`tag st-${s.status}`}>{ST[s.status]}</span>
+        <StatusMark status={s.status} />
         {s.status === 'submitted' && <a onClick={() => cancel('shift', s.id)}>отменить</a>}
       </div>) : <p className="muted">Пока нет</p>}
     </div>
@@ -486,7 +487,7 @@ export function Mine() {
         <div><b>{money(e.amount)}</b> · {e.object_title}{e.backfill ? <span className="small muted"> · {new Date(e.created_at).toLocaleDateString('ru-RU')}, задним числом</span> : null}<br /><span className="muted small">{e.payout_status === 'to_pay' ? 'к выплате' : e.payout_status === 'paid' ? 'выплачено' : ''}</span>
           {e.receipt_url && <a href={e.receipt_url} target="_blank" rel="noreferrer"> чек</a>}
           {e.reason && <div className="small">Причина: {e.reason}</div>}</div>
-        <span className={`tag st-${e.status}`}>{ST[e.status]}</span>
+        <StatusMark status={e.status} />
         {e.status === 'submitted' && <a onClick={() => cancel('expense', e.id)}>отменить</a>}
       </div>) : <p className="muted">Пока нет</p>}
     </div>

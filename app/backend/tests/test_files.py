@@ -44,8 +44,12 @@ class FakeDrive:
     def meta(self, fid):
         return FakeDrive.store[fid]
 
-    def stream(self, fid):
-        yield FakeDrive.store[fid]["data"]
+    def stream(self, fid, rng=None):
+        d = FakeDrive.store[fid]["data"]
+        if rng:
+            a, b = map(int, rng.split("=")[1].split("-"))
+            d = d[a:b + 1]
+        yield d
 
     def thumbnail(self, fid):
         return b"thumb"

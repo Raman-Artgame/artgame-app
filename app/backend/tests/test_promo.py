@@ -49,4 +49,7 @@ def test_live_card(client, team):  # noqa: F811
     r = client.get("/api/work/object/731", headers=hdr(5000)).json()
     assert r["done_m2"] == 15 and r["pct"] == 25
     assert [s["done"] for s in r["stages"]][:3] == [True, True, False]       # грунт считается пройденным раньше переноса
-    assert r["feed"][0]["before"] and r["feed"][0]["after"] and r["feed"][0]["work_done"] == "Перенёс эскиз"
+    # чужой отчёт (HEAD 09.11): фото видно всем, текст и м² — только автору, ГИП, Про и HEAD
+    assert r["feed"][0]["before"] and r["feed"][0]["after"] and r["feed"][0]["work_done"] is None and r["feed"][0]["m2"] is None
+    own = client.get("/api/work/object/731", headers=hdr(2000)).json()["feed"][0]
+    assert own["work_done"] == "Перенёс эскиз" and own["m2"] == 15

@@ -84,3 +84,68 @@ def history(oid: int, p: dict = Depends(active)):
             x["hours"] += round((s["ended_at"] - s["started_at"]).total_seconds() / 3600, 1)
     return {"shifts": shifts, "expenses": exps, "people": sorted(people.values(), key=lambda x: -x["m2"]),
             "spent": sum(float(e["amount"]) for e in exps if e["status"] != "rejected")}
+
+
+# Команда объекта (HEAD 09.11): назначают ГИП объекта, Главный художник, Художник-Про, Мастер печати, HEAD и МОП.
+CREW_BY = ASSIGN | GIP_ROLES
+CREW_ROLES = ("support", "artist", "artist_pro", "lead_artist", "print_operator", "print_master", "carpenter")
+
+
+def can_crew(conn, p: dict, oid: int) -> bool:
+    if p.get("_view_as"):
+        return False
+    if (p.get("acting_role") or p["role_code"]) in CREW_BY or p["role_code"] in CREW_BY:
+        return True
+    o = conn.execute("SELECT gip_person_id FROM objects WHERE id=%s", (oid,)).fetchone()
+    return bool(o and o["gip_person_id"] == p["id"])
+
+
+def crew_of(conn, oid: int) -> list[dict]:
+    return conn.execute("""SELECT pe.id, pe.full_name, r.title AS role_title, c.added_at, ab.full_name AS added_by
+                           FROM object_crew c JOIN people pe ON pe.id=c.person_id JOIN roles r ON r.code=pe.role_code
+                           LEFT JOIN people ab ON ab.id=c.added_by
+                           WHERE c.object_id=%s AND pe.status='active' ORDER BY pe.full_name""", (oid,)).fetchall()
+
+
+@router.get("/objects/{oid}/crew")
+def crew(oid: int, p: dict = Depends(active)):
+    with db.pool.connection() as conn:
+        edit = can_crew(conn, p, oid)
+        out = {"crew": crew_of(conn, oid), "can_edit": edit}
+        if edit:
+            out["candidates"] = conn.execute(
+                """SELECT pe.id, pe.full_name, r.title AS role_title FROM people pe JOIN roles r ON r.code=pe.role_code
+                   WHERE pe.status='active' AND pe.tg_id > 0 AND (pe.role_code = ANY(%s) OR pe.extra_roles && %s::text[])
+                   ORDER BY r.title, pe.full_name""", (list(CREW_ROLES), list(CREW_ROLES))).fetchall()
+    return out
+
+
+class CrewIn(BaseModel):
+    person_id: int
+    on: bool = True
+
+
+@router.post("/objects/{oid}/crew")
+def set_crew(oid: int, b: CrewIn, p: dict = Depends(active)):
+    with db.pool.connection() as conn, conn.transaction():
+        if not can_crew(conn, p, oid):
+            raise HTTPException(403, "на объект назначают ГИП, Главный художник, Про, Мастер печати, МОП и HEAD")
+        o = conn.execute("SELECT id, title, city FROM objects WHERE id=%s", (oid,)).fetchone()
+        if not o or not oid:
+            raise HTTPException(404, "объекта ещё нет в приложении — он появится после синхронизации со сделкой")
+        pe = conn.execute("SELECT id, tg_id, full_name FROM people WHERE id=%s AND status='active'", (b.person_id,)).fetchone()
+        if not pe:
+            raise HTTPException(404, "нет такого сотрудника")
+        if b.on:
+            added = conn.execute("""INSERT INTO object_crew (object_id, person_id, added_by) VALUES (%s,%s,%s)
+                                    ON CONFLICT DO NOTHING RETURNING person_id""", (oid, pe["id"], p["id"])).fetchone()
+        else:
+            added = None
+            conn.execute("DELETE FROM object_crew WHERE object_id=%s AND person_id=%s", (oid, pe["id"]))
+        db.audit(conn, p["id"], "crew_add" if b.on else "crew_remove", "objects", oid, {"person": pe["id"]})
+        out = crew_of(conn, oid)
+    if added:
+        where = f" — {o['city']}" if o["city"] else ""
+        _send(pe["tg_id"], f"{p['full_name']} поставил(а) тебя на объект № {oid} «{o['title']}»{where}. В «Смене» он у тебя первым, "
+                           "в «Проектах» — эскизы и адрес.")
+    return {"crew": out}

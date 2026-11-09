@@ -19,6 +19,7 @@ import { Feedback } from './feedback.jsx'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
 import './tokens.css'
 import { MyData, ProfileForm } from './profile.jsx'
+import { FileLinks } from './objects.jsx'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
   print_operator: 'Оператор настенного принтера', print_master: 'Мастер настенной печати', mop: 'МОП', mop_vip: 'VIP МОП',
@@ -48,7 +49,7 @@ function App() {
   if (!me.profile_at && !me._view_as && me.status !== 'blocked') return <div className="wrap"><ProfileForm me={me} first onDone={setMe} /></div>
   if (me.status !== 'active') return <><ViewAsBar me={me} ROLE={ROLE} /><div className="wrap"><div className="card"><h1>{me.full_name}</h1>
     <p className="muted">{me.status === 'pending' ? 'Заявка у HEAD. Как только назначат роль, откроются разделы.' : 'Вход закрыт.'}</p></div></div></>
-  return <><ViewAsBar me={me} ROLE={ROLE} />
+  return <><ViewAsBar me={me} ROLE={ROLE} /><FileLinks />
     <Main me={me} onMe={setMe} web={web} logout={() => { api('/logout', { method: 'POST', noView: true }).catch(() => {}); setWebToken(''); setViewAs(''); setLogin(true) }} /></>
 }
 
@@ -315,6 +316,7 @@ function Nav({ tabs, tab, setTab, counts = {}, scroll }) {
     {more && <div className="sheet" onClick={() => setMore(false)}><div className="sheetbox" onClick={e => e.stopPropagation()}>
       {rest.map(([k, t]) => <button key={k} className={'ghost' + (tab === k ? ' on' : '')} onClick={() => { setTab(k); setMore(false) }}><Icon k={k} />{t}</button>)}
     </div></div>}
+    <div className="navspace" aria-hidden="true" />{/* место под панель: она закреплена у нижнего края (HEAD 09.11: «везде прыгает») */}
     <nav className={scroll && tabs.length > MAX ? 'scroll' : ''}>
       {main.map(([k, t]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}
         ref={el => { if (el && tab === k && scroll) el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }) }}><Icon k={k} />{t}{counts[k] ? <i className="cnt" aria-hidden="true">{counts[k]}</i> : null}</button>)}

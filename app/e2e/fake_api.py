@@ -46,7 +46,12 @@ class FakeDrive:
         STORE[i] = {**STORE[fid], "parents": [parent]}
         return i
 
-    def stream(self, fid): yield STORE[fid]["data"]
+    def stream(self, fid, rng=None):
+        d = STORE[fid]["data"]
+        if rng:
+            a, b = map(int, rng.split("=")[1].split("-"))
+            d = d[a:b + 1]
+        yield d
     def thumbnail(self, fid): return STORE[fid]["data"]
 
 
