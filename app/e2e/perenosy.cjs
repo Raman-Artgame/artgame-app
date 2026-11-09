@@ -28,6 +28,12 @@ const broken = () => {
       if (tops.size > 1 && !/[-–/]/.test(m[0])) out.push(m[0])
     }
   }
+  // кнопки, вылезшие за край карточки или экрана (HEAD 09.11: ✓/✕ в «Проверке»)
+  for (const btn of document.querySelectorAll('.card button, .row button')) {
+    if (!btn.offsetParent) continue
+    const r = btn.getBoundingClientRect(), c = (btn.closest('.card') || document.body).getBoundingClientRect()
+    if (r.width && (r.right > c.right + 1 || r.right > innerWidth + 1)) out.push(`кнопка «${btn.textContent.trim().slice(0, 12)}» за краем`)
+  }
   return [...new Set(out)]
 }
 
@@ -35,6 +41,10 @@ const broken = () => {
   psql("INSERT INTO objects (id, title, city, bitrix_stage, level, area_m2, address) VALUES (731, 'УЙДОМДОНЕР', 'Астана', 'UC_AV00QK', 'medium', 60, 'Мангилик Ел 1') ON CONFLICT (id) DO UPDATE SET bitrix_stage='UC_AV00QK'")
   psql("INSERT INTO objects (id, title, city, bitrix_stage) VALUES (1579, 'ДЕТСКАЯ ПЛОЩАДКА', 'Астана', 'UC_AV00QK') ON CONFLICT (id) DO NOTHING")
   await call(1000, '/register', { full_name: 'HEAD' })
+  const az = await call(7099, '/register', { full_name: 'Ажар Длиннофамильная-Саппортова' })
+  psql(`INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status, work_done) VALUES (gen_random_uuid(), ${az.id}, 731, 'mural', now() - interval '20 hours', now() - interval '2 hours', 'submitted', 'Фон, контур и детали на всей стене у входа')`)
+  for (const [st, amt, why] of [['rejected', 480, "'Ошибка'"], ['approved', 32300, 'NULL'], ['submitted', 410, 'NULL']])
+    psql(`INSERT INTO expenses (client_uid, person_id, object_id, category, amount, paid_by, note, status, reason) VALUES (gen_random_uuid(), ${az.id}, 0, 'stock_art', ${amt}, 'company', 'Колеровка, краска и материалы × 1 = ${amt} (нет ориентира) · Жана Айгерим', '${st}', ${why})`)
   const b = await chromium.launch()
   const bad = [], checked = []
   let tg = 7100
@@ -53,13 +63,32 @@ const broken = () => {
     await pg.goto('http://127.0.0.1:4173/')
     await pg.locator('nav').waitFor()
     const n = await pg.locator('nav button').count()
-    for (let i = 0; i < n; i++) {
-      const btn = pg.locator('nav button').nth(i)
-      const name = (await btn.textContent()).replace(/\d+$/, '')
-      if (name === 'Ещё') continue
-      await btn.click()
+    const more = n && (await pg.locator('nav button').nth(n - 1).textContent()) === 'Ещё'
+    const extra = more ? await (async () => { await pg.locator('nav button').nth(n - 1).click(); await pg.waitForTimeout(300)
+      const t = await pg.locator('.sheetbox button').allTextContents(); await pg.mouse.click(5, 5); await pg.waitForTimeout(200); return t })() : []
+    for (let i = 0; i < n + extra.length - (more ? 1 : 0); i++) {
+      let name
+      if (i < n - (more ? 1 : 0)) {
+        const btn = pg.locator('nav button').nth(i)
+        name = (await btn.textContent()).replace(/\d+$/, '')
+        await btn.click()
+      } else {   // пункты листа «Ещё»
+        name = extra[i - (n - 1)]
+        await pg.locator('nav button').nth(n - 1).click(); await pg.waitForTimeout(300)
+        await pg.locator('.sheetbox button', { hasText: name }).first().click()
+      }
       await pg.waitForTimeout(700)
       let w = await pg.evaluate(broken)
+      const subs = await pg.locator('.segf button').allTextContents()   // подвкладки (Финансы: Обзор…Люди)
+      for (let j = 1; j < subs.length; j++) {
+        const sname = subs[j]
+        if (await pg.locator('.segf button').count() <= j) break
+        await pg.locator('.segf button').nth(j).click(); await pg.waitForTimeout(600)
+        const ws = await pg.evaluate(broken)
+        if (ws.length) w = w.concat(ws.map(x => `${sname}: ${x}`))
+        if (role === 'head' && sname === 'Закупки') await pg.screenshot({ path: `${shots}/nav-${role}-${name}-${sname}.png`, fullPage: true })
+      }
+      if (subs.length > 1) { await pg.locator('.segf button').first().click(); await pg.waitForTimeout(300) }
       for (const f of pg.frames().slice(1)) w = w.concat(await f.evaluate(broken).catch(() => []))   // места ролей (учебник, ТБ) во фрейме
       if (name === 'Проекты' && await pg.locator('.pcard').first().isVisible().catch(() => false)) {   // и карточка проекта
         await pg.locator('.pcard').first().click(); await pg.waitForTimeout(700); w = w.concat(await pg.evaluate(broken))

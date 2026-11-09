@@ -9,7 +9,7 @@ const DZ_ROLES = new Set(['lead_designer', 'designer_asst'])
 const BX_ROLES = new Set(['mop', 'mop_vip', ...DZ_ROLES])
 
 // Только HEAD: назначить роль и зоны, закрыть вход ушедшему (история остаётся).
-export function People({ ROLE, ZONE }) {
+export function People({ ROLE, ZONE, openViewAs }) {
   const [list, setList] = useState(null)
   const [bx, setBx] = useState(null)
   const [err, setErr] = useState('')
@@ -21,6 +21,7 @@ export function People({ ROLE, ZONE }) {
   const setRole = (p, role) => save(p.id, { role_code: role, ...(p.zones.length || !ROLE_ZONE[role] ? {} : { zones: [ROLE_ZONE[role]] }) })
   const pendingFirst = [...list].sort((a, b) => (a.status === 'pending' ? -1 : 0) - (b.status === 'pending' ? -1 : 0))
   return <div className="card"><h2>Команда</h2>{err && <p className="muted">{err}</p>}
+    {openViewAs && <p className="small"><a className="seeas" onClick={openViewAs}>Посмотреть приложение глазами роли →</a></p>}
     {pendingFirst.map(p => <div key={p.id} className="person">
       <div><b>{p.full_name}</b> {p.tg_username && <span className="muted small">@{p.tg_username}</span>}
         {p.status === 'pending' && <span className="tag st-rejected">ждёт роли</span>}
