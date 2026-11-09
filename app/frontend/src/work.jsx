@@ -54,7 +54,8 @@ const CX = [['easy', 'Лёгкий'], ['medium', 'Средний'], ['hard', 'С
 const pct = k => Math.round(k * 100) + '%'
 // «7 нояб., 09:00–18:00» — без секунд, с концом смены
 export const when = (a, b) => new Date(a).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) +
-  (b ? '–' + new Date(b).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '')
+  (b ? '–' + new Date(b).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) +
+    (new Date(b).toDateString() !== new Date(a).toDateString() ? ' след. дня' : '') + ` · ${Math.round((new Date(b) - new Date(a)) / 36e5 * 10) / 10} ч` : '')
 const m2 = x => Number(x).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 
 
@@ -494,6 +495,27 @@ export function Mine() {
   </>
 }
 
+// Проверяющий сам правит смену до решения (HEAD 09.11): время начала, часы через полночь, «дорога» → «смена»
+const hm = d => new Date(d).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Almaty' })
+function FixShift({ x, done }) {
+  const hrs = x.ended_at ? Math.round((new Date(x.ended_at) - new Date(x.started_at)) / 36e5 * 10) / 10 : 10
+  const [open, setOpen] = useState(false)
+  const [v, set] = useState({ start_time: hm(x.started_at), hours: String(hrs), kind: x.kind || 'work' })
+  const [err, setErr] = useState('')
+  if (!open) return <a className="small fixlink" onClick={() => setOpen(true)}>✎ Исправить время{x.kind === 'road' ? ' или тип' : ''}</a>
+  const save = () => api(`/shift/${x.id}/fix`, { method: 'POST', body: { start_time: v.start_time, hours: +v.hours, kind: v.kind } })
+    .then(() => { setOpen(false); done() }, e => setErr(e.message))
+  return <div className="fixbox">
+    <div className="pair"><div><label className="muted small">Начали в</label><input type="time" value={v.start_time} onChange={e => set({ ...v, start_time: e.target.value })} /></div>
+      <div><label className="muted small">Часов (до 48)</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} /></div></div>
+    {x.kind === 'road' && <div className="segf"><button className={v.kind === 'road' ? 'on' : ''} onClick={() => set({ ...v, kind: 'road' })}>Дорога</button>
+      <button className={v.kind === 'work' ? 'on' : ''} onClick={() => set({ ...v, kind: 'work' })}>Рабочая смена</button></div>}
+    <p className="small muted">Через полночь — просто больше часов: 9:00 + 18 ч = до 3:00. Ночь и переработка посчитаются сами.</p>
+    {err && <p className="small why">{err}</p>}
+    <div className="seg"><button className="mini" disabled={!(+v.hours > 0 && +v.hours <= 48)} onClick={save}>Сохранить</button><button className="ghost mini" onClick={() => setOpen(false)}>Отмена</button></div>
+  </div>
+}
+
 export function Review() {
   const [r, setR] = useState(null)
   const load = () => api('/review').then(setR, () => setR({ shifts: [], expenses: [] }))
@@ -509,7 +531,8 @@ export function Review() {
       {x.work_done && <div className="small">Сделал: {x.work_done}</div>}
       {(x.photo_before_url || x.photo_after_url) && <div className="pair">{x.photo_before_url && <a href={x.photo_before_full} target="_blank" rel="noreferrer"><img src={x.photo_before_url} alt="до" /></a>}
         {x.photo_after_url && <a href={x.photo_after_full} target="_blank" rel="noreferrer"><img src={x.photo_after_url} alt="после" /></a>}</div>}
-      <More x={x} /></div>
+      <More x={x} />
+      {k === 'shift' && <FixShift x={x} done={load} />}</div>
     <div className="seg"><button onClick={() => decide(k, x.id, true)}>✓</button><button className="ghost" onClick={() => decide(k, x.id, false)}>✕</button></div>
   </div>
   return <>

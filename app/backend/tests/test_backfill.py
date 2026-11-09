@@ -61,3 +61,22 @@ def test_past_shift_long_night(client, team, monkeypatch):  # noqa: F811
     s = client.post("/api/shifts/past", json=body, headers=hdr(5000)).json()
     assert s["status"] == "submitted" and s["started_at"].startswith(y.isoformat() + "T13:00")   # 18:00 Алматы = 13:00 UTC
     assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "hours": 49}, headers=hdr(5000)).status_code == 422
+
+
+def test_road_does_not_block_and_fix(client, team, monkeypatch):  # noqa: F811
+    """HEAD 09.11 (Ажар): дорога в тот же день не мешает внести смену; проверяющий сам правит время и тип."""
+    y = _today() - timedelta(days=1)
+    monkeypatch.setattr(settings, "backfill_from", (y - timedelta(days=5)).isoformat())
+    monkeypatch.setattr(settings, "backfill_until", _today().isoformat())
+    with db.pool.connection() as c:
+        pid = c.execute("SELECT id FROM people WHERE tg_id=5000").fetchone()["id"]
+        road = c.execute("""INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status, kind, trip, work_done)
+                            VALUES (gen_random_uuid(), %s, 731, 'mural', %s::date + time '09:00', %s::date + time '19:00', 'submitted', 'road', true, 'Дорога на объект')
+                            RETURNING id""", (pid, y, y)).fetchone()["id"]
+    body = {"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "day": y.isoformat(), "hours": 18,
+            "start_time": "09:00", "work_done": "Роспись до ночи"}
+    s = client.post("/api/shifts/past", json=body, headers=hdr(5000))
+    assert s.status_code == 200, s.text
+    assert client.post(f"/api/shift/{road}/fix", json={"start_time": "09:00", "hours": 18}, headers=hdr(5000)).status_code == 403   # сам себе — нет
+    r = client.post(f"/api/shift/{road}/fix", json={"start_time": "10:30", "hours": 17.5, "kind": "work"}, headers=hdr(1000)).json()
+    assert r["kind"] == "work" and "05:30" in r["started_at"]   # 10:30 Алматы

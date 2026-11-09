@@ -697,3 +697,5 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .fin-month { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line2); }
 .fin-month .head { margin-bottom: 8px; }
 .donut { flex-direction: column; align-items: stretch; } .donut svg { align-self: center; width: 150px; } .dlegend { width: 100%; }
+.fixlink { display: inline-block; margin-top: 6px; color: var(--accent2) !important; }
+.fixbox { margin-top: 8px; padding: 10px; border-radius: 12px; background: var(--alt); }
