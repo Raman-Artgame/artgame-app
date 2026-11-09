@@ -183,7 +183,7 @@ function PastShift({ d, done }) {
         setProg(`Фото ${i + 2} из ${pics.length}…`)
         try { await api(`/shifts/${sh.id}/photos`, { method: 'POST', body: { client_uid: uuid(), photo: rest[i] } }) } catch { bad++ }
       }
-      done(`Смена за ${dm(v.day)} ушла на проверку${pics.length && !shop ? `, фото: ${pics.length - bad}` : ''}.${bad ? ` Не загрузилось ${bad} — добавь их ещё раз в «Кабинете».` : ''}`)
+      done(`Смена за ${dm(v.day)} ушла на проверку${pics.length && !shop ? `, фото: ${pics.length - bad}` : ''}.${bad ? ` Не загрузилось ${bad} — добавь их в «Кабинете» → «Мои смены».` : ''}`)
     } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false); setProg('') }
   }
   return <div className="card past">
@@ -435,6 +435,20 @@ export function More({ x }) {
   return <div className="pics view">{x.photos.map((f, i) => <a key={i} href={f.full} target="_blank" rel="noreferrer"><img src={f.url} alt="" /></a>)}</div>
 }
 
+// Добавить ещё фото к отчёту задним числом, пока он на проверке
+function AddPics({ id, done }) {
+  const [msg, setMsg] = useState('')
+  const up = async files => {
+    let ok = 0
+    for (const f of [...files]) {
+      setMsg(`Загружаю ${ok + 1} из ${files.length}…`)
+      try { await api(`/shifts/${id}/photos`, { method: 'POST', body: { client_uid: uuid(), photo: await shrink(f) } }); ok++ } catch { /* следующее */ }
+    }
+    setMsg(`Добавлено фото: ${ok}`); done()
+  }
+  return <label className="small addpics"><a>🖼 Добавить фото</a><input type="file" accept="image/*" multiple hidden onChange={e => { const f = [...e.target.files]; e.target.value = ''; up(f) }} />{msg && <span className="muted"> {msg}</span>}</label>
+}
+
 export function Mine() {
   const [m, setM] = useState(null)
   const load = () => api('/my').then(setM, () => {})
@@ -458,6 +472,7 @@ export function Mine() {
           {s.work_done && <div className="small">Сделал: {s.work_done}</div>}
           {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <img src={s.photo_before_url} alt="до" />}{s.photo_after_url && <img src={s.photo_after_url} alt="после" />}</div>}
           <More x={s} />
+          {s.backfill && s.status === 'submitted' && s.object_id ? <AddPics id={s.id} done={load} /> : null}
           {s.reason && <div className="small">Причина: {s.reason}</div>}</div>
         <span className={`tag st-${s.status}`}>{ST[s.status]}</span>
         {s.status === 'submitted' && <a onClick={() => cancel('shift', s.id)}>отменить</a>}
