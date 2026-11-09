@@ -143,6 +143,27 @@ async function tab(p, name) {
   const cat = (await call(7100, '/design/catalogs')).rows[0]
   assert.strictEqual(cat.status, 'approved')
   assert.deepStrictEqual(cat.authors.sort(), [ids[7000], ids[7100]].sort())
-  console.log('OK: меню по ролям, сбор на объект, Про проверяет Главного, воронка дизайна, каталог референсов, своя ставка')
+  // 6. И.о. (HEAD 09.11): художник исполняет обязанности Главного — меню Главного, ставка художника, повышение 15.12
+  await call(1000, `/people/${ids[2000]}`, { acting_role: 'lead_artist', acting_promo: '2026-12-15', acting_note: 'День рождения команды!' })
+  const io = await open(b, 2000)
+  assert.deepStrictEqual(await navText(io), ['Сбор', 'Смена', 'Расход', 'Продакшн', 'Проверка', 'Проекты', 'Учёба', 'Кабинет'])
+  await tab(io, 'Кабинет')
+  await io.getByText('Ты — и.о. Главного художника').waitFor()
+  await io.getByText('Повышение — 15 декабря.').waitFor()
+  await io.getByText('Художник · и.о. Главного художника').waitFor()
+  await io.getByText(/15\s000 ₸/).first().waitFor()   // ставка — художника
+  await io.screenshot({ path: `${shots}/kab-io.png` })
+  // «Как подняться»: у Главного — к Про, у художника — к Главному; самопроверка «есть / нет»
+  await io.locator('.dutyfold').first().getByRole('button', { name: 'Открыть' }).click()
+  await io.getByText('Как стать Художником-Про').waitFor()
+  await io.locator('.grow .growrow').first().click()
+  await io.getByText('есть 1 из 7').waitFor()
+  await io.locator('.grow').scrollIntoViewIfNeeded()
+  await io.screenshot({ path: `${shots}/kab-grow-pro.png` })
+  // HEAD в «Команде»: поле и.о. и день повышения
+  await tab(h, 'Команда')
+  await h.getByText('Исполняет обязанности (и.о.)').first().waitFor()
+  await h.locator('input[type=date]').first().waitFor()
+  console.log('OK: меню по ролям, сбор на объект, Про проверяет Главного, воронка дизайна, каталог референсов, своя ставка, и.о. Главного, как подняться')
   await b.close()
 })().catch(e => { console.error(e); process.exit(1) })

@@ -203,7 +203,8 @@ def shift_role(p: dict, zone: str, want: str | None = None) -> str:
     if want and want in roles:
         return want
     pick = [r for r in roles if (r in PRINT_ROLES) == (zone == "print")]
-    return p["role_code"] if p["role_code"] in pick or not pick else pick[0]
+    cur = p["role_code"] if p["role_code"] in roles else roles[0]   # и.о.: ставка — по основной роли, не по исполняемой
+    return cur if cur in pick or not pick else pick[0]
 
 
 class FinishIn(BaseModel):

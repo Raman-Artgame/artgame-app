@@ -602,3 +602,11 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .card.duty.forbid { border-left: 4px solid var(--hot); }
 .card.duty.forbid li { margin: 4px 0; }
 .card.duty.policy { border-left: 4px solid var(--accent); }
+/* «Как подняться» и «и.о.» (HEAD 09.11) */
+.grow .growrow { cursor: pointer; align-items: flex-start; }
+.grow .growrow > div { flex: 1; }
+.grow .growrow p { margin: 2px 0 0; }
+.grow .growrow em { font-style: normal; color: var(--muted); flex: none; }
+.grow .growrow.ok span { background: var(--ok); }
+.grow .growrow.ok em { color: var(--ok); font-weight: 600; }
+.card.acting { border-left: 4px solid var(--accent); }

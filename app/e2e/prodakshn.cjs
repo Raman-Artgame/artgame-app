@@ -59,7 +59,7 @@ async function tab(p, name) {
   await tab(s, 'Учёба')
   await s.getByRole('button', { name: 'Правила игры' }).click()
   await s.getByText('Правила игры · Саппорт').waitFor()
-  await s.getByText('Что нужно уметь').waitFor()
+  await s.getByText(/Что нужно для ступени/).waitFor()
   // Полная должностная (HEAD 08.11): требования, права, запрещено, политика; без источника — «черновик»
   await s.getByText('Требования', { exact: true }).waitFor()
   await s.getByText('Что запрещено').waitFor()
