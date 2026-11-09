@@ -299,7 +299,7 @@ def _hm(x, default: str) -> tuple[int, int]:
 
 def night_hours(v: dict, start: datetime, end: datetime | None) -> float:
     """Ночные часы смены (HEAD 09.11: с 00:00 до 06:00 — pay.night.from / pay.night.to в «Значениях»), по времени Алматы."""
-    if not end or end <= start:
+    if not end or end <= start or not v.get("pay.night.from") or not v.get("pay.night.to"):   # без ключей ночь не считаем
         return 0.0
     (fh, fm), (th, tm) = _hm(v.get("pay.night.from"), "0:00"), _hm(v.get("pay.night.to"), "6:00")
     a, b = start.astimezone(TZ), end.astimezone(TZ)
