@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { Skeleton, cleanTitle, money } from './crm.jsx'
 import { Gallery } from './objects.jsx'
+import { More } from './work.jsx'
 
 // «Проекты» — общая вкладка (HEAD 06.11): кто где находится и сколько дней осталось до сдачи. Данные — сделки в работе
 // из Битрикса (срок из расчёта или договора) и смены из приложения (сделано, кто был на объекте последние дни).
@@ -132,7 +133,8 @@ function History({ id, mine }) {
         {s.work_done && <div className="small">Сделал: {s.work_done}</div>}
         {s.reason && <div className="small why">Причина: {s.reason}</div>}
         {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <a href={s.photo_before_full} target="_blank" rel="noreferrer"><img src={s.photo_before_url} alt="до" /></a>}
-          {s.photo_after_url && <a href={s.photo_after_full} target="_blank" rel="noreferrer"><img src={s.photo_after_url} alt="после" /></a>}</div>}</div>
+          {s.photo_after_url && <a href={s.photo_after_full} target="_blank" rel="noreferrer"><img src={s.photo_after_url} alt="после" /></a>}</div>}
+        <More x={s} /></div>
       <span className={`tag st-${s.status}`}>{ST[s.status] || s.status}</span></div>)}</>}
     {h.expenses.length > 0 && <><h3>Расходы · {money(h.spent)}</h3>{h.expenses.map(e => <div key={e.id} className="row">
       <div><b>{money(e.amount)}</b> · {e.category} · {e.full_name}<br /><span className="small muted">{dt(e.created_at)}{e.note ? ' · ' + e.note : ''}</span>
