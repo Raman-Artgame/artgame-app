@@ -38,9 +38,15 @@ async function tab(p, name) {
 
   // 1. Художник регистрируется сам и ждёт роли
   const { p: a, ctx } = await page(b, 2000, 'Дана')
-  await a.getByRole('button', { name: 'Отправить' }).waitFor()
+  // первый вход — анкета «Мои данные» (HEAD 09.11)
+  const an = a.locator('.card.profile')
+  await an.getByRole('button', { name: 'Сохранить' }).waitFor()
+  await an.locator('input').nth(0).fill('Ахметова'); await an.locator('input').nth(1).fill('Дана')
+  await an.locator('input[type=date]').fill('2000-05-01')
+  await an.locator('input[inputmode=tel]').first().fill('+7 701 000 00 01')
+  await an.getByRole('button', { name: 'Астана' }).click()
   await a.screenshot({ path: `${shots}/00-registr.png` })
-  await a.getByRole('button', { name: 'Отправить' }).click()
+  await an.getByRole('button', { name: 'Сохранить' }).click()
   await a.getByText('Заявка у HEAD').waitFor()
   await a.screenshot({ path: `${shots}/00-zayavka.png` })
   // HEAD назначает роль и зону на вкладке «Команда»
@@ -103,7 +109,7 @@ async function tab(p, name) {
   await l.getByText('Всё проверено').nth(1).waitFor()
 
   // 5. «Проекты» = бывшие «Объекты» (HEAD 08.11): карточка проекта, фото с объекта и файл дизайна (большой файл — прямо в Google, здесь подменён)
-  await call(1000, `/people/${(await call(1000, '/people')).find(x => x.full_name === 'Дана').id}`, { zones: ['mural', 'design'] })
+  await call(1000, `/people/${(await call(1000, '/people')).find(x => x.full_name === 'Дана Ахметова').id}`, { zones: ['mural', 'design'] })
   psql("INSERT INTO objects (id, title, city, bitrix_stage) VALUES (1700, 'ШКОЛА', 'Шымкент', 'UC_AV00QK') ON CONFLICT (id) DO NOTHING")
   await a.reload()
   await a.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000001' }) }))

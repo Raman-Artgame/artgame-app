@@ -18,27 +18,12 @@ import { DUTIES, GROW, POLICY } from './duties.js'
 import { Feedback } from './feedback.jsx'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
 import './tokens.css'
+import { MyData, ProfileForm } from './profile.jsx'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
   print_operator: 'Оператор настенного принтера', print_master: 'Мастер настенной печати', mop: 'МОП', mop_vip: 'VIP МОП',
   lead_designer: 'Главный дизайнер', designer_asst: 'Помощник дизайнера', carpenter: 'Мастер-плотник', head: 'HEAD' }
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
-
-function Register({ onDone }) {
-  const tg = window.Telegram?.WebApp?.initDataUnsafe?.user
-  const [name, setName] = useState([tg?.first_name, tg?.last_name].filter(Boolean).join(' '))
-  const [phone, setPhone] = useState('')
-  const [err, setErr] = useState('')
-  const send = () => api('/register', { method: 'POST', body: { full_name: name, phone } }).then(onDone, e => setErr(e.message))
-  return <div className="card">
-    <h1>Добро пожаловать</h1>
-    <p className="muted">Заполни имя, HEAD назначит тебе роль.</p>
-    <input value={name} onChange={e => setName(e.target.value)} placeholder="Имя и фамилия" />
-    <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Телефон" inputMode="tel" />
-    <button disabled={!name.trim()} onClick={send}>Отправить</button>
-    {err && <p className="muted">{err}</p>}
-  </div>
-}
 
 function App() {
   const [me, setMe] = useState(undefined)
@@ -58,11 +43,13 @@ function App() {
   if (login) return <div className="wrap"><Login onDone={() => { setLogin(false); load() }} /></div>
   if (err) return <div className="wrap"><div className="card"><h1>ARTGAME</h1><p className="muted">Открой приложение из бота @artgame_team_bot. ({err})</p></div></div>
   if (me === undefined) return <div className="wrap muted">Загрузка…</div>
-  if (me === null) return <div className="wrap"><Register onDone={setMe} /></div>
+  if (me === null) return <div className="wrap"><ProfileForm me={null} first onDone={setMe} /></div>
+  // анкета «Мои данные» (HEAD 09.11): пока не заполнена — сначала она (кроме «смотреть как» и тестовых сотрудников)
+  if (!me.profile_at && !me._view_as && me.status !== 'blocked') return <div className="wrap"><ProfileForm me={me} first onDone={setMe} /></div>
   if (me.status !== 'active') return <><ViewAsBar me={me} ROLE={ROLE} /><div className="wrap"><div className="card"><h1>{me.full_name}</h1>
     <p className="muted">{me.status === 'pending' ? 'Заявка у HEAD. Как только назначат роль, откроются разделы.' : 'Вход закрыт.'}</p></div></div></>
   return <><ViewAsBar me={me} ROLE={ROLE} />
-    <Main me={me} web={web} logout={() => { api('/logout', { method: 'POST', noView: true }).catch(() => {}); setWebToken(''); setViewAs(''); setLogin(true) }} /></>
+    <Main me={me} onMe={setMe} web={web} logout={() => { api('/logout', { method: 'POST', noView: true }).catch(() => {}); setWebToken(''); setViewAs(''); setLogin(true) }} /></>
 }
 
 const CHECKERS = new Set(['head', 'lead_artist', 'artist_pro', 'print_master', 'lead_designer'])
@@ -93,7 +80,7 @@ const PLAIN = new Set(['today', 'leads', 'deals', 'projects', 'month'])
 
 // Единое рабочее поле МОП (HEAD 06.11): вся работа по клиенту — в карточке сделки; «Место» МОП стало «Учёбой»
 // (учебник, тест, правила игры); общая вкладка «Проекты» — кто где и сколько дней осталось.
-function Main({ me, web, logout }) {
+function Main({ me, onMe, web, logout }) {
   const places = usePlaces()
   const mopPlace = places.find(p => p.code === 'mop')
   const other = places.filter(p => p.code !== 'mop')
@@ -167,8 +154,8 @@ function Main({ me, web, logout }) {
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
         tab === 'fin' ? <Finance /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design me={me} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
-        tab === 'mine' && (mop || carp || !me.zones.length) ? <><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
+        tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyData me={me} onMe={onMe} /><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyData me={me} onMe={onMe} /><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
     </div>
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll />
   </>

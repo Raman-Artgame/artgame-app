@@ -24,7 +24,11 @@ export function People({ ROLE, ZONE }) {
     {pendingFirst.map(p => <div key={p.id} className="person">
       <div><b>{p.full_name}</b> {p.tg_username && <span className="muted small">@{p.tg_username}</span>}
         {p.status === 'pending' && <span className="tag st-rejected">ждёт роли</span>}
-        {p.status === 'blocked' && <span className="tag">вход закрыт</span>}</div>
+        {p.status === 'blocked' && <span className="tag">вход закрыт</span>}
+        {p.profile_at ? <div className="small muted">{[[p.last_name, p.first_name, p.middle_name].filter(Boolean).join(' '),
+          p.birth_date && new Date(p.birth_date).toLocaleDateString('ru-RU'), p.phone, p.city, p.clothes_size && `размер ${p.clothes_size}`,
+          p.emergency_phone && `экстренно: ${[p.emergency_name, p.emergency_phone].filter(Boolean).join(' ')}`].filter(Boolean).join(' · ')}</div>
+          : <div className="small why">анкета не заполнена — заполнит при следующем входе</div>}</div>
       <select disabled={p.role_code === 'head'} value={p.role_code || ''} onChange={e => setRole(p, e.target.value)}>
         <option value="" disabled>— роль —</option>
         {Object.entries(ROLE).map(([k, t]) => <option key={k} value={k}>{t}</option>)}

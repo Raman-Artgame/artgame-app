@@ -130,5 +130,20 @@ def _consts(values: dict):
     return {"ok": True}
 
 
+# Анкета «Мои данные» (HEAD 09.11): в сквозных тестах люди считаются заполнившими анкету, кроме tg 8800 —
+# на нём kabinety.cjs проверяет саму анкету при первом входе.
+from artgame import db as _db  # noqa: E402
+
+
+@app.middleware("http")
+async def _profile_done(request, call_next):
+    resp = await call_next(request)
+    if request.url.path == "/api/register":
+        with _db.pool.connection() as c:
+            c.execute("UPDATE people SET profile_at=now() WHERE profile_at IS NULL AND tg_id <> 8800")
+    return resp
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8100)
+
