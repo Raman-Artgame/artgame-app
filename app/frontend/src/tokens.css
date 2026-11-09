@@ -12,7 +12,9 @@
 html { -webkit-text-size-adjust: 100%; }
 /* HEAD 09.11: на iPhone страница «уезжала» влево — длинное слово без пробелов (адрес, ссылка) раздвигало ширину и Telegram
    уменьшал всю страницу. Ничего не выходит за ширину экрана: переносим длинные слова, лишнее по ширине обрезаем. */
-html, body { overflow-x: hidden; max-width: 100%; }
+/* body — только clip: hidden на body делает его прокручиваемым контейнером, и нижнее меню (sticky) уезжает вниз (HEAD 09.11) */
+html { overflow-x: hidden; }
+body { overflow-x: clip; max-width: 100%; }
 #root { overflow-x: clip; max-width: 100vw; }
 .wrap { overflow-wrap: anywhere; }
 .wrap .card { min-width: 0; max-width: 100%; }
