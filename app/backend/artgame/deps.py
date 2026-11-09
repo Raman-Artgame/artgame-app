@@ -35,6 +35,15 @@ def act_as(p: dict, role: str) -> dict:
     return {**p, "role_main": p["role_code"], "role_code": role}
 
 
+def acting(p: dict) -> dict:
+    """И.о. (HEAD 09.11): права и меню — роли, которую человек исполняет; ставки — по основной (roles_of берёт role_main).
+    Если человек сам переключился на свою вторую роль («Я сейчас»), и.о. не накладываем."""
+    a = p.get("acting_role")
+    if not a or a == "head" or p.get("role_main") or a == p.get("role_code"):
+        return p
+    return {**p, "role_main": p["role_code"], "role_code": a, "acting": True}
+
+
 def current_person(x_telegram_init_data: str = Header(default=""), authorization: str = Header(default=""),
                    x_act_role: str = Header(default="")) -> dict:
     """В Telegram — подпись initData; с компьютера — сессия по коду от бота (weblogin)."""
@@ -56,9 +65,9 @@ def current_person(x_telegram_init_data: str = Header(default=""), authorization
     d = VIEW.get()
     if d and d.get("as"):   # HEAD смотрит как сотрудник: дальше всё считается от лица этого человека, запись закрыта
         with db.pool.connection() as conn:
-            p = resolve(conn, p, d["as"], load_person)
+            p = acting(resolve(conn, p, d["as"], load_person))
         return {**p, "roles": roles_of(p)}
-    p = act_as(p, x_act_role)
+    p = acting(act_as(p, x_act_role))
     return {**p, "roles": roles_of(p)}
 
 

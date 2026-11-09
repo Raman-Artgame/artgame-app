@@ -2,6 +2,8 @@
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
+from datetime import date
+
 from pydantic import BaseModel
 
 from . import constants as consts
@@ -103,7 +105,7 @@ def me(p: dict = Depends(current_person)):
 def people(_: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         return conn.execute(
-            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city, p.extra_roles,
+            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city, p.extra_roles, p.acting_role, p.acting_since, p.acting_promo, p.acting_note,
                       coalesce(array_agg(z.zone_code ORDER BY z.zone_code) FILTER (WHERE z.zone_code IS NOT NULL), '{}') AS zones
                FROM people p LEFT JOIN person_zones z ON z.person_id = p.id
                GROUP BY p.id ORDER BY p.created_at""").fetchall()
@@ -115,6 +117,9 @@ class AssignIn(BaseModel):
     status: str | None = None   # active | blocked (уход: вход закрыт, история остаётся)
     bitrix_user_id: int | None = None   # пользователь Битрикса (0 — снять связку): по нему МОП видит свои сделки
     city: str | None = None             # город сотрудника: объект в другом городе — командировка (HEAD 08.11)
+    acting_role: str | None = None   # и.о. (HEAD 09.11): "" — снять; права новой роли, ставка прежняя
+    acting_promo: date | None = None  # день повышения (напр. 15.12 — день рождения команды)
+    acting_note: str | None = None
     extra_roles: list[str] | None = None  # вторая роль (HEAD 08.11): напр. оператор печати + саппорт; ставки — по роли смены
 
 
@@ -128,6 +133,9 @@ def assign(person_id: int, body: AssignIn, head: dict = Depends(require_head)):
                 raise HTTPException(400, "bad role")
             conn.execute("UPDATE people SET role_code=%s, status=CASE WHEN status='pending' THEN 'active' ELSE status END, updated_at=now() WHERE id=%s",
                          (body.role_code, person_id))
+            # повышение: роль стала той, что исполнял, — «и.о.» снимается само (запись остаётся в журнале)
+            conn.execute("""UPDATE people SET acting_role=NULL, acting_since=NULL, acting_promo=NULL, acting_note=NULL
+                            WHERE id=%s AND acting_role=%s""", (person_id, body.role_code))
         if body.status is not None:
             if body.status not in ("active", "blocked"):
                 raise HTTPException(400, "bad status")
@@ -145,12 +153,24 @@ def assign(person_id: int, body: AssignIn, head: dict = Depends(require_head)):
             if extra and len(conn.execute("SELECT code FROM roles WHERE code = ANY(%s)", (extra,)).fetchall()) != len(extra):
                 raise HTTPException(400, "bad role")
             conn.execute("UPDATE people SET extra_roles=%s, updated_at=now() WHERE id=%s", (extra, person_id))
+        if body.acting_role is not None:
+            a = body.acting_role or None
+            if a and (a == "head" or not conn.execute("SELECT 1 FROM roles WHERE code=%s", (a,)).fetchone()):
+                raise HTTPException(400, "bad role")
+            conn.execute("""UPDATE people SET acting_role=%s, acting_since=CASE WHEN %s::text IS NULL THEN NULL
+                            WHEN acting_role IS DISTINCT FROM %s THEN current_date ELSE acting_since END,
+                            acting_promo=CASE WHEN %s::text IS NULL THEN NULL ELSE acting_promo END, updated_at=now() WHERE id=%s""",
+                         (a, a, a, a, person_id))
+        if body.acting_promo is not None:
+            conn.execute("UPDATE people SET acting_promo=%s, updated_at=now() WHERE id=%s", (body.acting_promo, person_id))
+        if body.acting_note is not None:
+            conn.execute("UPDATE people SET acting_note=%s, updated_at=now() WHERE id=%s", (body.acting_note.strip() or None, person_id))
         if body.zones is not None:
             conn.execute("DELETE FROM person_zones WHERE person_id=%s", (person_id,))
             for z in body.zones:
                 conn.execute("INSERT INTO person_zones (person_id, zone_code) VALUES (%s,%s)", (person_id, z))
-        db.audit(conn, head["id"], "assign", "people", person_id, body.model_dump(exclude_none=True))
-        return conn.execute("SELECT id, role_code, status, extra_roles FROM people WHERE id=%s", (person_id,)).fetchone()
+        db.audit(conn, head["id"], "assign", "people", person_id, body.model_dump(mode="json", exclude_none=True))
+        return conn.execute("SELECT id, role_code, status, extra_roles, acting_role, acting_since, acting_promo, acting_note FROM people WHERE id=%s", (person_id,)).fetchone()
 
 
 @app.get("/api/constants")

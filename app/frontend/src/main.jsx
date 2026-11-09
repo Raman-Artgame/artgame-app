@@ -143,12 +143,14 @@ function Main({ me, web, logout }) {
   const menu = isHead ? [['home', 'Пульт'], ...HEAD_FIRST.map(k => tabs.find(x => x[0] === k)).filter(Boolean),
     ...tabs.filter(x => !HEAD_FIRST.includes(x[0])), ['viewas', 'Смотреть как']] : tabs
   const duty = DUTIES[role]
-  const duties = (me.roles?.length ? me.roles : [role]).map(r => DUTIES[r]).filter(Boolean)   // в «Кабинете» — обе роли
+  // в «Кабинете» — обе роли; у «и.о.» — исполняемая и основная; у каждой — «Как подняться» (HEAD 09.11)
+  const dcodes = [...new Set([...(me.acting ? [role] : []), ...(me.roles?.length ? me.roles : [role])])].filter(r => DUTIES[r])
+  const folds = dcodes.map(r => <DutyFold key={r} d={DUTIES[r]} g={GROW[r]} me={me} />)
   if (tab === 'place' || tab === 'study') return <>
     {me.roles?.length > 1 && <div className="wrap"><RoleSwitch me={me} /></div>}
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
       extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> },
-        duty && { code: 'duty', title: 'Правила игры', render: () => <Duty d={duty} g={GROW[role]} /> }].filter(Boolean)} /> :
+        duty && { code: 'duty', title: 'Правила игры', render: () => <Duty d={duty} g={GROW[role]} me={me} /> }].filter(Boolean)} /> :
     <Places key={tab} list={tab === 'study' ? [mopPlace] : other} mode={tab === 'study' ? 'study' : ''} opts={tab === 'study' ? { mop: STUDY.mop() } : {}} />}
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll />
   </>
@@ -156,7 +158,7 @@ function Main({ me, web, logout }) {
     <div className="wrap">
       {web && <div className="webbar"><b>ARTGAME</b><span className="muted small">{me.full_name}</span><button className="ghost mini" onClick={logout}>Выйти</button></div>}
       <RoleSwitch me={me} />
-      {!PLAIN.has(tab) && tab !== 'home' && <div className="card"><h1>{me.full_name}</h1><span className="tag">{ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
+      {!PLAIN.has(tab) && tab !== 'home' && <div className="card"><h1>{me.full_name}</h1><span className="tag">{me.acting ? `${ROLE[me.role_main]} · и.о. ${gen(me.role_code)}` : ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
       {toast && <div className="toast">{toast}</div>}
       {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'viewas' ? <ViewAsCard /> :
         tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
@@ -165,8 +167,8 @@ function Main({ me, web, logout }) {
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
         tab === 'fin' ? <Finance /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design me={me} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
-        tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyPay /><MyIssued /><Feedback />{duties.map(x => <DutyFold key={x.title} d={x} />)}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyPay /><MyIssued /><Feedback />{duties.map(x => <DutyFold key={x.title} d={x} />)}<Mine /></> : <Review />}
+        tab === 'mine' && (mop || carp || !me.zones.length) ? <><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
     </div>
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll />
   </>
@@ -191,29 +193,51 @@ function ExpenseTab({ done }) {
   </>
 }
 
-// «Как стать художником» (HEAD 08.11) — для саппорта: что нужно уметь, как проходит экзамен, кто принимает.
-function Grow({ g }) {
-  return <div className="card duty">
-    <span className="tag">{g.step}</span><h2>{g.title}</h2><p>{g.about}</p>
-    <h3>Что нужно уметь</h3>{g.check.map((x, i) => <div key={i} className="growrow"><span>{i + 1}</span>{x}</div>)}
-    <h3>Экзамен</h3>{g.exam.map(([t, how, ok]) => <div key={t} className="growexam"><b>{t}</b><span className="small">{how}</span><span className="small muted">Зачёт: {ok}</span></div>)}
+// «Как подняться» (HEAD 09.11): у каждого игрока — что нужно для следующей ступени, самопроверка «есть / нет»
+// (отметки — только у себя на телефоне; подтверждает руководитель), экзамен, кто решает.
+function Grow({ g, me }) {
+  const key = `artgame.grow.${me?.id || 0}.${g.step}`
+  const [ok, setOk] = useState(() => { try { return JSON.parse(localStorage.getItem(key) || '[]') } catch { return [] } })
+  const flip = i => { const n = ok.includes(i) ? ok.filter(x => x !== i) : [...ok, i]; setOk(n); try { localStorage.setItem(key, JSON.stringify(n)) } catch { /* без памяти */ } }
+  return <div className="card duty grow">
+    <span className="tag">{g.step}</span>{g.draft && <span className="tag draft">черновик</span>}<h2>{g.title}</h2><p>{g.about}</p>
+    <h3>Что нужно для ступени · есть {ok.length} из {g.check.length}</h3>
+    {g.check.map((x, i) => { const [t, how] = Array.isArray(x) ? x : [x]
+      return <div key={i} className={'growrow' + (ok.includes(i) ? ' ok' : '')} onClick={() => flip(i)}>
+        <span>{ok.includes(i) ? '✓' : i + 1}</span><div>{t}{how && <p className="small muted">Как подтверждаем: {how}</p>}</div>
+        <em className="small">{ok.includes(i) ? 'есть' : 'нет'}</em></div> })}
+    {g.exam && <><h3>Экзамен</h3>{g.exam.map(([t, how, ok]) => <div key={t} className="growexam"><b>{t}</b><span className="small">{how}</span><span className="small muted">Зачёт: {ok}</span></div>)}</>}
     <p className="small muted">{g.who}</p><p className="small muted">Источник: {g.src}</p>
   </div>
 }
 
+// И.о. (HEAD 09.11): человек уже исполняет обязанности старшей роли, ставка — прежняя до дня повышения.
+const GEN = { lead_artist: 'Главного художника', artist_pro: 'Художника-Про', artist: 'Художника', print_master: 'Мастера печати',
+  lead_designer: 'Главного дизайнера', mop_vip: 'VIP МОП', mop: 'МОП', print_operator: 'Оператора печати' }
+const gen = r => GEN[r] || ROLE[r]
+function Acting({ me }) {
+  if (!me.acting) return null
+  const d = x => x ? new Date(x).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : ''
+  return <div className="card acting"><span className="tag">и.о.</span>
+    <h2>Ты — и.о. {gen(me.role_code)}</h2>
+    <p>{me.acting_since ? `С ${d(me.acting_since)}. ` : ''}Права, меню и задачи — {gen(me.role_code)}. Ставка пока — {gen(me.role_main)}.</p>
+    {me.acting_promo && <p><b>Повышение — {d(me.acting_promo)}.</b> {me.acting_note || ''}</p>}
+    <p className="small muted">Ниже — «Правила игры» обеих ролей и что нужно для ступени.</p></div>
+}
+
 // «Правила игры» (HEAD 08.11 — вместо «Должностной»): роль, кому подчиняешься, что делаешь; ниже — как вырасти на ступень.
 // «Правила игры» в «Кабинете» у всех (HEAD 08.11): свёрнуто одной карточкой, раскрывается целиком.
-function DutyFold({ d }) {
+function DutyFold({ d, g, me }) {
   const [open, setOpen] = useState(false)
   return <div className="card dutyfold">
     <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
       <div><span className="tag">Правила игры</span><h3>{d.title}</h3><p className="small muted">{d.about}</p></div>
       <button className="ghost mini">{open ? 'Свернуть' : 'Открыть'}</button></div>
-    {open && <div className="dutybody"><Duty d={d} /></div>}
+    {open && <div className="dutybody"><Duty d={d} g={g} me={me} /></div>}
   </div>
 }
 
-function Duty({ d, g }) {
+function Duty({ d, g, me }) {
   return <div className="wrap"><div className="card duty">
     <span className="tag">{d.step}</span><h2>Правила игры · {d.title}</h2><p>{d.about}</p><p className="small muted">{d.boss}</p>
     {d.goal && <><h3>Зачем ты в команде{dr(d, 'goal')}</h3><p>{d.goal}</p></>}
@@ -233,7 +257,7 @@ function Duty({ d, g }) {
     <p className="small">{POLICY.after}</p></div>
   <Policy />
   {d.next && <div className="card duty"><h3>Куда дальше</h3><p className="small">{d.next}</p></div>}
-  {g && <Grow g={g} />}
+  {g && <Grow g={g} me={me} />}
   <p className="small muted">Источник: {d.src}{d.drafts?.length ? ' «Черновик» — нет в документах компании, ждёт утверждения HEAD.' : ''}</p></div>
 }
 

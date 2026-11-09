@@ -35,6 +35,15 @@ export function People({ ROLE, ZONE }) {
           <option value="">— нет —</option>
           {Object.entries(ROLE).filter(([k]) => k !== 'head' && k !== p.role_code).map(([k, t]) => <option key={k} value={k}>{t}</option>)}
         </select></label>}
+      {p.role_code && p.role_code !== 'head' && <label className="small muted">Исполняет обязанности (и.о.) <span>· права и меню этой роли, ставка — прежняя до дня повышения</span>
+        <select value={p.acting_role || ''} onChange={e => save(p.id, { acting_role: e.target.value })}>
+          <option value="">— нет —</option>
+          {Object.entries(ROLE).filter(([k]) => k !== 'head' && k !== p.role_code).map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+        </select></label>}
+      {p.acting_role && <div className="acting-edit">
+        <label className="small muted">День повышения <input type="date" defaultValue={p.acting_promo || ''} onBlur={e => e.target.value && e.target.value !== p.acting_promo && save(p.id, { acting_promo: e.target.value })} /></label>
+        <label className="small muted">Что сказать человеку <input defaultValue={p.acting_note || ''} placeholder="15 декабря — день рождения команды" onBlur={e => e.target.value !== (p.acting_note || '') && save(p.id, { acting_note: e.target.value })} /></label>
+        <p className="small muted">В день повышения поставь роль выше — «и.о.» снимется само, ставка станет новой.</p></div>}
       <div className="zones">{Object.entries(ZONE).map(([z, t]) => {
         const on = p.zones.includes(z)
         return <button key={z} className={on ? '' : 'ghost'} onClick={() => save(p.id, { zones: on ? p.zones.filter(x => x !== z) : [...p.zones, z] })}>{t}</button>
