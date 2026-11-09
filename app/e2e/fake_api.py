@@ -118,6 +118,8 @@ def _bx_calls():
 from artgame import notify  # noqa: E402
 SENT = []
 notify.SEND = lambda tg, text: SENT.append({"tg": tg, "text": text})
+from artgame import dm  # noqa: E402
+dm.SEND = lambda tg, text: SENT.append({"tg": tg, "text": text, "dm": True}) and None   # «Диалог с HEAD»: бот никуда не пишет
 
 
 @app.get("/api/_e2e/sent")

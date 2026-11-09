@@ -49,3 +49,5 @@ def no_telegram(monkeypatch):
     """Бот в тестах никуда не пишет (регистрация, траты сверх лимита); test_notify подменяет SEND сам."""
     from artgame import notify
     monkeypatch.setattr(notify, "SEND", lambda tg, text: None)
+    from artgame import dm
+    monkeypatch.setattr(dm, "SEND", lambda tg, text: None)

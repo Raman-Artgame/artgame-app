@@ -32,6 +32,8 @@ def pulse(p: dict = Depends(require_head)):
                FROM feedback f JOIN people pe ON pe.id=f.person_id LEFT JOIN roles r ON r.code=f.role_code
                WHERE f.status<>'done' ORDER BY f.status='work', f.created_at DESC LIMIT 20""").fetchall()
         media = one("SELECT count(*) AS n FROM files WHERE kind='media' AND status='ready' AND review='pending'")["n"]
+        dm = one("""SELECT count(*) AS unread, count(DISTINCT person_id) AS people FROM dm
+                    WHERE NOT from_head AND read_at IS NULL""")   # «Диалог с HEAD» (09.11): непрочитанные от сотрудников
         today = conn.execute(
             """SELECT s.id, pe.full_name, r.title AS role_title, o.title AS object_title, s.zone_code, s.started_at, s.ended_at, s.status
                FROM shifts s JOIN people pe ON pe.id=s.person_id LEFT JOIN roles r ON r.code=pe.role_code JOIN objects o ON o.id=s.object_id
@@ -49,5 +51,5 @@ def pulse(p: dict = Depends(require_head)):
         week = one("""SELECT count(*) FILTER (WHERE status='approved') AS approved, count(*) FILTER (WHERE status='rejected') AS rejected,
                              count(DISTINCT person_id) AS people
                       FROM shifts WHERE started_at > now() - interval '7 days' AND status<>'cancelled'""")
-    return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"])}, "catalogs": catalogs, "media": media, "feedback": feedback,
+    return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"])}, "catalogs": catalogs, "media": media, "feedback": feedback, "dm": dm,
             "today": today, "team": team, "feed": feed, "week": week}
