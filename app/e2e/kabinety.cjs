@@ -105,11 +105,17 @@ async function tab(p, name) {
 
   // 4. Главный дизайнер: воронка «Дизайн РК», назначает помощника и размер XS, срок; запись в Битрикс
   const dz = await open(b, 7000)
-  assert.deepStrictEqual(await navText(dz), ['Дизайн', 'Проекты', 'Проверка', 'Учёба', 'Кабинет', 'Расход'])
-  await dz.locator('.dzfire .dzcard', { hasText: 'Дизайн кафе' }).getByText('нет дизайнера').waitFor()   // «Горит»: нет дизайнера и размера
+  assert.deepStrictEqual(await navText(dz), ['Дизайн', 'Проекты', 'Учёба', 'Кабинет', 'Расход'])
+  // HEAD 09.11: «нет дизайнера» — не «Горит», а «Назначить»; стадии — своей вкладкой, подсказки по кнопке
+  await dz.locator('.dztabs button', { hasText: 'Назначить' }).click()
+  await dz.locator('.dztodo .dzcard', { hasText: 'Дизайн кафе' }).getByText('нет дизайнера').waitFor()
+  await dz.screenshot({ path: `${shots}/kab-dizain-naznachit.png`, fullPage: true })
+  await dz.locator('.dztabs button', { hasText: 'По стадиям' }).click()
+  await dz.getByRole('button', { name: /Подсказки/ }).click()
   await dz.locator('.dzguide').first().getByText('Что делать').waitFor()
   await dz.screenshot({ path: `${shots}/kab-dizain.png`, fullPage: true })
   await dz.locator('.dzstage .dzcard', { hasText: 'Дизайн кафе' }).click()
+  await dz.locator('.modal .dzcontact a', { hasText: 'Связаться с клиентом' }).waitFor()   // связь с клиентом через Битрикс (HEAD 09.11)
   await dz.locator('.modal select').nth(1).selectOption({ label: 'Помощник Мира' })
   await dz.locator('.modal .chips button', { hasText: 'XS' }).click()
   await dz.locator('.modal input[type=date]').fill('2026-11-12')

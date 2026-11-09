@@ -182,3 +182,18 @@ def test_catalog_and_pay(client, dz):
     assert {"label": "Оклад в месяц", "amount": 300000} in my["rate"] and my["accrued"] == 302500
     art = client.get("/api/fin/my", headers=hdr(2000)).json()["rate"]
     assert art[0] == {"label": "Смена 10 ч", "amount": 15000}
+
+
+def test_design_team_from_bitrix_and_expense_cats(client, dz, monkeypatch):
+    """HEAD 09.11: дизайнер из Битрикса (Малика), которого нет в приложении, — в выборе; у дизайнеров в «Расходе» — такси и «Другое»."""
+    monkeypatch.setattr(bx, "users", lambda: [{"id": 4341, "name": "Малика Жұмаділдина", "position": "Дизайнер", "phone": ""},
+                                              {"id": 7000, "name": "Алия", "position": "Главный дизайнер", "phone": ""},
+                                              {"id": 4565, "name": "Ануар Минкеев", "position": "МОП", "phone": ""}])
+    t = client.get("/api/design/team", headers=hdr(7000)).json()
+    assert [x["bitrix_user_id"] for x in t if x.get("bx_only")] == [4341]
+    DEALS["1647"]["UF_CRM_ARTGAME_DESIGNER"] = "4341"
+    bx._cache.clear()
+    d = {x["id"]: x for x in client.get("/api/design/deals?fresh=1", headers=hdr(7000)).json()["deals"]}
+    assert d[1647]["designer"] == "Малика Жұмаділдина"
+    cats = [c["code"] for c in client.get("/api/work/dict", headers=hdr(7100)).json()["categories"]]
+    assert cats == ["transport", "other"]

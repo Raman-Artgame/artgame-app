@@ -54,7 +54,9 @@ def check_past_day(day: date) -> datetime:
 
 
 # Саппорт тратит только на такси и докупку на объект (HEAD 08.11).
-ROLE_CATS = {"support": ("transport", "purchase")}
+ROLE_CATS = {"support": ("transport", "purchase"),
+             # дизайнеры — только такси / доставка и «Другое» (HEAD 09.11)
+             "lead_designer": ("transport", "other"), "designer_asst": ("transport", "other")}
 # Категории только для некоторых ролей: проживание в командировке — Главный, Про, Мастер печати (HEAD 08.11)
 CAT_ROLES = {"lodging": {"lead_artist", "artist_pro", "print_master", "head"}}
 

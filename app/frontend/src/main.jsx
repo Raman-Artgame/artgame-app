@@ -129,7 +129,7 @@ function Main({ me, web, logout }) {
   const tabs = worker ? [...(KIT.has(role) ? [['kit', 'Сбор']] : []), ['shift', 'Смена'], ['expense', 'Расход'],
     ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['projects', 'Проекты'],
     ['study', 'Учёба'], ['mine', 'Кабинет']] :
-    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(me.reels ? [['prod', 'Продакшн']] : []), ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход']] :
+    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(me.reels ? [['prod', 'Продакшн']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход']] :   // «Проверки» у дизайнеров нет (HEAD 09.11)
    [...(sales ? [['today', 'Сегодня'], ['leads', 'Лиды'], ['deals', 'Сделки'], ['projects', 'Проекты'], ['month', 'Месяц']] : []),
     ...(mopPlace ? [['study', 'Учёба']] : []),
     ...(other.length ? [['place', 'Место']] : []),
