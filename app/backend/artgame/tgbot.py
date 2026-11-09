@@ -2,7 +2,7 @@
 
 - `setup()` — при каждой выкладке (install_test.sh): имя, описание до «Старт», короткое описание,
   без списка команд, кнопка меню «ARTGAME», webhook на /api/tg/hook. Меняет только то, что отличается.
-- `/api/tg/hook` — Telegram присылает сообщения; на любое личное сообщение бот отвечает приветствием
+- `/api/tg/hook` — Telegram присылает сообщения. Текст от сотрудника — в «Диалог с HEAD» (dm.from_telegram); иначе приветствие
   с кнопкой «Открыть ARTGAME». Подпись — заголовок X-Telegram-Bot-Api-Secret-Token (выводится из токена).
 Токен только в env сервера (ARTGAME_BOT_TOKEN).
 
@@ -64,6 +64,16 @@ async def tg_hook(request: Request, x_telegram_bot_api_secret_token: str = Heade
         return {"ok": True}
     try:
         kb = {"inline_keyboard": [[{"text": "Открыть ARTGAME", "web_app": {"url": app_url()}}]]}
+        try:   # «Диалог с HEAD» (09.11): сообщение сотрудника → HEAD, ответ HEAD свайпом → сотруднику
+            from . import dm
+            said = dm.from_telegram(int(chat["id"]), msg.get("text") or msg.get("caption") or "",
+                                    (msg.get("reply_to_message") or {}).get("message_id"))
+        except Exception as e:
+            print("tg_hook dm:", e, file=sys.stderr)
+            said = None
+        if said:
+            CALL("sendMessage", chat_id=chat["id"], text=said, reply_markup=kb)
+            return {"ok": True}
         text = welcome((msg.get("from") or {}).get("first_name", ""))
         try:   # баннер «Добро пожаловать» (frontend/public/bot-welcome.jpg); не вышло — просто текст
             CALL("sendPhoto", chat_id=chat["id"], photo=app_url() + "bot-welcome.jpg", caption=text, reply_markup=kb)

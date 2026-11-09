@@ -16,6 +16,7 @@ import { Production } from './production.jsx'
 import { Design } from './design.jsx'
 import { DUTIES, GROW, POLICY } from './duties.js'
 import { Feedback } from './feedback.jsx'
+import { DialogHead, Messages, useUnread } from './dm.jsx'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
 import './tokens.css'
 import { MyData, ProfileForm } from './profile.jsx'
@@ -107,7 +108,8 @@ function Main({ me, onMe, web, logout }) {
   const sales = DEAL_ROLES.has(me.role_code)
   const t = useToday(sales)
   const pulse = usePulse(isHead)
-  const counts = { ...(t ? { today: t.queue.hot.length + t.queue.today.length, leads: [...t.queue.hot, ...t.queue.today].filter(x => x.entity === 'lead').length } : {}),
+  const unread = useUnread(tab)   // «Диалог с HEAD» (09.11): цифра на вкладке «HEAD» / «Сообщения»
+  const counts = { chat: unread, ...(t ? { today: t.queue.hot.length + t.queue.today.length, leads: [...t.queue.hot, ...t.queue.today].filter(x => x.entity === 'lead').length } : {}),
     ...(pulse ? { review: +pulse.review.shifts + +pulse.review.expenses, people: pulse.pending.length } : {}) }
   const mop = ['mop', 'mop_vip'].includes(me.role_code)
   const carp = me.role_code === 'carpenter'
@@ -116,8 +118,8 @@ function Main({ me, onMe, web, logout }) {
   const worker = art || PRINT.has(role)
   const tabs = worker ? [...(KIT.has(role) ? [['kit', 'Сбор']] : []), ['shift', 'Смена'], ['expense', 'Расход'],
     ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['projects', 'Проекты'],
-    ['study', 'Учёба'], ['mine', 'Кабинет']] :
-    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(me.reels ? [['prod', 'Продакшн']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход']] :   // «Проверки» у дизайнеров нет (HEAD 09.11)
+    ['study', 'Учёба'], ['mine', 'Кабинет'], ['chat', 'HEAD']] :
+    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(me.reels ? [['prod', 'Продакшн']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход'], ['chat', 'HEAD']] :   // «Проверки» у дизайнеров нет (HEAD 09.11)
    [...(sales ? [['today', 'Сегодня'], ['leads', 'Лиды'], ['deals', 'Сделки'], ['projects', 'Проекты'], ['month', 'Месяц']] : []),
     ...(mopPlace ? [['study', 'Учёба']] : []),
     ...(other.length ? [['place', 'Место']] : []),
@@ -127,12 +129,12 @@ function Main({ me, onMe, web, logout }) {
     ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []),
     ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []),
     ...(KIT.has(role) ? [['kit', 'Сбор']] : []),
-    ...(role === 'head' ? [['design', 'Дизайн'], ['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда']] : [])]
+    ...(role === 'head' ? [['design', 'Дизайн'], ['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда'], ['chat', 'Сообщения']] : [['chat', 'HEAD']])]
   // Кабинет HEAD (08.11): Пульт · Проверка · Сделки · Финансы · Команда, остальное — в «Ещё», там же «Смотреть как».
   // HEAD 09.11 («кабинет — хаос, много дублей»): внизу 5 главных + «Ещё». Без Смены, Расхода, Кабинета, Места, Сбора и «Сегодня» —
   // у HEAD это дубли Пульта и Сделок. В «Ещё» — по важности.
   const HEAD_FIRST = ['review', 'deals', 'projects', 'fin']   // HEAD 09.11: проекты — на главную, команда — в «Ещё»
-  const HEAD_MORE = ['people', 'prod', 'design', 'leads', 'study', 'journal']   // склад — в «Финансы → Закупки»; «Месяц» — в Пульте; «Место» и «Смотреть как» убраны (HEAD 09.11)
+  const HEAD_MORE = ['chat', 'people', 'prod', 'design', 'leads', 'study', 'journal']   // склад — в «Финансы → Закупки»; «Месяц» — в Пульте; «Место» и «Смотреть как» убраны (HEAD 09.11)
   const menu = isHead ? [['home', 'Пульт'], ...HEAD_FIRST.map(k => tabs.find(x => x[0] === k)).filter(Boolean),
     ...HEAD_MORE.map(k => tabs.find(x => x[0] === k)).filter(Boolean)] : tabs
   // в «Кабинете» — обе роли; у «и.о.» — исполняемая и основная; у каждой — «Как подняться» (HEAD 09.11)
@@ -150,9 +152,10 @@ function Main({ me, onMe, web, logout }) {
     <div className="wrap">
       {web && <div className="webbar"><b>ARTGAME</b><span className="muted small">{me.full_name}</span><button className="ghost mini" onClick={logout}>Выйти</button></div>}
       <RoleSwitch me={me} />
-      {!PLAIN.has(tab) && tab !== 'home' && !isHead && <div className="card"><h1>{me.full_name}</h1><span className="tag">{me.acting ? `${ROLE[me.role_main]} · и.о. ${gen(me.role_code)}` : ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
+      {!PLAIN.has(tab) && tab !== 'home' && tab !== 'chat' && !isHead && <div className="card"><h1>{me.full_name}</h1><span className="tag">{me.acting ? `${ROLE[me.role_main]} · и.о. ${gen(me.role_code)}` : ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
       {toast && <div className="toast">{toast}</div>}
-      {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'viewas' ? <ViewAsCard /> :
+      {unread > 0 && tab !== 'chat' && !isHead && <button className="dmbar" onClick={() => go('chat')}>✉️ Новое сообщение от HEAD<span>Открыть ›</span></button>}
+      {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'chat' ? (isHead ? <Messages /> : <DialogHead />) : tab === 'viewas' ? <ViewAsCard /> :
         tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} openViewAs={isHead ? () => setTab('viewas') : null} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
         tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> :
@@ -304,6 +307,7 @@ const ICON = {
   people: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm7 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM2 20a7 7 0 0 1 14 0zm11 0a6 6 0 0 1 9 0',
   kit: 'M9 4h6l1 3h4v13H4V7h4zm-1 8 3 3 5-5', design: 'M12 3a9 9 0 1 0 0 18c1 0 1.5-.7 1.5-1.5 0-1-.8-1.4-.8-2.3 0-.9.7-1.6 1.6-1.6H17a4 4 0 0 0 4-4c0-4.7-4-8.6-9-8.6zM7.5 12h.01M10 7.5h.01M15 7.5h.01',
   home: 'M4 13a8 8 0 1 1 16 0M12 13l4-4M4 17h16',
+  chat: 'M4 5h16v11H9l-5 4zM8 9h8M8 12h5',   // «Диалог с HEAD» (09.11)
   viewas: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   more: 'M5 12h.01M12 12h.01M19 12h.01' }
 const Icon = ({ k }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[k] || ICON.more} /></svg>

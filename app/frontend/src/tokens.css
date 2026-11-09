@@ -710,3 +710,25 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 /* «Сбор»: зоны объекта — каждая во всю ширину, не уезжают за карточку (09.11) */
 .kitzones { display: flex; flex-direction: column; gap: 8px; }
 .kitzones button { width: 100%; min-width: 0; display: flex; justify-content: space-between; align-items: center; }
+
+/* «Диалог с HEAD» (HEAD 09.11) */
+.dm h2 { margin-bottom: 2px; }
+.dm .dmlist { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.dm .dmempty { margin: 12px 0; }
+.dmb { max-width: 86%; padding: 9px 12px 6px; border-radius: 16px; display: grid; gap: 3px; overflow-wrap: break-word; word-break: normal; }
+.dmb.them { align-self: flex-start; background: var(--alt); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
+.dmb.me { align-self: flex-end; background: #2A1520; border: 1px solid #4A1E30; border-bottom-right-radius: 6px; }
+.dmtext { white-space: pre-wrap; font-size: 15px; line-height: 1.4; }
+.dmmeta { font-size: 11px; color: var(--muted); justify-self: end; }
+.dmcast { font-size: 11px; font-weight: 700; color: var(--accent2); }
+.dmform { display: grid; gap: 8px; }
+.dmform textarea { resize: vertical; }
+.dmrow .qmain b { margin-right: 6px; }
+.dmcnt { display: inline-block; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: var(--accent); color: #fff; font: 700 11px/18px Onest, Inter, system-ui; font-style: normal; text-align: center; vertical-align: 1px; }
+.dmlast { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.dmlast.new { color: var(--text); font-weight: 600; }
+.dmcastrow { padding: 10px 0; border-top: 1px solid var(--line2); display: grid; gap: 4px; }
+.dmbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; margin: 0 0 12px; padding: 12px 14px; border-radius: var(--r2); background: var(--hotbg); color: var(--text); border: 1px solid var(--accent); font-weight: 700; text-align: left; }
+.dmbar span { color: var(--accent2); white-space: nowrap; font-weight: 600; }
+.card.dmpulse { cursor: pointer; padding: 14px 16px; }
+.dm .dmback { margin-bottom: 12px; }
