@@ -144,7 +144,8 @@ export function ShiftForm({ done }) {
   useEffect(() => {
     api('/shifts/open').then(r => {
       if (r.shift) { const o = { client_uid: r.shift.client_uid, object_id: r.shift.object_id, object_title: r.shift.object_title,
-        zone_code: r.shift.zone_code, role: r.shift.role_code, started_at: r.shift.started_at, before: r.shift.photo_before_url }; saveOpen(o); setOpen(o) }
+        zone_code: r.shift.zone_code, role: r.shift.role_code, started_at: r.shift.started_at, before: r.shift.photo_before_url,
+        workshop: r.shift.kind === 'workshop' ? (r.shift.task || 'Мастерская') : null }; saveOpen(o); setOpen(o) }
       else if (!pending()) { saveOpen(null); setOpen(null) }   // закрыта на сервере, а в очереди ничего нет
     }, () => {}).finally(() => setChecked(true))
   }, [])
@@ -220,7 +221,47 @@ function Road({ obj, zone, done }) {
   </div>
 }
 
-function StartShift({ d, onStarted, onRoad }) {
+// «Мастерская» без проекта (HEAD 09.11): печать — ТО принтера, ремонт, тест печати, обучение. Без фото, оплата по часам.
+function Workshop({ d, onStarted, back }) {
+  const [task, setTask] = useState(d.workshop[0])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const zone = d.zones.includes('print') ? 'print' : d.zones[0]
+  const start = async () => {
+    setBusy(true); setErr('')
+    try {
+      const o = { client_uid: uuid(), object_id: 0, object_title: 'Мастерская · ' + task, zone_code: zone, started_at: new Date().toISOString(), workshop: task }
+      const was = failed().length
+      await enqueue('/shifts/start', { client_uid: o.client_uid, object_id: 0, zone_code: zone, started_at: o.started_at, workshop: task })
+      const f = failed()
+      if (f.length > was && f[0].path === '/shifts/start') { setErr(`Сервер не принял: ${f[0].error}`); return }
+      onStarted(o)
+    } catch (e) { setErr(`Не получилось начать: ${e.message || e}`) } finally { setBusy(false) }
+  }
+  return <div className="card workshop">
+    <div className="steps"><span className="on">1 Начало</span><span>2 Работа</span><span>3 Конец смены</span></div>
+    <h2>Смена в мастерской</h2>
+    <p className="small muted">Без проекта: оплачивается как смена по часам, без плана и бонуса. Проверяет Мастер печати или HEAD.</p>
+    <label className="muted">Что делаешь</label>
+    <div className="chips">{d.workshop.map(t => <button key={t} className={task === t ? 'on' : ''} onClick={() => setTask(t)}>{t}</button>)}</div>
+    <button disabled={busy} onClick={start}>{busy ? 'Начинаю…' : 'Начать смену в мастерской'}</button>
+    {err && <p className="small why">{err}</p>}
+    {back && <p className="small"><a onClick={back}>← на объект</a></p>}
+  </div>
+}
+
+function StartShift(props) {
+  const { d } = props
+  const [mode, setMode] = useState('obj')
+  if (!d.workshop) return <StartObject {...props} />
+  return <>
+    <div className="segf"><button className={mode === 'obj' ? 'on' : ''} onClick={() => setMode('obj')}>На объекте</button>
+      <button className={mode === 'shop' ? 'on' : ''} onClick={() => setMode('shop')}>Мастерская · без проекта</button></div>
+    {mode === 'shop' ? <Workshop d={d} onStarted={props.onStarted} /> : <StartObject {...props} />}
+  </>
+}
+
+function StartObject({ d, onStarted, onRoad }) {
   const objs = d.objects.filter(o => o.id)
   const [v, set] = useState({ object_id: objs[0]?.id, zone_code: d.zones[0] })
   const [photo, setPhoto] = useState('')
@@ -228,7 +269,7 @@ function StartShift({ d, onStarted, onRoad }) {
   const [cond, setCond] = useState({})
   const [err, setErr] = useState('')
   const looking = viewAs() && !testAs()   // HEAD смотрит как сотрудник: только просмотр — предложить тест
-  if (!objs.length) return <div className="card"><h2>Смена</h2><p className="muted">Сейчас нет объектов в работе. Когда МОП переведёт сделку в «Выполнение проекта», объект появится здесь.</p></div>
+  if (!objs.length) return <div className="card"><h2>Смена</h2><p className="muted">Сейчас нет объектов в работе. Когда МОП переведёт сделку в «Выполнение проекта», объект появится здесь.{d.workshop ? ' Работа без проекта — «Мастерская».' : ''}</p></div>
   const obj = objs.find(o => o.id === v.object_id) || objs[0]
   // две роли (HEAD 08.11): роль смены — по зоне объекта (печать → роль печати, роспись → роль художника), можно сменить
   const roles = d.roles || [d.role]
@@ -291,12 +332,13 @@ function Running({ o, d, done }) {
   const stages = d.stages || []
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
   const print = o.zone_code === 'print'
-  const ok = photo && v.work_done.trim().length >= 3
+  const shop = !!o.workshop
+  const ok = (photo || shop) && v.work_done.trim().length >= 3
   const finish = async () => {
     setBusy(true)
     try {
       const left = await enqueue('/shifts/finish', { client_uid: o.client_uid, ended_at: new Date().toISOString(), area_m2: v.area_m2 === '' ? null : +v.area_m2,
-        work_done: v.work_done.trim(), photo_after: photo, note: v.note || null, printer: print ? v.printer || null : null, stage: v.stage || null })
+        work_done: v.work_done.trim(), photo_after: photo || null, note: v.note || null, printer: print ? v.printer || null : null, stage: v.stage || null })
       done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Смена закончена и ушла на проверку.')
     } catch { setBusy(false) }
   }
@@ -306,26 +348,26 @@ function Running({ o, d, done }) {
       <div className="steps dark"><span className="done">1 Начало</span><span className="on">2 Работа</span><span>3 Конец смены</span></div>
       <span className="kick">Смена идёт</span>
       <div className="timer">{hm(now - new Date(o.started_at).getTime())}</div>
-      <p className="small muted">с {new Date(o.started_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} · №{o.object_id} {o.object_title} · {ZONE[o.zone_code]}</p>
+      <p className="small muted">с {new Date(o.started_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} · {shop ? o.object_title : `№${o.object_id} ${o.object_title} · ${ZONE[o.zone_code]}`}</p>
       {o.before && <img className="before" src={o.before} alt="стена до" />}
     </div>
-    <Promo id={o.object_id} zone={o.zone_code} compact onData={setCond} role={o.role || d.role} />
-    <Hints step="run" role={o.role || d.role} cond={cond} v={d.safety || {}} uid={o.client_uid} />
+    {!shop && <Promo id={o.object_id} zone={o.zone_code} compact onData={setCond} role={o.role || d.role} />}
+    {!shop && <Hints step="run" role={o.role || d.role} cond={cond} v={d.safety || {}} uid={o.client_uid} />}
     <div className="card">
       <h2>Закончить смену</h2>
-      <label className="muted">{print ? 'Напечатано, м²' : 'Сделано, м²'}</label>
-      <input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.') })} placeholder="например, 4,5" />
+      {!shop && <><label className="muted">{print ? 'Напечатано, м²' : 'Сделано, м²'}</label>
+      <input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.') })} placeholder="например, 4,5" /></>}
       <label className="muted">Что сделал за смену</label>
-      <textarea rows="3" value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Например: загрунтовал стену, перенёс эскиз, прописал фон слева" />
+      <textarea rows="3" value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder={shop ? 'Например: прочистка головы, замена демпферов, тест-печать' : 'Например: загрунтовал стену, перенёс эскиз, прописал фон слева'} />
       {print && <><label className="muted">Принтер</label><input value={v.printer} onChange={e => set({ ...v, printer: e.target.value })} placeholder="Название принтера" /></>}
       <input placeholder="Комментарий (по желанию)" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
-      {!print && stages.length > 0 && <><label className="muted">Какой этап закрыл сегодня</label>
+      {!print && !shop && stages.length > 0 && <><label className="muted">Какой этап закрыл сегодня</label>
         <div className="chips stagepick">{stages.map(s => <button key={s.key} className={v.stage === s.key ? 'on' : 'ghost'} onClick={() => set({ ...v, stage: v.stage === s.key ? '' : s.key })}>{s.title}</button>)}</div></>}
-      <Hints step="finish" role={o.role || d.role} cond={{ ...cond, handover: v.stage === 'handover' }} v={d.safety || {}} uid={o.client_uid} />
+      {!shop && <><Hints step="finish" role={o.role || d.role} cond={{ ...cond, handover: v.stage === 'handover' }} v={d.safety || {}} uid={o.client_uid} />
       <h3>Фото в конце смены</h3>
-      <Snap value={photo} set={setPhoto} label="Сфотографировать результат" />
+      <Snap value={photo} set={setPhoto} label="Сфотографировать результат" /></>}
       <button disabled={!ok || busy} onClick={finish}>{busy ? 'Отправляю…' : 'Закончить и отправить на проверку'}</button>
-      {!ok && <p className="small muted">Нужно фото в конце смены и пара слов, что сделано.</p>}
+      {!ok && <p className="small muted">{shop ? 'Напиши пару слов, что сделано.' : 'Нужно фото в конце смены и пара слов, что сделано.'}</p>}
       <p className="small"><a onClick={cancel}>Отменить смену</a></p>
     </div>
   </>

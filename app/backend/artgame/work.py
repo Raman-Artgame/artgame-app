@@ -75,6 +75,7 @@ def work_dict(p: dict = Depends(active)):
             "zones": p["zones"],
             "printer": consts.latest(conn).get("print.tech.printer"),
             "role": p["role_code"],
+            "workshop": WORKSHOP_TASKS if set(p.get("roles") or [p["role_code"]]) & set(WORKSHOP_ROLES) else None,
             "roles": p.get("roles") or [p["role_code"]],   # две роли: в какой роли смена — по зоне объекта, можно сменить
             # подсказки смены (HEAD 08.11): ТБ из «Значений», этапы работ
             "safety": {k: x for k, x in consts.latest(conn).items() if k.startswith("safety.")},
@@ -208,13 +209,17 @@ class StartIn(BaseModel):
     object_id: int
     zone_code: str
     started_at: datetime
-    photo_before: str = Field(min_length=30, max_length=8_000_000)
+    photo_before: str | None = Field(default=None, max_length=8_000_000)   # обязательно на объекте; в мастерской — нет
     geo_lat: float | None = None
     geo_lon: float | None = None
     role: str | None = None             # две роли (HEAD 08.11): в какой роли смена; по умолчанию — по зоне объекта
+    workshop: str | None = Field(default=None, max_length=60)   # «Мастерская» без проекта (HEAD 09.11): ТО принтера и т. п.
 
 
 PRINT_ROLES = ("print_master", "print_operator")
+WORKSHOP_ROLES = PRINT_ROLES   # «Мастерская» без проекта (HEAD 09.11)
+WORKSHOP_ZONES = ("print",)
+WORKSHOP_TASKS = ["ТО принтера", "Ремонт и запчасти", "Тест печати", "Подготовка к объекту", "Обучение", "Другое"]
 
 
 def shift_role(p: dict, zone: str, want: str | None = None) -> str:
@@ -232,7 +237,7 @@ class FinishIn(BaseModel):
     ended_at: datetime
     area_m2: float | None = Field(default=None, ge=0)
     work_done: str = Field(min_length=3, max_length=2000)
-    photo_after: str = Field(min_length=30, max_length=8_000_000)
+    photo_after: str | None = Field(default=None, max_length=8_000_000)   # обязательно на объекте; в мастерской — нет
     printer: str | None = Field(default=None, max_length=100)
     note: str | None = Field(default=None, max_length=1000)
     stage: str | None = None            # этап, который закрыла смена (promo.STAGES)
@@ -259,7 +264,7 @@ def _shift_out(conn, row: dict) -> dict:
     out = dict(row)
     o = conn.execute("SELECT title, city FROM objects WHERE id=%s", (row["object_id"],)).fetchone()
     out["object_title"] = o["title"] if o else ""
-    return photos(out)
+    return shop_title(photos(out))
 
 
 @router.get("/shifts/open")
@@ -275,17 +280,24 @@ def start_shift(b: StartIn, p: dict = Depends(active)):
         dup = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
         if dup:
             return _shift_out(conn, dup)
+        shop = bool(b.workshop)
+        if shop:   # мастерская: без объекта, только печать (HEAD 09.11)
+            b.object_id = 0
+            if not set(p.get("roles") or [p["role_code"]]) & set(WORKSHOP_ROLES) or b.zone_code not in WORKSHOP_ZONES:
+                raise HTTPException(400, "Мастерская без проекта — у печати")
         check_zone(conn, p, b.zone_code, b.object_id)
-        if not b.object_id:
+        if not b.object_id and not shop:
             raise HTTPException(400, "Смена — только на объекте")
+        if not shop and not (b.photo_before and len(b.photo_before) >= 30):
+            raise HTTPException(422, "Нужно фото стены до начала")
         if conn.execute("SELECT 1 FROM shifts WHERE person_id=%s AND status='open'", (p["id"],)).fetchone():
             raise HTTPException(409, "Смена уже идёт — сначала закончи её")
-        ph = _photo(conn, p, b.object_id, b.client_uid, "before", b.photo_before, "до смены")
+        ph = None if shop else _photo(conn, p, b.object_id, b.client_uid, "before", b.photo_before, "до смены")
         row = conn.execute(
-            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, geo_lat, geo_lon, status, photo_before, trip, role_code)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,'open',%s,%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
-            (b.client_uid, p["id"], b.object_id, b.zone_code, b.started_at, b.geo_lat, b.geo_lon, ph, is_trip(conn, p["id"], b.object_id),
-             shift_role(p, b.zone_code, b.role))).fetchone()
+            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, geo_lat, geo_lon, status, photo_before, trip, role_code, kind, task)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,'open',%s,%s,%s,%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
+            (b.client_uid, p["id"], b.object_id, b.zone_code, b.started_at, b.geo_lat, b.geo_lon, ph, False if shop else is_trip(conn, p["id"], b.object_id),
+             shift_role(p, b.zone_code, b.role), "workshop" if shop else "work", b.workshop.strip() if shop else None)).fetchone()
         if not row:
             row = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
         else:
@@ -407,11 +419,14 @@ def finish_shift(b: FinishIn, p: dict = Depends(active)):
         from .promo import STAGE_KEYS
         if b.stage and b.stage not in STAGE_KEYS:
             raise HTTPException(400, "bad stage")
-        ph = _photo(conn, p, row["object_id"], b.client_uid, "after", b.photo_after, "после смены")
+        shop = row["kind"] == "workshop"
+        if not shop and not (b.photo_after and len(b.photo_after) >= 30):
+            raise HTTPException(422, "Нужно фото в конце смены")
+        ph = None if shop else _photo(conn, p, row["object_id"], b.client_uid, "after", b.photo_after, "после смены")
         s = ShiftIn(client_uid=b.client_uid, object_id=row["object_id"], zone_code=row["zone_code"], started_at=row["started_at"],
                     ended_at=b.ended_at, area_m2=b.area_m2, printer=b.printer if row["zone_code"] == "print" else None)
         apply_cond(conn, s)
-        n = shift_norm(consts.latest(conn), s, p["role_code"])
+        n = {"plan_m2": None, "kpd": None, "bonus": None} if shop else shift_norm(consts.latest(conn), s, p["role_code"])   # мастерская — без плана
         row = conn.execute(
             """UPDATE shifts SET status='submitted', ended_at=%s, area_m2=%s, work_done=%s, note=%s, photo_after=%s, printer=%s,
                    complexity=%s, at_height=%s, outdoor=%s, hard_surface=%s, plan_m2=%s, kpd=%s, bonus=%s, stage=%s
@@ -513,6 +528,13 @@ def photos(s: dict) -> dict:
     return s
 
 
+def shop_title(s: dict) -> dict:
+    """Смена в мастерской: вместо «Офис / без объекта» — «Мастерская · ТО принтера»."""
+    if s.get("kind") == "workshop":
+        s["object_title"] = "Мастерская" + (f" · {s['task']}" if s.get("task") else "")
+    return s
+
+
 def with_receipt(e: dict) -> dict:
     """Подписанная ссылка на чек (живёт 12 ч)."""
     from .files import sign
@@ -524,7 +546,7 @@ def with_receipt(e: dict) -> dict:
 def my(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         return {
-            "shifts": [photos(s) for s in conn.execute("""SELECT s.*, o.title AS object_title FROM shifts s JOIN objects o ON o.id=s.object_id
+            "shifts": [shop_title(photos(s)) for s in conn.execute("""SELECT s.*, o.title AS object_title FROM shifts s JOIN objects o ON o.id=s.object_id
                                       WHERE person_id=%s ORDER BY started_at DESC LIMIT 100""", (p["id"],)).fetchall()],
             "expenses": [with_receipt(e) for e in conn.execute("""SELECT e.*, o.title AS object_title FROM expenses e JOIN objects o ON o.id=e.object_id
                                         WHERE person_id=%s ORDER BY created_at DESC LIMIT 100""", (p["id"],)).fetchall()],
@@ -585,7 +607,7 @@ def review_list(p: dict = Depends(active)):
             if c.get("article") == "sales":
                 e["object_title"] = "Отдел продаж · " + e["category_title"] + (f" · сделка № {e['deal_id']}" if e.get("deal_id") else "") + (" · сверх лимита" if e.get("over_limit") else "")
         out["expenses"] = [with_receipt(e) for e in out["expenses"]]
-        out["shifts"] = [photos(x) for x in out["shifts"]]
+        out["shifts"] = [shop_title(photos(x)) for x in out["shifts"]]
         if p["role_code"] != "head":
             for x in out["shifts"]:
                 x.pop("bonus", None)
