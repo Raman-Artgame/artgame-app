@@ -610,3 +610,7 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .grow .growrow.ok span { background: var(--ok); }
 .grow .growrow.ok em { color: var(--ok); font-weight: 600; }
 .card.acting { border-left: 4px solid var(--accent); }
+/* ГИП и история проекта (HEAD 09.11) */
+.history .hpeople { display: grid; gap: 6px; }
+.history .hpeople div { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+.card.past .head h3 { margin: 0; }

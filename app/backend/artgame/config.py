@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     initdata_max_age: int = 24 * 3600   # сек, сколько живёт подпись Telegram
     private_key: str = ""               # ключ шифрования ИИН/реквизитов (pgcrypto)
     env_name: str = "test"              # test | prod
+    backfill_from: str = "2026-11-01"   # «Прошлая смена / расход» (HEAD 09.11): с какого дня можно внести задним числом
+    backfill_until: str = "2026-11-15"  # и до какого дня включительно открыта кнопка (ARTGAME_BACKFILL_UNTIL)
     public_origin: str = "https://app.artgame.world"
     gateway_url: str = ""              # шлюз ARTGAME (MCP) на localhost, чтение Битрикса через bitrix_read
     gateway_token: str = ""            # если шлюз требует токен

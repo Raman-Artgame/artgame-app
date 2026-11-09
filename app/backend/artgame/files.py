@@ -35,13 +35,18 @@ def can_see(p: dict, kind: str) -> bool:
     return p["role_code"] == "head"
 
 
+def can_prod(p: dict) -> bool:
+    """«Продакшн»: роль из PROD или переключатель «Оплачиваемые рилс» у человека (HEAD 09.11: Глеб)."""
+    return p["role_code"] in PROD or bool(p.get("reels"))
+
+
 def can_upload(p: dict, kind: str) -> bool:
     if kind == "photo":
         return True
     if kind == "design":
         return p["role_code"] == "head" or "design" in p["zones"]
     if kind == "media":
-        return p["role_code"] in PROD
+        return can_prod(p)
     return p["role_code"] in DOC_ROLES
 
 

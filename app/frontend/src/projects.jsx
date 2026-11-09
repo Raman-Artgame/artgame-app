@@ -56,7 +56,7 @@ function PCard({ x, onOpen }) {
       <span className={'left ' + (x.state === 'late' ? 'late' : x.left != null && x.left <= 2 ? 'soon' : '')}>{x.left == null ? '—' : x.left < 0 ? `−${-x.left} дн.` : `${x.left} дн.`}</span>
     </div>
     <div className="pbody">
-      <b>{cleanTitle(x.title, x.id)}</b>
+      <b>{cleanTitle(x.title, x.id)}</b>{x.gip && <span className="small muted"> · ГИП {x.gip.name.split(' ')[0]}</span>}
       <div className="meta">{[`№ ${x.id}`, x.city, x.area ? `${x.area} м²` : '', x.level].filter(Boolean).join(' · ')}</div>
       {x.working && <div className={'prog ' + (x.state === 'late' ? 'late' : x.progress >= 100 ? 'ok' : '')}><i style={{ width: pct(x) + '%' }} /></div>}
       <div className="pfoot">
@@ -72,7 +72,7 @@ function ProjectCard({ x, me, back, openDeal }) {
   const c = x.cond || {}
   const kv = [['Город', x.city], ['Адрес', x.address], ['Площадь', x.area ? `${x.area} м²` : ''], ['Сложность', x.level || 'МОП ещё не указал'],
     ['Старт', x.start ? dmy(x.start) : ''], ['Сдача', x.due ? dmy(x.due) : ''], ['Смены', x.norm.shifts ? `${x.done.shifts} из ${x.norm.shifts}` : x.done.shifts ? String(x.done.shifts) : ''],
-    ['Состав по норме', x.norm.crew ? `${x.norm.crew} чел.` : ''], ['Сделано', x.done.m2 ? `${x.done.m2} м²` : ''], ['МОП', x.manager], ['Сумма', x.sum ? money(x.sum) : '']].filter(([, v]) => v)
+    ['Состав по норме', x.norm.crew ? `${x.norm.crew} чел.` : ''], ['Сделано', x.done.m2 ? `${x.done.m2} м²` : ''], ['МОП', x.manager], ['ГИП', x.gip?.name || ''], ['Сумма', x.sum ? money(x.sum) : '']].filter(([, v]) => v)
   return <>
     <div className="phero" style={x.cover ? { backgroundImage: `linear-gradient(180deg, rgba(11,11,13,.15), rgba(11,11,13,.85)), url(${x.cover})` } : undefined}>
       <button className="ghost mini back" onClick={back}>← Проекты</button>
@@ -89,6 +89,54 @@ function ProjectCard({ x, me, back, openDeal }) {
         <p className="small muted">● — смена идёт сейчас; остальные были на объекте последние 4 дня.</p></>}
       {openDeal && <button className="ghost" onClick={() => openDeal(x.id)}>Открыть сделку</button>}
     </div>
+    {me && ASSIGN.has(me.role_code) && <GipPick x={x} />}
+    {me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} />}
     <Gallery obj={{ id: x.id, title: x.title }} me={me} />
   </>
+}
+
+// ГИП проекта (HEAD 09.11): назначают HEAD и МОП; ГИП — Главный художник, Про или Мастер печати (и «и.о.» этих ролей).
+const ASSIGN = new Set(['head', 'mop', 'mop_vip'])
+const SEE_ALL = new Set(['head', 'artist_pro'])
+function GipPick({ x }) {
+  const [list, setList] = useState(null)
+  const [cur, setCur] = useState(x.gip?.id || 0)
+  const [msg, setMsg] = useState('')
+  useEffect(() => { api('/gip/candidates').then(setList, () => setList([])) }, [])
+  const save = id => api(`/objects/${x.id}/gip`, { method: 'POST', body: { person_id: id } })
+    .then(r => { setCur(r.gip_id || 0); x.gip = r.gip_id ? { id: r.gip_id, name: r.gip_name } : null; setMsg(r.gip_id ? `ГИП — ${r.gip_name}, ему пришло сообщение.` : 'ГИП снят.') }, e => setMsg(e.message))
+  return <div className="card gippick"><h3>ГИП проекта</h3>
+    <select value={cur} onChange={e => save(+e.target.value)} disabled={!list}>
+      <option value={0}>— не назначен —</option>
+      {(list || []).map(p => <option key={p.id} value={p.id}>{p.full_name} · {p.acting ? 'и.о. ' : ''}{p.role_title}</option>)}
+    </select>
+    <p className="small muted">{msg || 'ГИП видит всю историю проекта и принимает его смены.'}</p></div>
+}
+
+const ST = { submitted: 'на проверке', approved: 'принято', rejected: 'отклонено', open: 'идёт' }
+const dt = s => new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+const tm = s => new Date(s).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+// Вся история проекта для ГИП: кто сколько, по дням — что сделал с фото, расходы с чеками.
+function History({ id, mine }) {
+  const [h, setH] = useState(null)
+  const [err, setErr] = useState('')
+  useEffect(() => { api(`/objects/${id}/history`).then(setH, e => setErr(e.message)) }, [id])
+  if (err) return <div className="card muted">{err}</div>
+  if (!h) return <div className="card muted">Загрузка истории…</div>
+  return <div className="card history"><h3>{mine ? 'Ты ГИП · вся история проекта' : 'Вся история проекта'}</h3>
+    {h.people.length ? <div className="hpeople">{h.people.map(x => <div key={x.name}><b>{x.name}</b>
+      <span className="small muted">{x.shifts} смен · {x.hours} ч{x.m2 ? ` · ${x.m2} м²` : ''}</span></div>)}</div> : <p className="muted">Смен ещё нет.</p>}
+    {h.shifts.length > 0 && <><h3>Смены</h3>{h.shifts.map(s => <div key={s.id} className="row">
+      <div><b>{s.full_name}</b> · {dt(s.started_at)} {tm(s.started_at)}{s.ended_at ? '–' + tm(s.ended_at) : ''}{s.area_m2 ? ` · ${+s.area_m2} м²` : ''}{s.kind === 'road' ? ' · дорога' : ''}
+        {s.backfill && <span className="tag draft">задним числом</span>}
+        {s.work_done && <div className="small">Сделал: {s.work_done}</div>}
+        {s.reason && <div className="small why">Причина: {s.reason}</div>}
+        {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <a href={s.photo_before_full} target="_blank" rel="noreferrer"><img src={s.photo_before_url} alt="до" /></a>}
+          {s.photo_after_url && <a href={s.photo_after_full} target="_blank" rel="noreferrer"><img src={s.photo_after_url} alt="после" /></a>}</div>}</div>
+      <span className={`tag st-${s.status}`}>{ST[s.status] || s.status}</span></div>)}</>}
+    {h.expenses.length > 0 && <><h3>Расходы · {money(h.spent)}</h3>{h.expenses.map(e => <div key={e.id} className="row">
+      <div><b>{money(e.amount)}</b> · {e.category} · {e.full_name}<br /><span className="small muted">{dt(e.created_at)}{e.note ? ' · ' + e.note : ''}</span>
+        {e.receipt_url && <a href={e.receipt_url} target="_blank" rel="noreferrer"> чек</a>}</div>
+      <span className={`tag st-${e.status}`}>{ST[e.status] || e.status}</span></div>)}</>}
+  </div>
 }

@@ -521,6 +521,9 @@ def my_pay(ym: str | None = None, p: dict = Depends(active)):
         v = vals(conn)
         roles = p.get("roles") or [p["role_code"]]
         rate = my_rate(v, roles[0], f)
+        if p.get("reels") and v.get("pay.reels") and not any(x["label"].startswith("Рилс") for x in rate):   # «Оплачиваемые рилс» (HEAD 09.11)
+            rate.append({"label": "Рилс после утверждения HEAD" + (f" (до {v['pay.reels.max']:g} в месяц)" if v.get("pay.reels.max") else ""),
+                         "amount": v["pay.reels"]})
         for r in roles[1:]:   # вторая роль (HEAD 08.11): её ставки — отдельными строками с названием роли
             t = role_title(conn, r)
             rate += [{**x, "label": f"{t} · {x['label']}"} for x in my_rate(v, r, None) if "Минимум" not in x["label"] and "Суточные" not in x["label"]]

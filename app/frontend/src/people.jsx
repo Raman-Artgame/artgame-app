@@ -35,6 +35,7 @@ export function People({ ROLE, ZONE }) {
           <option value="">— нет —</option>
           {Object.entries(ROLE).filter(([k]) => k !== 'head' && k !== p.role_code).map(([k, t]) => <option key={k} value={k}>{t}</option>)}
         </select></label>}
+      {p.role_code && p.role_code !== 'head' && <label className="small muted check"><input type="checkbox" checked={!!p.reels} onChange={e => save(p.id, { reels: e.target.checked })} /> Оплачиваемые рилс <span>· «Продакшн», рилс после вашего утверждения — в оплату по «Значениям»</span></label>}
       {p.role_code && p.role_code !== 'head' && <label className="small muted">Исполняет обязанности (и.о.) <span>· права и меню этой роли, ставка — прежняя до дня повышения</span>
         <select value={p.acting_role || ''} onChange={e => save(p.id, { acting_role: e.target.value })}>
           <option value="">— нет —</option>

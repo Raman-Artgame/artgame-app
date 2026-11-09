@@ -125,16 +125,16 @@ function Main({ me, web, logout }) {
   // Проверка · Проекты · Учёба · Кабинет (у кого что есть). Склад — внутри «Расхода». «Мои» → «Кабинет».
   const worker = art || PRINT.has(role)
   const tabs = worker ? [...(KIT.has(role) ? [['kit', 'Сбор']] : []), ['shift', 'Смена'], ['expense', 'Расход'],
-    ...(PROD.has(role) ? [['prod', 'Продакшн']] : []), ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['projects', 'Проекты'],
+    ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['projects', 'Проекты'],
     ['study', 'Учёба'], ['mine', 'Кабинет']] :
-    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход']] :
+    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(me.reels ? [['prod', 'Продакшн']] : []), ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход']] :
    [...(sales ? [['today', 'Сегодня'], ['leads', 'Лиды'], ['deals', 'Сделки'], ['projects', 'Проекты'], ['month', 'Месяц']] : []),
     ...(mopPlace ? [['study', 'Учёба']] : []),
     ...(other.length ? [['place', 'Место']] : []),
     ...(mop || carp ? [] : [['shift', 'Смена'], ['expense', 'Расход']]),
     ...(STOCK.has(role) ? [['stock', 'Склад']] : []), ['mine', 'Кабинет'],
     ...(!sales ? [['projects', 'Проекты']] : []),
-    ...(PROD.has(role) ? [['prod', 'Продакшн']] : []),
+    ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []),
     ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []),
     ...(KIT.has(role) ? [['kit', 'Сбор']] : []),
     ...(role === 'head' ? [['design', 'Дизайн'], ['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда']] : [])]
@@ -197,15 +197,18 @@ function ExpenseTab({ done }) {
 // (отметки — только у себя на телефоне; подтверждает руководитель), экзамен, кто решает.
 function Grow({ g, me }) {
   const key = `artgame.grow.${me?.id || 0}.${g.step}`
-  const [ok, setOk] = useState(() => { try { return JSON.parse(localStorage.getItem(key) || '[]') } catch { return [] } })
-  const flip = i => { const n = ok.includes(i) ? ok.filter(x => x !== i) : [...ok, i]; setOk(n); try { localStorage.setItem(key, JSON.stringify(n)) } catch { /* без памяти */ } }
+  const [ok, setOk] = useState(() => { if (me?._view_as) return []; try { return JSON.parse(localStorage.getItem(key) || '[]') } catch { return [] } })
+  const ro = !!me?._view_as   // HEAD смотрит как сотрудник: отметки — личные, тут их не ставим и не показываем свои
+  const flip = i => { if (ro) return
+    const n = ok.includes(i) ? ok.filter(x => x !== i) : [...ok, i]; setOk(n); try { localStorage.setItem(key, JSON.stringify(n)) } catch { /* без памяти */ } }
   return <div className="card duty grow">
     <span className="tag">{g.step}</span>{g.draft && <span className="tag draft">черновик</span>}<h2>{g.title}</h2><p>{g.about}</p>
-    <h3>Что нужно для ступени · есть {ok.length} из {g.check.length}</h3>
+    <h3>Что нужно для ступени{ro ? '' : ` · есть ${ok.length} из ${g.check.length}`}</h3>
+    {ro && <p className="small muted">Отметки «есть / нет» сотрудник ставит у себя — в просмотре их не видно.</p>}
     {g.check.map((x, i) => { const [t, how] = Array.isArray(x) ? x : [x]
       return <div key={i} className={'growrow' + (ok.includes(i) ? ' ok' : '')} onClick={() => flip(i)}>
         <span>{ok.includes(i) ? '✓' : i + 1}</span><div>{t}{how && <p className="small muted">Как подтверждаем: {how}</p>}</div>
-        <em className="small">{ok.includes(i) ? 'есть' : 'нет'}</em></div> })}
+        {!ro && <em className="small">{ok.includes(i) ? 'есть' : 'нет'}</em>}</div> })}
     {g.exam && <><h3>Экзамен</h3>{g.exam.map(([t, how, ok]) => <div key={t} className="growexam"><b>{t}</b><span className="small">{how}</span><span className="small muted">Зачёт: {ok}</span></div>)}</>}
     <p className="small muted">{g.who}</p><p className="small muted">Источник: {g.src}</p>
   </div>

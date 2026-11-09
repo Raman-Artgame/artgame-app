@@ -1,5 +1,5 @@
 """Раздел «Смены и расходы». Отправка идемпотентна по client_uid (офлайн-очередь на телефоне)."""
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from uuid import UUID, uuid5
 
@@ -10,6 +10,7 @@ import math
 
 from . import constants as consts
 from . import db, drive, sync_objects
+from .config import settings
 from .deps import current_person
 
 TZ = ZoneInfo("Asia/Almaty")
@@ -28,12 +29,28 @@ def active(p: dict = Depends(current_person)) -> dict:
     return p
 
 
-def check_zone(conn, p: dict, zone: str, object_id: int):
+def check_zone(conn, p: dict, zone: str, object_id: int, past: bool = False):
     if zone not in p["zones"]:
         raise HTTPException(400, "zone not assigned")
     o = conn.execute("SELECT status FROM objects WHERE id=%s", (object_id,)).fetchone()
-    if not o or o["status"] != "active":
+    if not o or o["status"] not in (("active", "done") if past else ("active",)):
         raise HTTPException(400, "object closed or missing")
+
+
+def backfill_window() -> dict:
+    """Задним числом (HEAD 09.11: «чтобы ребята всё заполнили с 1 ноября»): с какого дня и до какого числа открыто."""
+    today = datetime.now(TZ).date()
+    a, b = date.fromisoformat(settings.backfill_from), date.fromisoformat(settings.backfill_until)
+    return {"from": a.isoformat(), "until": b.isoformat(), "open": a <= today <= b}
+
+
+def check_past_day(day: date) -> datetime:
+    w = backfill_window()
+    if not w["open"]:
+        raise HTTPException(400, f"Внести задним числом можно было до {w['until']}")
+    if day < date.fromisoformat(w["from"]) or day >= datetime.now(TZ).date():
+        raise HTTPException(400, f"Дата — с {w['from']} по вчера")
+    return datetime(day.year, day.month, day.day, 9, 0, tzinfo=TZ)
 
 
 # Саппорт тратит только на такси и докупку на объект (HEAD 08.11).
@@ -62,6 +79,9 @@ def work_dict(p: dict = Depends(active)):
             # подсказки смены (HEAD 08.11): ТБ из «Значений», этапы работ
             "safety": {k: x for k, x in consts.latest(conn).items() if k.startswith("safety.")},
             "stages": [{"key": k, "title": t} for k, t in __import__("artgame.promo", fromlist=["STAGES"]).STAGES],
+            # задним числом с 1.11 (HEAD 09.11): объекты — и уже сданные
+            "backfill": {**backfill_window(), "objects": conn.execute(
+                "SELECT id, title, city FROM objects WHERE status IN ('active','done') AND id<>0 ORDER BY id DESC LIMIT 80").fetchall()},
         }
 
 
@@ -299,6 +319,43 @@ def get_trip(object_id: int, p: dict = Depends(active)):
         return o
 
 
+class PastIn(BaseModel):
+    client_uid: UUID
+    object_id: int
+    zone_code: str
+    day: date
+    hours: float = Field(gt=0, le=16)
+    area_m2: float | None = Field(default=None, ge=0)
+    work_done: str = Field(min_length=3, max_length=2000)
+    photo_after: str | None = Field(default=None, max_length=8_000_000)   # фото по возможности
+    role: str | None = None
+
+
+@router.post("/shifts/past")
+def past_shift(b: PastIn, p: dict = Depends(active)):
+    """«Прошлая смена» (HEAD 09.11): внести смену задним числом с 1.11 — сразу на проверку, с пометкой backfill."""
+    with db.pool.connection() as conn, conn.transaction():
+        dup = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
+        if dup:
+            return _shift_out(conn, dup)
+        check_zone(conn, p, b.zone_code, b.object_id, past=True)
+        if not b.object_id:
+            raise HTTPException(400, "Смена — только на объекте")
+        start = check_past_day(b.day)
+        if conn.execute("""SELECT 1 FROM shifts WHERE person_id=%s AND status NOT IN ('rejected','cancelled')
+                           AND started_at >= %s AND started_at < %s + interval '1 day'""", (p["id"], start.replace(hour=0), start.replace(hour=0))).fetchone():
+            raise HTTPException(409, "В этот день смена уже есть")
+        ph = _photo(conn, p, b.object_id, b.client_uid, "after", b.photo_after, "после (задним числом)") if b.photo_after else None
+        row = conn.execute(
+            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status, area_m2, work_done, photo_after,
+                                   trip, role_code, backfill)
+               VALUES (%s,%s,%s,%s,%s,%s,'submitted',%s,%s,%s,%s,%s,true) RETURNING *""",
+            (b.client_uid, p["id"], b.object_id, b.zone_code, start, start + timedelta(hours=b.hours), b.area_m2, b.work_done, ph,
+             is_trip(conn, p["id"], b.object_id), shift_role(p, b.zone_code, b.role))).fetchone()
+        db.audit(conn, p["id"], "shift_past", "shifts", row["id"], {"day": b.day.isoformat()})
+        return _shift_out(conn, row)
+
+
 class RoadIn(BaseModel):
     client_uid: UUID
     object_id: int
@@ -395,6 +452,7 @@ class ExpenseIn(BaseModel):
     paid_by: str = "own"
     receipt: str | None = Field(default=None, max_length=8_000_000)  # data:image/jpeg;base64,… (сжато на телефоне)
     note: str | None = None
+    day: date | None = None            # задним числом с 1.11 (HEAD 09.11)
 
 
 @router.post("/expenses")
@@ -405,7 +463,8 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
         dup = conn.execute("SELECT * FROM expenses WHERE client_uid=%s", (e.client_uid,)).fetchone()
         if dup:
             return dup
-        check_zone(conn, p, e.zone_code, e.object_id)
+        check_zone(conn, p, e.zone_code, e.object_id, past=bool(e.day))
+        at = check_past_day(e.day).replace(hour=12) if e.day else None
         if e.category not in {c["code"] for c in cats_for(conn, p["role_code"])}:
             raise HTTPException(400, "bad category")
         drive_id = None
@@ -418,10 +477,10 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
             except Exception as ex:  # Диск недоступен — телефон повторит позже
                 raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         row = conn.execute(
-            """INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, paid_by, receipt_url, note)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, paid_by, receipt_url, note, created_at, backfill)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,coalesce(%s, now()),%s)
                ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
-            (e.client_uid, p["id"], e.object_id, e.zone_code, e.category, e.amount, e.paid_by, None, e.note)).fetchone()
+            (e.client_uid, p["id"], e.object_id, e.zone_code, e.category, e.amount, e.paid_by, None, e.note, at, bool(e.day))).fetchone()
         if not row:
             return with_receipt(conn.execute("SELECT * FROM expenses WHERE client_uid=%s", (e.client_uid,)).fetchone())
         if drive_id:

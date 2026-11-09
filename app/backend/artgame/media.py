@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import db, drive
-from .files import PROD, links
+from .files import PROD, can_prod, links
 from .work import active
 
 router = APIRouter(prefix="/api")
@@ -34,7 +34,7 @@ def media_list(scope: str = "mine", object_id: int | None = None, p: dict = Depe
             raise HTTPException(403, "только HEAD")
         cond, args = "f.review='pending'", []
     elif scope == "object" and object_id:
-        cond, args = ("f.object_id=%s" + ("" if head or p["role_code"] in PROD else " AND f.review='approved'")), [object_id]
+        cond, args = ("f.object_id=%s" + ("" if head or can_prod(p) else " AND f.review='approved'")), [object_id]
     else:
         raise HTTPException(400, "bad scope")
     with db.pool.connection() as conn:
@@ -45,7 +45,7 @@ def media_list(scope: str = "mine", object_id: int | None = None, p: dict = Depe
             v = consts.latest(conn)
     out = {"items": [_out(f) for f in rows], "types": TYPES}
     if scope == "mine":   # своя ставка за рилс — только если человек сам снимает рилс
-        out["reels"] = {"rate": v.get("pay.reels"), "max": v.get("pay.reels.max")} if p["role_code"] in PROD else None
+        out["reels"] = {"rate": v.get("pay.reels"), "max": v.get("pay.reels.max")} if can_prod(p) else None
     return out
 
 
