@@ -93,3 +93,21 @@ def test_stock_purchase(client, monkeypatch):
     from datetime import date
     s = client.get("/api/fin/summary", params={"ym": f"{date.today():%Y-%m}"}, headers=hdr(1000)).json()
     assert s["costs"]["stock"] == 9800 + 170 and s["costs"]["canvas"] == 3000
+
+
+def test_purchase_with_deal_goes_to_project(client, monkeypatch):
+    """HEAD 09.11: покупка с № сделки — расход проекта (не «Закупки на склад»)."""
+    monkeypatch.setattr(drive, "save_receipt", lambda conn, dept, name, data, deal_id=None: "drv")
+    client.post("/api/register", json={"full_name": "HEAD"}, headers=hdr(1000))
+    pid = client.post("/api/register", json={"full_name": "Анна"}, headers=hdr(2000)).json()["id"]
+    client.post(f"/api/people/{pid}", json={"role_code": "artist", "zones": ["mural"]}, headers=hdr(1000))
+    with db.pool.connection() as c:
+        c.execute("INSERT INTO objects (id, title, city, bitrix_stage) VALUES (525, 'Объект 525', 'Астана', 'UC_AV00QK')")
+    t = buy(client, 2000, "art", [{"name": "Такси", "qty": 1, "amount": 480}], deal_id=525).json()
+    k = buy(client, 2000, "art", [{"name": "Колеровка", "qty": 1, "amount": 32300}], deal_id=525, paid_by="company").json()
+    s = buy(client, 2000, "art", [{"name": "Скотч", "qty": 1, "amount": 500}], deal_id=999).json()   # нет такой сделки — склад
+    assert (t["object_id"], t["category"]) == (525, "transport") and (k["object_id"], k["category"]) == (525, "purchase")
+    assert (s["object_id"], s["category"]) == (0, "stock_art")
+    assert [x["id"] for x in client.get("/api/stock/expenses", headers=hdr(1000)).json()["items"]] == [s["id"]]
+    rv = {x["id"]: x for x in client.get("/api/review", headers=hdr(1000)).json()["expenses"]}
+    assert rv[k["id"]]["object_title"] == "Объект 525"

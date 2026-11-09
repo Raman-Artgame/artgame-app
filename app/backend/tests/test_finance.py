@@ -340,3 +340,22 @@ def test_bitrix_projects(client, monkeypatch):
     fin._cache.clear()
     s = client.get("/api/fin/summary", params={"ym": "2026-11"}, headers=hdr(1000)).json()
     assert s["revenue"]["gross"] == 410000
+
+
+def test_bitrix_payment_without_date(client, monkeypatch):
+    """HEAD 09.11 («почему 0»): в сделке сумма поступления есть, даты нет — приход днём импорта; закрытые сделки не трогаем."""
+    from artgame import bx, fin_bx
+    setup(client, monkeypatch)
+    deals = [{"ID": "525", "TITLE": "Вок", "CATEGORY_ID": "0", "STAGE_ID": "UC_AV00QK", "UF_CRM_ARTGAME_FIN03_PAY1_AMOUNT": "289000|KZT",
+              "UF_CRM_ARTGAME_FIN03_PAY1_DATE": ""},
+             {"ID": "9", "TITLE": "Старая", "CATEGORY_ID": "0", "STAGE_ID": "WON", "UF_CRM_ARTGAME_FIN03_PAY1_AMOUNT": "200000|KZT"}]
+    monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False: deals)
+    assert fin_bx_run(fin_bx)["added"] == 1 and fin_bx_run(fin_bx) == {"deals": 2, "added": 0, "changed": 0}
+    with db.pool.connection() as c:
+        r = c.execute("SELECT * FROM fin_ledger WHERE source='bitrix'").fetchall()
+    assert len(r) == 1 and r[0]["deal_id"] == 525 and "дата не указана" in r[0]["note"]
+    deals[0]["UF_CRM_ARTGAME_FIN03_PAY1_DATE"] = "2026-11-05T03:00:00+05:00"   # МОП поставил дату — строка переезжает
+    assert fin_bx_run(fin_bx)["changed"] == 1
+    with db.pool.connection() as c:
+        act = c.execute("SELECT op_date FROM fin_ledger WHERE source='bitrix' AND status='active'").fetchall()
+    assert [str(x["op_date"]) for x in act] == ["2026-11-05"]

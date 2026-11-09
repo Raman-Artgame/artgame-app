@@ -93,14 +93,18 @@ def add(e: StockIn, p: dict = Depends(active)):
         except Exception as ex:  # Диск недоступен — телефон повторит позже
             raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         data, mime = drive.decode_data_url(e.receipt)
+        # HEAD 09.11: покупка с № сделки — это расход проекта, а не склад (такси — «Такси / доставка», прочее — «Докупка на объект»)
+        oid, cat = 0, e.category
+        if e.deal_id and conn.execute("SELECT 1 FROM objects WHERE id=%s", (e.deal_id,)).fetchone():
+            oid, cat = e.deal_id, "purchase"
         f = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by)
-                            VALUES (gen_random_uuid(), 0, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",
-                         (name, mime, len(data), drive_id, p["id"])).fetchone()
+                            VALUES (gen_random_uuid(), %s, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",
+                         (oid, name, mime, len(data), drive_id, p["id"])).fetchone()
         row = conn.execute(
             """INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, paid_by, note, deal_id,
                                      receipt_file_id, over_limit, status, payout_status, checked_at, reason)
-               VALUES (%s,%s,0,NULL,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
-            (e.client_uid, p["id"], e.category, e.amount, e.paid_by, e.note, e.deal_id, f["id"], bool(limit) and not ok,
+               VALUES (%s,%s,%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+            (e.client_uid, p["id"], oid, cat, e.amount, e.paid_by, e.note, e.deal_id, f["id"], bool(limit) and not ok,
              "approved" if ok else "submitted", "to_pay" if ok and e.paid_by == "own" else "none",
              datetime.now(TZ) if ok else None, "в пределах лимита" if ok else None)).fetchone()
         row = self_approve(conn, p, row)
@@ -228,6 +232,12 @@ class PurchaseIn(BaseModel):
     deal_id: int | None = Field(default=None, gt=0)           # под проект — по желанию
 
 
+def project_category(names) -> str:
+    """Статья расхода проекта для покупки «под сделку»: одно такси — transport, остальное — purchase."""
+    names = [n.lower() for n in names]
+    return "transport" if names and all("такси" in n or "доставк" in n for n in names) else "purchase"
+
+
 @router.post("/stock/purchase")
 def purchase(e: PurchaseIn, p: dict = Depends(active)):
     if e.paid_by not in ("own", "company"):
@@ -270,14 +280,18 @@ def purchase(e: PurchaseIn, p: dict = Depends(active)):
         except Exception as ex:  # Диск недоступен — телефон повторит позже
             raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         data, mime = drive.decode_data_url(e.receipt)
+        # HEAD 09.11: покупка с № сделки — это расход проекта, а не склад (такси — «Такси / доставка», прочее — «Докупка на объект»)
+        oid, cat = 0, d["category"]
+        if e.deal_id and conn.execute("SELECT 1 FROM objects WHERE id=%s", (e.deal_id,)).fetchone():
+            oid, cat = e.deal_id, project_category(x["name"] for x in lines)
         f = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by)
-                            VALUES (gen_random_uuid(), 0, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",
-                         (name, mime, len(data), drive_id, p["id"])).fetchone()
+                            VALUES (gen_random_uuid(), %s, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",
+                         (oid, name, mime, len(data), drive_id, p["id"])).fetchone()
         row = conn.execute(
             """INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, paid_by, note, deal_id,
                                      receipt_file_id, over_limit, status, payout_status, checked_at, reason)
-               VALUES (%s,%s,0,NULL,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
-            (e.client_uid, p["id"], d["category"], total, e.paid_by, note, e.deal_id, f["id"], bool(bad),
+               VALUES (%s,%s,%s,NULL,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+            (e.client_uid, p["id"], oid, cat, total, e.paid_by, note, e.deal_id, f["id"], bool(bad),
              "approved" if ok else "submitted", "to_pay" if ok and e.paid_by == "own" else "none",
              datetime.now(TZ) if ok else None, "в пределах потолка цены" if ok else None)).fetchone()
         row = self_approve(conn, p, row)

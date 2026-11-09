@@ -80,3 +80,4 @@ def test_road_does_not_block_and_fix(client, team, monkeypatch):  # noqa: F811
     assert client.post(f"/api/shift/{road}/fix", json={"start_time": "09:00", "hours": 18}, headers=hdr(5000)).status_code == 403   # сам себе — нет
     r = client.post(f"/api/shift/{road}/fix", json={"start_time": "10:30", "hours": 17.5, "kind": "work"}, headers=hdr(1000)).json()
     assert r["kind"] == "work" and "05:30" in r["started_at"]   # 10:30 Алматы
+

@@ -48,13 +48,16 @@ async function tab(p, name) {
   // 1. HEAD открывает приложение — сразу Пульт
   const h = await open(b, 1000)
   const nav = await navText(h)
-  assert.deepStrictEqual(nav.slice(0, 5), ['Пульт', 'Проверка', 'Сделки', 'Финансы', 'Команда'], nav.join(','))
+  assert.deepStrictEqual(nav.slice(0, 5), ['Пульт', 'Проверка', 'Сделки', 'Проекты', 'Финансы'], nav.join(','))
   await h.getByText('Ждёт вашего решения').waitFor()
   await h.getByText('Смены на проверке: 1').waitFor()
   await h.getByText('Ждут роли: 1').waitFor()
   await h.locator('#pulse-today').getByText('Дана Художник').waitFor()
   assert.strictEqual(await h.locator('.viewas-card').count(), 0, 'на Пульте нет дублей: «Смотреть как» — отдельной кнопкой (HEAD 09.11)')
-  assert.deepStrictEqual((await navText(h)), ['Пульт', 'Проверка', 'Сделки', 'Финансы', 'Команда', 'Ещё'], 'у HEAD внизу главное, остальное в «Ещё»')
+  assert.deepStrictEqual((await navText(h)), ['Пульт', 'Проверка', 'Сделки', 'Проекты', 'Финансы', 'Ещё'], 'у HEAD внизу главное, остальное в «Ещё»')
+  await h.locator('nav button').last().click()
+  assert.deepStrictEqual((await h.locator('.sheetbox button').allTextContents()).map(t => t.replace(/\d+$/, '')), ['Команда', 'Продакшн', 'Дизайн', 'Лиды', 'Учёба', 'Журнал'], 'в «Ещё» без Места, Месяца и «Смотреть как» (HEAD 09.11)')
+  await h.mouse.click(5, 5)
   await h.screenshot({ path: `${shots}/pult.png`, fullPage: true })
 
   // 2. «Смотреть как» Дана из «Команды»: баннер, меню художника, разделов HEAD нет
@@ -78,7 +81,7 @@ async function tab(p, name) {
   assert.strictEqual(await h.locator('.viewas-bar').count(), 0)
 
   // 5. роль целиком (человека ещё нет): МОП
-  await tab(h, 'Смотреть как')
+  await tab(h, 'Команда'); await h.getByText('Посмотреть приложение глазами роли').click()
   await h.locator('.viewas-card > .chips').getByRole('button', { name: 'МОП', exact: true }).click()
   await h.locator('.viewas-bar').getByText('Пример: МОП').waitFor()
   assert.ok((await navText(h)).includes('Сегодня'))
@@ -96,7 +99,7 @@ async function tab(p, name) {
   await h.getByText('Смотрел приложение как Дана Художник').waitFor()
 
   // 7. «Пройти как сотрудник · тест»: HEAD работает как «Тест · Саппорт» — смена уходит по-настоящему на проверку
-  await tab(h, 'Смотреть как')
+  await tab(h, 'Команда'); await h.getByText('Посмотреть приложение глазами роли').click()
   // HEAD открыл саппорта «просмотром»: в «Смене» видно, что это просмотр, и есть кнопка перейти в тест
   await h.locator('.viewas-card > .chips').getByRole('button', { name: 'Саппорт', exact: true }).click()
   await h.locator('.viewas-bar').getByText('Пример: Саппорт').waitFor()

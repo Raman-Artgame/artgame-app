@@ -131,10 +131,10 @@ function Main({ me, onMe, web, logout }) {
   // Кабинет HEAD (08.11): Пульт · Проверка · Сделки · Финансы · Команда, остальное — в «Ещё», там же «Смотреть как».
   // HEAD 09.11 («кабинет — хаос, много дублей»): внизу 5 главных + «Ещё». Без Смены, Расхода, Кабинета, Места, Сбора и «Сегодня» —
   // у HEAD это дубли Пульта и Сделок. В «Ещё» — по важности.
-  const HEAD_FIRST = ['review', 'deals', 'fin', 'people']
-  const HEAD_MORE = ['projects', 'prod', 'design', 'leads', 'month', 'study', 'place', 'journal']   // склад — в «Финансы → Закупки»
+  const HEAD_FIRST = ['review', 'deals', 'projects', 'fin']   // HEAD 09.11: проекты — на главную, команда — в «Ещё»
+  const HEAD_MORE = ['people', 'prod', 'design', 'leads', 'study', 'journal']   // склад — в «Финансы → Закупки»; «Месяц» — в Пульте; «Место» и «Смотреть как» убраны (HEAD 09.11)
   const menu = isHead ? [['home', 'Пульт'], ...HEAD_FIRST.map(k => tabs.find(x => x[0] === k)).filter(Boolean),
-    ...HEAD_MORE.map(k => tabs.find(x => x[0] === k)).filter(Boolean), ['viewas', 'Смотреть как']] : tabs
+    ...HEAD_MORE.map(k => tabs.find(x => x[0] === k)).filter(Boolean)] : tabs
   // в «Кабинете» — обе роли; у «и.о.» — исполняемая и основная; у каждой — «Как подняться» (HEAD 09.11)
   const dcodes = [...new Set([...(me.acting ? [role] : []), ...(me.roles?.length ? me.roles : [role])])].filter(r => DUTIES[r])
   const folds = dcodes.map(r => <DutyFold key={r} d={DUTIES[r]} g={GROW[r]} me={me} />)
@@ -142,7 +142,8 @@ function Main({ me, onMe, web, logout }) {
     {me.roles?.length > 1 && <div className="wrap"><RoleSwitch me={me} /></div>}
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
       extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> }].filter(Boolean)} /> :
-    <Places key={tab} list={tab === 'study' ? [mopPlace] : other} mode={tab === 'study' ? 'study' : ''} opts={tab === 'study' ? { mop: STUDY.mop() } : {}} />}
+    <Places key={tab} list={tab === 'study' ? (isHead ? [mopPlace, ...other].filter(Boolean) : [mopPlace]) : other}   // HEAD 09.11: «Место» убрано — места ролей у HEAD в «Учёбе»
+      mode={tab === 'study' && !isHead ? 'study' : ''} opts={tab === 'study' ? { mop: STUDY.mop() } : {}} />}
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={!isHead} />
   </>
   return <>
@@ -152,7 +153,7 @@ function Main({ me, onMe, web, logout }) {
       {!PLAIN.has(tab) && tab !== 'home' && !isHead && <div className="card"><h1>{me.full_name}</h1><span className="tag">{me.acting ? `${ROLE[me.role_main]} · и.о. ${gen(me.role_code)}` : ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
       {toast && <div className="toast">{toast}</div>}
       {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'viewas' ? <ViewAsCard /> :
-        tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
+        tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} openViewAs={isHead ? () => setTab('viewas') : null} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
         tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> :
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :

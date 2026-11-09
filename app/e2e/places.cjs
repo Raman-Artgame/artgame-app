@@ -38,9 +38,9 @@ async function tab(p, name) {
   await call(1000, `/people/${a.id}`, { role_code: 'artist', zones: ['mural'] })
 
   // HEAD: места художников, печати и дизайна (рабочее место МОП живёт в карточке сделки и в «Учёбе», калькулятор — один, в МОП)
-  const { p } = await open(b, 1000, { width: 1280, height: 860 })
+  const { p } = await open(b, 1000, { width: 1280, height: 860 }, 'Учёба')   // HEAD 09.11: «Место» убрано, места ролей — в «Учёбе»
   const chips = await p.locator('.place .chips button').allTextContents()
-  assert.deepStrictEqual(chips, ['Художники', 'Печать', 'Дизайн'])
+  assert.deepStrictEqual(chips.slice(-3), ['Художники', 'Печать', 'Дизайн'], chips.join(','))
   for (const [chip, title] of [['Художники', 'Рабочее место художников'], ['Печать', 'Рабочее место печати'], ['Дизайн', 'Рабочее место дизайнера']]) {
     await p.locator('.place .chips button', { hasText: chip }).click()
     await p.waitForFunction(t => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith(t), title, { timeout: 15000 })

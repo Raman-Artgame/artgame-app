@@ -6,7 +6,8 @@
 по умолчанию Kaspi ИП Яковлев, HEAD меняет счёт в «Финансы → Деньги».
 """
 import uuid
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from . import bx
 
@@ -22,7 +23,13 @@ def _day(v) -> date | None:
         return None
 
 
-SELECT = ["ID", "TITLE", "CATEGORY_ID"] + [f for _, a, d in PAY for f in (a, d)]
+def _closed(stage) -> bool:
+    """Сделка закрыта (успешно или нет) — старые поступления без даты не переносим в текущий месяц."""
+    s = str(stage or "")
+    return s == "WON" or s.endswith(":WON") or "LOSE" in s or "APOLOGY" in s
+
+
+SELECT = ["ID", "TITLE", "CATEGORY_ID", "STAGE_ID"] + [f for _, a, d in PAY for f in (a, d)]
 
 
 def import_payments(conn, since: date = START, until: date | None = None, ids: list[int] | None = None,
@@ -43,6 +50,15 @@ def import_payments(conn, since: date = START, until: date | None = None, ids: l
             ref = f"deal:{did}:pay{n}"
             rows = conn.execute("SELECT * FROM fin_ledger WHERE source='bitrix' AND source_ref=%s ORDER BY id DESC", (ref,)).fetchall()
             old = next((r for r in rows if r["status"] == "active"), None)
+            undated = False
+            if amount > 0 and day is None and ids is None and not _closed(d.get("STAGE_ID")):
+                # HEAD 09.11: сумма есть, даты нет (сделка 525) — деньги пришли, приход ставим днём, когда импорт его увидел;
+                # уже записан — держим ту дату; МОП поставит дату в сделке — строка переедет на неё
+                if old:
+                    continue
+                if rows:
+                    continue   # HEAD сам отменил — не возвращаем
+                day, undated = datetime.now(ZoneInfo("Asia/Almaty")).date(), True
             if (day and day < since) or (old and old["op_date"] < since) or (until and ((day and day >= until) or (old and old["op_date"] >= until))):
                 continue   # чужой период: история не трогается текущим импортом и наоборот
             ok = amount > 0 and day is not None
@@ -59,7 +75,7 @@ def import_payments(conn, since: date = START, until: date | None = None, ids: l
                 """INSERT INTO fin_ledger (client_uid, op_date, account_code, direction, amount, article_code, period, deal_id, note, source, source_ref)
                    VALUES (%s,%s,%s,'in',%s,%s,%s,%s,%s,'bitrix',%s)""",
                 (uuid.uuid4(), day, acc, amount, "design_prepay" if int(d.get("CATEGORY_ID") or 0) == DESIGN else "client_payment",
-                 f"{day:%Y-%m}", did, f"{(d.get('TITLE') or '')[:120]} · поступление {n}", ref))
+                 f"{day:%Y-%m}", did, f"{(d.get('TITLE') or '')[:120]} · поступление {n}" + (" · дата не указана в сделке" if undated else ""), ref))
             added += 0 if old else 1
     return {"deals": len(deals), "added": added, "changed": changed}
 
