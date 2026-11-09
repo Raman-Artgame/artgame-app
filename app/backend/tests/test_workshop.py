@@ -24,5 +24,9 @@ def test_workshop_shift(client, team):  # noqa: F811
                                                   "started_at": "2026-11-06T09:00:00+05:00"}, headers=hdr(5000)).status_code == 422
     with db.pool.connection() as c:
         c.execute("UPDATE shifts SET status='approved' WHERE person_id=%s", (pid,))
+        c.execute("""UPDATE constants_versions SET values = values || jsonb_build_object('pay.print.operator.workshop_hour',
+                     jsonb_build_object('value', '1000', 'status', 'Утверждено', 'who', 'head'))""")
     rows = client.post("/api/fin/payroll/2026-11/compute", headers=hdr(1000)).json()["rows"]
-    assert any(r["name"] == "Оператор" for r in rows)
+    row = next(r for r in rows if r["name"] == "Оператор")
+    assert float(next(l for l in row["lines"] if l["kind"] == "piece")["amount"]) == 6000   # 6 ч × 1000
+    assert {"label": "Мастерская без проекта, в час", "amount": 1000} in client.get("/api/fin/my", headers=hdr(6300)).json()["rate"]
