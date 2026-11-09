@@ -113,6 +113,16 @@ async function tab(p, name) {
   await op.getByRole('button', { name: 'Правила игры' }).click()
   await op.getByText('Правила игры · Оператор печати').waitFor()
   await op.screenshot({ path: `${shots}/print-pravila.png`, fullPage: true })
+  // «Мастерская» без проекта (HEAD 09.11): ТО принтера — без фото, оплата по часам
+  await tab(op, 'Смена')
+  await op.getByRole('button', { name: 'Мастерская · без проекта' }).click()
+  await op.getByRole('button', { name: 'ТО принтера' }).click()
+  await op.screenshot({ path: `${shots}/print-workshop.png` })
+  await op.getByRole('button', { name: 'Начать смену в мастерской' }).click()
+  await op.getByText('Мастерская · ТО принтера').first().waitFor()
+  await op.locator('textarea').fill('Прочистка головы, тест-печать')
+  await op.getByRole('button', { name: 'Закончить и отправить на проверку' }).click()
+  await op.getByText(/ушла на проверку/).waitFor()
 
   // 2б. Две роли (HEAD 08.11, «Оба способа»): HEAD даёт оператору вторую роль «Саппорт» — «Я сейчас», роль смены по объекту, обе ставки
   await call(1000, `/people/${ids[4000]}`, { extra_roles: ['support'], zones: ['print', 'mural'] })
