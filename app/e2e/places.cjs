@@ -66,7 +66,7 @@ async function tab(p, name) {
 
   // Художник (HEAD 08.11): «Учёба» — База знаний, Тест, Клиентам + ТБ и «Правила игры»; «Выезд», «Оплата», «Рост», «Куратор/ГИП» скрыты
   const { p: pa } = await open(b, 2100, null, 'Учёба')
-  assert.deepStrictEqual(await pa.locator('.place .chips button').allTextContents(), ['Учебник', 'Клиентам', 'ТБ', 'Правила игры'])
+  assert.deepStrictEqual(await pa.locator('.place .chips button').allTextContents(), ['Учебник', 'Клиентам', 'ТБ'])   // «Правила игры» — только в «Кабинете» (HEAD 09.11)
   await pa.waitForFunction(() => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith('Рабочее место художников'))
   const af = () => pa.frames().find(f => f.url().includes('/api/p/art/'))
   await pa.waitForTimeout(800)
@@ -78,9 +78,6 @@ async function tab(p, name) {
   await af().evaluate(() => { location.hash = '#pay' })
   await pa.waitForTimeout(300)
   assert.strictEqual(await af().evaluate(() => location.hash), '#ucheb')
-  await pa.locator('.place .chips button', { hasText: 'Правила игры' }).click()
-  await pa.getByText('Что ты делаешь').waitFor()
-  await pa.screenshot({ path: `${shots}/place-artist-duty.png` })
   await pa.locator('.place .chips button', { hasText: 'Учебник' }).click()
   await pa.waitForFunction(() => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith('Рабочее место художников'))
   await pa.waitForTimeout(1200)

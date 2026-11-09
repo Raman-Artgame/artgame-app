@@ -79,13 +79,14 @@ const STOCK = new Set(['lead_artist', 'artist_pro', 'print_master', 'carpenter']
 const PRINT = new Set(['print_operator', 'print_master'])
 const STUDY = {
   // HEAD 08.11: в «Учёбе» — База знаний (учебник), Тест, Клиентам; «Выезд» переехал в «Смену» подсказками,
-  // «Куратор/ГИП», «Главный художник», «Рост», «Оплата» скрыты. Рядом свои чипы: «ТБ» и «Правила игры».
+  // «Куратор/ГИП», «Главный художник», «Рост», «Оплата» скрыты. Рядом свой чип «ТБ»; «Правила игры» — только в «Кабинете» (HEAD 09.11).
   // «Тест» убран у всех (HEAD 08.11, 15:27): будет свой для каждой роли
   art: () => ({ home: 'ucheb', hide: ['trip', 'gip', 'chief', 'grow', 'pay', 'test'], sections: [['ucheb', 'Учебник'], ['mat', 'Клиентам']] }),
   // печать — так же: Учебник, Тест, Фотозадание, Клиентам; «Запуск» и «Сборы» — в «Смене» и «Сборе», «Экзамен» со ставками — скрыт
-  print: () => ({ home: 'ucheb', hide: ['start', 'kit', 'exam', 'test'], sections: [['ucheb', 'Учебник'], ['foto', 'Фотозадание'], ['mat', 'Клиентам']] }),
+  // «Фотозадание» убрано (HEAD 09.11)
+  print: () => ({ home: 'ucheb', hide: ['start', 'kit', 'exam', 'test', 'foto'], sections: [['ucheb', 'Учебник'], ['mat', 'Клиентам']] }),
   dz: () => ({ home: 'learn', hide: ['board', 'handoff', 'test'] }),
-  mop: () => ({ home: 'ucheb', hide: ['test'] }),
+  mop: () => ({ home: 'ucheb', hide: ['test', 'job'] }),   // «Правила игры» — только в «Кабинете» (HEAD 09.11)
 }
 const PLAIN = new Set(['today', 'leads', 'deals', 'projects', 'month'])
 
@@ -142,15 +143,13 @@ function Main({ me, web, logout }) {
   const HEAD_FIRST = ['review', 'deals', 'fin', 'people']
   const menu = isHead ? [['home', 'Пульт'], ...HEAD_FIRST.map(k => tabs.find(x => x[0] === k)).filter(Boolean),
     ...tabs.filter(x => !HEAD_FIRST.includes(x[0])), ['viewas', 'Смотреть как']] : tabs
-  const duty = DUTIES[role]
   // в «Кабинете» — обе роли; у «и.о.» — исполняемая и основная; у каждой — «Как подняться» (HEAD 09.11)
   const dcodes = [...new Set([...(me.acting ? [role] : []), ...(me.roles?.length ? me.roles : [role])])].filter(r => DUTIES[r])
   const folds = dcodes.map(r => <DutyFold key={r} d={DUTIES[r]} g={GROW[r]} me={me} />)
   if (tab === 'place' || tab === 'study') return <>
     {me.roles?.length > 1 && <div className="wrap"><RoleSwitch me={me} /></div>}
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
-      extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> },
-        duty && { code: 'duty', title: 'Правила игры', render: () => <Duty d={duty} g={GROW[role]} me={me} /> }].filter(Boolean)} /> :
+      extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> }].filter(Boolean)} /> :
     <Places key={tab} list={tab === 'study' ? [mopPlace] : other} mode={tab === 'study' ? 'study' : ''} opts={tab === 'study' ? { mop: STUDY.mop() } : {}} />}
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll />
   </>

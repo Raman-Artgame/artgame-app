@@ -56,8 +56,10 @@ async function tab(p, name) {
   const opts = await s.locator('select').nth(1).locator('option').allTextContents()
   assert.deepStrictEqual(opts, ['Такси / доставка', 'Докупка на объект'], opts.join(','))
   // «Учёба» (HEAD 08.11): База знаний, Тест, Клиентам + ТБ и «Правила игры» (внутри — как стать художником); «Выезда» нет
-  await tab(s, 'Учёба')
-  await s.getByRole('button', { name: 'Правила игры' }).click()
+  await tab(s, 'Учёба')   // «Правила игры» в «Учёбе» больше нет — только в «Кабинете» (HEAD 09.11)
+  assert.ok(!(await s.locator('.place .chips button').allTextContents()).includes('Правила игры'))
+  await tab(s, 'Кабинет')
+  await s.locator('.dutyfold').getByRole('button', { name: 'Открыть' }).click()
   await s.getByText('Правила игры · Саппорт').waitFor()
   await s.getByText(/Что нужно для ступени/).waitFor()
   // Полная должностная (HEAD 08.11): требования, права, запрещено, политика; без источника — «черновик»
@@ -70,6 +72,7 @@ async function tab(p, name) {
   await s.screenshot({ path: `${shots}/support-zapreshcheno.png` })
   assert.strictEqual(await s.getByText('Чек-лист выезда').count(), 0)
   await s.screenshot({ path: `${shots}/support-pravila.png`, fullPage: true })
+  await tab(s, 'Учёба')
   await s.getByRole('button', { name: 'ТБ', exact: true }).click()
   await s.getByText('ТБ на объекте').waitFor()
   await s.getByText('1,8 м').waitFor()
@@ -109,8 +112,9 @@ async function tab(p, name) {
   assert.ok(!(await navText(op)).includes('Склад'))
   assert.deepStrictEqual(await navText(op), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Кабинет'])
   await tab(op, 'Учёба')   // печать — как у художников: Учебник, Тест, Фотозадание, Клиентам + ТБ и «Правила игры»
-  assert.deepStrictEqual(await op.locator('.place .chips button').allTextContents(), ['Учебник', 'Фотозадание', 'Клиентам', 'ТБ', 'Правила игры'])
-  await op.getByRole('button', { name: 'Правила игры' }).click()
+  assert.deepStrictEqual(await op.locator('.place .chips button').allTextContents(), ['Учебник', 'Клиентам', 'ТБ'])   // HEAD 09.11
+  await tab(op, 'Кабинет')
+  await op.locator('.dutyfold').getByRole('button', { name: 'Открыть' }).click()
   await op.getByText('Правила игры · Оператор печати').waitFor()
   await op.screenshot({ path: `${shots}/print-pravila.png`, fullPage: true })
   // «Мастерская» без проекта (HEAD 09.11): ТО принтера — без фото, оплата по часам
