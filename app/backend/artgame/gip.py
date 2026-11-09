@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from . import db
 from .feedback import _send
-from .work import active, photos, with_receipt
+from .work import active, more_photos, photos, with_receipt
 
 router = APIRouter(prefix="/api")
 GIP_ROLES = {"lead_artist", "artist_pro", "print_master"}
@@ -64,11 +64,11 @@ def history(oid: int, p: dict = Depends(active)):
     with db.pool.connection() as conn:
         if not can_see(conn, p, oid):
             raise HTTPException(403, "историю проекта видят ГИП проекта, Художник-Про и HEAD")
-        shifts = [photos(s) for s in conn.execute(
+        shifts = more_photos(conn, [photos(s) for s in conn.execute(
             """SELECT s.id, s.person_id, pe.full_name, s.role_code, s.zone_code, s.kind, s.started_at, s.ended_at, s.area_m2, s.work_done,
                       s.status, s.reason, s.backfill, s.photo_before, s.photo_after
                FROM shifts s JOIN people pe ON pe.id=s.person_id
-               WHERE s.object_id=%s AND s.status <> 'cancelled' ORDER BY s.started_at DESC""", (oid,)).fetchall()]
+               WHERE s.object_id=%s AND s.status <> 'cancelled' ORDER BY s.started_at DESC""", (oid,)).fetchall()])
         exps = [with_receipt(e) for e in conn.execute(
             """SELECT e.id, pe.full_name, c.title AS category, e.amount, e.paid_by, e.note, e.status, e.created_at, e.backfill, e.receipt_file_id
                FROM expenses e JOIN people pe ON pe.id=e.person_id LEFT JOIN expense_categories c ON c.code=e.category

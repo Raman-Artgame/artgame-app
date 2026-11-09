@@ -376,6 +376,26 @@ def past_shift(b: PastIn, p: dict = Depends(active)):
         return _shift_out(conn, row)
 
 
+class PhotoIn(BaseModel):
+    client_uid: UUID                    # у каждого фото свой — повтор не создаёт дубль
+    photo: str = Field(min_length=30, max_length=8_000_000)
+
+
+@router.post("/shifts/{sid}/photos")
+def add_shift_photo(sid: int, b: PhotoIn, p: dict = Depends(active)):
+    """Ещё фото к своей смене задним числом (HEAD 09.11: «неограниченное количество фотографий»), пока она не проверена."""
+    with db.pool.connection() as conn, conn.transaction():
+        s = conn.execute("SELECT * FROM shifts WHERE id=%s AND person_id=%s", (sid, p["id"])).fetchone()
+        if not s:
+            raise HTTPException(404, "Смена не найдена")
+        if not s["backfill"] or s["status"] != "submitted" or not s["object_id"]:
+            raise HTTPException(400, "Фото добавляются к отчёту задним числом на объекте, пока он на проверке")
+        fid = _photo(conn, p, s["object_id"], b.client_uid, "extra", b.photo, "отчёт задним числом")
+        conn.execute("INSERT INTO shift_photos (shift_id, file_id) VALUES (%s,%s) ON CONFLICT DO NOTHING", (sid, fid))
+        n = conn.execute("SELECT count(*) AS n FROM shift_photos WHERE shift_id=%s", (sid,)).fetchone()["n"]
+        return {"ok": True, "count": n}
+
+
 class RoadIn(BaseModel):
     client_uid: UUID
     object_id: int
@@ -536,6 +556,19 @@ def photos(s: dict) -> dict:
     return s
 
 
+def more_photos(conn, rows: list[dict]) -> list[dict]:
+    """Доп. фото смены (отчёт задним числом, HEAD 09.11): s["photos"] = [{url, full}] — подписанные ссылки."""
+    from .files import sign
+    ids = [r["id"] for r in rows]
+    by = {}
+    if ids:
+        for r in conn.execute("SELECT shift_id, file_id FROM shift_photos WHERE shift_id = ANY(%s) ORDER BY id", (ids,)).fetchall():
+            by.setdefault(r["shift_id"], []).append({"url": sign(r["file_id"], "thumb"), "full": sign(r["file_id"], "content")})
+    for r in rows:
+        r["photos"] = by.get(r["id"], [])
+    return rows
+
+
 def shop_title(s: dict) -> dict:
     """Смена в мастерской: вместо «Офис / без объекта» — «Мастерская · ТО принтера»."""
     if s.get("kind") == "workshop":
@@ -554,8 +587,8 @@ def with_receipt(e: dict) -> dict:
 def my(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         return {
-            "shifts": [shop_title(photos(s)) for s in conn.execute("""SELECT s.*, o.title AS object_title FROM shifts s JOIN objects o ON o.id=s.object_id
-                                      WHERE person_id=%s ORDER BY started_at DESC LIMIT 100""", (p["id"],)).fetchall()],
+            "shifts": more_photos(conn, [shop_title(photos(s)) for s in conn.execute("""SELECT s.*, o.title AS object_title FROM shifts s JOIN objects o ON o.id=s.object_id
+                                      WHERE person_id=%s ORDER BY started_at DESC LIMIT 100""", (p["id"],)).fetchall()]),
             "expenses": [with_receipt(e) for e in conn.execute("""SELECT e.*, o.title AS object_title FROM expenses e JOIN objects o ON o.id=e.object_id
                                         WHERE person_id=%s ORDER BY created_at DESC LIMIT 100""", (p["id"],)).fetchall()],
         }
@@ -615,7 +648,7 @@ def review_list(p: dict = Depends(active)):
             if c.get("article") == "sales":
                 e["object_title"] = "Отдел продаж · " + e["category_title"] + (f" · сделка № {e['deal_id']}" if e.get("deal_id") else "") + (" · сверх лимита" if e.get("over_limit") else "")
         out["expenses"] = [with_receipt(e) for e in out["expenses"]]
-        out["shifts"] = [shop_title(photos(x)) for x in out["shifts"]]
+        out["shifts"] = more_photos(conn, [shop_title(photos(x)) for x in out["shifts"]])
         if p["role_code"] != "head":
             for x in out["shifts"]:
                 x.pop("bonus", None)

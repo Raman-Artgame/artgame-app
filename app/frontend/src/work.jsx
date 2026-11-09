@@ -165,16 +165,26 @@ function PastShift({ d, done }) {
   const [open, setOpen] = useState(false)
   const [v, set] = useState({ object_id: b.objects[0]?.id, zone_code: d.zones[0], day: '', hours: '10', area_m2: '', work_done: '', workshop: '' })
   const shop = !!v.workshop   // мастерская без проекта (печать, HEAD 09.11)
-  const [photo, setPhoto] = useState('')
+  const [pics, setPics] = useState([])     // сколько угодно фото из галереи (HEAD 09.11)
   const [busy, setBusy] = useState(false)
+  const [prog, setProg] = useState('')
   const [err, setErr] = useState('')
+  const pick = async files => {
+    for (const f of [...files]) { const x = await shrink(f); setPics(a => [...a, x]) }
+  }
   const send = async () => {
     setBusy(true); setErr('')
     try {
-      await api('/shifts/past', { method: 'POST', body: { client_uid: uuid(), ...v, ...(shop ? { object_id: 0, zone_code: 'print' } : { workshop: null }),
-        hours: +v.hours, area_m2: v.area_m2 === '' || shop ? null : +v.area_m2, photo_after: shop ? null : photo || null } })
-      done(`Смена за ${dm(v.day)} ушла на проверку.`)
-    } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }
+      const sh = await api('/shifts/past', { method: 'POST', body: { client_uid: uuid(), ...v, ...(shop ? { object_id: 0, zone_code: 'print' } : { workshop: null }),
+        hours: +v.hours, area_m2: v.area_m2 === '' || shop ? null : +v.area_m2, photo_after: shop ? null : pics[0] || null } })
+      const rest = shop ? [] : pics.slice(1)
+      let bad = 0
+      for (let i = 0; i < rest.length; i++) {
+        setProg(`Фото ${i + 2} из ${pics.length}…`)
+        try { await api(`/shifts/${sh.id}/photos`, { method: 'POST', body: { client_uid: uuid(), photo: rest[i] } }) } catch { bad++ }
+      }
+      done(`Смена за ${dm(v.day)} ушла на проверку${pics.length && !shop ? `, фото: ${pics.length - bad}` : ''}.${bad ? ` Не загрузилось ${bad} — добавь их ещё раз в «Кабинете».` : ''}`)
+    } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false); setProg('') }
   }
   return <div className="card past">
     <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
@@ -194,7 +204,10 @@ function PastShift({ d, done }) {
       <label className="muted">Часов</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} />
       {!shop && <><label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} /></>}
       <label className="muted">Что сделал</label><textarea value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Фон, контур, детали…" />
-      {!shop && <Snap value={photo} set={setPhoto} label="Фото работы из галереи (если есть)" gallery />}
+      {!shop && <><label className="muted">Фото работы · {pics.length ? `выбрано ${pics.length}` : 'из галереи, сколько угодно'}</label>
+        <div className="pics">{pics.map((x, i) => <span key={i}><img src={x} alt="" /><button className="ghost mini" onClick={() => setPics(pics.filter((_, j) => j !== i))}>✕</button></span>)}
+          <label className="photo snap add"><span>🖼 Добавить фото</span><input type="file" accept="image/*" multiple hidden onChange={e => { pick(e.target.files); e.target.value = '' }} /></label></div></>}
+      {prog && <p className="small muted">{prog}</p>}
       <button disabled={busy || !v.day || (!shop && !v.object_id) || !+v.hours || v.work_done.trim().length < 3} onClick={send}>{busy ? 'Отправляю…' : 'Отправить на проверку'}</button>
       {err && <p className="small why">{err}</p>}
     </>}
@@ -416,6 +429,12 @@ export function ExpenseForm({ done }) {
   </div>
 }
 
+// Доп. фото отчёта задним числом (HEAD 09.11)
+export function More({ x }) {
+  if (!x.photos?.length) return null
+  return <div className="pics view">{x.photos.map((f, i) => <a key={i} href={f.full} target="_blank" rel="noreferrer"><img src={f.url} alt="" /></a>)}</div>
+}
+
 export function Mine() {
   const [m, setM] = useState(null)
   const load = () => api('/my').then(setM, () => {})
@@ -438,6 +457,7 @@ export function Mine() {
           {s.plan_m2 && <div className="small">{s.zone_code === 'print' ? 'План' : 'Норма'} {m2(s.plan_m2)} м²{s.kpd != null && <> · КПД <b>{pct(s.kpd)}</b></>}{+s.bonus > 0 && <> · бонус <b>{money(s.bonus)}</b></>}</div>}
           {s.work_done && <div className="small">Сделал: {s.work_done}</div>}
           {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <img src={s.photo_before_url} alt="до" />}{s.photo_after_url && <img src={s.photo_after_url} alt="после" />}</div>}
+          <More x={s} />
           {s.reason && <div className="small">Причина: {s.reason}</div>}</div>
         <span className={`tag st-${s.status}`}>{ST[s.status]}</span>
         {s.status === 'submitted' && <a onClick={() => cancel('shift', s.id)}>отменить</a>}
@@ -469,7 +489,8 @@ export function Review() {
     <div><b>{x.person_name}</b> · {x.object_title}{x.backfill && <span className="tag draft">задним числом</span>}<br /><span className="muted small">{children}</span>
       {x.work_done && <div className="small">Сделал: {x.work_done}</div>}
       {(x.photo_before_url || x.photo_after_url) && <div className="pair">{x.photo_before_url && <a href={x.photo_before_full} target="_blank" rel="noreferrer"><img src={x.photo_before_url} alt="до" /></a>}
-        {x.photo_after_url && <a href={x.photo_after_full} target="_blank" rel="noreferrer"><img src={x.photo_after_url} alt="после" /></a>}</div>}</div>
+        {x.photo_after_url && <a href={x.photo_after_full} target="_blank" rel="noreferrer"><img src={x.photo_after_url} alt="после" /></a>}</div>}
+      <More x={x} /></div>
     <div className="seg"><button onClick={() => decide(k, x.id, true)}>✓</button><button className="ghost" onClick={() => decide(k, x.id, false)}>✕</button></div>
   </div>
   return <>

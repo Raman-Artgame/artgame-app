@@ -22,6 +22,13 @@ def test_past_shift_and_expense(client, team, monkeypatch):  # noqa: F811
             "area_m2": 6.5, "work_done": "Фон и контур"}
     s = client.post("/api/shifts/past", json={**body, "photo_after": JPEG}, headers=hdr(5000)).json()
     assert s["status"] == "submitted" and s["backfill"] and s["role_code"] == "artist" and s["photo_after"]
+    # сколько угодно фото — по одному (HEAD 09.11)
+    for _ in range(3):
+        r = client.post(f"/api/shifts/{s['id']}/photos", json={"client_uid": str(uuid.uuid4()), "photo": JPEG}, headers=hdr(5000)).json()
+    assert r["count"] == 3
+    assert client.post(f"/api/shifts/{s['id']}/photos", json={"client_uid": str(uuid.uuid4()), "photo": JPEG}, headers=hdr(2000)).status_code == 404
+    mine = next(x for x in client.get("/api/my", headers=hdr(5000)).json()["shifts"] if x["id"] == s["id"])
+    assert len(mine["photos"]) == 3
     assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4())}, headers=hdr(5000)).status_code == 409
     assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "day": date.today().isoformat()},
                        headers=hdr(5000)).status_code == 400

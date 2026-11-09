@@ -175,8 +175,12 @@ async function tab(p, name) {
     const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
     await io.locator('.card.past input[type=date]').fill(y)
     await io.locator('.card.past textarea').fill('Фон и контур')
+    // сколько угодно фото из галереи (HEAD 09.11)
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC', 'base64')
+    await io.locator('.card.past .pics input[type=file]').setInputFiles([1, 2, 3].map(i => ({ name: `p${i}.png`, mimeType: 'image/png', buffer: png })))
+    await io.getByText('Фото работы · выбрано 3').waitFor()
     await io.locator('.card.past').getByRole('button', { name: 'Отправить на проверку' }).click()
-    await io.getByText(/ушла на проверку/).waitFor()
+    await io.getByText(/ушла на проверку, фото: 3/).waitFor()
   }
   // 9. ГИП проекта: HEAD назначает в карточке проекта, ГИП видит всю историю
   execSync(`psql "${process.env.ARTGAME_DATABASE_URL}" -qc "INSERT INTO objects (id, title, city, bitrix_stage) VALUES (1700, 'Школа', 'Шымкент', 'UC_AV00QK') ON CONFLICT (id) DO NOTHING"`)
