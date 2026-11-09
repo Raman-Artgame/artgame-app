@@ -496,11 +496,11 @@ export function Mine() {
 }
 
 // Проверяющий сам правит смену до решения (HEAD 09.11): время начала, часы через полночь, «дорога» → «смена»
-const hm = d => new Date(d).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Almaty' })
+const clockAt = d => new Date(d).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Almaty' })
 function FixShift({ x, done }) {
   const hrs = x.ended_at ? Math.round((new Date(x.ended_at) - new Date(x.started_at)) / 36e5 * 10) / 10 : 10
   const [open, setOpen] = useState(false)
-  const [v, set] = useState({ start_time: hm(x.started_at), hours: String(hrs), kind: x.kind || 'work' })
+  const [v, set] = useState({ start_time: clockAt(x.started_at), hours: String(hrs), kind: x.kind || 'work' })
   const [err, setErr] = useState('')
   if (!open) return <a className="small fixlink" onClick={() => setOpen(true)}>✎ Исправить время{x.kind === 'road' ? ' или тип' : ''}</a>
   const save = () => api(`/shift/${x.id}/fix`, { method: 'POST', body: { start_time: v.start_time, hours: +v.hours, kind: v.kind } })
