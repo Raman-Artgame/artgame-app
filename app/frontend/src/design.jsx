@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { Sheet } from './ui.jsx'
+import { bxLink, usePortal } from './crm.jsx'
 
 // «Дизайн» (HEAD 06–07.11): воронка Битрикса «Дизайн РК», единицы за месяц, каталог референсов.
 // Единица — только при «УТВЕРЖДЕНО» (макет и эскиз утверждены); каждый переход в «Правки» — новый круг, без доплаты.
@@ -49,16 +50,19 @@ const GUIDE = {
 const code = id => String(id || '').split(':')[1] || ''
 const today = () => new Date(new Date().toDateString())
 const daysLeft = s => s ? Math.round((new Date(s) - today()) / 864e5) : null
-function hot(x, canAssign) {
+// «Горит» (HEAD 09.11) — только срок и срочность: просрочено, сегодня, завтра, «Срочный заказ», второй круг правок.
+// Нет дизайнера, размера или срока — не «горит», а «Назначить» (у Главного дизайнера и HEAD).
+function hot(x) {
   const d = daysLeft(x.deadline), r = []
   if (d != null && d < 0) r.push('срок прошёл')
   else if (d === 0) r.push('срок сегодня')
   else if (d === 1) r.push('срок завтра')
   if (code(x.stage) === 'FINAL_INVOICE') r.push('срочно')
   if (x.rounds >= 2) r.push(`правки: круг ${x.rounds}`)
-  if (canAssign && !x.designer_bx) r.push('нет дизайнера')
-  if (canAssign && !x.size) r.push('нет размера')
   return r
+}
+function lacks(x) {
+  return [!x.designer_bx && 'нет дизайнера', !x.size && 'нет размера', !x.deadline && 'нет срока'].filter(Boolean)
 }
 function Due({ s }) {
   const d = daysLeft(s)
@@ -70,53 +74,66 @@ function Deals() {
   const [d, setD] = useState(null)
   const [e, setE] = useState('')
   const [open, setOpen] = useState(null)
+  const [view, setView] = useState('')
   const [only, setOnly] = useState('')
-  const [guide, setGuide] = useState(() => { try { return localStorage.getItem('artgame.dzguide') !== '0' } catch { return true } })
+  const [shut, setShut] = useState({})
+  const [guide, setGuide] = useState(() => { try { return localStorage.getItem('artgame.dzguide') === '1' } catch { return false } })
   const team = useTeam()
   const load = (fresh = 0) => api('/design/deals?fresh=' + fresh).then(setD, x => setE(x.message))
   useEffect(() => { load() }, [])
   if (e) return <div className="card muted">{e}</div>
   if (!d) return <div className="card muted">Загрузка…</div>
-  const fire = d.deals.map(x => ({ x, why: hot(x, d.can_assign) })).filter(f => f.why.length)
+  const fire = d.deals.map(x => ({ x, why: hot(x) })).filter(f => f.why.length)
+  const todo = d.can_assign ? d.deals.map(x => ({ x, why: lacks(x) })).filter(f => f.why.length) : []
   const stages = d.stages.filter(s => code(s.id) !== 'WON')
+  const v = view || (fire.length ? 'fire' : 'stages')
   const toggle = () => { setGuide(!guide); try { localStorage.setItem('artgame.dzguide', guide ? '0' : '1') } catch { /* без памяти */ } }
-  const Card = ({ x, why }) => { const g = GUIDE[code(x.stage)] || {}
+  const Card = ({ x, why, need }) => { const g = GUIDE[code(x.stage)] || {}
     const i = stages.findIndex(s => s.id === x.stage)
     return <div className="dzcard" style={{ '--sc': g.color || 'var(--line)' }} onClick={() => setOpen(x)}>
       <div className="dztop"><span className="tag">№ {x.id}</span><Due s={x.deadline} /></div>
       <b className="dztitle">{x.title || 'Сделка ' + x.id}</b>
-      <div className="small muted">{[x.designer || 'дизайнер не назначен', x.size ? x.size.toUpperCase() + ' · ' + String(x.units).replace('.', ',') + ' ед.' : 'размер не задан', x.city].filter(Boolean).join(' · ')}</div>
-      {why ? <div>{why.map(w => <span key={w} className="miss">{w}</span>)}</div> :
-        x.rounds ? <div><span className="miss">правки: круг {x.rounds}</span></div> : null}
-      <div className="dzdots">{stages.map((s, k) => <i key={s.id} className={k < i ? 'done' : k === i ? 'on' : ''} />)}</div>
+      <div className="small muted">{[x.designer || 'дизайнер не назначен', x.size ? x.size.toUpperCase() + ' · ' + String(x.units).replace('.', ',') + ' ед.' : '', x.city].filter(Boolean).join(' · ')}</div>
+      {(why?.length || need?.length) ? <div>{(why || []).map(w => <span key={w} className="miss hotm">{w}</span>)}{(need || []).map(w => <span key={w} className="miss">{w}</span>)}</div> : null}
+      <div className="dzst"><span className="dzdots">{stages.map((s, k) => <i key={s.id} className={k < i ? 'done' : k === i ? 'on' : ''} />)}</span>
+        <span className="small muted">{stages[i]?.name || x.stage_name}</span></div>
     </div> }
+  const tabs = [['fire', '🔥 Горит', fire.length], ...(d.can_assign ? [['todo', 'Назначить', todo.length]] : []), ['stages', 'По стадиям', d.deals.length]]
   return <>
     <div className="card dzhero">
       <div className="head"><h2>Воронка «Дизайн РК»</h2><button className="ghost mini" onClick={() => { setD(null); load(1) }}>Обновить</button></div>
-      <p className="small muted">Единица засчитывается на «УТВЕРЖДЕНО». Клиенту пишет только МОП — через Битрикс. Готовые эскизы — в «ДИЗАЙН/Утвержденные дизайны» папки сделки, оттуда их видят художники.</p>
+      <p className="small muted">Единица — на «УТВЕРЖДЕНО». Связь с клиентом — кнопкой в карточке сделки, через Битрикс. Готовые эскизы — в «ДИЗАЙН/Утвержденные дизайны».</p>
       {!d.bx && <p className="small why">Запись в Битрикс выключена — изменения пишутся только в журнал.</p>}
-      <div className="dzfunnel">{stages.map(s => { const n = d.deals.filter(x => x.stage === s.id).length, g = GUIDE[code(s.id)] || {}
+      <div className="segf dztabs">{tabs.map(([k, t, n]) => <button key={k} className={v === k ? 'on' : ''} onClick={() => { setView(k); setOnly('') }}>{t}<b>{n}</b></button>)}</div>
+    </div>
+    {v === 'fire' && <div className="card dzfire"><h3>🔥 Горит · {fire.length}</h3>
+      <p className="small muted">Срок прошёл, сегодня или завтра, срочный заказ, второй круг правок. Берётся первым.</p>
+      {fire.length ? <div className="dzgrid">{fire.map(f => <Card key={f.x.id} x={f.x} why={f.why} />)}</div> : <p className="small muted">Ничего не горит.</p>}</div>}
+    {v === 'todo' && <div className="card dztodo"><h3>Назначить · {todo.length}</h3>
+      <p className="small muted">Не хватает дизайнера, размера или срока. Нажми на сделку и заполни.</p>
+      {todo.length ? <div className="dzgrid">{todo.map(f => <Card key={f.x.id} x={f.x} need={f.why} />)}</div> : <p className="small muted">Все сделки назначены.</p>}</div>}
+    {v === 'stages' && <>
+      <div className="card"><div className="dzfunnel">{stages.map(s => { const n = d.deals.filter(x => x.stage === s.id).length, g = GUIDE[code(s.id)] || {}
         return <button key={s.id} className={'dzstep' + (only === s.id ? ' on' : '') + (n ? '' : ' empty')} style={{ '--sc': g.color || 'var(--line)' }}
           onClick={() => setOnly(only === s.id ? '' : s.id)}><b>{n}</b><span>{s.name}</span></button> })}</div>
-      <button className="ghost mini" onClick={toggle}>{guide ? 'Скрыть подсказки' : 'Показать подсказки: что делать на каждой стадии'}</button>
-    </div>
-    {!only && fire.length > 0 && <div className="card dzfire"><h3>🔥 Горит · {fire.length}</h3>
-      <div className="dzgrid">{fire.map(f => <Card key={f.x.id} x={f.x} why={f.why} />)}</div></div>}
-    {stages.filter(s => !only || s.id === only).map(s => { const rows = d.deals.filter(x => x.stage === s.id), g = GUIDE[code(s.id)]
-      if (!rows.length && !only) return null
-      return <div key={s.id} className="card dzstage" style={{ '--sc': g?.color || 'var(--line)' }}>
-        <div className="stagehead"><b>{s.name}</b><span className="muted small">{rows.length}</span></div>
-        {guide && g && <div className="dzguide">
-          <div><i>Что делать</i><span>{g.todo}</span></div><div><i>Как</i><span>{g.how}</span></div><div><i>Что ожидается</i><span>{g.want}</span></div></div>}
-        <div className="dzgrid">{rows.map(x => <Card key={x.id} x={x} />)}</div>
-        {!rows.length && <p className="small muted">Здесь сейчас пусто.</p>}
-      </div> })}
+        <button className="ghost mini" onClick={toggle}>{guide ? 'Скрыть подсказки' : 'Подсказки: что делать на каждой стадии'}</button></div>
+      {stages.filter(s => !only || s.id === only).map(s => { const rows = d.deals.filter(x => x.stage === s.id), g = GUIDE[code(s.id)]
+        if (!rows.length && !only) return null
+        const closed = only ? false : shut[s.id] ?? rows.length > 6
+        return <div key={s.id} className="card dzstage" style={{ '--sc': g?.color || 'var(--line)' }}>
+          <button className="stagehead dzsh" onClick={() => setShut({ ...shut, [s.id]: !closed })}><span><i className="dzdot" />{s.name}</span><span className="muted small">{rows.length} {closed ? '▸' : '▾'}</span></button>
+          {!closed && <>{guide && g && <div className="dzguide">
+            <div><i>Что делать</i><span>{g.todo}</span></div><div><i>Как</i><span>{g.how}</span></div><div><i>Что ожидается</i><span>{g.want}</span></div></div>}
+          <div className="dzgrid">{rows.map(x => <Card key={x.id} x={x} why={hot(x)} />)}</div>
+          {!rows.length && <p className="small muted">Здесь сейчас пусто.</p>}</>}
+        </div> })}</>}
     {!d.deals.length && <div className="card"><p className="small muted">{d.can_assign ? 'Открытых сделок дизайна нет.' : 'На вас пока нет сделок дизайна.'}</p></div>}
     {open && <DealSheet x={open} d={d} team={team} onClose={() => setOpen(null)} onDone={() => { setOpen(null); load(1) }} />}
   </>
 }
 
 function DealSheet({ x, d, team, onClose, onDone }) {
+  const portal = usePortal()
   const [v, set] = useState({ stage: x.stage, designer_bx: x.designer_bx || '', size: x.size || '', deadline: x.deadline || '', folder: x.folder, layout: x.layout })
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -133,16 +150,21 @@ function DealSheet({ x, d, team, onClose, onDone }) {
     api(`/design/deals/${x.id}`, { method: 'POST', body: b }).then(onDone, ex => { setMsg(ex.message); setBusy(false) })
   }
   const won = d.stages.find(s => s.name.toUpperCase() === 'УТВЕРЖДЕНО')?.id
+  const bxu = bxLink(portal, 'deal', x.id)
   return <Sheet title={x.title || 'Сделка ' + x.id} onClose={onClose}>
     <p className="small muted">№ {x.id}{x.rounds ? ` · правки: круг ${x.rounds}` : ''} · единица засчитывается на «УТВЕРЖДЕНО»</p>
+    {bxu && <div className="dealbtns dzcontact">
+      <a className="btn" href={bxu} target="_blank" rel="noreferrer">Связаться с клиентом · звонок и WhatsApp в Битриксе</a></div>}
+    {bxu && <p className="small muted">Звонок и переписка идут из карточки Битрикса — так всё остаётся в сделке.</p>}
     <label className="muted">Стадия</label>
     <select value={v.stage} onChange={e => set({ ...v, stage: e.target.value })}>{d.stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
     {v.stage === won && v.stage !== x.stage && <p className="small why">Перед «УТВЕРЖДЕНО» нужны размер, дизайнер и ссылка на утверждённый эскиз.</p>}
     <label className="muted">Дизайнер</label>
     <select disabled={!d.can_assign} value={v.designer_bx} onChange={e => set({ ...v, designer_bx: e.target.value })}>
       <option value="">не назначен</option>
-      {team.filter(t => t.bitrix_user_id).map(t => <option key={t.id} value={t.bitrix_user_id}>{t.full_name}</option>)}</select>
+      {team.filter(t => t.bitrix_user_id).map(t => <option key={t.bitrix_user_id} value={t.bitrix_user_id}>{t.full_name}{t.bx_only ? ' · из Битрикса' : ''}</option>)}</select>
     {d.can_assign && team.some(t => !t.bitrix_user_id) && <p className="small muted">Не связаны с Битриксом: {team.filter(t => !t.bitrix_user_id).map(t => t.full_name).join(', ')} — HEAD, вкладка «Команда».</p>}
+    {d.can_assign && team.some(t => t.bx_only) && <p className="small muted">«Из Битрикса» — дизайнер ещё не вошёл в приложение: сделку назначить можно, единицы засчитаются, когда HEAD свяжет его в «Команде».</p>}
     <label className="muted">Размер</label>
     <div className="chips">{d.sizes.map(s => <button key={s.code} disabled={!d.can_assign} className={v.size === s.code ? 'on' : ''}
       onClick={() => set({ ...v, size: s.code })}>{s.title} · {String(s.units).replace('.', ',')}</button>)}</div>
@@ -197,7 +219,7 @@ function Catalogs({ me }) {
       <input placeholder="Стиль" value={form.style || ''} onChange={e => setForm({ ...form, style: e.target.value })} />
       <input placeholder="Ссылка на папку или рефборд" value={form.url || ''} onChange={e => setForm({ ...form, url: e.target.value })} />
       <label className="muted small">Исполнители (1–2)</label>
-      <div className="chips">{team.map(t => { const on = form.authors.includes(t.id)
+      <div className="chips">{team.filter(t => t.id).map(t => { const on = form.authors.includes(t.id)
         return <button key={t.id} className={on ? 'on' : ''} onClick={() => setForm({ ...form, authors: on ? form.authors.filter(a => a !== t.id) : [...form.authors, t.id].slice(-2) })}>{t.full_name}</button> })}</div>
       <div className="seg"><button className="ghost" onClick={() => setForm(null)}>Отмена</button>
         <button disabled={form.title.trim().length < 2 || !form.authors.length} onClick={() => api(form.id ? `/design/catalogs/${form.id}` : '/design/catalogs', { method: 'POST', body: form })

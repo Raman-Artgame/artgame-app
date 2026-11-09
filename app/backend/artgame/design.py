@@ -110,6 +110,7 @@ def deals(fresh: int = 0, p: dict = Depends(active)):
         sync_units(conn, won, v, local, people)
         rounds = _rounds(conn, ids)
     out = []
+    bxn = {u["id"]: u["name"] for u in bx_designers()} if any(int(d.get(F_DESIGNER) or 0) not in people for d in rows if d.get(F_DESIGNER)) else {}
     for d in rows:
         uid = int(d.get(F_DESIGNER) or 0) or None
         if p["role_code"] not in ALL and uid != me_bx:
@@ -117,7 +118,7 @@ def deals(fresh: int = 0, p: dict = Depends(active)):
         size = _size(d, local)
         out.append({"id": int(d["ID"]), "title": d.get("TITLE") or "", "stage": d.get("STAGE_ID"),
                     "stage_name": (st.get(d.get("STAGE_ID")) or {}).get("name", d.get("STAGE_ID")),
-                    "designer_bx": uid, "designer": (people.get(uid) or {}).get("full_name"), "size": size,
+                    "designer_bx": uid, "designer": (people.get(uid) or {}).get("full_name") or bxn.get(uid), "size": size,
                     "units": unit_of(v, size), "deadline": _date(d.get(F_DEADLINE)), "folder": d.get(F_FOLDER) or "",
                     "layout": d.get(F_LAYOUT) or "", "rounds": rounds.get(int(d["ID"]), 0), "city": bx.city_name(d.get(bx.CITY)),
                     "manager_bx": int(d.get("ASSIGNED_BY_ID") or 0)})
@@ -131,9 +132,20 @@ def deals(fresh: int = 0, p: dict = Depends(active)):
 def team(p: dict = Depends(active)):
     need(p)
     with db.pool.connection() as conn:
-        return conn.execute("""SELECT id, full_name, role_code, bitrix_user_id FROM people
+        rows = conn.execute("""SELECT id, full_name, role_code, bitrix_user_id FROM people
                                WHERE status='active' AND role_code = ANY(%s) ORDER BY role_code, full_name""",
                             (sorted(DESIGNERS),)).fetchall()
+    # HEAD 09.11: дизайнеры из Битрикса (должность «Дизайнер…»), которых ещё нет в приложении, — тоже в выборе (Малика)
+    linked = {r["bitrix_user_id"] for r in rows if r["bitrix_user_id"]}
+    return rows + [{"id": None, "full_name": u["name"], "role_code": None, "bitrix_user_id": u["id"], "bx_only": True}
+                   for u in bx_designers() if u["id"] not in linked]
+
+
+def bx_designers() -> list:
+    try:
+        return [u for u in bx.users() if "дизайн" in (u.get("position") or "").lower() and u["name"]]
+    except Exception:   # Битрикс недоступен — выбор из своих
+        return []
 
 
 class DealIn(BaseModel):
