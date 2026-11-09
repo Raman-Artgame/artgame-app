@@ -10,9 +10,9 @@ const ABOUT = {
   photo: 'Всё, что сняли на объекте: фото до и после из смен и добавленные вручную.',
   video: 'Видео с объекта: снятое на смене и загруженное в «Продакшн». Видят все на проекте.',
   media: 'Продакшн — лучшее, что HEAD утвердил для соцсетей и портфолио: фото, видео, рилс.',
-  doc: 'Договор, счета, акты. Видят HEAD, МОП и главные.' }
+  doc: 'Договор, счета, акты. Видят HEAD, МОП, Про и главные.' }
 const PROD = new Set(['head', 'lead_artist', 'artist_pro', 'print_master'])
-const DOC_ROLES = new Set(['head', 'mop', 'mop_vip', 'lead_artist', 'print_master', 'lead_designer'])
+const DOC_ROLES = new Set(['head', 'mop', 'mop_vip', 'artist_pro', 'lead_artist', 'print_master', 'lead_designer'])
 const size = b => b > 1e6 ? (b / 1e6).toFixed(1) + ' МБ' : Math.ceil(b / 1e3) + ' КБ'
 
 // Большой файл грузится с телефона прямо в Google; сервер только выдаёт ссылку и проверяет результат.

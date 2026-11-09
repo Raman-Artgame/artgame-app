@@ -3,6 +3,7 @@ import { api, uuid } from './api.js'
 import { enqueue, pending } from './queue.js'
 import { shrink } from './work.jsx'
 import { money } from './crm.jsx'
+import { Donut, HBars, MonthBars, mln } from './charts.jsx'
 
 // Финансы (HEAD 06.11.2026): с ноября все деньги ведутся здесь, Google Таблица — витрина.
 // Сводка месяца, журнал денег (счета Kaspi / наличные / переводы HEAD), ФОТ всех, кому платим, закупки из бюджета.
@@ -189,19 +190,68 @@ function Payees({ d }) {
   </div>
 }
 
+// «Обзор» (HEAD 09.11: «с диаграммами, графиками — как в артефакте финансов»): год графиками, тап по месяцу — его цифры
+const COSTS = [['payroll', 'ФОТ', '#E60041'], ['project', 'На объекты', '#3DDC97'], ['materials', 'Материалы', '#5CD3E6'], ['stock', 'Склад', '#F3C38A'],
+  ['canvas', 'Мастерская', '#C58CFF'], ['sales', 'Отдел продаж', '#7FA8FF'], ['fixed', 'Постоянные', '#9C97A0'], ['variable', 'Переменные', '#FF8A5C']]
+export function Overview({ openMonth }) {
+  const [y, setY] = useState(new Date().getFullYear())
+  const [d, setD] = useState(null)
+  const [e, setE] = useState('')
+  const [pick, setPick] = useState(null)
+  useEffect(() => { setD(null); setE(''); api('/fin/year?y=' + y).then(setD, err(setE)) }, [y])
+  if (e) return <div className="card"><p className="small muted">{e}</p></div>
+  if (!d) return <div className="card muted">Считаю год…</div>
+  const ms = d.months.map(m => ({ ...m, spent: Object.values(m.costs).reduce((a, x) => a + (x || 0), 0) }))
+  const sum = k => ms.reduce((a, m) => a + (m[k] || 0), 0)
+  const net = sum('net'), gross = sum('gross'), spent = sum('spent'), profit = sum('profit'), deals = sum('deals')
+  const pm = ms.find(m => m.month === pick) || ms[ms.length - 1]
+  const costs = COSTS.map(([k, t, c]) => ({ t, c, v: ms.reduce((a, m) => a + (m.costs[k] || 0), 0) })).sort((a, b) => b.v - a.v)
+  const best = [...ms].sort((a, b) => (b.net || 0) - (a.net || 0))[0]
+  const MN = m => new Date(m + '-01').toLocaleDateString('ru-RU', { month: 'long' })
+  return <>
+    <div className="card dark fin-hero">
+      <div className="head"><button className="ghost mini" onClick={() => setY(y - 1)}>‹</button><b>{y} год</b>
+        <button className="ghost mini" disabled={y >= new Date().getFullYear()} onClick={() => setY(y + 1)}>›</button></div>
+      <div className="kpis">
+        <div><span>Выручка с НДС</span><b>{mln(gross)}</b></div>
+        <div><span>Без НДС</span><b>{mln(net)}</b></div>
+        <div><span>Прибыль до ИПН</span><b className={profit < 0 ? 'neg' : 'pos'}>{mln(profit)}</b></div>
+        <div><span>Маржа</span><b>{net ? Math.round(profit / net * 100) + '%' : '—'}</b></div>
+        <div><span>Сделок сдано</span><b>{deals || '—'}</b></div>
+        <div><span>Средний чек</span><b>{deals ? mln(gross / deals) : '—'}</b></div>
+      </div></div>
+    <div className="card"><h3>Выручка и прибыль по месяцам</h3>
+      <MonthBars months={ms} picked={pm?.month} onPick={setPick} />
+      <div className="legend"><span><i style={{ background: 'var(--text)' }} />Выручка без НДС</span><span><i style={{ background: '#4A4652' }} />Расходы</span>
+        <span><i style={{ background: 'var(--accent)' }} />Прибыль</span>{ms.some(m => m.estimate) && <span><i style={{ background: 'var(--muted)' }} />до ноября — история</span>}</div>
+      {pm && <div className="fin-month">
+        <div className="head"><b>{MN(pm.month)}</b>{openMonth && <button className="ghost mini" onClick={() => openMonth(pm.month)}>Сводка месяца ›</button>}</div>
+        <div className="kpis">
+          <div><span>Выручка без НДС</span><b>{mln(pm.net)}</b></div><div><span>Расходы</span><b>{mln(pm.spent)}</b></div>
+          <div><span>Прибыль</span><b className={pm.profit < 0 ? 'neg' : 'pos'}>{mln(pm.profit)}</b></div><div><span>Сделок</span><b>{pm.deals}</b></div>
+        </div></div>}
+      <p className="small muted">Тапните месяц на графике — ниже его цифры. {best?.net ? `Лучший месяц — ${MN(best.month)}, ${mln(best.net)}.` : ''}</p></div>
+    <div className="card"><h3>Куда уходят деньги · {y}</h3><Donut parts={costs} label="расходы" /></div>
+    {d.cities.length > 0 && <div className="card"><h3>Выручка по городам</h3><HBars rows={d.cities.slice(0, 8).map(c => ({ t: c.city, v: c.sum }))} /></div>}
+    <div className="card"><h3>Деньги: пришло и ушло</h3>
+      <HBars rows={[{ t: 'Пришло', v: sum('cash_in'), c: '#3DDC97' }, { t: 'Ушло', v: sum('cash_out'), c: '#E60041' }]} />
+      <p className="small muted">По журналу денег с ноября: оплаты Битрикса подтягиваются сами, остальное — «Деньги».</p></div>
+  </>
+}
+
 export function Finance() {
   const [m, setM] = useState(ym())
-  const [t, setT] = useState('sum')
+  const [t, setT] = useState('over')
   const [d, setD] = useState(null)
   const [e, setE] = useState('')
   useEffect(() => { api('/fin/dict').then(setD, err(setE)) }, [])
   if (e) return <div className="card"><p className="muted">{e}</p></div>
   if (!d) return <div className="card muted">Загрузка…</div>
   return <>
-    <div className="card"><MonthBar m={m} setM={setM} />
-      <div className="segf">{[['sum', 'Сводка'], ['cash', 'Деньги'], ['pay', 'ФОТ'], ['buy', 'Закупки'], ['who', 'Люди']].map(([k, n]) =>
+    <div className="card">{t !== 'over' && <MonthBar m={m} setM={setM} />}
+      <div className="segf">{[['over', 'Обзор'], ['sum', 'Месяц'], ['cash', 'Деньги'], ['pay', 'ФОТ'], ['buy', 'Закупки'], ['who', 'Люди']].map(([k, n]) =>
         <button key={k} className={t === k ? 'on' : ''} onClick={() => setT(k)}>{n}</button>)}</div></div>
-    {t === 'sum' ? <Summary m={m} /> : t === 'cash' ? <Ledger m={m} d={d} /> : t === 'pay' ? <Payroll m={m} d={d} /> : t === 'buy' ? <StockSpend /> : <Payees d={d} />}
+    {t === 'over' ? <Overview openMonth={x => { setM(x); setT('sum') }} /> : t === 'sum' ? <Summary m={m} /> : t === 'cash' ? <Ledger m={m} d={d} /> : t === 'pay' ? <Payroll m={m} d={d} /> : t === 'buy' ? <StockSpend /> : <Payees d={d} />}
   </>
 }
 

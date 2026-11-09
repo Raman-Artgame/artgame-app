@@ -73,6 +73,8 @@ async function tab(p, name) {
   // 2. HEAD: «Финансы» → «Закупки» видит закупку плотника
   const h = await open(b, 1000)
   await tab(h, 'Финансы')
+  await h.getByText('Выручка и прибыль по месяцам').waitFor()   // первым — «Обзор» с графиками (HEAD 09.11)
+  await h.locator('.segf').getByRole('button', { name: 'Месяц' }).click()
   await h.getByText('Прибыль месяца').waitFor()
   await h.locator('.segf').getByRole('button', { name: 'Закупки' }).click()
   await h.locator('.row', { hasText: 'Плотник Арман' }).waitFor()
@@ -89,6 +91,8 @@ async function tab(p, name) {
   await h.getByText(/Хозтовары и офис · нет ориентира цены/).waitFor()
   await h.screenshot({ path: `${shots}/sklad-review.png` })
   await tab(h, 'Финансы')
+  await h.getByText('Выручка и прибыль по месяцам').waitFor()   // первым — «Обзор» с графиками (HEAD 09.11)
+  await h.locator('.segf').getByRole('button', { name: 'Месяц' }).click()
   await h.getByText('Прибыль месяца').waitFor()
 
   // 3. «Деньги»: остаток на начало по Kaspi
@@ -111,7 +115,7 @@ async function tab(p, name) {
   await h.screenshot({ path: `${shots}/fin-payroll.png` })
 
   // 5. Сводка: Kaspi 1 500 000 → 1 488 000, мастерская холстов 12 000
-  await h.locator('.segf').getByRole('button', { name: 'Сводка' }).click()
+  await h.locator('.segf').getByRole('button', { name: 'Месяц' }).click()
   await h.locator('.row', { hasText: 'Kaspi' }).getByText(/1\s488\s000/).waitFor()
   await h.locator('.row', { hasText: 'Мастерская холстов' }).getByText(/12\s000/).waitFor()
   await h.screenshot({ path: `${shots}/fin-summary.png`, fullPage: true })

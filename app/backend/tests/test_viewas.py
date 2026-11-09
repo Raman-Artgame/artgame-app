@@ -151,3 +151,32 @@ def test_test_as_role_writes_for_test_person(client, monkeypatch):
     r = client.post("/api/shifts/start", json={"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural",
                                                "started_at": T0, "photo_before": JPEG}, headers=va(1000, "test:support"))
     assert r.status_code == 403
+
+
+def test_purge_test_people(client, monkeypatch):
+    """HEAD 09.11: «Тест · …» — убрать отовсюду, прямо удалить: смены, расходы, фото, журнал; настоящие люди не трогаются."""
+    from test_files import JPEG, FakeDrive
+    from artgame import drive, viewas
+    FakeDrive.store = {}
+    monkeypatch.setattr(drive, "Drive", FakeDrive)
+    monkeypatch.setattr(viewas.settings, "public_origin", "https://test.app.artgame.world")
+    setup_people(client)
+    with db.pool.connection() as c:
+        c.execute("UPDATE objects SET bitrix_stage='UC_AV00QK' WHERE id=731")
+        real = c.execute("SELECT count(*) AS n FROM people").fetchone()["n"]
+    client.post("/api/view-as/start", json={"target": "test:support"}, headers=hdr(1000))
+    uid = str(uuid.uuid4())
+    client.post("/api/shifts/start", json={"client_uid": uid, "object_id": 731, "zone_code": "mural", "started_at": T0, "photo_before": JPEG},
+                headers=va(1000, "test:support"))
+    s = client.post("/api/shifts/finish", json={"client_uid": uid, "ended_at": T1, "area_m2": 2, "work_done": "Тест", "photo_after": JPEG},
+                    headers=va(1000, "test:support")).json()
+    client.post(f"/api/shift/{s['id']}/review", json={"approve": False, "reason": "Тест"}, headers=hdr(1000))
+    assert client.post("/api/view-as/purge", headers=va(1000, "test:support")).status_code == 403   # только «у себя»
+    assert client.post("/api/view-as/purge", headers=hdr(1000)).json()["people"] == 1
+    with db.pool.connection() as c:
+        assert c.execute("SELECT count(*) AS n FROM people").fetchone()["n"] == real
+        assert c.execute("SELECT count(*) AS n FROM shifts").fetchone()["n"] == 0
+        assert c.execute("SELECT count(*) AS n FROM files").fetchone()["n"] == 0
+        assert c.execute("""SELECT count(*) AS n FROM audit_log WHERE entity='shifts' OR person_id IS NULL
+                            OR (action LIKE 'view_as%%' AND data->>'target' LIKE 'test:%%')""").fetchone()["n"] == 0
+    assert client.post("/api/view-as/purge", headers=hdr(1000)).json()["people"] == 0

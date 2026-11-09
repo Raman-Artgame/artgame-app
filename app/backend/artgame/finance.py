@@ -711,3 +711,27 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
             "budget": [{"code": k, **b} for k, b in budget.items()],
             "cash": {"opening": opening, "closing": closing, "in": inflow, "out": outflow,
                      "lines": [{**r, "s": _f(r["s"])} for r in cash], "company_paid_receipts": company_paid}}
+
+
+@router.get("/fin/year")
+def year_overview(y: int | None = None, p: dict = Depends(require_head)):
+    """Обзор года для графиков «Финансы → Обзор» (HEAD 09.11: «с диаграммами, как в артефакте финансов»):
+    по месяцам — выручка, расходы по видам, прибыль, деньги; за год — города и структура расходов. Те же числа, что «Сводка»."""
+    from . import fin
+    now = datetime.now(TZ)
+    y = y or now.year
+    last = now.month if y == now.year else 12
+    months, cities = [], {}
+    for mo in range(1, last + 1):
+        s = summary(f"{y}-{mo:02d}", p)
+        try:
+            rows = fin.month_rows(y, mo)
+        except Exception:  # noqa: BLE001 — лист не прочитан: без городов и сделок
+            rows = []
+        for r in rows:
+            c = (r["city"] or "Другой").split(" (")[0].strip() or "Другой"
+            cities[c] = cities.get(c, 0.0) + _f(r["sum"])
+        months.append({"month": f"{y}-{mo:02d}", "gross": s["revenue"]["gross"], "net": s["revenue"]["net"], "costs": s["costs"],
+                       "profit": s["profit"], "cash_in": s["cash"]["in"], "cash_out": s["cash"]["out"], "deals": len(rows),
+                       "estimate": f"{y}-{mo:02d}" < f"{HIST_CUT:%Y-%m}"})
+    return {"year": y, "months": months, "cities": sorted(({"city": k, "sum": round(v)} for k, v in cities.items()), key=lambda x: -x["sum"])}

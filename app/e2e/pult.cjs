@@ -39,8 +39,11 @@ async function tab(p, name) {
   await call(2600, '/register', { full_name: 'Новенький' })
   execSync(`psql "${process.env.ARTGAME_DATABASE_URL}" -qc "INSERT INTO objects (id, title, city, bitrix_stage) VALUES (731, 'Кафе e2e', 'Астана', 'UC_AV00QK') ON CONFLICT (id) DO UPDATE SET bitrix_stage='UC_AV00QK'"`)
   const now = Date.now()
-  await call(2000, '/shifts', { client_uid: crypto.randomUUID(), object_id: 731, zone_code: 'mural', started_at: new Date(now - 3 * 3600e3).toISOString(),
-    ended_at: new Date(now - 600e3).toISOString(), area_m2: 6, complexity: 'medium' })
+  // «сегодня» в Пульте — по Алматы (UTC+5): смена не раньше полуночи Алматы, иначе вечером тест падал
+  const almatyMidnight = Math.floor((now + 5 * 3600e3) / 864e5) * 864e5 - 5 * 3600e3
+  const st = Math.max(now - 3 * 3600e3, almatyMidnight + 60e3), en = Math.max(st + 60e3, now - 600e3)
+  await call(2000, '/shifts', { client_uid: crypto.randomUUID(), object_id: 731, zone_code: 'mural', started_at: new Date(st).toISOString(),
+    ended_at: new Date(en).toISOString(), area_m2: 6, complexity: 'medium' })
 
   // 1. HEAD открывает приложение — сразу Пульт
   const h = await open(b, 1000)
@@ -50,7 +53,8 @@ async function tab(p, name) {
   await h.getByText('Смены на проверке: 1').waitFor()
   await h.getByText('Ждут роли: 1').waitFor()
   await h.locator('#pulse-today').getByText('Дана Художник').waitFor()
-  await h.getByText('Смотреть глазами сотрудника').waitFor()
+  assert.strictEqual(await h.locator('.viewas-card').count(), 0, 'на Пульте нет дублей: «Смотреть как» — отдельной кнопкой (HEAD 09.11)')
+  assert.deepStrictEqual((await navText(h)), ['Пульт', 'Проверка', 'Сделки', 'Финансы', 'Команда', 'Ещё'], 'у HEAD внизу главное, остальное в «Ещё»')
   await h.screenshot({ path: `${shots}/pult.png`, fullPage: true })
 
   // 2. «Смотреть как» Дана из «Команды»: баннер, меню художника, разделов HEAD нет
@@ -74,6 +78,7 @@ async function tab(p, name) {
   assert.strictEqual(await h.locator('.viewas-bar').count(), 0)
 
   // 5. роль целиком (человека ещё нет): МОП
+  await tab(h, 'Смотреть как')
   await h.locator('.viewas-card > .chips').getByRole('button', { name: 'МОП', exact: true }).click()
   await h.locator('.viewas-bar').getByText('Пример: МОП').waitFor()
   assert.ok((await navText(h)).includes('Сегодня'))
@@ -91,7 +96,7 @@ async function tab(p, name) {
   await h.getByText('Смотрел приложение как Дана Художник').waitFor()
 
   // 7. «Пройти как сотрудник · тест»: HEAD работает как «Тест · Саппорт» — смена уходит по-настоящему на проверку
-  await tab(h, 'Пульт')
+  await tab(h, 'Смотреть как')
   // HEAD открыл саппорта «просмотром»: в «Смене» видно, что это просмотр, и есть кнопка перейти в тест
   await h.locator('.viewas-card > .chips').getByRole('button', { name: 'Саппорт', exact: true }).click()
   await h.locator('.viewas-bar').getByText('Пример: Саппорт').waitFor()
