@@ -7,7 +7,7 @@ from datetime import date
 from pydantic import BaseModel
 
 from . import constants as consts
-from . import feedback, head, items, viewas
+from . import feedback, gip, head, items, viewas
 from . import bx, bxw, db, design, files, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
@@ -42,6 +42,7 @@ app.include_router(design.router)
 app.include_router(head.router)
 app.include_router(items.router)
 app.include_router(feedback.router)
+app.include_router(gip.router)
 viewas.install(app)
 
 
@@ -104,7 +105,7 @@ def me(p: dict = Depends(current_person)):
 def people(_: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         return conn.execute(
-            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city, p.extra_roles, p.acting_role, p.acting_since, p.acting_promo, p.acting_note,
+            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city, p.extra_roles, p.reels, p.acting_role, p.acting_since, p.acting_promo, p.acting_note,
                       coalesce(array_agg(z.zone_code ORDER BY z.zone_code) FILTER (WHERE z.zone_code IS NOT NULL), '{}') AS zones
                FROM people p LEFT JOIN person_zones z ON z.person_id = p.id
                GROUP BY p.id ORDER BY p.created_at""").fetchall()
@@ -116,6 +117,7 @@ class AssignIn(BaseModel):
     status: str | None = None   # active | blocked (уход: вход закрыт, история остаётся)
     bitrix_user_id: int | None = None   # пользователь Битрикса (0 — снять связку): по нему МОП видит свои сделки
     city: str | None = None             # город сотрудника: объект в другом городе — командировка (HEAD 08.11)
+    reels: bool | None = None        # «Оплачиваемые рилс» (HEAD 09.11): «Продакшн» и рилс в оплату любому человеку
     acting_role: str | None = None   # и.о. (HEAD 09.11): "" — снять; права новой роли, ставка прежняя
     acting_promo: date | None = None  # день повышения (напр. 15.12 — день рождения команды)
     acting_note: str | None = None
@@ -152,6 +154,8 @@ def assign(person_id: int, body: AssignIn, head: dict = Depends(require_head)):
             if extra and len(conn.execute("SELECT code FROM roles WHERE code = ANY(%s)", (extra,)).fetchall()) != len(extra):
                 raise HTTPException(400, "bad role")
             conn.execute("UPDATE people SET extra_roles=%s, updated_at=now() WHERE id=%s", (extra, person_id))
+        if body.reels is not None:
+            conn.execute("UPDATE people SET reels=%s, updated_at=now() WHERE id=%s", (body.reels, person_id))
         if body.acting_role is not None:
             a = body.acting_role or None
             if a and (a == "head" or not conn.execute("SELECT 1 FROM roles WHERE code=%s", (a,)).fetchone()):
@@ -169,7 +173,7 @@ def assign(person_id: int, body: AssignIn, head: dict = Depends(require_head)):
             for z in body.zones:
                 conn.execute("INSERT INTO person_zones (person_id, zone_code) VALUES (%s,%s)", (person_id, z))
         db.audit(conn, head["id"], "assign", "people", person_id, body.model_dump(mode="json", exclude_none=True))
-        return conn.execute("SELECT id, role_code, status, extra_roles, acting_role, acting_since, acting_promo, acting_note FROM people WHERE id=%s", (person_id,)).fetchone()
+        return conn.execute("SELECT id, role_code, status, extra_roles, reels, acting_role, acting_since, acting_promo, acting_note FROM people WHERE id=%s", (person_id,)).fetchone()
 
 
 @app.get("/api/constants")

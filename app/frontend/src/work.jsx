@@ -150,7 +150,47 @@ export function ShiftForm({ done }) {
   }, [])
   if (!d) return <div className="card muted">Загрузка…</div>
   if (open) return <Running o={open} d={d} done={t => { saveOpen(null); setOpen(null); done(t) }} />
-  return <StartShift d={d} checked={checked} onStarted={o => { saveOpen(o); setOpen(o) }} onRoad={done} />
+  return <><StartShift d={d} checked={checked} onStarted={o => { saveOpen(o); setOpen(o) }} onRoad={done} />
+    {d.backfill?.open && <PastShift d={d} done={done} />}</>
+}
+
+// «Прошлая смена» (HEAD 09.11: «чтобы ребята всё заполнили с 1 ноября»): дата, объект (и сданные), часы, м², что сделал,
+// фото по возможности → сразу на проверку с пометкой «задним числом». Открыто до даты из настроек сервера.
+const dm = x => new Date(x).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+const yday = () => { const t = new Date(); t.setDate(t.getDate() - 1); return t.toISOString().slice(0, 10) }
+function PastShift({ d, done }) {
+  const b = d.backfill
+  const [open, setOpen] = useState(false)
+  const [v, set] = useState({ object_id: b.objects[0]?.id, zone_code: d.zones[0], day: '', hours: '10', area_m2: '', work_done: '' })
+  const [photo, setPhoto] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const send = async () => {
+    setBusy(true); setErr('')
+    try {
+      await api('/shifts/past', { method: 'POST', body: { client_uid: uuid(), ...v, hours: +v.hours, area_m2: v.area_m2 === '' ? null : +v.area_m2, photo_after: photo || null } })
+      done(`Смена за ${dm(v.day)} ушла на проверку.`)
+    } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }
+  }
+  return <div className="card past">
+    <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
+      <div><h3>Прошлая смена</h3><p className="small muted">Внеси смены с {dm(b.from)} — до {dm(b.until)} включительно.</p></div>
+      <button className="ghost mini">{open ? 'Свернуть' : 'Внести'}</button></div>
+    {open && <>
+      <label className="muted">Дата</label><input type="date" min={b.from} max={yday()} value={v.day} onChange={e => set({ ...v, day: e.target.value })} />
+      <label className="muted">Объект</label>
+      <select value={v.object_id} onChange={e => set({ ...v, object_id: +e.target.value })}>
+        {b.objects.map(o => <option key={o.id} value={o.id}>№{o.id} · {o.title}{o.city ? ` — ${o.city}` : ''}</option>)}
+      </select>
+      {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}
+      <label className="muted">Часов</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: e.target.value.replace(/[^\d.]/g, '') })} />
+      <label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(/[^\d.]/g, '') })} />
+      <label className="muted">Что сделал</label><textarea value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Фон, контур, детали…" />
+      <Snap value={photo} set={setPhoto} label="Фото работы (если есть)" />
+      <button disabled={busy || !v.day || !v.object_id || !+v.hours || v.work_done.trim().length < 3} onClick={send}>{busy ? 'Отправляю…' : 'Отправить на проверку'}</button>
+      {err && <p className="small why">{err}</p>}
+    </>}
+  </div>
 }
 
 // День дороги в командировку (HEAD 08.11): одна кнопка; оплата — как смена по ставке роли, суточные — сами (pay.trip_food).
@@ -296,13 +336,19 @@ export function ExpenseForm({ done }) {
   const [v, set] = useState(null)
   useEffect(() => { if (d) set({ object_id: d.objects[0]?.id, zone_code: d.zones[0], category: d.categories[0]?.code, amount: '', paid_by: 'own', note: '' }) }, [d])
   if (!d || !v) return <div className="card muted">Загрузка…</div>
+  const past = !!v.day
+  const objs = past ? d.backfill.objects : d.objects
   const send = async () => {
-    const left = await enqueue('/expenses', { ...v, amount: +v.amount })
+    const left = await enqueue('/expenses', { ...v, amount: +v.amount, day: v.day || null })
     done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Расход отправлен на проверку.')
   }
   return <div className="card">
     <h2>Расход</h2>
-    <Common d={d} v={v} set={set} />
+    {d.backfill?.open && <><div className="segf"><button className={past ? '' : 'on'} onClick={() => set({ ...v, day: '', object_id: d.objects[0]?.id })}>Сегодня</button>
+      <button className={past ? 'on' : ''} onClick={() => set({ ...v, day: yday(), object_id: d.backfill.objects[0]?.id })}>Прошлая дата</button></div>
+      {past && <><p className="small muted">Расходы с {dm(d.backfill.from)} можно внести до {dm(d.backfill.until)}.</p>
+        <input type="date" min={d.backfill.from} max={yday()} value={v.day} onChange={e => set({ ...v, day: e.target.value })} /></>}</>}
+    <Common d={{ ...d, objects: objs }} v={v} set={set} />
     <label className="muted">Категория</label>
     <select value={v.category} onChange={e => set({ ...v, category: e.target.value })}>
       {d.categories.map(c => <option key={c.code} value={c.code}>{c.title}</option>)}
@@ -339,7 +385,7 @@ export function Mine() {
       <button className="ghost mini" onClick={() => { clearFailed(); load() }}>Понятно, скрыть</button></div>}
     <div className="card"><h2>Мои смены</h2>
       {m.shifts.length ? m.shifts.map(s => <div key={s.id} className="row">
-        <div><b>{s.object_title}</b><br /><span className="muted small">{when(s.started_at, s.ended_at)}{s.area_m2 ? ` · ${+s.area_m2} м²` : ''}</span>
+        <div><b>{s.object_title}</b><br /><span className="muted small">{when(s.started_at, s.ended_at)}{s.area_m2 ? ` · ${+s.area_m2} м²` : ''}{s.backfill ? ' · задним числом' : ''}</span>
           {s.plan_m2 && <div className="small">{s.zone_code === 'print' ? 'План' : 'Норма'} {m2(s.plan_m2)} м²{s.kpd != null && <> · КПД <b>{pct(s.kpd)}</b></>}{+s.bonus > 0 && <> · бонус <b>{money(s.bonus)}</b></>}</div>}
           {s.work_done && <div className="small">Сделал: {s.work_done}</div>}
           {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <img src={s.photo_before_url} alt="до" />}{s.photo_after_url && <img src={s.photo_after_url} alt="после" />}</div>}
@@ -350,7 +396,7 @@ export function Mine() {
     </div>
     <div className="card"><h2>Мои расходы</h2>
       {m.expenses.length ? m.expenses.map(e => <div key={e.id} className="row">
-        <div><b>{money(e.amount)}</b> · {e.object_title}<br /><span className="muted small">{e.payout_status === 'to_pay' ? 'к выплате' : e.payout_status === 'paid' ? 'выплачено' : ''}</span>
+        <div><b>{money(e.amount)}</b> · {e.object_title}{e.backfill ? <span className="small muted"> · {new Date(e.created_at).toLocaleDateString('ru-RU')}, задним числом</span> : null}<br /><span className="muted small">{e.payout_status === 'to_pay' ? 'к выплате' : e.payout_status === 'paid' ? 'выплачено' : ''}</span>
           {e.receipt_url && <a href={e.receipt_url} target="_blank" rel="noreferrer"> чек</a>}
           {e.reason && <div className="small">Причина: {e.reason}</div>}</div>
         <span className={`tag st-${e.status}`}>{ST[e.status]}</span>
@@ -371,7 +417,7 @@ export function Review() {
     api(`/${k}/${id}/review`, { method: 'POST', body: { approve, reason } }).then(load)
   }
   const Item = ({ k, x, children }) => <div className="row">
-    <div><b>{x.person_name}</b> · {x.object_title}<br /><span className="muted small">{children}</span>
+    <div><b>{x.person_name}</b> · {x.object_title}{x.backfill && <span className="tag draft">задним числом</span>}<br /><span className="muted small">{children}</span>
       {x.work_done && <div className="small">Сделал: {x.work_done}</div>}
       {(x.photo_before_url || x.photo_after_url) && <div className="pair">{x.photo_before_url && <a href={x.photo_before_full} target="_blank" rel="noreferrer"><img src={x.photo_before_url} alt="до" /></a>}
         {x.photo_after_url && <a href={x.photo_after_full} target="_blank" rel="noreferrer"><img src={x.photo_after_url} alt="после" /></a>}</div>}</div>

@@ -117,3 +117,15 @@ def test_production_review_and_reels_pay(client, team):
     assert ("reels", 10000.0) in lines["P3000"]
     assert {"label": "Рилс после утверждения HEAD (до 2 в месяц)", "amount": 5000} in client.get("/api/fin/my", headers=hdr(3000)).json()["rate"]
     assert client.get("/api/head/pulse", headers=hdr(1000)).json()["media"] == 0
+
+
+def test_reels_flag_any_person(client, team):
+    """HEAD 09.11: «Оплачиваемые рилс» любому человеку (напр. Глебу) — «Продакшн» и рилс в оплату."""
+    assert upload(client, 5000, "reels").status_code == 403
+    assert client.post(f"/api/people/{team[5000]}", json={"reels": True}, headers=hdr(1000)).json()["reels"] is True
+    assert client.get("/api/me", headers=hdr(5000)).json()["reels"] is True
+    assert upload(client, 5000, "reels").json()["review"] == "pending"
+    assert client.get("/api/media?scope=mine", headers=hdr(5000)).json()["reels"] == {"rate": 5000, "max": 2}
+    assert any(x["label"].startswith("Рилс") for x in client.get("/api/fin/my", headers=hdr(5000)).json()["rate"])
+    client.post(f"/api/people/{team[5000]}", json={"reels": False}, headers=hdr(1000))
+    assert upload(client, 5000, "reels").status_code == 403
