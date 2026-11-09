@@ -129,10 +129,11 @@ export function Hints({ step, role, cond, v, uid }) {
   </div>
 }
 
-function Snap({ value, set, label }) {
+// gallery (HEAD 09.11): в отчётах задним числом фото берут из галереи телефона, а не только с камеры
+function Snap({ value, set, label, gallery }) {
   return <label className={'photo snap' + (value ? ' has' : '')}>
-    {value ? <img src={value} alt={label} /> : <span>📷 {label}</span>}
-    <input type="file" accept="image/*" capture="environment" hidden onChange={async e => e.target.files[0] && set(await shrink(e.target.files[0]))} />
+    {value ? <img src={value} alt={label} /> : <span>{gallery ? '🖼' : '📷'} {label}</span>}
+    <input type="file" accept="image/*" {...(gallery ? {} : { capture: 'environment' })} hidden onChange={async e => e.target.files[0] && set(await shrink(e.target.files[0]))} />
   </label>
 }
 
@@ -187,7 +188,7 @@ function PastShift({ d, done }) {
       <label className="muted">Часов</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: e.target.value.replace(/[^\d.]/g, '') })} />
       <label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(/[^\d.]/g, '') })} />
       <label className="muted">Что сделал</label><textarea value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Фон, контур, детали…" />
-      <Snap value={photo} set={setPhoto} label="Фото работы (если есть)" />
+      <Snap value={photo} set={setPhoto} label="Фото работы из галереи (если есть)" gallery />
       <button disabled={busy || !v.day || !v.object_id || !+v.hours || v.work_done.trim().length < 3} onClick={send}>{busy ? 'Отправляю…' : 'Отправить на проверку'}</button>
       {err && <p className="small why">{err}</p>}
     </>}
@@ -402,8 +403,8 @@ export function ExpenseForm({ done }) {
     </div>
     <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
     <label className="photo">
-      {v.receipt ? <img src={v.receipt} alt="чек" /> : <span>📷 Фото чека</span>}
-      <input type="file" accept="image/*" capture="environment" hidden onChange={async e => e.target.files[0] && set({ ...v, receipt: await shrink(e.target.files[0]) })} />
+      {v.receipt ? <img src={v.receipt} alt="чек" /> : <span>{past ? '🖼 Фото чека из галереи' : '📷 Фото чека'}</span>}
+      <input type="file" accept="image/*" {...(past ? {} : { capture: 'environment' })} hidden onChange={async e => e.target.files[0] && set({ ...v, receipt: await shrink(e.target.files[0]) })} />
     </label>
     <button disabled={!v.amount} onClick={send}>Отправить расход</button>
   </div>
