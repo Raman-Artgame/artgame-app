@@ -163,14 +163,16 @@ const yday = () => { const t = new Date(); t.setDate(t.getDate() - 1); return t.
 function PastShift({ d, done }) {
   const b = d.backfill
   const [open, setOpen] = useState(false)
-  const [v, set] = useState({ object_id: b.objects[0]?.id, zone_code: d.zones[0], day: '', hours: '10', area_m2: '', work_done: '' })
+  const [v, set] = useState({ object_id: b.objects[0]?.id, zone_code: d.zones[0], day: '', hours: '10', area_m2: '', work_done: '', workshop: '' })
+  const shop = !!v.workshop   // мастерская без проекта (печать, HEAD 09.11)
   const [photo, setPhoto] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const send = async () => {
     setBusy(true); setErr('')
     try {
-      await api('/shifts/past', { method: 'POST', body: { client_uid: uuid(), ...v, hours: +v.hours, area_m2: v.area_m2 === '' ? null : +v.area_m2, photo_after: photo || null } })
+      await api('/shifts/past', { method: 'POST', body: { client_uid: uuid(), ...v, ...(shop ? { object_id: 0, zone_code: 'print' } : { workshop: null }),
+        hours: +v.hours, area_m2: v.area_m2 === '' || shop ? null : +v.area_m2, photo_after: shop ? null : photo || null } })
       done(`Смена за ${dm(v.day)} ушла на проверку.`)
     } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }
   }
@@ -180,16 +182,20 @@ function PastShift({ d, done }) {
       <button className="ghost mini">{open ? 'Свернуть' : 'Внести'}</button></div>
     {open && <>
       <label className="muted">Дата</label><input type="date" min={b.from} max={yday()} value={v.day} onChange={e => set({ ...v, day: e.target.value })} />
+      {d.workshop && <div className="segf"><button className={shop ? '' : 'on'} onClick={() => set({ ...v, workshop: '' })}>На объекте</button>
+        <button className={shop ? 'on' : ''} onClick={() => set({ ...v, workshop: d.workshop[0] })}>Мастерская · без проекта</button></div>}
+      {shop ? <><label className="muted">Что делал</label>
+        <div className="chips">{d.workshop.map(t => <button key={t} className={v.workshop === t ? 'on' : ''} onClick={() => set({ ...v, workshop: t })}>{t}</button>)}</div></> : <>
       <label className="muted">Объект</label>
       <select value={v.object_id} onChange={e => set({ ...v, object_id: +e.target.value })}>
         {b.objects.map(o => <option key={o.id} value={o.id}>№{o.id} · {o.title}{o.city ? ` — ${o.city}` : ''}</option>)}
       </select>
-      {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}
+      {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}</>}
       <label className="muted">Часов</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} />
-      <label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} />
+      {!shop && <><label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} /></>}
       <label className="muted">Что сделал</label><textarea value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Фон, контур, детали…" />
-      <Snap value={photo} set={setPhoto} label="Фото работы из галереи (если есть)" gallery />
-      <button disabled={busy || !v.day || !v.object_id || !+v.hours || v.work_done.trim().length < 3} onClick={send}>{busy ? 'Отправляю…' : 'Отправить на проверку'}</button>
+      {!shop && <Snap value={photo} set={setPhoto} label="Фото работы из галереи (если есть)" gallery />}
+      <button disabled={busy || !v.day || (!shop && !v.object_id) || !+v.hours || v.work_done.trim().length < 3} onClick={send}>{busy ? 'Отправляю…' : 'Отправить на проверку'}</button>
       {err && <p className="small why">{err}</p>}
     </>}
   </div>

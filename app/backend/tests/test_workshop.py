@@ -19,6 +19,15 @@ def test_workshop_shift(client, team):  # noqa: F811
     f = client.post("/api/shifts/finish", json={"client_uid": uid, "ended_at": "2026-11-05T15:00:00+05:00", "area_m2": 30,
                                                 "work_done": "Чистка головы, замена демпферов"}, headers=hdr(6300)).json()
     assert f["status"] == "submitted" and f["bonus"] is None and f["plan_m2"] is None
+    # задним числом — тоже можно мастерскую (HEAD 09.11)
+    from datetime import date, timedelta
+    from artgame.config import settings
+    y = date.today() - timedelta(days=1)
+    settings.backfill_from, settings.backfill_until = (y - timedelta(days=3)).isoformat(), date.today().isoformat()
+    ps = client.post("/api/shifts/past", json={"client_uid": str(uuid.uuid4()), "object_id": 0, "zone_code": "print", "day": y.isoformat(),
+                                               "hours": 4.5, "work_done": "Замена демпферов", "workshop": "Ремонт и запчасти"}, headers=hdr(6300)).json()
+    assert ps["kind"] == "workshop" and ps["object_title"] == "Мастерская · Ремонт и запчасти" and ps["backfill"]
+    settings.backfill_from, settings.backfill_until = "2026-11-01", "2026-11-15"
     # на объекте фото по-прежнему обязательно
     assert client.post("/api/shifts/start", json={"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural",
                                                   "started_at": "2026-11-06T09:00:00+05:00"}, headers=hdr(5000)).status_code == 422
@@ -28,5 +37,5 @@ def test_workshop_shift(client, team):  # noqa: F811
                      jsonb_build_object('value', '1000', 'status', 'Утверждено', 'who', 'head'))""")
     rows = client.post("/api/fin/payroll/2026-11/compute", headers=hdr(1000)).json()["rows"]
     row = next(r for r in rows if r["name"] == "Оператор")
-    assert float(next(l for l in row["lines"] if l["kind"] == "piece")["amount"]) == 6000   # 6 ч × 1000
+    assert float(next(l for l in row["lines"] if l["kind"] == "piece")["amount"]) == 10500   # (6 + 4,5 задним числом) ч × 1000
     assert {"label": "Мастерская без проекта, в час", "amount": 1000} in client.get("/api/fin/my", headers=hdr(6300)).json()["rate"]

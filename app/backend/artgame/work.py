@@ -342,6 +342,7 @@ class PastIn(BaseModel):
     work_done: str = Field(min_length=3, max_length=2000)
     photo_after: str | None = Field(default=None, max_length=8_000_000)   # фото по возможности
     role: str | None = None
+    workshop: str | None = Field(default=None, max_length=60)   # мастерская без проекта (печать, HEAD 09.11)
 
 
 @router.post("/shifts/past")
@@ -351,20 +352,26 @@ def past_shift(b: PastIn, p: dict = Depends(active)):
         dup = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
         if dup:
             return _shift_out(conn, dup)
+        shop = bool(b.workshop)
+        if shop:
+            b.object_id, b.area_m2 = 0, None
+            if not set(p.get("roles") or [p["role_code"]]) & set(WORKSHOP_ROLES) or b.zone_code not in WORKSHOP_ZONES:
+                raise HTTPException(400, "Мастерская без проекта — у печати")
         check_zone(conn, p, b.zone_code, b.object_id, past=True)
-        if not b.object_id:
+        if not b.object_id and not shop:
             raise HTTPException(400, "Смена — только на объекте")
         start = check_past_day(b.day)
         if conn.execute("""SELECT 1 FROM shifts WHERE person_id=%s AND status NOT IN ('rejected','cancelled')
                            AND started_at >= %s AND started_at < %s + interval '1 day'""", (p["id"], start.replace(hour=0), start.replace(hour=0))).fetchone():
             raise HTTPException(409, "В этот день смена уже есть")
-        ph = _photo(conn, p, b.object_id, b.client_uid, "after", b.photo_after, "после (задним числом)") if b.photo_after else None
+        ph = _photo(conn, p, b.object_id, b.client_uid, "after", b.photo_after, "после (задним числом)") if b.photo_after and not shop else None
         row = conn.execute(
             """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status, area_m2, work_done, photo_after,
-                                   trip, role_code, backfill)
-               VALUES (%s,%s,%s,%s,%s,%s,'submitted',%s,%s,%s,%s,%s,true) RETURNING *""",
+                                   trip, role_code, backfill, kind, task)
+               VALUES (%s,%s,%s,%s,%s,%s,'submitted',%s,%s,%s,%s,%s,true,%s,%s) RETURNING *""",
             (b.client_uid, p["id"], b.object_id, b.zone_code, start, start + timedelta(hours=b.hours), b.area_m2, b.work_done, ph,
-             is_trip(conn, p["id"], b.object_id), shift_role(p, b.zone_code, b.role))).fetchone()
+             False if shop else is_trip(conn, p["id"], b.object_id), shift_role(p, b.zone_code, b.role),
+             "workshop" if shop else "work", b.workshop.strip() if shop else None)).fetchone()
         db.audit(conn, p["id"], "shift_past", "shifts", row["id"], {"day": b.day.isoformat()})
         return _shift_out(conn, row)
 
