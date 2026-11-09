@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException
 from datetime import date
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import constants as consts
 from . import feedback, gip, head, items, viewas
@@ -101,11 +101,48 @@ def me(p: dict = Depends(current_person)):
     return p
 
 
+class ProfileIn(BaseModel):
+    """Анкета «Мои данные» (HEAD 09.11): человек заполняет сам; имя в приложении — отсюда, не из Telegram."""
+    last_name: str = Field(min_length=2, max_length=60)
+    first_name: str = Field(min_length=2, max_length=60)
+    middle_name: str | None = Field(default=None, max_length=60)
+    birth_date: date
+    phone: str = Field(min_length=10, max_length=20)
+    city: str = Field(min_length=2, max_length=60)
+    emergency_name: str | None = Field(default=None, max_length=80)
+    emergency_phone: str | None = Field(default=None, max_length=20)
+    clothes_size: str | None = Field(default=None, max_length=10)
+
+
+@app.post("/api/profile")
+def profile(body: ProfileIn, p: dict = Depends(current_person)):
+    import re
+    from datetime import datetime, timezone
+    clean = lambda x: re.sub(r"\s+", " ", (x or "").strip()) or None   # noqa: E731
+    first, last = clean(body.first_name), clean(body.last_name)
+    if not re.fullmatch(r"[^\d@/:]{2,60}", first or "") or not re.fullmatch(r"[^\d@/:]{2,60}", last or ""):
+        raise HTTPException(422, "Имя и фамилия — буквами, как в документах")
+    today = date.today()
+    if not (date(1940, 1, 1) <= body.birth_date <= date(today.year - 14, today.month, min(today.day, 28))):
+        raise HTTPException(422, "Проверьте дату рождения")
+    phone = re.sub(r"[^\d+]", "", body.phone)
+    if len(re.sub(r"\D", "", phone)) < 10:
+        raise HTTPException(422, "Телефон — полностью, с кодом")
+    data = {"last_name": last, "first_name": first, "middle_name": clean(body.middle_name), "birth_date": body.birth_date,
+            "phone": phone, "city": clean(body.city), "emergency_name": clean(body.emergency_name),
+            "emergency_phone": clean(body.emergency_phone), "clothes_size": clean(body.clothes_size), "full_name": f"{first} {last}"}
+    with db.pool.connection() as conn, conn.transaction():
+        conn.execute(f"UPDATE people SET {', '.join(k + '=%s' for k in data)}, profile_at=%s WHERE id=%s",
+                     (*data.values(), datetime.now(timezone.utc), p["id"]))
+        db.audit(conn, p["id"], "profile", "people", p["id"], {k: v for k, v in data.items() if k in ("full_name", "city")})
+        return load_person(conn, p["id"], by="id")
+
+
 @app.get("/api/people")
 def people(_: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         return conn.execute(
-            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city, p.extra_roles, p.reels, p.acting_role, p.acting_since, p.acting_promo, p.acting_note,
+            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city, p.phone, p.birth_date, p.last_name, p.first_name, p.middle_name, p.emergency_name, p.emergency_phone, p.clothes_size, p.profile_at, p.extra_roles, p.reels, p.acting_role, p.acting_since, p.acting_promo, p.acting_note,
                       coalesce(array_agg(z.zone_code ORDER BY z.zone_code) FILTER (WHERE z.zone_code IS NOT NULL), '{}') AS zones
                FROM people p LEFT JOIN person_zones z ON z.person_id = p.id
                GROUP BY p.id ORDER BY p.created_at""").fetchall()
