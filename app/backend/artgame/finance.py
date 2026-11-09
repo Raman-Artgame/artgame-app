@@ -31,6 +31,8 @@ RATE = {"support": ("pay.support.shift", "pay.support.hour"), "artist": ("pay.ar
         "artist_pro": ("pay.pro.shift", "pay.pro.hour"), "lead_artist": ("pay.chief.shift", "pay.chief.hour"),
         "print_operator": ("pay.print.operator", None), "print_master": ("pay.print.master", None),
         "carpenter": ("pay.carpenter.shift", "pay.carpenter.hour")}
+# «Мастерская» без проекта (HEAD 09.11): печать — своя ставка в час из «Значений»; нет ключа — как обычная смена (с предупреждением)
+WORKSHOP_RATE = {"print_master": "pay.print.master.workshop_hour", "print_operator": "pay.print.operator.workshop_hour"}
 # Роли на окладе (HEAD 06–07.11): плотник, помощник и главный дизайнер — сумма из «Значений».
 SALARY_ROLE = {"carpenter": "pay.carpenter.month", "designer_asst": "pay.design_assistant.month",
                "lead_designer": "pay.design.lead.month"}
@@ -354,7 +356,13 @@ def compute(conn, ym: str, by: dict) -> dict:
             for s in shifts:   # две роли (HEAD 08.11): каждая смена — по ставке своей роли
                 hours = ((s["ended_at"] - s["started_at"]).total_seconds() / 3600) if s["ended_at"] else (v.get("shift.hours") or 10)
                 r = s["role_code"] or role
-                pay, miss = shift_pay(v, r, hours)
+                wk = WORKSHOP_RATE.get(r) if s["kind"] == "workshop" else None
+                if wk and v.get(wk):
+                    pay, miss = round(hours * v[wk], 2), ""
+                else:
+                    pay, miss = shift_pay(v, r, hours)
+                    if wk:
+                        miss = f"нет ставки {wk} в «Значениях» — мастерская посчитана как смена"
                 missing = miss or missing
                 piece += pay
                 bonus += _f(s["bonus"])
@@ -561,6 +569,8 @@ def my_rate(v: dict, role: str | None, f: dict | None) -> list[dict]:
             out.append({"label": "Минимум в месяц", "amount": v[MINIMUM[role]]})
         if keys and v.get("pay.trip_food"):   # командировка (HEAD 08.11): дорога — как смена, плюс суточные
             out.append({"label": "Суточные в командировке, за день", "amount": v["pay.trip_food"]})
+    if role in WORKSHOP_RATE and v.get(WORKSHOP_RATE[role]):
+        out.append({"label": "Мастерская без проекта, в час", "amount": v[WORKSHOP_RATE[role]]})
     if role == "lead_designer":
         if v.get("pay.design.unit_over"):
             out.append({"label": "Единица дизайна сверх нормы", "amount": v["pay.design.unit_over"]})
