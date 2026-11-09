@@ -44,3 +44,15 @@ def test_past_shift_and_expense(client, team, monkeypatch):  # noqa: F811
     monkeypatch.setattr(settings, "backfill_until", y.isoformat())
     assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "day": (y - timedelta(days=1)).isoformat()},
                        headers=hdr(5000)).status_code == 400
+
+
+def test_past_shift_long_night(client, team, monkeypatch):  # noqa: F811
+    """HEAD 09.11: ночные проекты и смены дольше 16 ч — одной записью до 48 ч, с временем начала (ночь считает ФОТ)."""
+    y = date.today() - timedelta(days=2)
+    monkeypatch.setattr(settings, "backfill_from", (y - timedelta(days=5)).isoformat())
+    monkeypatch.setattr(settings, "backfill_until", date.today().isoformat())
+    body = {"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "day": y.isoformat(), "hours": 34,
+            "start_time": "18:00", "area_m2": 22, "work_done": "Ночной проект", "photo_after": JPEG}
+    s = client.post("/api/shifts/past", json=body, headers=hdr(5000)).json()
+    assert s["status"] == "submitted" and s["started_at"].startswith(y.isoformat() + "T13:00")   # 18:00 Алматы = 13:00 UTC
+    assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "hours": 49}, headers=hdr(5000)).status_code == 422

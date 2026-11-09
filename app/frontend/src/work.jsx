@@ -163,7 +163,7 @@ const yday = () => { const t = new Date(); t.setDate(t.getDate() - 1); return t.
 function PastShift({ d, done }) {
   const b = d.backfill
   const [open, setOpen] = useState(false)
-  const [v, set] = useState({ object_id: b.objects[0]?.id, zone_code: d.zones[0], day: '', hours: '10', area_m2: '', work_done: '', workshop: '' })
+  const [v, set] = useState({ object_id: b.objects[0]?.id, zone_code: d.zones[0], day: '', start_time: '09:00', hours: '10', area_m2: '', work_done: '', workshop: '' })
   const shop = !!v.workshop   // мастерская без проекта (печать, HEAD 09.11)
   const [pics, setPics] = useState([])     // сколько угодно фото из галереи (HEAD 09.11)
   const [busy, setBusy] = useState(false)
@@ -173,7 +173,7 @@ function PastShift({ d, done }) {
     for (const f of [...files]) { const x = await shrink(f); setPics(a => [...a, x]) }
   }
   const send = async () => {
-    if (+v.hours > 16) { setErr('За один день — не больше 16 часов. Работали несколько дней — внесите каждый день отдельной сменой.'); return }
+    if (+v.hours > 48) { setErr('Одной записью — до 48 часов. Дольше — внесите по дням.'); return }
     setBusy(true); setErr('')
     try {
       const sh = await api('/shifts/past', { method: 'POST', body: { client_uid: uuid(), ...v, ...(shop ? { object_id: 0, zone_code: 'print' } : { workshop: null }),
@@ -202,7 +202,9 @@ function PastShift({ d, done }) {
         {b.objects.map(o => <option key={o.id} value={o.id}>№{o.id} · {o.title}{o.city ? ` — ${o.city}` : ''}</option>)}
       </select>
       {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}</>}
-      <label className="muted">Часов за этот день (до 16)</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} />
+      <div className="pair"><div><label className="muted">Начали в</label><input type="time" value={v.start_time} onChange={e => set({ ...v, start_time: e.target.value })} /></div>
+        <div><label className="muted">Часов (до 48)</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} /></div></div>
+      <p className="small muted">Сверх {d.shift_hours || 10} ч — по часовой ставке, ночные часы ({d.night || '0:00–6:00'}) — +{d.night_pct ?? 10}% к часу. Посчитается само.</p>
       {!shop && <><label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} /></>}
       <label className="muted">Что сделал</label><textarea value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Фон, контур, детали…" />
       {!shop && <><label className="muted">Фото работы · {pics.length ? `выбрано ${pics.length}` : 'из галереи, сколько угодно'}</label>
