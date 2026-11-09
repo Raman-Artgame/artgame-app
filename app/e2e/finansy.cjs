@@ -24,6 +24,7 @@ async function open(b, id) {
 }
 async function tab(p, name) {
   const nav = p.locator('nav')
+  await nav.locator('button').first().waitFor()
   if (await nav.getByRole('button', { name, exact: true }).count()) return nav.getByRole('button', { name, exact: true }).click()
   await nav.locator('button').last().click()
   await p.locator('.sheetbox').getByRole('button', { name, exact: true }).click()
