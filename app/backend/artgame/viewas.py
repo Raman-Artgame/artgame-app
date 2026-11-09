@@ -178,4 +178,15 @@ def install(app):
             db.audit(conn, p["id"], "view_as_stop", "people", None, {"target": body.target})
         return {"ok": True}
 
+    @app.post("/api/view-as/purge")
+    def view_purge(p: dict = Depends(current_person)):
+        """«Стереть тестовые данные» (HEAD 09.11): тестовые сотрудники и всё, что они сделали, — из базы целиком."""
+        _head(p)
+        if p.get("_view_as"):
+            raise HTTPException(403, "сначала «Вернуться к себе»")
+        with db.pool.connection() as conn, conn.transaction():
+            n = conn.execute("SELECT purge_test_people() AS n").fetchone()["n"]
+            db.audit(conn, p["id"], "test_purge", "people", None, {"people": n})
+        return {"ok": True, "people": n}
+
     app.add_middleware(ViewAsMiddleware)

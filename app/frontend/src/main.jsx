@@ -129,9 +129,12 @@ function Main({ me, onMe, web, logout }) {
     ...(KIT.has(role) ? [['kit', 'Сбор']] : []),
     ...(role === 'head' ? [['design', 'Дизайн'], ['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда']] : [])]
   // Кабинет HEAD (08.11): Пульт · Проверка · Сделки · Финансы · Команда, остальное — в «Ещё», там же «Смотреть как».
+  // HEAD 09.11 («кабинет — хаос, много дублей»): внизу 5 главных + «Ещё». Без Смены, Расхода, Кабинета, Места, Сбора и «Сегодня» —
+  // у HEAD это дубли Пульта и Сделок. В «Ещё» — по важности.
   const HEAD_FIRST = ['review', 'deals', 'fin', 'people']
+  const HEAD_MORE = ['projects', 'prod', 'design', 'leads', 'month', 'study', 'place', 'journal']   // склад — в «Финансы → Закупки»
   const menu = isHead ? [['home', 'Пульт'], ...HEAD_FIRST.map(k => tabs.find(x => x[0] === k)).filter(Boolean),
-    ...tabs.filter(x => !HEAD_FIRST.includes(x[0])), ['viewas', 'Смотреть как']] : tabs
+    ...HEAD_MORE.map(k => tabs.find(x => x[0] === k)).filter(Boolean), ['viewas', 'Смотреть как']] : tabs
   // в «Кабинете» — обе роли; у «и.о.» — исполняемая и основная; у каждой — «Как подняться» (HEAD 09.11)
   const dcodes = [...new Set([...(me.acting ? [role] : []), ...(me.roles?.length ? me.roles : [role])])].filter(r => DUTIES[r])
   const folds = dcodes.map(r => <DutyFold key={r} d={DUTIES[r]} g={GROW[r]} me={me} />)
@@ -140,13 +143,13 @@ function Main({ me, onMe, web, logout }) {
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
       extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> }].filter(Boolean)} /> :
     <Places key={tab} list={tab === 'study' ? [mopPlace] : other} mode={tab === 'study' ? 'study' : ''} opts={tab === 'study' ? { mop: STUDY.mop() } : {}} />}
-    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll />
+    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={!isHead} />
   </>
   return <>
     <div className="wrap">
       {web && <div className="webbar"><b>ARTGAME</b><span className="muted small">{me.full_name}</span><button className="ghost mini" onClick={logout}>Выйти</button></div>}
       <RoleSwitch me={me} />
-      {!PLAIN.has(tab) && tab !== 'home' && <div className="card"><h1>{me.full_name}</h1><span className="tag">{me.acting ? `${ROLE[me.role_main]} · и.о. ${gen(me.role_code)}` : ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
+      {!PLAIN.has(tab) && tab !== 'home' && !isHead && <div className="card"><h1>{me.full_name}</h1><span className="tag">{me.acting ? `${ROLE[me.role_main]} · и.о. ${gen(me.role_code)}` : ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
       {toast && <div className="toast">{toast}</div>}
       {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'viewas' ? <ViewAsCard /> :
         tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
@@ -158,7 +161,7 @@ function Main({ me, onMe, web, logout }) {
         tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyData me={me} onMe={onMe} /><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
         tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyData me={me} onMe={onMe} /><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
     </div>
-    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll />
+    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={!isHead} />
   </>
 }
 

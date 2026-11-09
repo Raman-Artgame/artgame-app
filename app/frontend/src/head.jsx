@@ -3,12 +3,11 @@ import { FeedbackInbox } from './feedback.jsx'
 import { api, setViewAs, viewAs } from './api.js'
 import { flush } from './queue.js'
 import { money } from './crm.jsx'
-import { LABEL } from './journal.jsx'
+import { Spark, mln } from './charts.jsx'
 
 // Кабинет HEAD — «Пульт» (HEAD 08.11): сверху то, что ждёт решения, дальше деньги месяца, кто сегодня на объектах,
 // команда и последние действия. Отсюда же — «Смотреть как сотрудник».
 const tm = s => new Date(s).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-const ago = s => { const m = Math.round((Date.now() - new Date(s)) / 60000); return m < 60 ? `${m} мин` : m < 1440 ? `${Math.round(m / 60)} ч` : `${Math.round(m / 1440)} дн` }
 const ym = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Almaty' }).slice(0, 7)
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
 
@@ -22,7 +21,8 @@ export function Pulse({ me, pulse, go }) {
   const p = pulse
   const [fin, setFin] = useState(null)
   const [fb, setFb] = useState(null)   // обращения после ответа — заново с сервера
-  useEffect(() => { api('/fin/summary?ym=' + ym()).then(setFin, e => setFin({ err: e.message })) }, [])
+  const [year, setYear] = useState(null)
+  useEffect(() => { api('/fin/summary?ym=' + ym()).then(setFin, e => setFin({ err: e.message })); api('/fin/year').then(setYear, () => {}) }, [])
   if (p === null) return <div className="card muted">Загрузка…</div>
   if (p === false) return <div className="card muted">Пульт не загрузился. Обновите страницу.</div>
   const r = p.review
@@ -54,20 +54,18 @@ export function Pulse({ me, pulse, go }) {
 
     <FeedbackInbox items={fb ?? p.feedback} reload={() => api('/head/pulse').then(x => setFb(x.feedback))} />
 
-    <div className="card"><div className="head"><h3>Деньги · {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</h3>
-      <button className="ghost mini" onClick={() => go('fin')}>Финансы</button></div>
+    <div className="card pulse-money" onClick={() => go('fin')} role="button"><div className="head"><h3>Деньги · {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</h3>
+      <span className="muted">Финансы ›</span></div>
       {!fin ? <p className="small muted">Считаю…</p> : fin.err ? <p className="small muted">{fin.err}</p> : <>
-        <div className="kv">
-          <div><span className="small muted">Выручка с НДС</span><b>{money(fin.revenue?.gross)}</b></div>
-          <div><span className="small muted">Прибыль до ИПН</span><b className={fin.profit < 0 ? 'neg' : 'ok'}>{money(fin.profit)}</b></div>
-          <div><span className="small muted">Пришло</span><b>{money(fin.cash?.in)}</b></div>
-          <div><span className="small muted">Ушло</span><b>{money(fin.cash?.out)}</b></div>
+        <div className="kpis">
+          <div><span>Выручка с НДС</span><b>{mln(fin.revenue?.gross)}</b></div>
+          <div><span>Прибыль до ИПН</span><b className={fin.profit < 0 ? 'neg' : 'pos'}>{mln(fin.profit)}</b></div>
+          <div><span>Пришло</span><b>{mln(fin.cash?.in)}</b></div>
+          <div><span>Ушло</span><b>{mln(fin.cash?.out)}</b></div>
         </div>
-        {fin.warn?.length > 0 && <p className="small muted">{fin.warn[0]}</p>}
+        {year?.months?.length > 1 && <><Spark values={year.months.map(m => m.net)} /><p className="small muted">Выручка без НДС по месяцам {year.year}</p></>}
       </>}
     </div>
-
-    <ViewAsCard />
 
     <div className="card" id="pulse-today"><h3>Сегодня на объектах</h3>
       {!p.today.length ? <p className="small muted">Смен сегодня пока нет.</p> : p.today.map(s => <div key={s.id} className="row">
@@ -83,12 +81,6 @@ export function Pulse({ me, pulse, go }) {
       {!active && <p className="small muted">Ролей ещё никому не назначено.</p>}
     </div>
 
-    <div className="card"><div className="head"><h3>Последние действия</h3><button className="ghost mini" onClick={() => go('journal')}>Журнал</button></div>
-      {!p.feed.length ? <p className="small muted">Пока тихо.</p> : p.feed.map((f, i) => <div key={i} className="row">
-        <div><b>{f.full_name}</b><div className="small muted">{(LABEL[f.action] || (() => f.action === 'register' ? 'Зарегистрировался' : f.action))(f)}</div></div>
-        <span className="small muted">{ago(f.at)}</span>
-      </div>)}
-    </div>
   </>
 }
 
@@ -126,6 +118,10 @@ export function ViewAsCard() {
         <h3>Пройти как сотрудник · тест</h3>
         <p className="small muted">Здесь можно действовать: начать и закончить смену, загрузить фото, отправить расход. Всё идёт по-настоящему — в базу, на Диск в папку сделки, на проверку — от тестового сотрудника «Тест · роль». Только на test.</p>
         <div className="chips">{o.roles.map(r => <button key={r.code} disabled={!!busy} onClick={() => go('test:' + r.code)}>{r.title}</button>)}</div>
+        <button className="ghost mini" disabled={!!busy} onClick={() => confirm('Удалить всех «Тест · …» и всё, что они сделали: смены, фото, расходы, записи журнала?') &&
+          api('/view-as/purge', { method: 'POST', noView: true }).then(r => setErr(r.people ? `Удалено тестовых сотрудников: ${r.people} — со всеми сменами и расходами.` : 'Тестовых данных нет.'), e => setErr(e.message))}>
+          Стереть тестовые данные</button>
+        <p className="small muted">После теста нажмите — «Тест · …» исчезнет отовсюду: проверка, проекты, журнал, финансы.</p>
       </div>}
     </>}
   </div>

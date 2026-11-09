@@ -662,3 +662,38 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .gabout { margin: 6px 0 10px; }
 .grid .gpic { padding: 0; border: 0; background: none; width: 100%; } .grid .gpic img { width: 100%; display: block; }
 .mitem .mthumb { padding: 0; border: 0; flex: none; }
+/* графики «Финансы → Обзор» (HEAD 09.11) */
+.chart { width: 100%; height: auto; display: block; }
+.chart .grid { stroke: var(--line2); stroke-width: 1; }
+.chart .zero { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart .b-rev { fill: var(--text); } .chart .b-rev.est { fill: var(--muted); }
+.chart .b-cost { fill: #4A4652; }
+.chart .l-profit { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linejoin: round; }
+.chart .d-profit { fill: var(--accent); }
+.chart .pick { fill: var(--alt); }
+.chart .ax { fill: var(--muted); font-size: 9px; text-anchor: middle; } .chart .ax.l { text-anchor: start; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0 2px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.donut { display: flex; gap: 14px; align-items: center; }
+.donut svg { width: 128px; flex: none; }
+.donut .dc-v { fill: var(--text); font-size: 13px; font-weight: 800; text-anchor: middle; }
+.donut .dc-l { fill: var(--muted); font-size: 8px; text-anchor: middle; }
+.dlegend { flex: 1; min-width: 0; display: grid; gap: 6px; font-size: 13px; }
+.dlegend div { display: grid; grid-template-columns: 10px 1fr auto 34px; gap: 6px; align-items: center; }
+.dlegend i { width: 10px; height: 10px; border-radius: 3px; }
+.dlegend span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .dlegend b { white-space: nowrap; } .dlegend em { color: var(--muted); font-style: normal; text-align: right; }
+.hbars { display: grid; gap: 8px; }
+.hb { display: grid; grid-template-columns: 92px 1fr auto; gap: 8px; align-items: center; font-size: 13px; }
+.hb-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hb-bar { height: 10px; background: var(--line2); border-radius: 99px; overflow: hidden; } .hb-bar i { display: block; height: 100%; border-radius: 99px; }
+.hb b { white-space: nowrap; }
+.kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.kpis > div { background: var(--alt); border-radius: 14px; padding: 12px; min-width: 0; }
+.kpis b { display: block; font-size: 20px; line-height: 1.2; white-space: nowrap; } .kpis span { font-size: 12px; color: var(--muted); }
+.kpis b.neg { color: var(--hot); } .kpis b.pos { color: var(--ok); }
+.spark { width: 100%; height: 40px; margin-top: 10px; } .spark polyline { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.fin-hero .head b { font-size: 18px; } .fin-hero .kpis > div { background: var(--dark-line); }
+.fin-month { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line2); }
+.fin-month .head { margin-bottom: 8px; }
+.donut { flex-direction: column; align-items: stretch; } .donut svg { align-self: center; width: 150px; } .dlegend { width: 100%; }
