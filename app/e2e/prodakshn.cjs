@@ -112,7 +112,7 @@ async function tab(p, name) {
   assert.ok(!(await navText(op)).includes('Склад'))
   assert.deepStrictEqual(await navText(op), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Кабинет'])
   await tab(op, 'Учёба')   // печать — как у художников: Учебник, Тест, Фотозадание, Клиентам + ТБ и «Правила игры»
-  assert.deepStrictEqual(await op.locator('.place .chips button').allTextContents(), ['Учебник', 'Клиентам', 'ТБ'])   // HEAD 09.11
+  assert.deepStrictEqual(await op.locator('.place .chips button').allTextContents(), ['Учебник', 'Подготовка к печати', 'Клиентам', 'ТБ'])   // HEAD 09.11
   await tab(op, 'Кабинет')
   await op.locator('.dutyfold').getByRole('button', { name: 'Открыть' }).click()
   await op.getByText('Правила игры · Оператор печати').waitFor()
