@@ -377,7 +377,7 @@ def past_shift(b: PastIn, p: dict = Depends(active)):
             start = start.replace(hour=h, minute=m)
         if conn.execute("""SELECT 1 FROM shifts WHERE person_id=%s AND status NOT IN ('rejected','cancelled')
                            AND started_at >= %s AND started_at < %s + interval '1 day'""", (p["id"], start.replace(hour=0, minute=0), start.replace(hour=0, minute=0))).fetchone():
-            raise HTTPException(409, "В этот день смена уже есть")
+            raise HTTPException(409, "В этот день смена уже есть. Если в ней ошибка (часы, объект) — «Кабинет» → «Мои смены» → «отменить» и внеси заново.")
         ph = _photo(conn, p, b.object_id, b.client_uid, "after", b.photo_after, "после (задним числом)") if b.photo_after and not shop else None
         row = conn.execute(
             """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status, area_m2, work_done, photo_after,
