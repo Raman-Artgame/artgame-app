@@ -173,6 +173,7 @@ function PastShift({ d, done }) {
     for (const f of [...files]) { const x = await shrink(f); setPics(a => [...a, x]) }
   }
   const send = async () => {
+    if (+v.hours > 16) { setErr('За один день — не больше 16 часов. Работали несколько дней — внесите каждый день отдельной сменой.'); return }
     setBusy(true); setErr('')
     try {
       const sh = await api('/shifts/past', { method: 'POST', body: { client_uid: uuid(), ...v, ...(shop ? { object_id: 0, zone_code: 'print' } : { workshop: null }),
@@ -201,7 +202,7 @@ function PastShift({ d, done }) {
         {b.objects.map(o => <option key={o.id} value={o.id}>№{o.id} · {o.title}{o.city ? ` — ${o.city}` : ''}</option>)}
       </select>
       {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}</>}
-      <label className="muted">Часов</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} />
+      <label className="muted">Часов за этот день (до 16)</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} />
       {!shop && <><label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} /></>}
       <label className="muted">Что сделал</label><textarea value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Фон, контур, детали…" />
       {!shop && <><label className="muted">Фото работы · {pics.length ? `выбрано ${pics.length}` : 'из галереи, сколько угодно'}</label>

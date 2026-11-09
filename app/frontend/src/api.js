@@ -29,6 +29,24 @@ export function uuid() {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
 }
 
+// Ошибка проверки полей (422) приходит списком — показываем по-русски, а не «[object Object]» (HEAD 09.11)
+const FIELD = { hours: 'Часов', area_m2: 'Сделано, м²', work_done: 'Что сделал', day: 'Дата', amount: 'Сумма', object_id: 'Объект', photo_after: 'Фото' }
+function errText(d) {
+  if (!d || typeof d === 'string') return d
+  if (!Array.isArray(d)) return d.message || JSON.stringify(d)
+  return d.map(x => {
+    const f = FIELD[x.loc?.[x.loc.length - 1]] || x.loc?.[x.loc.length - 1] || 'Поле'
+    const c = x.ctx || {}
+    if (x.type === 'less_than_equal') return `${f}: не больше ${c.le}`
+    if (x.type === 'greater_than') return `${f}: больше ${c.gt}`
+    if (x.type === 'greater_than_equal') return `${f}: не меньше ${c.ge}`
+    if (x.type === 'string_too_short') return `${f}: слишком коротко`
+    if (x.type === 'string_too_long') return `${f}: слишком длинно`
+    if (x.type === 'missing') return `${f}: не заполнено`
+    return `${f}: проверьте значение`
+  }).join('. ')
+}
+
 export async function api(path, opts = {}) {
   const auth = initData() ? { 'X-Telegram-Init-Data': initData() } : webToken() ? { Authorization: `Bearer ${webToken()}` } : {}
   const va = !opts.noView && viewAs() ? { 'X-View-As': viewAs() } : actRole() ? { 'X-Act-Role': actRole() } : {}
@@ -40,6 +58,6 @@ export async function api(path, opts = {}) {
   const data = await r.json().catch(() => ({}))
   if (r.status === 401 && !initData() && webToken()) { setWebToken(''); window.dispatchEvent(new Event('artgame:logout')) }
   if (r.status === 403 && data.view_as) readOnlyHit(data.detail)
-  if (!r.ok) throw Object.assign(new Error(data.detail || r.status), { status: r.status })
+  if (!r.ok) throw Object.assign(new Error(errText(data.detail) || r.status), { status: r.status })
   return data
 }
