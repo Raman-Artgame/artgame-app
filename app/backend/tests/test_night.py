@@ -24,3 +24,7 @@ def test_shift_pay_overtime_and_night():
     assert shift_pay(V, "artist", 34)[0] == 15000 + 24 * 1500            # сверх 10 ч — по часу
     assert shift_pay(V, "artist", 10, night=4)[0] == 15000 + 4 * 150     # ночь +10 % к часу
     assert shift_pay({**V, "pay.night": 0}, "artist", 10, night=4)[0] == 15000
+
+
+def test_no_night_keys_no_night():
+    assert night_hours({"pay.night": 10}, t(7, 18), t(8, 4)) == 0
