@@ -9,7 +9,7 @@
 Все ставки, лимиты и план бюджета — из «Значений» (pay.*, fin.*). Чего в «Значениях» нет, не считаем и говорим об этом.
 """
 import calendar
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -288,17 +288,48 @@ def role_title(conn, code: str) -> str:
     return r["title"] if r else code
 
 
-def shift_pay(v: dict, role: str, hours: float) -> tuple[float, str]:
-    """Оплата одной смены: полная смена (от 90 % нормы часов) — ставка смены, короче — по часу (или доля смены)."""
+def _hm(x, default: str) -> tuple[int, int]:
+    t = str(x if x not in (None, "") else default).strip().replace(".", ":")
+    try:
+        h, m = (t.split(":") + ["0"])[:2]   # «0:00», «0:00:00», «6»
+        return int(float(h)) % 24, int(float(m or 0))
+    except ValueError:
+        return _hm(default, "0:00") if default != t else (0, 0)
+
+
+def night_hours(v: dict, start: datetime, end: datetime | None) -> float:
+    """Ночные часы смены (HEAD 09.11: с 00:00 до 06:00 — pay.night.from / pay.night.to в «Значениях»), по времени Алматы."""
+    if not end or end <= start:
+        return 0.0
+    (fh, fm), (th, tm) = _hm(v.get("pay.night.from"), "0:00"), _hm(v.get("pay.night.to"), "6:00")
+    a, b = start.astimezone(TZ), end.astimezone(TZ)
+    total, day = 0.0, (a - timedelta(days=1)).date()
+    while datetime(day.year, day.month, day.day, tzinfo=TZ) <= b:
+        n0 = datetime(day.year, day.month, day.day, fh, fm, tzinfo=TZ)
+        n1 = datetime(day.year, day.month, day.day, th, tm, tzinfo=TZ)
+        if n1 <= n0:
+            n1 += timedelta(days=1)
+        total += max(0.0, (min(b, n1) - max(a, n0)).total_seconds()) / 3600
+        day += timedelta(days=1)
+    return round(total, 2)
+
+
+def shift_pay(v: dict, role: str, hours: float, night: float = 0.0) -> tuple[float, str]:
+    """Оплата одной смены: полная смена (от 90 % нормы часов) — ставка смены, короче — по часу (или доля смены).
+    Сверх нормы часов — каждый час по часовой ставке (правило «Переработка — по той же ставке»; HEAD 09.11: смены дольше 16 ч).
+    Ночные часы — плюс pay.night % к часовой ставке (HEAD 09.11)."""
     keys = RATE.get(role)
     if not keys or not v.get(keys[0]):
         return 0.0, f"нет ставки {keys[0] if keys else 'для роли'} в «Значениях»"
     full = v.get("shift.hours", 10) or 10
     shift_rate = v[keys[0]]
+    hour_rate = (v.get(keys[1]) if keys[1] else None) or shift_rate / full
     if hours >= full * 0.9:
-        return float(shift_rate), ""
-    hour_rate = v.get(keys[1]) if keys[1] else None
-    return round(hours * (hour_rate or shift_rate / full), 2), ""
+        pay = float(shift_rate) + max(0.0, hours - full) * hour_rate
+    else:
+        pay = hours * hour_rate
+    pay += min(night, hours) * hour_rate * (v.get("pay.night") or 0) / 100
+    return round(pay, 2), ""
 
 
 def company_revenue(y: int, m: int) -> tuple[float | None, str]:
@@ -357,10 +388,11 @@ def compute(conn, ym: str, by: dict) -> dict:
                 hours = ((s["ended_at"] - s["started_at"]).total_seconds() / 3600) if s["ended_at"] else (v.get("shift.hours") or 10)
                 r = s["role_code"] or role
                 wk = WORKSHOP_RATE.get(r) if s["kind"] == "workshop" else None
+                night = night_hours(v, s["started_at"], s["ended_at"])
                 if wk and v.get(wk):
-                    pay, miss = round(hours * v[wk], 2), ""
+                    pay, miss = round(hours * v[wk] + min(night, hours) * v[wk] * (v.get("pay.night") or 0) / 100, 2), ""
                 else:
-                    pay, miss = shift_pay(v, r, hours)
+                    pay, miss = shift_pay(v, r, hours, night)
                     if wk:
                         miss = f"нет ставки {wk} в «Значениях» — мастерская посчитана как смена"
                 missing = miss or missing

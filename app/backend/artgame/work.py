@@ -81,6 +81,9 @@ def work_dict(p: dict = Depends(active)):
             "roles": p.get("roles") or [p["role_code"]],   # две роли: в какой роли смена — по зоне объекта, можно сменить
             # подсказки смены (HEAD 08.11): ТБ из «Значений», этапы работ
             "safety": {k: x for k, x in consts.latest(conn).items() if k.startswith("safety.")},
+            # ночь и переработка (HEAD 09.11): подпись в «Прошлой смене»; считает finance.shift_pay
+            **(lambda v: {"shift_hours": v.get("shift.hours") or 10, "night_pct": v.get("pay.night") or 0,
+                          "night": f"{v.get('pay.night.from') or '0:00'}–{v.get('pay.night.to') or '6:00'}"})(consts.latest(conn)),
             "stages": [{"key": k, "title": t} for k, t in __import__("artgame.promo", fromlist=["STAGES"]).STAGES],
             # задним числом с 1.11 (HEAD 09.11): объекты — и уже сданные
             "backfill": {**backfill_window(), "objects": conn.execute(
@@ -339,7 +342,8 @@ class PastIn(BaseModel):
     object_id: int
     zone_code: str
     day: date
-    hours: float = Field(gt=0, le=16)
+    hours: float = Field(gt=0, le=48)   # HEAD 09.11: ночные и длинные проекты — до двух суток одной записью
+    start_time: str | None = Field(default=None, pattern=r"^\d{1,2}:\d{2}$")   # когда начали (по умолчанию 9:00) — для ночных часов
     area_m2: float | None = Field(default=None, ge=0)
     work_done: str = Field(min_length=3, max_length=2000)
     photo_after: str | None = Field(default=None, max_length=8_000_000)   # фото по возможности
@@ -363,8 +367,13 @@ def past_shift(b: PastIn, p: dict = Depends(active)):
         if not b.object_id and not shop:
             raise HTTPException(400, "Смена — только на объекте")
         start = check_past_day(b.day)
+        if b.start_time:
+            h, m = (int(x) for x in b.start_time.split(":"))
+            if h > 23 or m > 59:
+                raise HTTPException(422, "Время начала — от 0:00 до 23:59")
+            start = start.replace(hour=h, minute=m)
         if conn.execute("""SELECT 1 FROM shifts WHERE person_id=%s AND status NOT IN ('rejected','cancelled')
-                           AND started_at >= %s AND started_at < %s + interval '1 day'""", (p["id"], start.replace(hour=0), start.replace(hour=0))).fetchone():
+                           AND started_at >= %s AND started_at < %s + interval '1 day'""", (p["id"], start.replace(hour=0, minute=0), start.replace(hour=0, minute=0))).fetchone():
             raise HTTPException(409, "В этот день смена уже есть")
         ph = _photo(conn, p, b.object_id, b.client_uid, "after", b.photo_after, "после (задним числом)") if b.photo_after and not shop else None
         row = conn.execute(

@@ -643,3 +643,4 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .dzcontact { display: grid; gap: 8px; margin: 6px 0 4px; }
 .dzcontact .btn { text-align: center; }
 .dzst .dzdots { flex: 1; margin-top: 0; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
