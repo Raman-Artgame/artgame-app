@@ -6,7 +6,9 @@
 """
 import hashlib
 import hmac
+import re
 import time
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -229,13 +231,31 @@ def _ready(file_id: int) -> dict:
     return f
 
 
+def _range(h: str | None, size: int) -> tuple[int, int] | None:
+    """«bytes=a-b» / «bytes=a-» / «bytes=-n» → (a, b) включительно; чужое или кривое — None (отдаём целиком)."""
+    m = re.fullmatch(r"bytes=(\d*)-(\d*)", (h or "").strip())
+    if not m or size <= 0 or (not m[1] and not m[2]):
+        return None
+    a, b = (int(m[1]), int(m[2]) if m[2] else size - 1) if m[1] else (max(0, size - int(m[2])), size - 1)
+    return (a, min(b, size - 1)) if a <= b and a < size else None
+
+
 @router.get("/files/{file_id}/content")
-def content(file_id: int, exp: int, sig: str):
+def content(file_id: int, exp: int, sig: str, request: Request, dl: int = 0):
+    """Файл с Диска через сервер. dl=1 — скачать (attachment), иначе открыть в приложении; Range — для видео."""
     check_sig(file_id, "content", exp, sig)
     f = _ready(file_id)
-    name = f["name"].encode("ascii", "ignore").decode() or "file"
-    return StreamingResponse(drive.Drive().stream(f["drive_id"]), media_type=f["mime"] or "application/octet-stream",
-                             headers={"Content-Disposition": f'inline; filename="{name}"', "Cache-Control": "private, max-age=3600"})
+    name = f["name"] or "file"
+    ascii_name = name.encode("ascii", "ignore").decode().replace('"', "") or "file"
+    disp = f'{"attachment" if dl else "inline"}; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(name)}'
+    hdr = {"Content-Disposition": disp, "Cache-Control": "private, max-age=3600", "Accept-Ranges": "bytes"}
+    size = int(f["size"] or 0)
+    rng = _range(request.headers.get("range"), size)
+    if rng:
+        a, b = rng
+        return StreamingResponse(drive.Drive().stream(f["drive_id"], f"bytes={a}-{b}"), status_code=206, media_type=f["mime"] or "application/octet-stream",
+                                 headers={**hdr, "Content-Range": f"bytes {a}-{b}/{size}", "Content-Length": str(b - a + 1)})
+    return StreamingResponse(drive.Drive().stream(f["drive_id"]), media_type=f["mime"] or "application/octet-stream", headers=hdr)
 
 
 @router.get("/files/{file_id}/thumb")

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { StatusMark } from './ui.jsx'
 import { api } from './api.js'
 import { Skeleton, cleanTitle, money } from './crm.jsx'
 import { Gallery } from './objects.jsx'
@@ -91,6 +92,7 @@ function ProjectCard({ x, me, back, openDeal }) {
       {openDeal && <button className="ghost" onClick={() => openDeal(x.id)}>Открыть сделку</button>}
     </div>
     {me && ASSIGN.has(me.role_code) && <GipPick x={x} />}
+    {me && x.id > 0 && <Crew id={x.id} />}
     {me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} />}
     <Gallery obj={{ id: x.id, title: x.title }} me={me} />
   </>
@@ -114,6 +116,28 @@ function GipPick({ x }) {
     <p className="small muted">{msg || 'ГИП видит всю историю проекта и принимает его смены.'}</p></div>
 }
 
+// Команда объекта (HEAD 09.11: «Где главный художник назначает на объект?»): ставят ГИП, Главный, Про, Мастер печати, МОП и HEAD.
+// Назначенному приходит сообщение бота, объект у него первым в «Смене».
+function Crew({ id }) {
+  const [d, setD] = useState(null)
+  const [add, setAdd] = useState(0)
+  const [msg, setMsg] = useState('')
+  useEffect(() => { api(`/objects/${id}/crew`).then(setD, () => setD({ crew: [], can_edit: false })) }, [id])
+  if (!d || (!d.crew.length && !d.can_edit)) return null
+  const set = (pid, on) => api(`/objects/${id}/crew`, { method: 'POST', body: { person_id: pid, on } })
+    .then(r => { setD({ ...d, crew: r.crew }); setAdd(0); setMsg(on ? 'Поставлен на объект, ему пришло сообщение.' : 'Снят с объекта.') }, e => setMsg(e.message))
+  const free = (d.candidates || []).filter(c => !d.crew.some(x => x.id === c.id))
+  return <div className="card crew"><h3>На объекте работают</h3>
+    {d.crew.length ? <div className="who">{d.crew.map(c => <span key={c.id}>{c.full_name} <i className="small muted">· {c.role_title}</i>
+      {d.can_edit && <a className="x" aria-label="снять" onClick={() => confirm(`Снять ${c.full_name} с объекта?`) && set(c.id, false)}> ✕</a>}</span>)}</div>
+      : <p className="small muted">Пока никого не поставили.</p>}
+    {d.can_edit && <div className="seg"><select value={add} onChange={e => setAdd(+e.target.value)}>
+      <option value={0}>— кого поставить —</option>
+      {free.map(c => <option key={c.id} value={c.id}>{c.full_name} · {c.role_title}</option>)}</select>
+      <button className="mini" disabled={!add} onClick={() => set(add, true)}>Поставить</button></div>}
+    <p className="small muted">{msg || (d.can_edit ? 'Назначенный получит сообщение, объект у него станет первым в «Смене».' : 'Состав ставят ГИП и главные.')}</p></div>
+}
+
 const ST = { submitted: 'на проверке', approved: 'принято', rejected: 'отклонено', open: 'идёт' }
 const dt = s => new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 const tm = s => new Date(s).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
@@ -135,10 +159,10 @@ function History({ id, mine }) {
         {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <a href={s.photo_before_full} target="_blank" rel="noreferrer"><img src={s.photo_before_url} alt="до" /></a>}
           {s.photo_after_url && <a href={s.photo_after_full} target="_blank" rel="noreferrer"><img src={s.photo_after_url} alt="после" /></a>}</div>}
         <More x={s} /></div>
-      <span className={`tag st-${s.status}`}>{ST[s.status] || s.status}</span></div>)}</>}
+      <StatusMark status={s.status} /></div>)}</>}
     {h.expenses.length > 0 && <><h3>Расходы · {money(h.spent)}</h3>{h.expenses.map(e => <div key={e.id} className="row">
       <div><b>{money(e.amount)}</b> · {e.category} · {e.full_name}<br /><span className="small muted">{dt(e.created_at)}{e.note ? ' · ' + e.note : ''}</span>
         {e.receipt_url && <a href={e.receipt_url} target="_blank" rel="noreferrer"> чек</a>}</div>
-      <span className={`tag st-${e.status}`}>{ST[e.status] || e.status}</span></div>)}</>}
+      <StatusMark status={e.status} /></div>)}</>}
   </div>
 }

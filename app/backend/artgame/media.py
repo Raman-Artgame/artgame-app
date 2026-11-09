@@ -24,8 +24,9 @@ def _out(f: dict) -> dict:
 
 
 @router.get("/media")
-def media_list(scope: str = "mine", object_id: int | None = None, p: dict = Depends(active)):
-    """mine — своё (с отметками HEAD); review — ждёт решения HEAD; object — утверждённое по объекту (карточка проекта)."""
+def media_list(scope: str = "mine", object_id: int | None = None, type: str | None = None, p: dict = Depends(active)):
+    """mine — своё (с отметками HEAD); review — ждёт решения HEAD; object — утверждённое по объекту (карточка проекта);
+    object + type=video — все видео объекта (вкладка «Видео», HEAD 09.11): и ждущие HEAD, кроме возвращённых."""
     head = p["role_code"] == "head"
     if scope == "mine":
         cond, args = "f.uploaded_by=%s", [p["id"]]
@@ -33,6 +34,8 @@ def media_list(scope: str = "mine", object_id: int | None = None, p: dict = Depe
         if not head:
             raise HTTPException(403, "только HEAD")
         cond, args = "f.review='pending'", []
+    elif scope == "object" and object_id and type == "video":
+        cond, args = ("f.object_id=%s AND f.media_type IN ('video', 'reels')" + ("" if head or can_prod(p) else " AND f.review <> 'rejected'")), [object_id]
     elif scope == "object" and object_id:
         cond, args = ("f.object_id=%s" + ("" if head or can_prod(p) else " AND f.review='approved'")), [object_id]
     else:

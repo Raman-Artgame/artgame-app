@@ -355,7 +355,8 @@ export function MyPay() {
     {p && <><div className="kv"><div><span className="muted small">Начислено</span><b>{money(p.accrued)}</b></div>
       <div><span className="muted small">Выплачено</span><b>{money(p.paid)}</b></div><div><span className="muted small">Осталось</span><b>{money(p.left)}</b></div></div>
       {p.lines.map((a, i) => <div key={i} className="row small"><span>{a.detail || LINE[a.kind]}</span><b>{money(+a.amount)}</b></div>)}
-      {!p.lines.length && <p className="small muted">За этот месяц начислений пока нет — HEAD считает ФОТ в конце месяца.</p>}
+      {!p.lines.length && <p className="small muted">{p.live ? 'Принятых смен за этот месяц пока нет. Как только смену примут — сумма появится здесь сразу.' : 'За этот месяц начислений пока нет.'}</p>}
+      {p.live && p.lines.length > 0 && <p className="small muted">Считается сразу по принятым сменам. Окончательно — когда HEAD закроет месяц.</p>}
       {p.rate?.length > 0 && <><h3 style={{ marginTop: 14 }}>Моя ставка</h3>
         {p.rate.map((r, i) => <div key={i} className="row small"><span>{r.label}</span><b>{money(r.amount)}</b></div>)}
         <p className="small muted">По листу «Значения». Изменения ставок утверждает HEAD.</p></>}</>}

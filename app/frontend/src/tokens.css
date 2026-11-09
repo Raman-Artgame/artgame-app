@@ -16,7 +16,7 @@ html { -webkit-text-size-adjust: 100%; }
 html { overflow-x: hidden; }
 body { overflow-x: clip; max-width: 100%; }
 #root { overflow-x: clip; max-width: 100vw; }
-.wrap { overflow-wrap: anywhere; }
+.wrap { overflow-wrap: break-word; }   /* не anywhere: в узких ячейках рвало слова по буквам (HEAD 09.11) */
 .wrap .card { min-width: 0; max-width: 100%; }
 .live-card .lc-addr p { min-width: 0; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 Onest, Inter, system-ui, sans-serif; }
@@ -71,7 +71,7 @@ a.btn.ghost { background: var(--surface); color: var(--text); border: 1px solid 
 .why { color: var(--warn); }
 
 /* ---- нижнее меню: тёмное, до шести кнопок ---- */
-nav { position: sticky; bottom: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); background: var(--dark); border-top: 1px solid var(--dark-line); max-width: 480px; margin: 0 auto; z-index: 10; border-radius: 18px 18px 0 0; }
+nav { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); background: var(--dark); border-top: 1px solid var(--dark-line); max-width: 480px; margin: 0 auto; z-index: 10; border-radius: 18px 18px 0 0; }
 nav button { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 2px; font-size: 11px; font-weight: 600; background: transparent; color: var(--dark-muted); width: auto; border-radius: 12px; white-space: nowrap; }
 nav button:hover { background: var(--dark2); }
 nav button.on { color: #fff; background: var(--dark-line); }
@@ -103,7 +103,7 @@ nav .cnt { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 16px;
 }
 
 /* ---- рабочее место во фрейме ---- */
-.place { display: flex; flex-direction: column; height: calc(100dvh - 62px - env(safe-area-inset-bottom)); }
+.place { display: flex; flex-direction: column; height: calc(100dvh - 66px - env(safe-area-inset-bottom)); }
 .place .chips { display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto; background: var(--surface); border-bottom: 1px solid var(--line); margin: 0; }
 .placeframe { flex: 1; width: 100%; border: 0; background: #fff; }
 .embed { position: relative; margin: 0 -18px -18px; border-top: 1px solid var(--line2); }
@@ -380,7 +380,7 @@ b.neg { color: var(--hot); }
 .viewas-bar .eye { font-size: 18px; }
 .viewas-bar button { width: auto; flex: none; padding: 9px 12px; font-size: 13px; background: var(--dark); color: #fff; border-radius: 10px; }
 .viewas-bar button:hover { background: var(--dark2); }
-body.viewas .place { height: calc(100dvh - 62px - 52px - env(safe-area-inset-bottom)); }
+body.viewas .place { height: calc(100dvh - 66px - 52px - env(safe-area-inset-bottom)); }
 body.viewas.web .webbar { margin-top: 0; }
 
 /* ---------- Правки HEAD 08.11: смена по шагам, промо объекта, проекты карточками, продакшн, сбор по шагам ---------- */
@@ -644,3 +644,21 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .dzcontact .btn { text-align: center; }
 .dzst .dzdots { flex: 1; margin-top: 0; }
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* статус значком (HEAD 09.11) и суммы без переноса по цифрам */
+.stmark { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 800; background: var(--alt); color: var(--muted); }
+.stmark.st-approved { background: var(--okbg); color: var(--ok); }
+.stmark.st-rejected { background: var(--hotbg); color: var(--hot); }
+.stmark.st-open { color: var(--ok); font-size: 12px; }
+.row > b, .row > span > b { white-space: nowrap; flex: 0 0 auto; }
+.row > div, .row > span:first-child { min-width: 0; }
+.navspace { height: calc(66px + env(safe-area-inset-bottom)); flex: none; }
+/* просмотр файла внутри приложения (HEAD 09.11: не через браузер) */
+.viewer .vbox { max-width: 100%; display: flex; justify-content: center; }
+.viewer video { max-width: 100%; max-height: 74vh; border-radius: 10px; background: #000; }
+.viewer .vfile { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 40px; color: var(--dark-text); }
+.viewer .vfile b { font-size: 15px; }
+.viewer .vbtns { display: flex; gap: 8px; }
+.gabout { margin: 6px 0 10px; }
+.grid .gpic { padding: 0; border: 0; background: none; width: 100%; } .grid .gpic img { width: 100%; display: block; }
+.mitem .mthumb { padding: 0; border: 0; flex: none; }

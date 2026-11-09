@@ -71,8 +71,11 @@ def cats_for(conn, role: str | None) -> list[dict]:
 def work_dict(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         return {
-            "objects": conn.execute("SELECT id, title, city FROM objects WHERE status='active' AND (id=0 OR bitrix_stage=%s) ORDER BY id DESC",
-                                    (sync_objects.WORK,)).fetchall(),
+            # объекты, куда человека поставили (object_crew, HEAD 09.11), — первыми, с пометкой mine
+            "objects": conn.execute("""SELECT o.id, o.title, o.city, c.person_id IS NOT NULL AS mine FROM objects o
+                                       LEFT JOIN object_crew c ON c.object_id=o.id AND c.person_id=%s
+                                       WHERE o.status='active' AND (o.id=0 OR o.bitrix_stage=%s)
+                                       ORDER BY (c.person_id IS NOT NULL) DESC, o.id DESC""", (p["id"], sync_objects.WORK)).fetchall(),
             "categories": cats_for(conn, p["role_code"]),
             "zones": p["zones"],
             "printer": consts.latest(conn).get("print.tech.printer"),
@@ -488,7 +491,7 @@ def object_promo(object_id: int, zone: str = "mural", p: dict = Depends(active))
         obj = conn.execute("SELECT * FROM objects WHERE id=%s", (object_id,)).fetchone()
         promo.maybe_sync(conn, obj)
         c["sketches"] = promo.sketches(conn, object_id)
-        c.update(promo.progress(conn, object_id, c["area"]))
+        c.update(promo.progress(conn, object_id, c["area"], p))
         c["trip"] = is_trip(conn, p["id"], object_id)   # командировка для этого человека: в смене кнопка «Дорога», суточные
         c["trip_set"] = obj["trip"]
         c["now"] = [r["full_name"] for r in conn.execute(
