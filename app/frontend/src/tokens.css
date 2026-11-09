@@ -10,6 +10,13 @@
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
+/* HEAD 09.11: на iPhone страница «уезжала» влево — длинное слово без пробелов (адрес, ссылка) раздвигало ширину и Telegram
+   уменьшал всю страницу. Ничего не выходит за ширину экрана: переносим длинные слова, лишнее по ширине обрезаем. */
+html, body { overflow-x: hidden; max-width: 100%; }
+#root { overflow-x: clip; max-width: 100vw; }
+.wrap { overflow-wrap: anywhere; }
+.wrap .card { min-width: 0; max-width: 100%; }
+.live-card .lc-addr p { min-width: 0; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 Onest, Inter, system-ui, sans-serif; }
 .wrap { max-width: 480px; margin: 0 auto; padding: 16px 16px 24px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; margin-bottom: 12px; box-shadow: var(--shadow); }
