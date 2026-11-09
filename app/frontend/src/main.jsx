@@ -84,7 +84,8 @@ const STUDY = {
   art: () => ({ home: 'ucheb', hide: ['trip', 'gip', 'chief', 'grow', 'pay', 'test'], sections: [['ucheb', 'Учебник'], ['mat', 'Клиентам']] }),
   // печать — так же: Учебник, Тест, Фотозадание, Клиентам; «Запуск» и «Сборы» — в «Смене» и «Сборе», «Экзамен» со ставками — скрыт
   // «Фотозадание» убрано (HEAD 09.11)
-  print: () => ({ home: 'ucheb', hide: ['start', 'kit', 'exam', 'test', 'foto'], sections: [['ucheb', 'Учебник'], ['mat', 'Клиентам']] }),
+  // «Подготовка к печати» (HEAD 09.11) — инструкция производителя по шагам с фото, рядом с учебником
+  print: () => ({ home: 'ucheb', hide: ['start', 'kit', 'exam', 'test', 'foto'], sections: [['ucheb', 'Учебник'], ['prep', 'Подготовка к печати'], ['mat', 'Клиентам']] }),
   dz: () => ({ home: 'learn', hide: ['board', 'handoff', 'test'] }),
   mop: () => ({ home: 'ucheb', hide: ['test', 'job'] }),   // «Правила игры» — только в «Кабинете» (HEAD 09.11)
 }

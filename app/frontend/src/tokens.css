@@ -557,7 +557,8 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .issued-box { margin-top: 8px; padding: 10px 12px; border-radius: var(--r2); background: var(--alt); border: 1px solid var(--line2); }
 .issued-box .acts a { margin-left: 8px; }
 .issued-box .it-returned b, .issued-box .it-lost b { text-decoration: line-through; color: var(--muted); }
-.place .placechips { flex: none; flex-wrap: nowrap; scrollbar-width: none; }
+.place .placechips { flex: none; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.place .placechips button { flex: none; white-space: nowrap; }
 .place .placeextra { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }   /* ТБ и «Правила игры» листаются (HEAD: «из него не выйти») */
 .trip-note { color: var(--warn); font-weight: 600; }
 .card.road { border-color: #6B4A1C; }
