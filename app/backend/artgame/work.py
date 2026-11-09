@@ -375,7 +375,8 @@ def past_shift(b: PastIn, p: dict = Depends(active)):
             if h > 23 or m > 59:
                 raise HTTPException(422, "Время начала — от 0:00 до 23:59")
             start = start.replace(hour=h, minute=m)
-        if conn.execute("""SELECT 1 FROM shifts WHERE person_id=%s AND status NOT IN ('rejected','cancelled')
+        # день дороги не мешает рабочей смене в тот же день (HEAD 09.11: Ажар не могла внести 8.11 из-за дороги)
+        if conn.execute("""SELECT 1 FROM shifts WHERE person_id=%s AND status NOT IN ('rejected','cancelled') AND kind <> 'road'
                            AND started_at >= %s AND started_at < %s + interval '1 day'""", (p["id"], start.replace(hour=0, minute=0), start.replace(hour=0, minute=0))).fetchone():
             raise HTTPException(409, "В этот день смена уже есть. Если в ней ошибка (часы, объект) — «Кабинет» → «Мои смены» → «отменить» и внеси заново.")
         ph = _photo(conn, p, b.object_id, b.client_uid, "after", b.photo_after, "после (задним числом)") if b.photo_after and not shop else None
@@ -667,6 +668,40 @@ def review_list(p: dict = Depends(active)):
             for x in out["shifts"]:
                 x.pop("bonus", None)
         return out
+
+
+class FixIn(BaseModel):
+    start_time: str = Field(pattern=r"^\d{1,2}:\d{2}$")
+    hours: float = Field(gt=0, le=48)
+    kind: str | None = None   # «road» → «work»: дорогу поставили вместо смены
+
+
+@router.post("/shift/{item_id}/fix")
+def fix_shift(item_id: int, b: FixIn, p: dict = Depends(active)):
+    """HEAD 09.11: проверяющий сам исправляет смену до решения — время начала, часы (до 48, через полночь), дорога ↔ смена.
+    Ночь и переработку ФОТ пересчитает по новому времени."""
+    if p.get("_view_as"):
+        raise HTTPException(403, "только просмотр")
+    h, m = (int(x) for x in b.start_time.split(":"))
+    if h > 23 or m > 59:
+        raise HTTPException(422, "Время начала — от 0:00 до 23:59")
+    if b.kind not in (None, "work", "road"):
+        raise HTTPException(400, "bad kind")
+    cond, args = review_filter(p)
+    with db.pool.connection() as conn, conn.transaction():
+        s = conn.execute(f"SELECT x.* FROM shifts x JOIN objects o ON o.id=x.object_id WHERE x.id=%s AND x.status='submitted' AND {cond}",
+                         [item_id, *args]).fetchone()
+        if not s:
+            raise HTTPException(403, "исправить можно смену на проверке, которую вы принимаете")
+        start = s["started_at"].astimezone(TZ).replace(hour=h, minute=m, second=0, microsecond=0)
+        kind = b.kind or s["kind"]
+        conn.execute("""UPDATE shifts SET started_at=%s, ended_at=%s, kind=%s,
+                          work_done=CASE WHEN %s='work' AND kind='road' THEN coalesce(nullif(note, ''), work_done) ELSE work_done END WHERE id=%s""",
+                     (start, start + timedelta(hours=b.hours), kind, kind, item_id))
+        db.audit(conn, p["id"], "shift_fix", "shifts", item_id, {"from": [s["started_at"].isoformat(), s["ended_at"].isoformat() if s["ended_at"] else None, s["kind"]],
+                                                                  "to": [start.isoformat(), b.hours, kind]})
+        row = conn.execute("SELECT * FROM shifts WHERE id=%s", (item_id,)).fetchone()
+    return {"ok": True, "started_at": row["started_at"], "ended_at": row["ended_at"], "kind": row["kind"]}
 
 
 class Decision(BaseModel):
