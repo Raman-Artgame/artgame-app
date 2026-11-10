@@ -81,7 +81,10 @@ def test_receipt_to_drive(client, monkeypatch):
     # повтор из очереди не грузит чек второй раз
     client.post("/api/expenses", json=body, headers=hdr(2000))
     assert len(calls) == 1
-    bad = {**body, "client_uid": str(uuid.uuid4()), "receipt": "data:text/html;base64,AA=="}
+    # тот же расход с новым client_uid (форму открыли заново и нажали ещё раз) — дубль не создаётся
+    again = client.post("/api/expenses", json={**body, "client_uid": str(uuid.uuid4())}, headers=hdr(2000)).json()
+    assert again["id"] == e["id"] and len(calls) == 1 and len(client.get("/api/my", headers=hdr(2000)).json()["expenses"]) == 1
+    bad = {**body, "client_uid": str(uuid.uuid4()), "amount": 2501, "receipt": "data:text/html;base64,AA=="}
     assert client.post("/api/expenses", json=bad, headers=hdr(2000)).status_code == 400
 
 
