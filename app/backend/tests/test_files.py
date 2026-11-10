@@ -74,7 +74,8 @@ def test_photo_upload_view_and_folders(client, fake):
     with db.pool.connection() as c:
         o = c.execute("SELECT drive_folder, folders FROM objects WHERE id=731").fetchone()
     assert o["drive_folder"] == "deal-731" and o["folders"]["report"] == "deal-731/МЕДИА/Отчёты"
-    assert set(o["folders"]) == {"report", "prod", "design", "receipt", "doc"}
+    assert set(o["folders"]) == {"v", "report", "prod", "reels", "design", "design_ok", "site", "receipt", "doc"}
+    assert o["folders"]["site"] == "deal-731/ДИЗАЙН/Фото объекта" and o["folders"]["receipt"] == "deal-731/РАСХОДЫ ЧЕКИ"
     # другой художник видит фото в приложении
     lst = client.get("/api/objects/731/files?kind=photo", headers=hdr(5000)).json()
     assert [x["id"] for x in lst] == [f["id"]] and lst[0]["by"] == "P2000"
@@ -99,7 +100,7 @@ def test_design_big_upload_direct(client, fake):
     # пока не загружено — в ленте нет
     assert client.get("/api/objects/731/files?kind=design", headers=hdr(5000)).json() == []
     # телефон загрузил в Google, сервер сверяет папку и размер
-    fake.store["drvBIGFILE01"] = {"parents": ["deal-731/Дизайн"], "size": "5", "mimeType": "image/vnd.adobe.photoshop", "data": b"12345"}
+    fake.store["drvBIGFILE01"] = {"parents": ["deal-731/ДИЗАЙН"], "size": "5", "mimeType": "image/vnd.adobe.photoshop", "data": b"12345"}
     fake.store["drvWRONG0001"] = {"parents": ["elsewhere"], "size": "5", "mimeType": "x", "data": b"12345"}
     assert client.post(f"/api/files/{r['file_id']}/done", json={"drive_id": "drvWRONG0001"}, headers=hdr(2000)).status_code == 400
     done = client.post(f"/api/files/{r['file_id']}/done", json={"drive_id": "drvBIGFILE01"}, headers=hdr(2000)).json()
@@ -134,7 +135,7 @@ def test_objects_from_bitrix(client, fake):
         assert o640["status"] == "done" and o640["drive_folder"] == "fold640"
         o = c.execute("SELECT * FROM objects WHERE id=812").fetchone()
         drive.ensure_folders(c, o)
-        assert c.execute("SELECT folders FROM objects WHERE id=812").fetchone()["folders"]["design"] == "deal-812/Дизайн"
+        assert c.execute("SELECT folders FROM objects WHERE id=812").fetchone()["folders"]["design"] == "deal-812/ДИЗАЙН"
 
 
 def test_gateway_client(monkeypatch):

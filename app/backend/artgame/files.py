@@ -177,7 +177,7 @@ def start_upload(object_id: int, body: UploadIn, request: Request, p: dict = Dep
                 return {"file_id": f["id"], "done": True}
         try:
             d = drive.Drive()
-            url = d.resumable(drive.folder_of(conn, obj, body.kind, d), body.name, body.mime, body.size, origin)
+            url = d.resumable(drive.folder_of(conn, obj, body.kind, d, body.media_type), body.name, body.mime, body.size, origin)
         except Exception as ex:
             raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         return {"file_id": f["id"], "upload_url": url}
@@ -200,7 +200,7 @@ def finish_upload(file_id: int, body: DoneIn, p: dict = Depends(active)):
         try:
             d = drive.Drive()
             m = d.meta(body.drive_id)
-            folder = drive.folder_of(conn, obj, f["kind"], d)
+            folder = drive.folder_of(conn, obj, f["kind"], d, f.get("media_type"))
         except Exception as ex:
             raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         if folder not in m.get("parents", []) or int(m.get("size", -1)) != f["size"]:
