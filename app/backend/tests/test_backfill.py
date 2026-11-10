@@ -69,7 +69,7 @@ def test_past_shift_and_expense(client, team, monkeypatch):  # noqa: F811
 
 def test_past_shift_long_night(client, team, monkeypatch):  # noqa: F811
     """HEAD 09.11: ночные проекты и смены дольше 16 ч — одной записью до 48 ч, с временем начала (ночь считает ФОТ)."""
-    y = _today() - timedelta(days=2)
+    y = _today() - timedelta(days=3)   # 18:00 + 34 ч должно закончиться раньше «сейчас» в любое время суток
     monkeypatch.setattr(settings, "backfill_from", (y - timedelta(days=5)).isoformat())
     monkeypatch.setattr(settings, "backfill_until", _today().isoformat())
     body = {"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "day": y.isoformat(), "hours": 34,
@@ -81,7 +81,7 @@ def test_past_shift_long_night(client, team, monkeypatch):  # noqa: F811
 
 def test_road_does_not_block_and_fix(client, team, monkeypatch):  # noqa: F811
     """HEAD 09.11 (Ажар): дорога в тот же день не мешает внести смену; проверяющий сам правит время и тип."""
-    y = _today() - timedelta(days=1)
+    y = _today() - timedelta(days=2)   # 09:00 + 18 ч — уже закончилась и сразу после полуночи по Алматы
     monkeypatch.setattr(settings, "backfill_from", (y - timedelta(days=5)).isoformat())
     monkeypatch.setattr(settings, "backfill_until", _today().isoformat())
     with db.pool.connection() as c:
