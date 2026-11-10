@@ -174,3 +174,72 @@ def kpi(ym: str | None = None, p: dict = Depends(require_head)):
     except Exception as e:  # noqa: BLE001 — Битрикс недоступен: остальные цифры всё равно показываем
         out["bx_error"] = str(e)[:200]
     return out
+
+
+# HEAD 10.11: «все плитки кликабельные, с нормальной информацией» — расшифровка каждой плитки «Деньги»
+def _day(v) -> str:
+    return str(v or "")[:10]
+
+
+@router.get("/fin/kpi/{k}")
+def kpi_detail(k: str, ym: str | None = None, p: dict = Depends(require_head)):
+    from . import bx, fin
+    from .finance import bounds
+    from .fin_bx import DONE
+    from .work import with_receipt
+    ym = ym or now_ym()
+    start, end = bounds(ym)
+    money = bx._money
+    if k == "revenue":
+        rows = sorted(fin.month_rows(start.year, start.month), key=lambda r: -r["sum"])
+        return {"items": [{"title": f"№{r['id']} {r['title']}", "sub": " · ".join(x for x in (r["city"], "сдан " + r["closed"][8:10] + "." + r["closed"][5:7]) if x),
+                           "amount": r["sum"]} for r in rows],
+                "note": "Проекты, сданные в этом месяце: стадия «Оплата + закрывающие» или «Успешно», дата — «Окончание факт»."}
+    with db.pool.connection() as conn:
+        if k == "cash_in":
+            rows = conn.execute("""SELECT l.op_date, l.amount, l.note, l.deal_id, a.title AS account FROM fin_ledger l
+                                   JOIN fin_accounts a ON a.code=l.account_code JOIN fin_articles r ON r.code=l.article_code
+                                   WHERE l.status='active' AND l.direction='in' AND r.kind NOT IN ('transfer','opening')
+                                     AND l.op_date >= %s AND l.op_date < %s ORDER BY l.amount DESC""", (start, end)).fetchall()
+            return {"items": [{"title": (r["note"] or "").split(" · поступление")[0] or (f"Сделка №{r['deal_id']}" if r["deal_id"] else "Приход"),
+                               "sub": f"{r['op_date']:%d.%m} · {r['account']}" + (" · дата не указана в сделке — поставьте её" if "дата не указана" in (r["note"] or "") else ""),
+                               "amount": float(r["amount"]), "warn": "дата не указана" in (r["note"] or "")} for r in rows],
+                    "note": "«Поступления 1–4» из сделок Битрикса с датой этого месяца. Без даты — ставим днём, когда увидели."}
+        if k in ("support", "expenses"):
+            rows = [r for r in due(conn, p) if r["weekly"] == (k == "support")]
+            ids = [i for r in rows for x in r["lines"] for i in x["expense_ids"]]
+            exp = {e["id"]: with_receipt(e) for e in conn.execute(
+                """SELECT e.id, e.amount, e.created_at, e.note, e.receipt_file_id, c.title AS cat, o.title AS obj FROM expenses e
+                   JOIN expense_categories c ON c.code=e.category JOIN objects o ON o.id=e.object_id WHERE e.id = ANY(%s)""", (ids,)).fetchall()}
+            out = []
+            for r in sorted(rows, key=lambda r: -r["total"]):
+                lines = []
+                for x in r["lines"]:
+                    if k == "support":
+                        lines.append({"t": f"{x['what']} за {x['ym'][5:]}.{x['ym'][:4]}", "amount": x["amount"]})
+                    else:
+                        for i in x["expense_ids"]:
+                            e = exp.get(i)
+                            if e:
+                                lines.append({"t": f"{e['created_at']:%d.%m} · {e['cat']} · {e['obj']}" + (f" · {e['note']}" if e.get("note") else ""),
+                                              "amount": float(e["amount"]), "receipt_url": e["receipt_url"]})
+                out.append({"title": r["name"], "sub": f"чеков {r['checks']}" if r["checks"] else "", "amount": r["total"], "lines": lines})
+            return {"items": out, "monday": next_monday().isoformat(),
+                    "note": ("Саппорты — принятые смены (и их чеки) за прошлый и этот месяц минус уже выплаченное." if k == "support" else
+                             "Одобренные чеки «свои деньги», ещё не выплаченные.") + " Выплатить — «Финансы → ФОТ → К выплате в понедельник»."}
+    if k == "debt":
+        sel = ["ID", "TITLE", "STAGE_ID", "OPPORTUNITY", F_DEBT, "UF_CRM_ARTGAME_FIN03_RECEIVED"]
+        rows = [d for d in bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": list(DONE)}, "select": sel}) if money(d.get(F_DEBT)) > 0]
+        rows.sort(key=lambda d: -money(d.get(F_DEBT)))
+        return {"items": [{"title": f"№{d['ID']} " + str(d.get("TITLE") or "").split("·", 1)[-1].strip(), "amount": money(d.get(F_DEBT)),
+                           "sub": f"сумма {money(d.get('OPPORTUNITY')):,.0f} · пришло {money(d.get('UF_CRM_ARTGAME_FIN03_RECEIVED')):,.0f}".replace(",", " ")
+                                  + (" · работы сданы" if d.get("STAGE_ID") == "UC_BMKDS4" else " · «Успешно»")} for d in rows],
+                "note": "Сданные проекты, где в сделке есть долг (поле «Долг»). Ждём список долгов от HEAD — сверим."}
+    if k == "in_work":
+        rows = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": ["UC_AV00QK"]},
+                                             "select": ["ID", "TITLE", "OPPORTUNITY", "UF_CRM_ARTGAME_FIN03_RECEIVED", F_DEBT]})
+        rows.sort(key=lambda d: -money(d.get("OPPORTUNITY")))
+        return {"items": [{"title": f"№{d['ID']} " + str(d.get("TITLE") or "").split("·", 1)[-1].strip(), "amount": money(d.get("OPPORTUNITY")),
+                           "sub": f"пришло {money(d.get('UF_CRM_ARTGAME_FIN03_RECEIVED')):,.0f} · осталось {money(d.get(F_DEBT)):,.0f}".replace(",", " ")} for d in rows],
+                "note": "Сделки на стадии «Выполнение проекта»."}
+    raise HTTPException(404, "нет такой плитки")
