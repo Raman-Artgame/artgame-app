@@ -97,7 +97,8 @@ def test_production_review_and_reels_pay(client, team):
     assert upload(client, 5000, "reels").status_code == 403                 # художник — без «Продакшна»
     assert upload(client, 3000, "bad").status_code == 400
     got = [upload(client, 3000, "reels").json() for _ in range(3)] + [upload(client, 3000, "video").json()]
-    assert all(g["review"] == "pending" for g in got) and FakeDrive.pending[0] == "deal-731/МЕДИА/Отчёты"
+    assert all(g["review"] == "pending" for g in got) and FakeDrive.pending[0] == "deal-731/МЕДИА/Отчёты"   # последнее — видео
+    assert sum(v["parents"] == ["deal-731/МЕДИА/Рилс"] for v in FakeDrive.store.values()) == 3          # рилс — в «МЕДИА / Рилс» (HEAD 10.11)
     assert client.get("/api/media?scope=review", headers=hdr(3000)).status_code == 403
     assert len(client.get("/api/media?scope=review", headers=hdr(1000)).json()["items"]) == 4
     assert client.get("/api/media?scope=object&object_id=731", headers=hdr(2000)).json()["items"] == []   # саппорт видит только утверждённое

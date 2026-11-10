@@ -68,6 +68,9 @@ def _system_person(conn) -> int | None:
     return r["id"] if r else None
 
 
+SITE_PHOTOS = "фото объекта"
+
+
 def sync_designs(conn, obj: dict, d=None) -> int:
     """Картинки из «ДИЗАЙН» сделки → files(kind=design). Уже известные (по drive_id) не дублируются. Возвращает, сколько добавлено."""
     root = obj.get("drive_folder")
@@ -82,7 +85,8 @@ def sync_designs(conn, obj: dict, d=None) -> int:
         for fid, path in queue:
             for f in d.ls(fid):
                 if f.get("mimeType") == drive.FOLDER:
-                    nxt.append((f["id"], f"{path}/{f['name']}"))
+                    if f["name"].casefold() != SITE_PHOTOS:   # «ДИЗАЙН / Фото объекта» — фото для макетов, не эскизы (HEAD 10.11)
+                        nxt.append((f["id"], f"{path}/{f['name']}"))
                 elif (f.get("mimeType") or "").startswith(IMG):
                     found.append((f, path))
         queue, depth = nxt, depth + 1

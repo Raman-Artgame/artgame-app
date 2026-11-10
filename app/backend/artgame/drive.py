@@ -15,10 +15,23 @@ import httpx
 from .config import settings
 
 PROJECTS_ROOT_ID = "1_33LDppwOu02ToP4c3uUS-mPux5mPIJf"
-# HEAD 08.11: фото и видео с объекта — в «МЕДИА / Отчёты» (всё от всех), утверждённое HEAD — копией в «МЕДИА / Продакшн».
-# «МЕДИА» папку сделки создаёт DRIVE01; «Фото объекта» больше не заводим (старые остаются как есть).
-SUBFOLDERS = {"report": "МЕДИА/Отчёты", "prod": "МЕДИА/Продакшн", "design": "Дизайн", "receipt": "Расходы чеки", "doc": "Документы"}
+# Папка сделки (утверждено HEAD 10.11, названия буква в букву с тредом Диска):
+#   ДИЗАЙН (эскизы) / Утвержденные дизайны · ДИЗАЙН / Фото объекта (фото для наложения макетов)
+#   МЕДИА / Отчёты (всё, что снято на объекте) · МЕДИА / Продакшн (утверждённое HEAD) · МЕДИА / Рилс
+#   ДОКУМЕНТЫ · РАСХОДЫ ЧЕКИ.  Других подпапок приложение не создаёт.
+SUBFOLDERS = {"report": "МЕДИА/Отчёты", "prod": "МЕДИА/Продакшн", "reels": "МЕДИА/Рилс", "design": "ДИЗАЙН",
+              "design_ok": "ДИЗАЙН/Утвержденные дизайны", "site": "ДИЗАЙН/Фото объекта", "doc": "ДОКУМЕНТЫ", "receipt": "РАСХОДЫ ЧЕКИ"}
+FOLDERS_V = 2   # старше — ID подпапок ищутся заново по именам (07.11 приложение плодило «Дизайн» и «Фото объекта» рядом)
 FOLDER_OF = {"photo": "report", "media": "report"}   # вид файла в базе → подпапка сделки
+
+
+def key_of(kind: str, media_type: str | None = None) -> str:
+    """Подпапка для загрузки: рилс — в «МЕДИА / Рилс», остальное медиа и фото с объекта — в «МЕДИА / Отчёты»."""
+    if kind == "media" and media_type == "reels":
+        return "reels"
+    return FOLDER_OF.get(kind, kind)
+
+
 MONTHS = ["ЯНВАРЬ", "ФЕВРАЛЬ", "МАРТ", "АПРЕЛЬ", "МАЙ", "ИЮНЬ", "ИЮЛЬ", "АВГУСТ", "СЕНТЯБРЬ", "ОКТЯБРЬ", "НОЯБРЬ", "ДЕКАБРЬ"]
 # «10 ФИНАНСЫ / Расходы чеки» на диске ARTGAME.KZ; сервисному аккаунту дан доступ только к этой папке.
 RECEIPTS_ROOT_ID = "1PCTnoVlAqBhvwUgBRIc8dd4murbKKnkB"
@@ -70,6 +83,7 @@ class Drive:
     def child(self, parent: str, name: str) -> str:
         # регистр не важен: DRIVE01 создаёт «ДИЗАЙН», приложение искало «Дизайн» и плодило вторую папку
         found = [f for f in self.ls(parent) if f.get("mimeType") == FOLDER and f["name"].casefold() == name.casefold()]
+        found.sort(key=lambda f: f["name"] != name)   # точное имя (утверждённое) — первым, «Дизайн» рядом с «ДИЗАЙН» не берём
         if found:
             return found[0]["id"]
         r = httpx.post(API, headers=self.h, timeout=30, params={"supportsAllDrives": "true"},
@@ -137,6 +151,8 @@ def ensure_folders(conn, obj: dict, d: Drive | None = None) -> dict:
     if obj["id"] == 0:
         raise ValueError("у «Офис / без объекта» нет папки сделки")
     folders = dict(obj.get("folders") or {})
+    if folders.get("v") != FOLDERS_V:
+        folders = {"v": FOLDERS_V}
     if all(k in folders for k in SUBFOLDERS) and obj.get("drive_folder"):
         return folders
     d = d or Drive()
@@ -165,12 +181,12 @@ def save_photo(conn, obj: dict, name: str, data_url: str, kind: str = "photo") -
     """Фото объекта (или другой файл) в подпапку сделки. Возвращает ID файла на Диске."""
     data, mime = decode_data_url(data_url)
     d = Drive()
-    return d.upload(ensure_folders(conn, obj, d)[FOLDER_OF.get(kind, kind)], name + _ext(mime), data, mime)
+    return d.upload(ensure_folders(conn, obj, d)[key_of(kind)], name + _ext(mime), data, mime)
 
 
-def folder_of(conn, obj: dict, kind: str, d: "Drive | None" = None) -> str:
-    """ID подпапки сделки для вида файла (photo/media → МЕДИА / Отчёты)."""
-    return ensure_folders(conn, obj, d)[FOLDER_OF.get(kind, kind)]
+def folder_of(conn, obj: dict, kind: str, d: "Drive | None" = None, media_type: str | None = None) -> str:
+    """ID подпапки сделки для вида файла (photo/media → МЕДИА / Отчёты, рилс → МЕДИА / Рилс)."""
+    return ensure_folders(conn, obj, d)[key_of(kind, media_type)]
 
 
 def receipt_folder(conn, d: Drive, dept: str, deal_id: int | None) -> tuple[str, bool]:

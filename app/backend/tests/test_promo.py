@@ -22,9 +22,10 @@ def test_guess_level_by_price():
 def test_live_card(client, team):  # noqa: F811
     FakeDrive.tree = {
         "root731": [{"id": "dz", "name": "ДИЗАЙН", "mimeType": F}, {"id": "docs", "name": "Документы", "mimeType": F}],
-        "dz": [{"id": "ok", "name": "Утвержденные дизайны", "mimeType": F}, {"id": "raw.ai", "name": "Исходник.ai", "mimeType": "application/postscript"},
+        "dz": [{"id": "ok", "name": "Утвержденные дизайны", "mimeType": F}, {"id": "site", "name": "Фото объекта", "mimeType": F}, {"id": "raw.ai", "name": "Исходник.ai", "mimeType": "application/postscript"},
                {"id": "v1", "name": "Вариант 1.jpg", "mimeType": "image/jpeg", "size": "10"}],
         "ok": [{"id": "fin", "name": "Финал.jpg", "mimeType": "image/jpeg", "size": "10"}],
+        "site": [{"id": "wall", "name": "Стена до.jpg", "mimeType": "image/jpeg", "size": "10"}],   # фото для макетов — не эскиз
         "docs": [{"id": "dog", "name": "Договор.pdf", "mimeType": "application/pdf"}],
     }
     with db.pool.connection() as c:

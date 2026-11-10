@@ -39,7 +39,7 @@ def test_receipt_folders(monkeypatch):
                         "folders": {"photo": "p", "design": "d", "receipt": "deal1347/Расходы чеки", "doc": "x"}}})
     jpg = "data:image/jpeg;base64,/9j/AA=="
     drive.save_receipt(conn, "sales", "Чек A", jpg, deal_id=1347)
-    assert d.up[-1] == ("deal1347/Расходы чеки", "Чек A.jpg")
+    assert d.up[-1] == ("deal1347/РАСХОДЫ ЧЕКИ", "Чек A.jpg")   # старые ID без версии — найдены заново по утверждённым именам
     drive.save_receipt(conn, "sales", "Чек B", jpg, deal_id=999)          # у сделки нет папки → отдел, № в имени
     assert d.up[-1] == (f"FIN/01 Продажи/{month}", "Чек B сделка 999.jpg")
     drive.save_receipt(conn, "print", "Чек C", jpg)
@@ -53,3 +53,10 @@ def test_receipt_folders(monkeypatch):
     except RuntimeError:
         pass
 
+
+
+def test_child_prefers_approved_name():
+    """HEAD 10.11: рядом лежат «ДИЗАЙН» и дубль «Дизайн» — приложение берёт утверждённое имя буква в букву."""
+    d = object.__new__(drive.Drive)
+    d.ls = lambda parent: [{"id": "dup", "name": "Дизайн", "mimeType": drive.FOLDER}, {"id": "ok", "name": "ДИЗАЙН", "mimeType": drive.FOLDER}]
+    assert d.child("root", "ДИЗАЙН") == "ok"
