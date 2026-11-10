@@ -64,7 +64,9 @@ CAT_ROLES = {"lodging": {"lead_artist", "artist_pro", "print_master", "head"}}
 def cats_for(conn, role: str | None) -> list[dict]:
     rows = conn.execute("SELECT code, title FROM expense_categories WHERE active AND article='project' ORDER BY sort").fetchall()
     allow = ROLE_CATS.get(role or "")
-    return [r for r in rows if (not allow or r["code"] in allow) and (r["code"] not in CAT_ROLES or role in CAT_ROLES[r["code"]])]
+    # trip_* вносятся в карточке проекта (блок «Командировка»), не в обычных расходах
+    return [r for r in rows if not r["code"].startswith("trip_") and (not allow or r["code"] in allow)
+            and (r["code"] not in CAT_ROLES or role in CAT_ROLES[r["code"]])]
 
 
 @router.get("/work/dict")
@@ -327,7 +329,9 @@ def set_trip(object_id: int, b: TripIn, p: dict = Depends(active)):
         row = conn.execute("UPDATE objects SET trip=%s WHERE id=%s AND id<>0 RETURNING id, trip", (b.trip, object_id)).fetchone()
         if not row:
             raise HTTPException(404, "объекта ещё нет в приложении")
-        db.audit(conn, p["id"], "object_trip", "objects", object_id, {"trip": b.trip})
+        from .trips import retrip   # HEAD 10.11: смены объекта — заново (питание в командировке)
+        n = retrip(conn, object_id)
+        db.audit(conn, p["id"], "object_trip", "objects", object_id, {"trip": b.trip, "shifts": n})
         return row
 
 

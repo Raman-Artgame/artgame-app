@@ -7,7 +7,7 @@ from datetime import date
 from pydantic import BaseModel, Field
 
 from . import constants as consts
-from . import dm, feedback, gip, head, items, tgbot, viewas, weekly
+from . import dm, feedback, gip, head, items, tgbot, viewas, weekly, trips
 from . import bx, bxw, db, design, files, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ARTGAME", lifespan=lifespan)
 app.include_router(weekly.router)
+app.include_router(trips.router)
 app.include_router(media.router)   # до work: там общий /{kind}/{id}/review
 app.include_router(work.router)
 app.include_router(files.router)

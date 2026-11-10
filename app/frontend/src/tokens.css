@@ -743,3 +743,7 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .mitem:has(> button.mini) { grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; }
 .mitem > button.mini { width: 44px; height: 44px; padding: 0; }
 .nowrap { white-space: nowrap; }
+/* выплата с чеком: форма под строкой человека (HEAD 10.11) */
+.row:has(> .dealedit) { flex-wrap: wrap; }
+.paidlog { margin-top: 10px; }
+.paidlog summary { cursor: pointer; color: var(--muted); padding: 6px 0; }

@@ -163,28 +163,41 @@ function Payroll({ m, d }) {
 function Monday({ d, onPaid }) {
   const [w, setW] = useState(null)
   const [e, setE] = useState('')
-  const [acc, setAcc] = useState(d.accounts[0]?.code)
+  const bank = d.accounts.filter(a => a.code !== 'cash')
+  const hasCash = d.accounts.some(a => a.code === 'cash')
+  const [acc, setAcc] = useState((bank[0] || d.accounts[0])?.code)
   const [busy, setBusy] = useState(0)
   const load = () => api('/fin/weekly').then(setW, err(setE))
   useEffect(() => { load() }, [])
+  const [rc, setRc] = useState(null)   // {payee_id, receipt} — чек перевода перед «Выплачено» (HEAD 10.11)
   const pay = r => {
-    if (!confirm(`${r.name}: выплачено ${money(r.total)}?`)) return
     setBusy(r.payee_id); setE('')
-    api('/fin/weekly/pay', { method: 'POST', body: { client_uid: crypto.randomUUID(), payee_id: r.payee_id, account: acc, op_date: today(), amount: r.total } })
-      .then(() => { load(); onPaid && onPaid() }, err(setE)).finally(() => setBusy(0))
+    api('/fin/weekly/pay', { method: 'POST', body: { client_uid: uuid(), payee_id: r.payee_id, account: rc?.cash ? 'cash' : acc, op_date: today(), amount: r.total,
+      receipt: rc?.payee_id === r.payee_id ? rc.receipt || null : null } })
+      .then(() => { setRc(null); load(); onPaid && onPaid() }, err(setE)).finally(() => setBusy(0))
   }
   const day = w && new Date(w.monday + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
   return <div className="card">
     <div className="head"><h3>К выплате в понедельник</h3>{w && <b className="nowrap">{money(w.total)}</b>}</div>
     <p className="small muted">{day ? `Понедельник, ${day}. ` : ''}Саппортам — принятые смены, всем — одобренные чеки «свои деньги». Нажми «Выплачено», когда перевёл: сотрудник увидит «выплачено».</p>
     {e && <p className="small why">{e}</p>}
-    {w && w.rows.length > 0 && d.accounts.length > 1 && <select value={acc} onChange={x => setAcc(x.target.value)}>{d.accounts.map(a => <option key={a.code} value={a.code}>Со счёта: {a.title}</option>)}</select>}
+    {w && w.rows.length > 0 && bank.length > 1 && <select value={acc} onChange={x => setAcc(x.target.value)}>{bank.map(a => <option key={a.code} value={a.code}>Со счёта: {a.title}</option>)}</select>}
     {!w ? <p className="muted small">Загрузка…</p> : !w.rows.length ? <p className="small muted">Всё выплачено.</p> :
       w.rows.map(r => <div key={r.payee_id} className="row">
         <div><b>{r.name}</b> · {money(r.total)}
           <div className="small muted">{r.lines.map(x => `${x.what} за ${x.ym.slice(5)}.${x.ym.slice(0, 4)}: ${money(x.amount)}`).join(' · ')}{r.checks ? ` · чеков ${r.checks}` : ''}</div></div>
-        <button className="mini" disabled={busy === r.payee_id} onClick={() => pay(r)}>Выплачено</button>
+        {rc?.payee_id === r.payee_id ? null : <button className="mini" onClick={() => setRc({ payee_id: r.payee_id, receipt: '', cash: false })}>Выплачено</button>}
+        {rc?.payee_id === r.payee_id && <div className="dealedit" style={{ flexBasis: '100%' }}>
+          <div className="seg"><button className={rc.cash ? 'ghost' : ''} onClick={() => setRc({ ...rc, cash: false })}>Переводом</button>
+            {hasCash && <button className={rc.cash ? '' : 'ghost'} onClick={() => setRc({ ...rc, cash: true, receipt: '' })}>Наличными</button>}</div>
+          {rc.cash ? <p className="small muted">Наличные — без чека. Сотрудник нажмёт «Получил» в «Мои выплаты», здесь появится дата.</p>
+            : <Receipt value={rc.receipt} pick={async f => setRc({ ...rc, receipt: await shrink(f) })} />}
+          <div className="seg"><button disabled={busy === r.payee_id} onClick={() => pay(r)}>Выплачено {money(r.total)}</button><button className="ghost" onClick={() => setRc(null)}>Отмена</button></div></div>}
       </div>)}
+    {w && w.paid?.length > 0 && <details className="paidlog"><summary className="small">Уже выплачено (45 дней): {w.paid.length}</summary>
+      {w.paid.map(x => <div key={x.id} className="row"><div><b>{x.name}</b> · {money(+x.amount)}
+        <div className="small muted">{new Date(x.op_date + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} · {x.account} · за {x.period}{x.account_code === 'cash' ? (x.ack_at ? ' · получил ' + new Date(x.ack_at).toLocaleDateString('ru-RU') : ' · ждёт «Получил»')
+          : x.receipt_url ? <> · <a href={x.receipt_url}>чек</a></> : ' · без чека'}</div></div></div>)}</details>}
   </div>
 }
 
@@ -436,6 +449,13 @@ export function MyPay() {
       {p.lines.map((a, i) => <div key={i} className="row small"><span>{a.detail || LINE[a.kind]}</span><b>{money(+a.amount)}</b></div>)}
       {!p.lines.length && <p className="small muted">{p.live ? 'Принятых смен за этот месяц пока нет. Как только смену примут — сумма появится здесь сразу.' : 'За этот месяц начислений пока нет.'}</p>}
       {p.live && p.lines.length > 0 && <p className="small muted">Считается сразу по принятым сменам. Окончательно — когда HEAD закроет месяц.</p>}
+      {p.payments?.length > 0 && <><h3 style={{ marginTop: 14 }}>Выплаты</h3>
+        {p.payments.map(x => <div key={x.id} className="row small"><div><b>{money(+x.amount)}</b>
+          <div className="muted">{new Date(x.op_date + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} · {x.account}
+            {x.receipt_url && <> · <a href={x.receipt_url}>чек</a></>}{x.ack_at && ' · получил ' + new Date(x.ack_at).toLocaleDateString('ru-RU')}</div></div>
+          {!x.ack_at && <button className="mini" onClick={() => api('/fin/my/ack/' + x.id, { method: 'POST' }).then(() => setP({ ...p,
+            payments: p.payments.map(y => y.id === x.id ? { ...y, ack_at: new Date().toISOString() } : y) }))}>Получил</button>}</div>)}
+        <p className="small muted">Нажми «Получил», когда деньги пришли (особенно наличные).</p></>}
       {p.rate?.length > 0 && <><h3 style={{ marginTop: 14 }}>Моя ставка</h3>
         {p.rate.map((r, i) => <div key={i} className="row small"><span>{r.label}</span><b>{money(r.amount)}</b></div>)}
         <p className="small muted">По листу «Значения». Изменения ставок утверждает HEAD.</p></>}</>}
