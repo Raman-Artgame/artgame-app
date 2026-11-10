@@ -89,6 +89,9 @@ function LedgerForm({ d, done, cancel }) {
   </div>
 }
 
+// оплата клиента, которую внёс МОП в сделке (HEAD 10.11), и HEAD её ещё не сверил
+const unchecked = x => x.source === 'app' && x.status === 'active' && !x.checked_at && ['client_payment', 'design_prepay'].includes(x.article_code)
+
 function Ledger({ m, d }) {
   const [rows, setRows] = useState(null)
   const [form, setForm] = useState(false)
@@ -107,7 +110,9 @@ function Ledger({ m, d }) {
           {x.receipt_url && <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></>}</div>
         {x.source === 'bitrix' && x.status === 'active' && <div className="small muted">из Битрикса · счёт:{' '}
           <select className="inline" value={x.account_code} onChange={e => api(`/fin/ledger/${x.id}/account`, { method: 'POST', body: { account: e.target.value } }).then(load, err(setE))}>
-            {d.accounts.map(a => <option key={a.code} value={a.code}>{a.title}</option>)}</select></div>}</div>
+            {d.accounts.map(a => <option key={a.code} value={a.code}>{a.title}</option>)}</select></div>}
+        {unchecked(x) && <div className="small why">внёс МОП · на сверке: проверьте чек и выписку</div>}</div>
+      {unchecked(x) && <button className="mini" onClick={() => api(`/fin/ledger/${x.id}/check`, { method: 'POST' }).then(load, err(setE))}>✓</button>}
       {x.status === 'active' && <button className="ghost mini" onClick={() => cancel(x.id)}>✕</button>}
     </div>)}
     {rows && !rows.length && !form && <p className="small muted">Операций за месяц нет. Начните с «Остаток на начало» по каждому счёту.</p>}

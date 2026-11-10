@@ -8,6 +8,7 @@ import { Places, usePlaces } from './places.jsx'
 import { DEAL_ROLES, Deals } from './deals.jsx'
 import { Journal } from './journal.jsx'
 import { Month } from './dealcard.jsx'
+import { PayDesk } from './pays.jsx'
 import { Projects } from './projects.jsx'
 import { LeadCard, Leads, Today, useToday } from './crm.jsx'
 import { Finance, MyPay, StockSpend } from './finance.jsx'
@@ -78,7 +79,7 @@ const STUDY = {
   dz: () => ({ home: 'learn', hide: ['board', 'handoff', 'test'] }),
   mop: () => ({ home: 'ucheb', hide: ['test', 'job'] }),   // «Правила игры» — только в «Кабинете» (HEAD 09.11)
 }
-const PLAIN = new Set(['today', 'leads', 'deals', 'projects', 'month'])
+const PLAIN = new Set(['today', 'leads', 'deals', 'projects', 'month', 'pays'])
 
 // Единое рабочее поле МОП (HEAD 06.11): вся работа по клиенту — в карточке сделки; «Место» МОП стало «Учёбой»
 // (учебник, тест, правила игры); общая вкладка «Проекты» — кто где и сколько дней осталось.
@@ -110,20 +111,21 @@ function Main({ me, onMe, web, logout }) {
   const pulse = usePulse(isHead)
   const unread = useUnread(tab)   // «Диалог с HEAD» (09.11): цифра на вкладке «HEAD» / «Сообщения»
   const counts = { chat: unread, ...(t ? { today: t.queue.hot.length + t.queue.today.length, leads: [...t.queue.hot, ...t.queue.today].filter(x => x.entity === 'lead').length } : {}),
-    ...(pulse ? { review: +pulse.review.shifts + +pulse.review.expenses, people: pulse.pending.length } : {}) }
+    ...(pulse ? { review: +pulse.review.shifts + +pulse.review.expenses + +(pulse.review.payments || 0), people: pulse.pending.length } : {}) }
   const mop = ['mop', 'mop_vip'].includes(me.role_code)
   const carp = me.role_code === 'carpenter'
   // HEAD 08.11 (вечер): у художников и печати всё внизу одной лентой, в таком порядке — Сбор · Смена · Расход · Продакшн ·
   // Проверка · Проекты · Учёба · Кабинет (у кого что есть). Склад — внутри «Расхода». «Мои» → «Кабинет».
   const worker = art || PRINT.has(role)
-  const tabs = worker ? [...(KIT.has(role) ? [['kit', 'Сбор']] : []), ['shift', 'Смена'], ['expense', 'Расход'],
+  const pays = me.pays && role !== 'head' ? [['pays', 'Оплаты']] : []   // «Вносит оплаты клиентов» (HEAD 10.11): любая сделка
+  const tabs = worker ? [...(KIT.has(role) ? [['kit', 'Сбор']] : []), ['shift', 'Смена'], ['expense', 'Расход'], ...pays,
     ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['projects', 'Проекты'],
     ['study', 'Учёба'], ['mine', 'Кабинет'], ['chat', 'HEAD']] :
-    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход'], ['chat', 'HEAD']] :   // «Проверки» у дизайнеров нет (HEAD 09.11)
+    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход'], ...pays, ['chat', 'HEAD']] :   // «Проверки» у дизайнеров нет (HEAD 09.11)
    [...(sales ? [['today', 'Сегодня'], ['leads', 'Лиды'], ['deals', 'Сделки'], ['projects', 'Проекты'], ['month', 'Месяц']] : []),
     ...(mopPlace ? [['study', 'Учёба']] : []),
     ...(other.length ? [['place', 'Место']] : []),
-    ...(mop || carp ? [] : [['shift', 'Смена'], ['expense', 'Расход']]),
+    ...(mop || carp ? [] : [['shift', 'Смена'], ['expense', 'Расход']]), ...pays,
     ...(STOCK.has(role) ? [['stock', 'Склад']] : []), ['mine', 'Кабинет'],
     ...(!sales ? [['projects', 'Проекты']] : []),
     ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []),
@@ -160,7 +162,7 @@ function Main({ me, onMe, web, logout }) {
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
         tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> :
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
-        tab === 'fin' ? <Finance /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design me={me} /> :
+        tab === 'fin' ? <Finance /> : tab === 'pays' ? <PayDesk /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design me={me} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
         tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyData me={me} onMe={onMe} /><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
         tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyData me={me} onMe={onMe} /><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
@@ -309,6 +311,7 @@ const ICON = {
   home: 'M4 13a8 8 0 1 1 16 0M12 13l4-4M4 17h16',
   chat: 'M4 5h16v11H9l-5 4zM8 9h8M8 12h5',   // «Диалог с HEAD» (09.11)
   viewas: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  pays: 'M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5-2 1.5zM9 7.5h6M9 10.5h6M12 10.5v6',   // «Оплаты» (HEAD 10.11): чек со знаком ₸
   more: 'M5 12h.01M12 12h.01M19 12h.01' }
 const Icon = ({ k }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[k] || ICON.more} /></svg>
 const MAX = 6   // кнопок в меню без листа «Ещё»

@@ -516,9 +516,13 @@ function FixShift({ x, done }) {
 
 export function Review() {
   const [r, setR] = useState(null)
+  const [pays, setPays] = useState(null)   // оплаты клиентов, которые внесли МОП (HEAD 10.11) — только у HEAD
   const load = () => api('/review').then(setR, () => setR({ shifts: [], expenses: [] }))
-  useEffect(() => { load() }, [])
+  const loadPays = () => api('/fin/payments/check').then(setPays, () => setPays(null))
+  useEffect(() => { load(); loadPays() }, [])
   if (!r) return <div className="card muted">Загрузка…</div>
+  const pay = (id, ok) => (ok || confirm('Отменить оплату? Она останется в журнале зачёркнутой, «Поступило» в сделке уменьшится.')) &&
+    api(`/fin/ledger/${id}/${ok ? 'check' : 'cancel'}`, { method: 'POST' }).then(loadPays, e => alert(e.message))
   const decide = (k, id, approve) => {
     const reason = approve ? null : prompt('Причина отказа')
     if (!approve && !reason) return
@@ -537,6 +541,14 @@ export function Review() {
     <div className="card"><h2>Смены на проверку</h2>
       {r.shifts.length ? r.shifts.map(x => <Item key={x.id} k="shift" x={x}>{when(x.started_at, x.ended_at)}{x.area_m2 ? ` · ${+x.area_m2} м²` : ''} · {ZONE[x.zone_code]}{x.plan_m2 ? ` · ${x.zone_code === 'print' ? 'план' : 'норма'} ${m2(x.plan_m2)} м²` : ''}{x.kpd != null ? ` · КПД ${pct(x.kpd)}` : ''}{x.printer ? ` · ${x.printer}` : ''}</Item>) : <p className="muted">Всё проверено</p>}
     </div>
+    {pays && <div className="card"><h2>Оплаты клиентов на сверку</h2>
+      {pays.length ? pays.map(x => <div key={x.id} className="row">
+        <div><b>{money(x.amount)}</b> · сделка № {x.deal_id}<br /><span className="muted small">{[new Date(x.op_date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }),
+          x.account_title, (x.note || '').replace(`${x.deal_id} · `, '')].filter(Boolean).join(' · ')}{x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</span></div>
+        <div className="seg"><button onClick={() => pay(x.id, true)}>✓</button><button className="ghost" onClick={() => pay(x.id, false)}>✕</button></div>
+      </div>) : <p className="muted">Всё сверено</p>}
+      <p className="small muted">✓ — деньги пришли, сумма и чек совпадают с выпиской. ✕ — ошибка: оплата отменяется, итог сделки в Битриксе пересчитается.</p>
+    </div>}
     <div className="card"><h2>Расходы на проверку</h2>
       {r.expenses.length ? r.expenses.map(x => <Item key={x.id} k="expense" x={x}>{money(x.amount)}{x.category_title && !(x.object_title || '').includes(x.category_title) ? ' · ' + x.category_title : ''} · {x.paid_by === 'own' ? 'свои' : 'компании'}{x.note ? ' · ' + x.note : ''}{x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</Item>) : <p className="muted">Всё проверено</p>}
     </div>

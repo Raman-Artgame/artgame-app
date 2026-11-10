@@ -26,7 +26,12 @@ def pulse(p: dict = Depends(require_head)):
                            (SELECT count(*) FROM shifts WHERE status='submitted' AND created_at < now() - interval '24 hours') AS shifts_late,
                            (SELECT count(*) FROM expenses WHERE status='submitted' AND created_at < now() - interval '24 hours') AS expenses_late,
                            (SELECT count(DISTINCT expense_id) FROM stock_lines l JOIN expenses e ON e.id=l.expense_id
-                             WHERE e.status='submitted' AND l.flag IN ('over_cap','no_ref')) AS over_cap""")
+                             WHERE e.status='submitted' AND l.flag IN ('over_cap','no_ref')) AS over_cap,
+                           -- оплаты клиентов, которые внесли МОП (HEAD 10.11): сверить с чеком и выпиской
+                           (SELECT count(*) FROM fin_ledger WHERE source='app' AND status='active' AND checked_at IS NULL
+                             AND article_code IN ('client_payment','design_prepay')) AS payments,
+                           (SELECT coalesce(sum(amount),0) FROM fin_ledger WHERE source='app' AND status='active' AND checked_at IS NULL
+                             AND article_code IN ('client_payment','design_prepay')) AS payments_sum""")
         catalogs = one("SELECT count(*) AS n FROM design_catalogs WHERE status='sent'")["n"]
         feedback = conn.execute(   # «Обращения» (HEAD 08.11): новые и в работе
             """SELECT f.id, f.kind, f.text, f.place, f.status, f.created_at, pe.full_name, r.title AS role_title
@@ -52,5 +57,6 @@ def pulse(p: dict = Depends(require_head)):
         week = one("""SELECT count(*) FILTER (WHERE status='approved') AS approved, count(*) FILTER (WHERE status='rejected') AS rejected,
                              count(DISTINCT person_id) AS people
                       FROM shifts WHERE started_at > now() - interval '7 days' AND status<>'cancelled'""")
-    return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"])}, "catalogs": catalogs, "media": media, "feedback": feedback, "dm": dm,
+    return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"]), "payments_sum": float(rv["payments_sum"])},
+            "catalogs": catalogs, "media": media, "feedback": feedback, "dm": dm,
             "today": today, "team": team, "feed": feed, "week": week}

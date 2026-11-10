@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { api } from './api.js'
+import { api, uuid } from './api.js'
+import { enqueue } from './queue.js'
 import { SalesSpend } from './salesexp.jsx'
 import { Embed } from './places.jsx'
-import { CityPicker, Copy, Sheet, WaitSheet, cityBase } from './ui.jsx'
+import { CityPicker, Copy, Receipt, Sheet, WaitSheet, cityBase } from './ui.jsx'
+import { shrink } from './work.jsx'
 import { CallOutcome, Contact, Feed, Skeleton, bxLink, cleanTitle, dt, money, strip, usePortal } from './crm.jsx'
 import { leftText } from './projects.jsx'
 import { FillBar, FillSheet, LOCK_DOCS, LOCK_KP, Locked, anketaKey, lockFor, missingFor } from './fill.jsx'
@@ -295,6 +297,57 @@ function ContactFix({ d, onDone }) {
   </div>
 }
 
+// Оплаты сделки (HEAD 10.11): журнал приложения — внесённые здесь, из полей «Поступление» и HEAD; ниже — история из полей сделки
+// год — только у прошлогодних оплат: «10 нояб.», но «5 дек. 2025»
+const pdate = x => { if (!x) return 'без даты'; const t = new Date(x); return t.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', ...(t.getFullYear() !== new Date().getFullYear() && { year: 'numeric' }) }) }
+export function Payments({ pay }) {
+  const rows = [...(pay.items || []), ...(pay.history || []).map(h => ({ ...h, hist: true, op_date: h.date }))]
+  if (!rows.length) return <p className="small muted">Оплат по сделке ещё нет.</p>
+  return <div className="paylist">{rows.map((x, i) => <div key={x.id || 'h' + i} className="row" style={x.status === 'cancelled' ? { opacity: .45, textDecoration: 'line-through' } : null}>
+    <div><b>{money(x.amount)}</b> <span className="small muted">{x.hist ? 'из поля сделки' : x.account_title}</span>
+      <div className="small muted">{[pdate(x.op_date), !x.hist && (x.source === 'bitrix' ? 'из поля «Поступление»' : x.author), x.status === 'cancelled' && 'отменено HEAD'].filter(Boolean).join(' · ')}
+        {x.receipt_url && <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></>}</div></div>
+    {x.on_check && <span className="tag draft">на сверке</span>}
+  </div>)}</div>
+}
+
+// «Внести оплату»: сумма, дата (сегодня), счёт, фото чека обязательно. Нет сети — запись ждёт на телефоне и уходит сама.
+// Оплата до 01.11.2026 (нашли задним числом) — в счёт «История»: долг сделки уменьшает, в деньги ноября не входит.
+const START = '2026-11-01'
+export function PaySheet({ d, onClose, onDone }) {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Almaty' })
+  const accounts = d.pay.accounts || []
+  const [v, set] = useState({ amount: '', op_date: today, account: accounts[0]?.code || '', note: '', receipt: '' })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const hist = !!v.op_date && v.op_date < START
+  const send = async () => {
+    const path = `/bx/deals/${d.id}/payment`
+    const body = { client_uid: uuid(), amount: +v.amount, op_date: v.op_date, account: hist ? 'hist' : v.account, note: v.note.trim() || null, receipt: v.receipt }
+    setBusy(true); setErr('')
+    try {
+      await api(path, { method: 'POST', body })
+      onDone(d.pay.count_unchecked ? 'Оплата внесена: «Поступило» обновлено, HEAD сверит чек.' : 'Оплата внесена: войдёт в «Поступило» после сверки HEAD.')
+    } catch (e) {
+      if (!e.status || e.status >= 500) { await enqueue(path, body); onDone('Нет связи с сервером: оплата сохранена на телефоне и уйдёт сама.') }
+      else setErr(e.message)
+    } finally { setBusy(false) }
+  }
+  return <Sheet title="Внести оплату" onClose={onClose}>
+    <div className="dealedit">
+      <input inputMode="numeric" value={v.amount} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder="Сумма, ₸" />
+      <label className="small muted">Дата оплаты <input type="date" value={v.op_date} min="2025-01-01" max={today} onChange={e => set({ ...v, op_date: e.target.value })} /></label>
+      {hist ? <p className="small why">Оплата до ноября уйдёт в «Историю»: долг сделки уменьшит, в деньги ноября не войдёт.</p> :
+        <div className="chips">{accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>}
+      <input value={v.note} onChange={e => set({ ...v, note: e.target.value })} placeholder="Комментарий, например «аванс 50%»" />
+      <Receipt value={v.receipt} need pick={async f => set({ ...v, receipt: await shrink(f) })} />
+      {err && <p className="small why">{err}</p>}
+      <div className="dealbtns"><button disabled={busy || !(+v.amount > 0) || !v.receipt || !v.op_date || !(hist || v.account)} onClick={send}>{busy ? 'Отправляю…' : `Внести ${+v.amount > 0 ? money(+v.amount) : ''}`}</button>
+        <button className="ghost" onClick={onClose}>Отмена</button></div>
+    </div>
+  </Sheet>
+}
+
 export function DealCard({ id, back, place }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
@@ -387,13 +440,16 @@ export function DealCard({ id, back, place }) {
       <div className="card"><h3>Оплата</h3>
         <div className="kv">
           <div><span className="muted small">Поступило</span><b>{money(d.pay.received)}</b></div>
-          <div><span className="muted small">Долг</span><b>{money(d.pay.debt)}</b></div>
+          <div><span className="muted small">{d.pay.lost ? 'Упущено' : 'Долг'}</span><b>{money(d.pay.lost || d.pay.debt)}</b></div>
           {calc && <div><span className="muted small">Аванс по расчёту</span><b>{money(calc.out.pay.prepay)}</b></div>}
           {d.pay.next && <div><span className="muted small">Ближайший платёж</span><b>{d.pay.next.slice(0, 10)}</b></div>}
         </div>
-        <p className="small muted">Поступления отмечает HEAD, сервер считает долг. Когда аванс пришёл и договор подписан — переведите сделку в работу и передайте куратору.</p>
+        {d.pay.on_check > 0 && <p className="small why">На сверке у HEAD: {money(d.pay.on_check)}{d.pay.count_unchecked ? ' (уже в «Поступило»)' : ' (войдёт в «Поступило» после ✓ HEAD)'}.</p>}
+        <Payments pay={d.pay} />
+        <p className="small muted">Оплату вносите здесь, с фото чека: чек ляжет в папку сделки «Приходы чеки», HEAD сверит, «Поступило» и «Долг» в Битриксе приложение запишет само. Когда аванс пришёл и договор подписан — переведите сделку в работу и передайте куратору.</p>
         <div className="dealbtns wrapbtns">
-          <button className="mini" onClick={() => setSheet({ kind: 'stage' })}>Перевести в работу</button>
+          <button className="mini" onClick={() => setSheet({ kind: 'pay' })}>+ Внести оплату</button>
+          <button className="ghost mini" onClick={() => setSheet({ kind: 'stage' })}>Перевести в работу</button>
           <button className="ghost mini" onClick={() => setSheet({ kind: 'note', text: 'Передаю куратору: аванс получен, договор подписан. Старт — после подтверждения загрузки.' })}>Передать куратору</button>
           <button className="ghost mini" onClick={say}>Скрипты шага</button>
         </div>
@@ -415,6 +471,7 @@ export function DealCard({ id, back, place }) {
     {sheet?.kind === 'stage' && <StageSheet d={d} stages={stages} onClose={() => setSheet(null)} onDone={said} onFill={() => setSheet({ kind: 'fill' })} />}
     {sheet?.kind === 'fill' && <FillSheet d={d} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'note' && <NoteSheet d={d} initial={sheet.text} onClose={() => setSheet(null)} onDone={said} />}
+    {sheet?.kind === 'pay' && <PaySheet d={d} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'say' && <Scripts codes={codes} algoStep={algo[0]} title={`Скрипты: ${name(cur)}`} onClose={() => setSheet(null)} />}
   </>
 }

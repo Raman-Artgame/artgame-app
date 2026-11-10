@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     gateway_url: str = ""              # шлюз ARTGAME (MCP) на localhost, чтение Битрикса через bitrix_read
     gateway_token: str = ""            # если шлюз требует токен
     bitrix_webhook: str = ""           # входящий вебхук Битрикса (права CRM): запись из приложения, решение HEAD 05.11
+    pay_push: bool = False             # ARTGAME_PAY_PUSH=1: итоги оплат сделок пишет приложение (deal_money, HEAD 10.11) —
+                                       # только в одной среде и только когда робот FIN03 на сервере выключен
     drive_inbox: str = ""              # устарело: чеки без сделки — drive.RECEIPTS_ROOT_ID / drive_receipts
     drive_receipts: str = ""           # запасной ID папки «10 ФИНАНСЫ / Расходы чеки» (если RECEIPTS_ROOT_ID пуст)
     google_sa_file: str = ""            # путь к JSON сервисного аккаунта на сервере

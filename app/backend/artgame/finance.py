@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import constants as consts
@@ -123,7 +123,7 @@ def add_ledger(conn, p: dict, *, client_uid, op_date: date, account: str, direct
 
 
 @router.post("/fin/ledger")
-def ledger_add(e: LedgerIn, p: dict = Depends(require_head)):
+def ledger_add(e: LedgerIn, bg: BackgroundTasks, p: dict = Depends(require_head)):
     """HEAD вносит операцию: аренда, реклама, остаток на начало, оплата клиента наличными, перевод между счетами."""
     period = e.period or ym_of(e.op_date)
     bounds(period)
@@ -157,7 +157,15 @@ def ledger_add(e: LedgerIn, p: dict = Depends(require_head)):
                              amount=e.amount, article=e.article, period=period, deal_id=e.deal_id, payee_id=e.payee_id,
                              note=e.note, receipt_file_id=fid)
         db.audit(conn, p["id"], "fin_ledger_add", "fin_ledger", row["id"], {"article": e.article, "amount": e.amount})
-        return row
+    money_changed(bg, row)
+    return row
+
+
+def money_changed(bg: BackgroundTasks, row: dict | None):
+    """Оплата клиента или возврат по сделке — итоги сделки в Битрикс сразу, не через 15 минут (HEAD 10.11)."""
+    from . import deal_money
+    if row and row.get("deal_id") and row.get("article_code") in deal_money.IN + ("refund",):
+        bg.add_task(deal_money.push_deal, int(row["deal_id"]))
 
 
 @router.get("/fin/ledger")
@@ -173,7 +181,7 @@ def ledger_list(ym: str | None = None, _: dict = Depends(require_head)):
 
 
 @router.post("/fin/ledger/{item_id}/cancel")
-def ledger_cancel(item_id: int, p: dict = Depends(require_head)):
+def ledger_cancel(item_id: int, bg: BackgroundTasks, p: dict = Depends(require_head)):
     """Ошибочная операция: не удаляем, помечаем «отменено» (у перевода — обе строки)."""
     with db.pool.connection() as conn, conn.transaction():
         row = conn.execute("UPDATE fin_ledger SET status='cancelled' WHERE id=%s AND status='active' RETURNING *", (item_id,)).fetchone()
@@ -186,6 +194,7 @@ def ledger_cancel(item_id: int, p: dict = Depends(require_head)):
                             (SELECT ref::bigint FROM fin_accruals WHERE kind='reimburse' AND payee_id=%s AND period=%s AND status='active')""",
                          (row["payee_id"], row["period"]))
         db.audit(conn, p["id"], "fin_ledger_cancel", "fin_ledger", item_id)
+    money_changed(bg, row)
     return {"ok": True}
 
 

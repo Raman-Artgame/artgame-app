@@ -9,7 +9,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from . import db, fin_bx, fin_history, finance
+from . import db, deal_money, fin_bx, fin_history, finance
 from .config import settings
 from .deps import require_head
 
@@ -407,13 +407,18 @@ def run(year: int | None = None) -> dict:
             pays = fin_bx.import_payments(conn)
     except Exception as ex:  # noqa: BLE001 — Битрикс недоступен: витрину всё равно обновляем
         pays = {"error": str(ex)[:200]}
+    try:   # итоги оплат в сделки (Поступило / Долг / Упущено) — по журналу, вместо робота FIN03 (HEAD 10.11)
+        with db.pool.connection() as conn:
+            money = deal_money.push(conn)
+    except Exception as ex:  # noqa: BLE001
+        money = {"error": str(ex)[:200]}
     with db.pool.connection() as conn:
         hist = fin_history.run(conn)
     with db.pool.connection() as conn:
         head = conn.execute("SELECT * FROM people WHERE role_code='head' ORDER BY id LIMIT 1").fetchone() or {"id": None}
         tabs = build(conn, year, head)
     write(settings.fin_sheet_id, tabs)
-    return {"ok": True, "rows": {t: len(r) - 1 for t, r in tabs.items()}, "bitrix": pays, "history": hist}
+    return {"ok": True, "rows": {t: len(r) - 1 for t, r in tabs.items()}, "bitrix": pays, "deal_money": money, "history": hist}
 
 
 @router.post("/fin/export")
