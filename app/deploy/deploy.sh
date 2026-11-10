@@ -22,11 +22,11 @@ rsync -a --delete "$SRC/deploy/" "$DST/deploy/"
 [ -x "$DST/venv/bin/python" ] || python3 -m venv "$DST/venv"
 "$DST/venv/bin/pip" install -q -r "$DST/backend/requirements.txt"
 chown -R artgame-app:artgame-app "$DST"
-chmod 755 /srv/artgame-app "$DST" "$DST/web"   # Caddy читает web/
+chmod 755 /srv/artgame-app "$DST"; chmod -R a+rX "$DST/web"   # Caddy читает web/ при любом umask
 
 install -m 644 "$SRC"/deploy/artgame-*.service "$SRC"/deploy/artgame-*.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now "artgame-api@$ENV" "artgame-constants@$ENV.timer"
+systemctl enable --now "artgame-api@$ENV" "artgame-constants@$ENV.timer" "artgame-objects@$ENV.timer"
 systemctl restart "artgame-api@$ENV"
 if [ "$ENV" = prod ]; then systemctl enable --now artgame-backup.timer; fi
 

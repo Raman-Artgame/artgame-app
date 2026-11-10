@@ -7,4 +7,15 @@
 Локально: `cd backend && python -m venv .venv && .venv/bin/pip install -r requirements.txt && ARTGAME_TEST_DATABASE_URL=postgresql://… .venv/bin/pytest`.
 Секреты только в `/etc/artgame-app/*.env` на сервере (см. `deploy/env.example`).
 
-Сквозной тест экрана: поднять API на пустой базе (`ARTGAME_BOT_TOKEN=123:test-token ARTGAME_HEAD_TG_ID=1000`) на :8100 и `npx vite preview --port 4173` в `frontend/`, затем `node e2e/smeny.cjs`.
+Сквозной тест экрана: поднять API на пустой базе (`ARTGAME_BOT_TOKEN=123:test-token ARTGAME_HEAD_TG_ID=1000`) через `backend/.venv/bin/python e2e/fake_api.py` (из `backend/`, Диск подменён) и `npx vite preview --port 4173` в `frontend/`, затем `node e2e/smeny.cjs`.
+
+## Рабочие места ролей (из артефактов)
+
+Страницы мест (художники, печать, МОП, калькулятор, дизайн) лежат в `backend/places/<место>/*.enc` — зашифрованы
+AES-256-GCM, потому что репозиторий публичный, а внутри ставки и внутренние правила. Ключ `ARTGAME_CONTENT_KEY` — только
+в env сервера (install_test.sh спрашивает один раз) и в закрытой папке проекта `app-core/secret/`.
+Кто что открывает — `PLACES` в `backend/artgame/places.py`. Обновить место из новой версии артефакта:
+скачать файлы артефакта в папку и `ARTGAME_CONTENT_KEY=… python -m artgame.pack_places <папка> <место>` (из `backend/`).
+`window.claude` на странице заменяет `place_shim.js`: общая база → таблица `place_docs`, `config/values` → «Значения»
+(по аудитории места), скачивание → через сервер (в Telegram — `downloadFile`). ИИ-помощник и Битрикс в местах пока выключены.
+Тест: тот же API с ключом, затем `node e2e/places.cjs`.

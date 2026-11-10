@@ -42,10 +42,33 @@ def parse_rows(rows: list[list[str]]) -> dict:
     return out
 
 
+def who_set(who: str) -> set[str]:
+    """«Кто видит» бывает списком: «производство, моп»."""
+    return {w.strip() for w in who.split(",") if w.strip()}
+
+
 def visible(values: dict, role_code: str | None) -> dict:
     aud = audience(role_code)
     return {k: v for k, v in values.items()
-            if v["status"] == "Утверждено" and (aud is None or v["who"] in aud)}
+            if v["status"] == "Утверждено" and (aud is None or who_set(v["who"]) & aud)}
+
+
+def num(v):
+    """Значение ячейки числом («17 000», «0,8»); не число — строка."""
+    s = str(v).replace("\u00a0", "").replace(" ", "").replace(",", ".")
+    try:
+        x = float(s)
+    except ValueError:
+        return str(v).strip()
+    return int(x) if x.is_integer() else x
+
+
+def latest(conn) -> dict:
+    """Все утверждённые значения последнего снимка: ключ → число. Только для расчётов на сервере."""
+    row = conn.execute("SELECT values FROM constants_versions ORDER BY id DESC LIMIT 1").fetchone()
+    if not row:
+        return {}
+    return {k: num(v["value"]) for k, v in row["values"].items() if v["status"] == "Утверждено"}
 
 
 def fetch_rows() -> list[list[str]]:

@@ -65,3 +65,32 @@ def test_expense_flow_gip_and_payout(client):
     assert statuses == ["approved", "cancelled"]
     assert client.post("/api/expenses", json={"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural",
                                               "category": "nope", "amount": 1}, headers=hdr(2000)).status_code == 400
+
+
+def test_receipt_to_drive(client, monkeypatch):
+    from artgame import drive
+    calls = []
+    monkeypatch.setattr(drive, "save_photo", lambda conn, obj, name, data, kind="receipt": calls.append((obj["id"], name, kind)) or "drv-receipt-1")
+    setup_people(client)
+    body = {"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "category": "paint",
+            "amount": 2500, "receipt": "data:image/jpeg;base64,/9j/AA=="}
+    e = client.post("/api/expenses", json=body, headers=hdr(2000)).json()
+    assert e["receipt_url"].startswith(f"/api/files/{e['receipt_file_id']}/content?") and calls[0] == (731, calls[0][1], "receipt") and "P2000" in calls[0][1]
+    assert client.get("/api/my", headers=hdr(2000)).json()["expenses"][0]["receipt_url"]
+    # повтор из очереди не грузит чек второй раз
+    client.post("/api/expenses", json=body, headers=hdr(2000))
+    assert len(calls) == 1
+    bad = {**body, "client_uid": str(uuid.uuid4()), "receipt": "data:text/html;base64,AA=="}
+    assert client.post("/api/expenses", json=bad, headers=hdr(2000)).status_code == 400
+
+
+def test_receipt_drive_down_is_retryable(client, monkeypatch):
+    from artgame import drive
+    def boom(*a):
+        raise RuntimeError("down")
+    monkeypatch.setattr(drive, "save_photo", boom)
+    setup_people(client)
+    body = {"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "category": "paint",
+            "amount": 1, "receipt": "data:image/jpeg;base64,/9j/AA=="}
+    assert client.post("/api/expenses", json=body, headers=hdr(2000)).status_code == 502
+    assert client.get("/api/my", headers=hdr(2000)).json()["expenses"] == []
