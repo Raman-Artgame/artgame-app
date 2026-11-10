@@ -681,6 +681,11 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
                             (start, end)).fetchall()
         company_paid = _f(conn.execute("""SELECT coalesce(sum(e.amount),0) AS s FROM expenses e WHERE e.status='approved'
                                           AND e.paid_by='company' AND e.created_at >= %s AND e.created_at < %s""", (t0, t1)).fetchone()["s"])
+        # HEAD 10.11 «какая-то дичь»: расшифровка денег — ЗП прошлых месяцев в «Ушло», приходы без даты в сделке в «Пришло»
+        why = conn.execute("""SELECT coalesce(sum(amount) FILTER (WHERE direction='out' AND article_code='payroll' AND period < %s), 0) AS prev_pay,
+                                      coalesce(sum(amount) FILTER (WHERE direction='out' AND article_code='payroll' AND period < %s AND source='import'), 0) AS prev_hist,
+                                      coalesce(sum(amount) FILTER (WHERE direction='in' AND note LIKE '%%дата не указана%%'), 0) AS undated
+                               FROM fin_ledger WHERE status='active' AND op_date >= %s AND op_date < %s""", (ym, ym, start, end)).fetchone()
         opening, closing = balances(conn, start), balances(conn, end)
         plans = conn.execute("SELECT code, title, kind, plan_key FROM fin_articles WHERE plan_key IS NOT NULL AND active ORDER BY sort").fetchall()
         hist = start < HIST_CUT   # до ноября 2026: расходы проектов — оценки старой таблицы «Проекты 2026»
@@ -728,7 +733,8 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
             "ipn": round(max(profit, 0) * ipn_pct / 100) if profit is not None and ipn_pct else None,
             "budget": [{"code": k, **b} for k, b in budget.items()],
             "cash": {"opening": opening, "closing": closing, "in": inflow, "out": outflow,
-                     "lines": [{**r, "s": _f(r["s"])} for r in cash], "company_paid_receipts": company_paid}}
+                     "lines": [{**r, "s": _f(r["s"])} for r in cash], "company_paid_receipts": company_paid,
+                     "out_prev_payroll": _f(why["prev_pay"]), "out_prev_payroll_hist": _f(why["prev_hist"]), "in_undated": _f(why["undated"])}}
 
 
 @router.get("/fin/year")

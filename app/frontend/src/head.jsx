@@ -64,9 +64,10 @@ export function Pulse({ me, pulse, go }) {
         <div className="kpis">
           <div><span>Выручка с НДС</span><b>{mln(fin.revenue?.gross)}</b></div>
           <div><span>Прибыль до ИПН</span><b className={fin.profit < 0 ? 'neg' : 'pos'}>{mln(fin.profit)}</b></div>
-          <div><span>Пришло</span><b>{mln(fin.cash?.in)}</b></div>
-          <div><span>Ушло</span><b>{mln(fin.cash?.out)}</b></div>
+          <div><span>Пришло</span><b>{mln(fin.cash?.in)}</b>{fin.cash?.in_undated > 0 && <small>без даты в сделке {mln(fin.cash.in_undated)}</small>}</div>
+          <div><span>Ушло</span><b>{mln(fin.cash?.out)}</b>{fin.cash?.out_prev_payroll > 0 && <small>из них ЗП прошлых месяцев {mln(fin.cash.out_prev_payroll)}</small>}</div>
         </div>
+        <p className="small muted">Выручка — проекты, сданные в этом месяце (по концу работ). Прибыль — выручка минус начисления месяца, пока месяц идёт, она неполная. Пришло — «Поступления» с датой этого месяца в сделках Битрикса.</p>
         {year?.months?.length > 1 && <><Spark values={year.months.map(m => m.net)} /><p className="small muted">Выручка без НДС по месяцам {year.year}</p></>}
       </>}
     </div>
