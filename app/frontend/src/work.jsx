@@ -425,6 +425,7 @@ export function ExpenseForm({ done }) {
       <button className={v.paid_by === 'own' ? '' : 'ghost'} onClick={() => set({ ...v, paid_by: 'own' })}>Свои деньги</button>
       <button className={v.paid_by === 'company' ? '' : 'ghost'} onClick={() => set({ ...v, paid_by: 'company' })}>Компании</button>
     </div>
+    <p className="small muted">{v.paid_by === 'own' ? 'Свои деньги: после одобрения чек «к выплате», возвращаем в понедельник вместе с выплатами.' : 'Деньги компании: платили картой или наличными компании, тебе возвращать нечего.'}</p>
     <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
     <Receipt value={v.receipt} pick={async f => set({ ...v, receipt: await shrink(f) })} />
     <button disabled={!v.amount} onClick={send}>Отправить расход</button>

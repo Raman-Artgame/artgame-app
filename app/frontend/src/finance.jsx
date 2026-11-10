@@ -149,13 +149,42 @@ function Payroll({ m, d }) {
   const load = () => api('/fin/payroll/' + m).then(setP, err(setE))
   useEffect(() => { setP(null); load() }, [m])
   const compute = () => { setBusy(true); setE(''); api(`/fin/payroll/${m}/compute`, { method: 'POST' }).then(r => { setP(r); setE((r.warn || []).join('; ')) }, err(setE)).finally(() => setBusy(false)) }
-  return <div className="card">
+  return <><Monday d={d} onPaid={load} /><div className="card">
     <div className="head"><h3>ФОТ</h3><button className="mini" disabled={busy} onClick={compute}>{busy ? 'Считаю…' : 'Пересчитать'}</button></div>
     {p && <div className="kv"><div><span className="muted small">Начислено</span><b>{money(p.accrued)}</b></div>
       <div><span className="muted small">Выплачено</span><b>{money(p.paid)}</b></div><div><span className="muted small">Осталось</span><b>{money(p.left)}</b></div></div>}
     <p className="small muted">Пересчёт берёт смены, бонусы печати, оклады, % МОП и возмещение чеков «свои деньги». Ручные начисления не трогает.</p>
     {e && <p className="small why">{e}</p>}
     {p?.rows.map(r => <PayRow key={r.id} r={r} m={m} d={d} reload={load} />)}
+  </div></>
+}
+
+// Выплаты по понедельникам (HEAD 10.11): саппортам — смены, всем — чеки «свои деньги». «Выплачено» пишет строку в журнал денег.
+function Monday({ d, onPaid }) {
+  const [w, setW] = useState(null)
+  const [e, setE] = useState('')
+  const [acc, setAcc] = useState(d.accounts[0]?.code)
+  const [busy, setBusy] = useState(0)
+  const load = () => api('/fin/weekly').then(setW, err(setE))
+  useEffect(() => { load() }, [])
+  const pay = r => {
+    if (!confirm(`${r.name}: выплачено ${money(r.total)}?`)) return
+    setBusy(r.payee_id); setE('')
+    api('/fin/weekly/pay', { method: 'POST', body: { client_uid: crypto.randomUUID(), payee_id: r.payee_id, account: acc, op_date: today(), amount: r.total } })
+      .then(() => { load(); onPaid && onPaid() }, err(setE)).finally(() => setBusy(0))
+  }
+  const day = w && new Date(w.monday + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+  return <div className="card">
+    <div className="head"><h3>К выплате в понедельник</h3>{w && <b className="nowrap">{money(w.total)}</b>}</div>
+    <p className="small muted">{day ? `Понедельник, ${day}. ` : ''}Саппортам — принятые смены, всем — одобренные чеки «свои деньги». Нажми «Выплачено», когда перевёл: сотрудник увидит «выплачено».</p>
+    {e && <p className="small why">{e}</p>}
+    {w && w.rows.length > 0 && d.accounts.length > 1 && <select value={acc} onChange={x => setAcc(x.target.value)}>{d.accounts.map(a => <option key={a.code} value={a.code}>Со счёта: {a.title}</option>)}</select>}
+    {!w ? <p className="muted small">Загрузка…</p> : !w.rows.length ? <p className="small muted">Всё выплачено.</p> :
+      w.rows.map(r => <div key={r.payee_id} className="row">
+        <div><b>{r.name}</b> · {money(r.total)}
+          <div className="small muted">{r.lines.map(x => `${x.what} за ${x.ym.slice(5)}.${x.ym.slice(0, 4)}: ${money(x.amount)}`).join(' · ')}{r.checks ? ` · чеков ${r.checks}` : ''}</div></div>
+        <button className="mini" disabled={busy === r.payee_id} onClick={() => pay(r)}>Выплачено</button>
+      </div>)}
   </div>
 }
 
