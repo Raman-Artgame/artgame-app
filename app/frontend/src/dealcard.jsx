@@ -307,28 +307,29 @@ export function Payments({ pay, onDate }) {
   return <div className="paylist">{rows.map((x, i) => <div key={x.id || 'h' + i} className="row" style={x.status === 'cancelled' ? { opacity: .45, textDecoration: 'line-through' } : null}>
     <div><b>{money(x.amount)}</b> <span className="small muted">{x.hist ? 'из поля сделки' : x.account_title}</span>
       <div className="small muted">{[x.slot ? 'без даты' : pdate(x.op_date), !x.hist && (x.source === 'bitrix' ? 'из поля «Поступление»' : x.author), x.status === 'cancelled' && 'отменено HEAD'].filter(Boolean).join(' · ')}
-        {x.receipt_url && <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></>}</div></div>
+        {x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : x.source === 'app' && ' · без чека'}</div></div>
     {x.on_check && <span className="tag draft">на сверке</span>}
     {x.slot && onDate && <button className="mini" onClick={() => onDate(x)}>Дата и чек</button>}
   </div>)}</div>
 }
 
-// «Внести оплату»: сумма, дата (сегодня), счёт, фото чека обязательно. Нет сети — запись ждёт на телефоне и уходит сама.
+// «Внести оплату»: сумма, дата (сегодня), счёт, фото чека (наличными — по желанию). Нет сети — запись ждёт на телефоне и уходит сама.
 // Оплата до 01.11.2026 (нашли задним числом) — в счёт «История»: долг сделки уменьшает, в деньги ноября не входит.
 const START = '2026-11-01'
 // slot — «Дата и чек» к оплате из поля «Поступление N» без даты: сумма уже стоит, оплата заменит поле, двойного счёта нет.
 export function PaySheet({ d, slot, onClose, onDone }) {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Almaty' })
   const accounts = d.pay.accounts || []
-  const [v, set] = useState({ amount: slot ? String(Math.round(slot.amount)) : '', op_date: today, account: accounts[0]?.code || '', note: '', receipt: '' })
+  const [v, set] = useState({ amount: slot ? String(Math.round(slot.amount)) : '', op_date: today, account: accounts[0]?.code || '', note: '', receipt: '', cash: false })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const hist = !!v.op_date && v.op_date < START
+  const cash = hist ? v.cash : v.account === 'cash'   // наличными — фото расписки по желанию (HEAD 10.11)
   const undated = slot ? [] : [...(d.pay.items || []), ...(d.pay.history || [])].filter(x => x.slot)
   const send = async () => {
     const path = `/bx/deals/${d.id}/payment`
-    const body = { client_uid: uuid(), amount: +v.amount, op_date: v.op_date, account: hist ? 'hist' : v.account, note: v.note.trim() || null, receipt: v.receipt,
-      ...(slot && { slot: slot.slot }) }
+    const body = { client_uid: uuid(), amount: +v.amount, op_date: v.op_date, account: hist ? 'hist' : v.account, note: v.note.trim() || null, receipt: v.receipt || null,
+      ...(slot && { slot: slot.slot }), ...(hist && cash && { cash: true }) }
     setBusy(true); setErr('')
     try {
       await api(path, { method: 'POST', body })
@@ -344,12 +345,15 @@ export function PaySheet({ d, slot, onClose, onDone }) {
       {!!undated.length && <p className="small why">В сделке есть оплата без даты: {undated.map(x => money(x.amount)).join(', ')}. Если вносите её, закройте это окно и нажмите «Дата и чек» у неё в списке, иначе она задвоится.</p>}
       <input inputMode="numeric" value={v.amount} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder="Сумма, ₸" />
       <label className="small muted">Дата оплаты <input type="date" value={v.op_date} min="2025-01-01" max={today} onChange={e => set({ ...v, op_date: e.target.value })} /></label>
-      {hist ? <p className="small why">Оплата до ноября уйдёт в «Историю»: долг сделки уменьшит, в деньги ноября не войдёт.</p> :
-        <div className="chips">{accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>}
+      {hist ? <>
+        <p className="small why">Оплата до ноября уйдёт в «Историю»: долг сделки уменьшит, в деньги ноября не войдёт.</p>
+        <div className="chips"><button className={v.cash ? 'on' : ''} onClick={() => set({ ...v, cash: !v.cash })}>Наличные</button></div>
+      </> : <div className="chips">{accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>}
       <input value={v.note} onChange={e => set({ ...v, note: e.target.value })} placeholder="Комментарий, например «аванс 50%»" />
-      <Receipt value={v.receipt} need pick={async f => set({ ...v, receipt: await shrink(f) })} />
+      <Receipt value={v.receipt} need={!cash} pick={async f => set({ ...v, receipt: await shrink(f) })} />
+      {cash && !v.receipt && <p className="small muted">Наличные: добавьте фото расписки, если она есть. Без фото HEAD сверит сам.</p>}
       {err && <p className="small why">{err}</p>}
-      <div className="dealbtns"><button disabled={busy || !(+v.amount > 0) || !v.receipt || !v.op_date || !(hist || v.account)} onClick={send}>{busy ? 'Отправляю…' : `${slot ? 'Сохранить' : 'Внести'} ${+v.amount > 0 ? money(+v.amount) : ''}`}</button>
+      <div className="dealbtns"><button disabled={busy || !(+v.amount > 0) || !(v.receipt || cash) || !v.op_date || !(hist || v.account)} onClick={send}>{busy ? 'Отправляю…' : `${slot ? 'Сохранить' : 'Внести'} ${+v.amount > 0 ? money(+v.amount) : ''}`}</button>
         <button className="ghost" onClick={onClose}>Отмена</button></div>
     </div>
   </Sheet>

@@ -306,3 +306,31 @@ def test_undated_slot_gets_date_and_receipt(client, monkeypatch):
     assert client.post(f"/api/fin/ledger/{row['id']}/cancel", headers=hdr(1000)).json()["ok"]
     c = dm.card(deals["1317"])
     assert c["received"] == 0 and c["debt"] == 160_000 and not any(x["slot"] for x in c["items"]) and c["history"] == []
+
+
+def test_cash_without_photo(client, monkeypatch):
+    """Наличные (HEAD 10.11): оплату наличными вносят без фото чека, HEAD сверяет сам; безналичную без фото внести нельзя.
+    До ноября счёт — «История», наличные — отметкой в комментарии."""
+    from datetime import date
+
+    from artgame import drive
+    ids = setup(client, monkeypatch)
+    client.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    d = {**deal(1611, opp=110_000), "ASSIGNED_BY_ID": "4565"}
+    monkeypatch.setattr(bx, "READ", lambda m, p: {"result": d})
+    saved = []
+    monkeypatch.setattr(drive, "save_income_receipt", lambda *a: saved.append(a) or "drv")
+    pay = {"client_uid": uid(), "amount": 110000, "op_date": str(date.today()), "account": "kaspi"}
+    assert client.post("/api/bx/deals/1611/payment", json=pay, headers=hdr(6000)).status_code == 400   # Kaspi без фото — нельзя
+    r = client.post("/api/bx/deals/1611/payment", json={**pay, "account": "cash"}, headers=hdr(6000))
+    assert r.status_code == 200, r.text
+    row = r.json()["row"]
+    assert row["account_code"] == "cash" and row["receipt_file_id"] is None and row["receipt_url"] is None and not saved
+    assert r.json()["pay"]["received"] == 110_000 and r.json()["pay"]["debt"] == 0
+    assert [(x["deal_id"], x["receipt_url"]) for x in client.get("/api/fin/payments/check", headers=hdr(1000)).json()] == [(1611, None)]
+    # до ноября: «История», наличные — отметкой; без отметки «наличные» и без фото — нельзя
+    r = client.post("/api/bx/deals/1611/payment", json={**pay, "client_uid": uid(), "amount": 5000, "op_date": "2026-10-20", "account": "hist",
+                                                        "cash": True}, headers=hdr(6000)).json()
+    assert r["row"]["account_code"] == "hist" and "до ноября · наличными" in r["row"]["note"]
+    assert client.post("/api/bx/deals/1611/payment", json={**pay, "client_uid": uid(), "op_date": "2026-10-20", "account": "hist"},
+                       headers=hdr(6000)).status_code == 400

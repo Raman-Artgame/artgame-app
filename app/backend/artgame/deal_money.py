@@ -38,6 +38,7 @@ PAUSE = 0.5      # между записями в Битрикс: не боль�
 # МОП не ждёт HEAD, чтобы начать работы; ошибку HEAD отменяет ✕). False — считать только после ✓ HEAD.
 COUNT_UNCHECKED = True
 TZ = ZoneInfo("Asia/Almaty")
+CASH = "cash"                  # счёт «Наличные»: оплату можно внести без фото (HEAD 10.11)
 HIST_FROM = date(2025, 1, 1)   # оплату задним числом вносим с 2025 года; до 01.11.2026 — в счёт «История»: в долг сделки, не в деньги ноября
 
 
@@ -271,9 +272,10 @@ class PaymentIn(BaseModel):
     amount: float = Field(gt=0, le=10_000_000_000)
     op_date: date
     account: str = Field(min_length=1, max_length=40)
-    receipt: str = Field(min_length=30, max_length=8_000_000)
+    receipt: str | None = Field(default=None, min_length=30, max_length=8_000_000)   # без фото — только наличные
     note: str | None = Field(default=None, max_length=300)
     slot: int | None = Field(default=None, ge=1, le=4)   # «Дата и чек»: эта оплата — «Поступление N» сделки без даты
+    cash: bool = False   # наличными (для оплаты до ноября: счёт там «История», наличные — отметкой)
 
 
 def _income_receipt(conn, p: dict, name: str, data_url: str, deal_id: int) -> int:
@@ -294,7 +296,8 @@ def _income_receipt(conn, p: dict, name: str, data_url: str, deal_id: int) -> in
 def add_payment(deal_id: int, b: PaymentIn, bg: BackgroundTasks, p: dict = Depends(active)):
     """Оплата клиента с фото чека → журнал денег (сразу в «Поступило»), чек — в папку сделки «Приходы чеки», HEAD сверяет.
     Оплата до 01.11.2026 (нашли задним числом) — в счёт «История»: долг сделки уменьшает, в деньги ноября не входит.
-    slot — «Дата и чек» к полю «Поступление N» без даты (Анна 09–10.11): оплата заменяет поле, поле больше не считается."""
+    slot — «Дата и чек» к полю «Поступление N» без даты (Анна 09–10.11): оплата заменяет поле, поле больше не считается.
+    Наличные (HEAD 10.11): фото расписки по желанию, без фото HEAD сверяет сам; безналичные — только с фото чека или выписки."""
     d = _deal_for_pay(p, deal_id)
     cat = int(d.get("CATEGORY_ID") or 0)
     if cat not in bx.CATEGORIES:
@@ -311,6 +314,9 @@ def add_payment(deal_id: int, b: PaymentIn, bg: BackgroundTasks, p: dict = Depen
         account = "hist" if hist else b.account
         if (b.account == "hist" and not hist) or not conn.execute("SELECT 1 FROM fin_accounts WHERE code=%s AND active", (account,)).fetchone():
             raise HTTPException(400, "нет такого счёта")
+        cash = account == CASH or (hist and (b.cash or b.account == CASH))
+        if not b.receipt and not cash:
+            raise HTTPException(400, "нужно фото чека или выписки; без фото — только оплата наличными")
         if ref:
             if ref not in _undated(d):
                 raise HTTPException(400, f"у «Поступление {b.slot}» в сделке нет суммы без даты")
@@ -323,8 +329,8 @@ def add_payment(deal_id: int, b: PaymentIn, bg: BackgroundTasks, p: dict = Depen
             # приход, который импорт поставил днём, когда увидел поле, — отменяем: вместо него оплата с датой и чеком
             conn.execute("UPDATE fin_ledger SET status='cancelled' WHERE source='bitrix' AND source_ref=%s AND status='active'", (ref,))
         title = str(d.get("TITLE") or f"сделка {deal_id}")[:80]
-        fid = _income_receipt(conn, p, f"{b.op_date} приход {b.amount:.0f} {title}".replace("/", "-"), b.receipt, deal_id)
-        note = " · ".join(x for x in (title, f"внёс {p['full_name']}", "до ноября" if hist else "",
+        fid = _income_receipt(conn, p, f"{b.op_date} приход {b.amount:.0f} {title}".replace("/", "-"), b.receipt, deal_id) if b.receipt else None
+        note = " · ".join(x for x in (title, f"внёс {p['full_name']}", "до ноября" if hist else "", "наличными" if hist and cash else "",
                                       f"вместо «Поступление {b.slot}» без даты" if ref else "", (b.note or "").strip()) if x)
         row = finance.add_ledger(conn, p, client_uid=b.client_uid, op_date=b.op_date, account=account, direction="in", amount=b.amount,
                                  article="design_prepay" if cat == DESIGN else "client_payment", period=f"{b.op_date:%Y-%m}",
@@ -332,7 +338,8 @@ def add_payment(deal_id: int, b: PaymentIn, bg: BackgroundTasks, p: dict = Depen
         if p["role_code"] == "head" and not p.get("_view_as"):   # оплата, которую внёс сам HEAD, сверять не нужно
             row = conn.execute("UPDATE fin_ledger SET checked_at=now(), checked_by=%s WHERE id=%s RETURNING *", (p["id"], row["id"])).fetchone()
         db.audit(conn, p["id"], "client_payment_add", "deal", deal_id,
-                 {"amount": b.amount, "ledger": row["id"], "account": account, **({"slot": b.slot} if ref else {})})
+                 {"amount": b.amount, "ledger": row["id"], "account": account, **({"slot": b.slot} if ref else {}),
+                  **({"cash": True} if cash else {}), **({} if b.receipt else {"receipt": None})})
     bg.add_task(push_deal, deal_id)
     return {"ok": True, "row": with_receipt(row), "pay": card(d)}
 
