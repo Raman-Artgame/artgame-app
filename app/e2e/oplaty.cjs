@@ -1,6 +1,6 @@
 // Сквозной тест «Оплата клиента» (HEAD 10.11): МОП вносит оплату в карточке сделки с фото чека → оплата «на сверке»,
 // «Поступило» и «Долг» считает приложение по журналу; HEAD видит её в пульсе и «Проверке», ✓ сверяет, ✕ отменяет.
-// Итоги в Битрикс без ARTGAME_PAY_PUSH не пишутся. API — e2e/fake_api.py на пустой базе (Битрикс — ответы tests/test_bx.py).
+// «Дата и чек»: оплата из поля сделки без даты заменяется оплатой с датой и чеком. Итоги в Битрикс без ARTGAME_PAY_PUSH не пишутся. API — e2e/fake_api.py на пустой базе (Битрикс — ответы tests/test_bx.py).
 const { chromium } = require('playwright')
 const { execSync } = require('child_process')
 const assert = require('assert')
@@ -179,7 +179,44 @@ const noFin03 = async () => assert.ok(!(await bxCalls()).some(c => Object.keys(c
   await an.screenshot({ path: `${shots}/pays-done.png`, fullPage: true })
   check = await call(1000, '/fin/payments/check')
   assert.deepStrictEqual(check.map(x => [x.deal_id, x.amount, x.account_title, x.author]), [[1590, 2900000, 'История (до ноября)', 'Анна']])
+
+  // «Дата и чек» (10.11): Анна вносила оплату в «Поступление 1» без даты — указывает дату и чек, «Поступило» не задваивается
+  await fetch(API + '/_e2e/deal/1700', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ UF_CRM_ARTGAME_FIN03_PAY1_AMOUNT: '1200000|KZT', UF_CRM_ARTGAME_FIN03_PAY1_DATE: '' }) })
+  await an.locator('input[placeholder="№ сделки или название"]').fill('1700')
+  await an.getByRole('button', { name: 'Найти' }).click()
+  const d17 = an.locator('.card', { has: an.locator('h3', { hasText: '№ 1700' }) })
+  await d17.waitFor()
+  assert.match(await d17.locator('.kv').textContent(), /Поступило1\s200\s000\s₸Долг1\s200\s000\s₸/)
+  assert.match(await d17.locator('.paylist').textContent(), /1\s200\s000\s₸ из поля сделкибез даты/)
+  await d17.getByRole('button', { name: '+ Внести оплату' }).click()
+  await an.locator('.sheetbox', { hasText: 'В сделке есть оплата без даты: 1 200 000 ₸' }).waitFor()   // подсказка: не задвоить
+  await an.locator('.sheetbox').getByRole('button', { name: 'Отмена' }).click()
+  await fits(an, 'оплата без даты')
+  await an.screenshot({ path: `${shots}/pays-undated.png`, fullPage: true })
+  await d17.getByRole('button', { name: 'Дата и чек' }).click()
+  const s3 = an.locator('.sheetbox')
+  await s3.locator('text=из поля «Поступление 1» без даты').waitFor()
+  assert.strictEqual(await s3.locator('input[placeholder="Сумма, ₸"]').inputValue(), '1200000')
+  await s3.locator('input[type=date]').fill('2026-11-04')
+  await s3.locator('.receipt input').first().setInputFiles(CHEK)
+  await s3.locator('.receipt img').waitFor()
+  await fits(an, '«Дата и чек»')
+  await an.waitForTimeout(300); await an.screenshot({ path: `${shots}/pays-slot-sheet.png` })
+  await s3.getByRole('button', { name: 'Сохранить 1 200 000 ₸' }).click()
+  await an.locator('.toast', { hasText: 'Дата и чек сохранены' }).waitFor()
+  await d17.locator('.paylist', { hasText: 'Анна' }).waitFor()
+  assert.match(await d17.locator('.kv').textContent(), /Поступило1\s200\s000\s₸Долг1\s200\s000\s₸/)   // не 2 400 000
+  const list17 = await d17.locator('.paylist').textContent()
+  assert.match(list17, /1\s200\s000\s₸ Kaspi ИП Яковлев4 нояб\. · Анна · чекна сверке/)
+  assert.ok(!/из поля сделки/.test(list17) && !(await d17.getByRole('button', { name: 'Дата и чек' }).count()), 'поле заменено')
+  await an.screenshot({ path: `${shots}/pays-slot-done.png`, fullPage: true })
+  check = await call(1000, '/fin/payments/check')
+  assert.deepStrictEqual(check.map(x => [x.deal_id, x.amount, x.op_date]), [[1590, 2900000, '2026-10-15'], [1700, 1200000, '2026-11-04']])
+  assert.match(check[1].note, /вместо «Поступление 1» без даты/)
+  await fetch(API + '/_e2e/deal/1700', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ UF_CRM_ARTGAME_FIN03_PAY1_AMOUNT: null, UF_CRM_ARTGAME_FIN03_PAY1_DATE: null }) })
   await noFin03()
-  console.log('OK: оплата с чеком из карточки, «Поступило» и долг по журналу, сверка HEAD ✓/✕ в пульсе и «Проверке», «Оплаты» по галочке и задним числом, без записи итогов в Битрикс')
+  console.log('OK: оплата с чеком из карточки, «Поступило» и долг по журналу, сверка HEAD ✓/✕ в пульсе и «Проверке», «Оплаты» по галочке и задним числом, «Дата и чек» к оплате без даты без двойного счёта, без записи итогов в Битрикс')
   await b.close()
 })().catch(e => { console.error(e); process.exit(1) })
