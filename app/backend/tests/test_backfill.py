@@ -23,6 +23,14 @@ def test_past_shift_and_expense(client, team, monkeypatch):  # noqa: F811
         c.execute("INSERT INTO objects (id, title, city, bitrix_stage, status) VALUES (733, 'Снова в работе', 'Астана', 'UC_AV00QK', 'active')")
     d = client.get("/api/work/dict", headers=hdr(5000)).json()["backfill"]
     assert d["open"] and {o["id"] for o in d["objects"]} == {731, 733}   # только «Выполнение проекта»
+    # HEAD 10.11: сделку по ошибке перенесли с «Выполнения» — задним числом её видно, пока открыт срок
+    from artgame import sync_objects
+    with db.pool.connection() as c:
+        sync_objects.upsert(c, [{"ID": "733", "TITLE": "733 · Снова в работе — Астана", "STAGE_ID": "WON", "CATEGORY_ID": "0"}])
+    d = client.get("/api/work/dict", headers=hdr(5000)).json()
+    assert 733 in {o["id"] for o in d["backfill"]["objects"]} and 733 not in {o["id"] for o in d["objects"]}
+    with db.pool.connection() as c:
+        sync_objects.upsert(c, [{"ID": "733", "TITLE": "733 · Снова в работе — Астана", "STAGE_ID": "UC_AV00QK", "CATEGORY_ID": "0"}])
     body = {"client_uid": str(uuid.uuid4()), "object_id": 732, "zone_code": "mural", "day": y.isoformat(), "hours": 8,
             "area_m2": 6.5, "work_done": "Фон и контур"}
     s = client.post("/api/shifts/past", json={**body, "photo_after": JPEG}, headers=hdr(5000)).json()

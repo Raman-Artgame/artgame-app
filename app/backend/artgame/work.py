@@ -105,8 +105,9 @@ def work_dict(p: dict = Depends(active)):
             "stages": [{"key": k, "title": t} for k, t in __import__("artgame.promo", fromlist=["STAGES"]).STAGES],
             # задним числом с 1.11 (HEAD 09.11): объекты — и уже сданные
             "backfill": {**backfill_window(), "objects": conn.execute(
-                "SELECT id, title, city FROM objects WHERE status='active' AND id<>0 AND bitrix_stage=%s ORDER BY id DESC",
-                (sync_objects.WORK,)).fetchall()},   # HEAD 09.11: только «Выполнение проекта» — завершённые HEAD сам возвращает туда
+                """SELECT id, title, city FROM objects WHERE status IN ('active','done') AND id<>0
+                     AND (bitrix_stage=%s OR left_work_at >= %s::date) ORDER BY id DESC""",
+                (sync_objects.WORK, backfill_window()["from"])).fetchall()},   # HEAD 10.11: и ушедшие с «Выполнения» после начала срока   # HEAD 09.11: только «Выполнение проекта» — завершённые HEAD сам возвращает туда
         }
 
 
