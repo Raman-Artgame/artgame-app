@@ -173,6 +173,21 @@ async function tab(p, name) {
   assert.strictEqual(mine.items[0].review, 'approved')
   // саппорт видит утверждённое в карточке проекта
   assert.strictEqual((await call(2000, '/media?scope=object&object_id=731')).items.length, 1)
-  console.log('OK: саппорт (меню, расходы, как стать художником, без калькулятора), продакшн и утверждение HEAD')
+  // 5. Главный дизайнер (HEAD 10.11): «Продакшн → Медиа» — видео со всех объектов, скачать, сдать готовый рилс HEAD
+  const dzId = (await call(7000, '/register', { full_name: 'Дизайнер Малика' })).id
+  await call(1000, `/people/${dzId}`, { role_code: 'lead_designer', zones: ['design'] })
+  psql(`INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by, status, media_type, review) VALUES (gen_random_uuid(), 731, 'media', 'Процесс кафе.mp4', 'video/mp4', 9000000, 'drvVID0000001', ${ids[3000]}, 'ready', 'video', 'pending')`)
+  const dz = await open(b, 7000)
+  await dz.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000078' }) }))
+  await tab(dz, 'Продакшн')
+  await dz.locator('.mitem', { hasText: 'Процесс кафе.mp4' }).waitFor()
+  await dz.locator('.mitem', { hasText: 'Рилс кафе.mp4' }).waitFor({ state: 'detached', timeout: 1000 }).catch(() => {})
+  await dz.screenshot({ path: `${shots}/prod-dizainer-media.png`, fullPage: true })
+  await dz.getByRole('button', { name: '🎬 Загрузить готовый рилс' }).click()
+  await dz.locator('.seg button:not(.ghost)', { hasText: 'Рилс' }).waitFor()
+  await dz.locator('label.photo input[type=file]').setInputFiles({ name: 'Рилс дизайнера.mp4', mimeType: 'video/mp4', buffer: Buffer.from('MP4-DATA') })
+  await dz.locator('.mitem', { hasText: 'Рилс дизайнера.mp4' }).getByText('у HEAD').waitFor()
+  assert.ok((await call(1000, '/media?scope=review')).items.some(x => x.name === 'Рилс дизайнера.mp4'))
+  console.log('OK: саппорт (меню, расходы, как стать художником, без калькулятора), продакшн и утверждение HEAD, медиа и рилс Главного дизайнера')
   await b.close()
 })().catch(e => { console.error(e); process.exit(1) })

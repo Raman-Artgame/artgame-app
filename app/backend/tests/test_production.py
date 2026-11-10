@@ -129,3 +129,18 @@ def test_reels_flag_any_person(client, team):
     assert any(x["label"].startswith("Рилс") for x in client.get("/api/fin/my", headers=hdr(5000)).json()["rate"])
     client.post(f"/api/people/{team[5000]}", json={"reels": False}, headers=hdr(1000))
     assert upload(client, 5000, "reels").status_code == 403
+
+
+def test_designer_media_library(client, team):
+    """HEAD 10.11: Главный дизайнер видит в «Продакшн → Медиа» видео всех объектов (кроме возвращённых) и сдаёт рилс HEAD."""
+    pid = client.post("/api/register", json={"full_name": "Дизайнер"}, headers=hdr(7000)).json()["id"]
+    client.post(f"/api/people/{pid}", json={"role_code": "lead_designer", "zones": ["design"]}, headers=hdr(1000))
+    v1, v2 = upload(client, 3000, "video").json(), upload(client, 3000, "video").json()
+    upload(client, 3000, "photo")
+    client.post(f"/api/media/{v2['id']}/review", json={"approve": False, "note": "темно"}, headers=hdr(1000))
+    lib = client.get("/api/media?scope=library&type=video", headers=hdr(7000)).json()["items"]
+    assert [x["id"] for x in lib] == [v1["id"]] and lib[0]["url"]
+    assert client.get("/api/media?scope=library", headers=hdr(5000)).status_code == 403   # художнику — нет
+    r = upload(client, 7000, "reels").json()
+    assert r["review"] == "pending"
+    assert r["id"] in {x["id"] for x in client.get("/api/media?scope=review", headers=hdr(1000)).json()["items"]}

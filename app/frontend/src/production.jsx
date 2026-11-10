@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
-import { uploadBig } from './objects.jsx'
+import { Viewer, download, uploadBig } from './objects.jsx'
 
 // «Продакшн» (HEAD 08.11): Главный художник, Художник-Про, Мастер настенной печати грузят полноценный материал с объекта —
 // фото, видео, готовые рилс. Всё уходит в «МЕДИА / Отчёты» папки сделки; HEAD утверждает лучшее → копия в «МЕДИА / Продакшн».
@@ -12,7 +12,8 @@ const ACCEPT = { photo: 'image/*', video: 'video/*', reels: 'video/*' }
 
 export function Production({ me }) {
   const head = me.role_code === 'head'
-  const [view, setView] = useState(head ? 'review' : 'add')
+  const lib = head || me.role_code === 'lead_designer'   // медиатека для монтажа рилс (HEAD 10.11)
+  const [view, setView] = useState(head ? 'review' : lib ? 'lib' : 'add')
   return <>
     <div className="card dark prodhead"><span className="kick">Продакшн</span>
       <h2>Материал с объекта</h2>
@@ -21,17 +22,18 @@ export function Production({ me }) {
     </div>
     <div className="segf">
       {head && <button className={view === 'review' ? 'on' : ''} onClick={() => setView('review')}>На утверждение</button>}
-      <button className={view === 'add' ? 'on' : ''} onClick={() => setView('add')}>Загрузить</button>
+      {lib && <button className={view === 'lib' ? 'on' : ''} onClick={() => setView('lib')}>Медиа</button>}
+      <button className={view === 'add' || view === 'reels' ? 'on' : ''} onClick={() => setView('add')}>Загрузить</button>
       <button className={view === 'mine' ? 'on' : ''} onClick={() => setView('mine')}>Моё</button>
     </div>
-    {view === 'review' ? <Review /> : view === 'add' ? <Add onDone={() => setView('mine')} /> : <Mine />}
+    {view === 'review' ? <Review /> : view === 'lib' ? <Library onReels={() => setView('reels')} /> : view === 'add' || view === 'reels' ? <Add key={view} initial={view === 'reels' ? 'reels' : 'photo'} onDone={() => setView('mine')} /> : <Mine />}
   </>
 }
 
-function Add({ onDone }) {
+function Add({ onDone, initial }) {
   const [objs, setObjs] = useState(null)
   const [obj, setObj] = useState(null)
-  const [type, setType] = useState('photo')
+  const [type, setType] = useState(initial || 'photo')
   const [busy, setBusy] = useState('')
   const [rate, setRate] = useState(null)
   useEffect(() => {
@@ -69,6 +71,33 @@ function Item({ x, children }) {
     <div className="mbody"><b>{x.name}</b>
       <div className="small muted">{TYPES.find(t => t[0] === x.media_type)?.[1]} · №{x.object_id} {x.object_title} · {x.by}</div>
       {children}</div>
+  </div>
+}
+
+// Медиатека (HEAD 10.11): Главный дизайнер видит видео и фото со всех объектов, скачивает, монтирует рилс
+// и загружает готовый рилс («Загрузить → Рилс») — он уходит HEAD на утверждение.
+function Library({ onReels }) {
+  const [type, setType] = useState('video')
+  const [d, setD] = useState(null)
+  const [obj, setObj] = useState('')
+  const [open, setOpen] = useState(null)
+  useEffect(() => { setD(null); api(`/media?scope=library&type=${type}`).then(setD, e => setD({ items: [], err: e.message })) }, [type])
+  const objs = d ? [...new Map(d.items.map(x => [x.object_id, `№${x.object_id} ${x.object_title}`])).entries()] : []
+  const items = d ? d.items.filter(x => !obj || x.object_id === +obj) : []
+  return <div className="card">
+    <p className="small muted">Материал с объектов от команды. Скачай, смонтируй рилс и загрузи его: «Загрузить → Рилс» — он уйдёт HEAD на утверждение.</p>
+    <div className="seg">{TYPES.map(([k, t]) => <button key={k} className={type === k ? '' : 'ghost'} onClick={() => { setType(k); setObj('') }}>{t}</button>)}</div>
+    {objs.length > 1 && <select value={obj} onChange={e => setObj(e.target.value)}><option value="">Все объекты</option>
+      {objs.map(([id, t]) => <option key={id} value={id}>{t}</option>)}</select>}
+    {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> : !items.length ? <p className="muted small">Пока пусто.</p> :
+      items.map(x => <div key={x.id} className="mitem">
+        <button className="mthumb" onClick={() => setOpen(x)}>{x.thumb ? <img src={x.thumb} alt="" loading="lazy" /> : <span>▶</span>}</button>
+        <div className="mbody"><a onClick={() => setOpen(x)}><b>{x.name}</b></a>
+          <div className="small muted">№{x.object_id} {x.object_title} · {x.by} · {new Date(x.created_at).toLocaleDateString('ru-RU')}{x.review === 'approved' ? ' · в Продакшн' : ''}</div></div>
+        <button className="ghost mini" aria-label="Скачать" onClick={() => download(x)}>⬇</button>
+      </div>)}
+    <button className="ghost" onClick={onReels}>🎬 Загрузить готовый рилс</button>
+    <Viewer f={open} onClose={() => setOpen(null)} />
   </div>
 }
 

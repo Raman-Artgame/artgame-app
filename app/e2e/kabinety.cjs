@@ -105,7 +105,7 @@ async function tab(p, name) {
 
   // 4. Главный дизайнер: воронка «Дизайн РК», назначает помощника и размер XS, срок; запись в Битрикс
   const dz = await open(b, 7000)
-  assert.deepStrictEqual(await navText(dz), ['Дизайн', 'Проекты', 'Учёба', 'Кабинет', 'Расход', 'HEAD'])
+  assert.deepStrictEqual(await navText(dz), ['Дизайн', 'Проекты', 'Продакшн', 'Учёба', 'Кабинет', 'Расход', 'HEAD'])
   // HEAD 09.11: «нет дизайнера» — не «Горит», а «Назначить»; стадии — своей вкладкой, подсказки по кнопке
   await dz.locator('.dztabs button', { hasText: 'Назначить' }).click()
   await dz.locator('.dztodo .dzcard', { hasText: 'Дизайн кафе' }).getByText('нет дизайнера').waitFor()

@@ -63,7 +63,7 @@ const SENIOR = new Set(['lead_artist', 'artist_pro'])
 const DZ = new Set(['lead_designer', 'designer_asst'])
 const KIT = new Set(['lead_artist', 'artist_pro', 'print_master', 'head'])
 // HEAD 08.11: «Продакшн» — у Главного, Про и Мастера настенной печати (HEAD утверждает); склад — только у них же (и плотника).
-const PROD = new Set(['lead_artist', 'artist_pro', 'print_master', 'head'])
+const PROD = new Set(['lead_artist', 'artist_pro', 'print_master', 'lead_designer', 'head'])   // Главный дизайнер — монтаж рилс (HEAD 10.11)
 const STOCK = new Set(['lead_artist', 'artist_pro', 'print_master', 'carpenter'])
 const PRINT = new Set(['print_operator', 'print_master'])
 const STUDY = {
@@ -119,7 +119,7 @@ function Main({ me, onMe, web, logout }) {
   const tabs = worker ? [...(KIT.has(role) ? [['kit', 'Сбор']] : []), ['shift', 'Смена'], ['expense', 'Расход'],
     ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['projects', 'Проекты'],
     ['study', 'Учёба'], ['mine', 'Кабинет'], ['chat', 'HEAD']] :
-    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(me.reels ? [['prod', 'Продакшн']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход'], ['chat', 'HEAD']] :   // «Проверки» у дизайнеров нет (HEAD 09.11)
+    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход'], ['chat', 'HEAD']] :   // «Проверки» у дизайнеров нет (HEAD 09.11)
    [...(sales ? [['today', 'Сегодня'], ['leads', 'Лиды'], ['deals', 'Сделки'], ['projects', 'Проекты'], ['month', 'Месяц']] : []),
     ...(mopPlace ? [['study', 'Учёба']] : []),
     ...(other.length ? [['place', 'Место']] : []),

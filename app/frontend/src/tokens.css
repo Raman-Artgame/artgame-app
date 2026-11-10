@@ -739,3 +739,6 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .btnlike { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 12px 10px; border-radius: 12px; font-weight: 600; cursor: pointer;
   background: var(--dark); color: #fff; border: 1px solid var(--dark); white-space: nowrap; }
 .btnlike.ghost { background: transparent; color: inherit; border-color: var(--line); }
+/* строка медиа с кнопкой «⬇» справа — в одну линию (галерея, медиатека, 10.11) */
+.mitem:has(> button.mini) { grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; }
+.mitem > button.mini { width: 44px; height: 44px; padding: 0; }

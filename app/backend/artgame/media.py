@@ -13,6 +13,7 @@ from .work import active
 
 router = APIRouter(prefix="/api")
 TYPES = {"photo": "Фото", "video": "Видео", "reels": "Рилс"}
+LIBRARY = {"lead_designer", "head"}   # медиатека для монтажа рилс (HEAD 10.11)
 
 SQL = """SELECT f.*, pe.full_name AS by, o.title AS object_title, o.city AS object_city
          FROM files f JOIN people pe ON pe.id=f.uploaded_by JOIN objects o ON o.id=f.object_id
@@ -38,6 +39,14 @@ def media_list(scope: str = "mine", object_id: int | None = None, type: str | No
         cond, args = ("f.object_id=%s AND f.media_type IN ('video', 'reels')" + ("" if head or can_prod(p) else " AND f.review <> 'rejected'")), [object_id]
     elif scope == "object" and object_id:
         cond, args = ("f.object_id=%s" + ("" if head or can_prod(p) else " AND f.review='approved'")), [object_id]
+    elif scope == "library":   # HEAD 10.11: Главный дизайнер монтирует рилс — весь материал всех объектов, кроме возвращённого
+        if p["role_code"] not in LIBRARY:
+            raise HTTPException(403, "медиатека — у Главного дизайнера и HEAD")
+        cond, args = "f.review IS DISTINCT FROM 'rejected'", []
+        if type in TYPES:
+            cond, args = cond + " AND coalesce(f.media_type, 'photo')=%s", [type]
+        if object_id:
+            cond, args = cond + " AND f.object_id=%s", args + [object_id]
     else:
         raise HTTPException(400, "bad scope")
     with db.pool.connection() as conn:

@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api")
 
 DOC_ROLES = {"head", "mop", "mop_vip", "artist_pro", "lead_artist", "print_master", "lead_designer"}   # Про — выше Главного (HEAD 09.11)
 KINDS = ("photo", "design", "doc", "media")
-PROD = {"lead_artist", "artist_pro", "print_master", "head"}   # «Продакшн» (HEAD 08.11)
+PROD = {"lead_artist", "artist_pro", "print_master", "lead_designer", "head"}   # «Продакшн» (HEAD 08.11; Главный дизайнер — 10.11)
 TTL = 12 * 3600
 MAX_PHOTO = 8_000_000
 MAX_BIG = 2_000_000_000  # 2 ГБ на файл дизайна
