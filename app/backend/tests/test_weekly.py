@@ -95,13 +95,33 @@ def test_pulse_kpi(client, monkeypatch):
     def fake(method, params, fresh=False):
         f = params["filter"]
         if f.get("STAGE_SEMANTIC_ID") == "F":
-            return [{"ID": "1", "UF_CRM_ARTGAME_FIN03_LOST": "280000|KZT"}, {"ID": "2", "UF_CRM_ARTGAME_FIN03_LOST": None}]
-        if f.get("STAGE_ID") == "UC_AV00QK":
+            return [{"ID": "1", "TITLE": "1 · Киберклуб", "UF_CRM_ARTGAME_FIN03_LOST": "280000|KZT", "UF_CRM_1753381316974": "Дорого"},
+                    {"ID": "2", "UF_CRM_ARTGAME_FIN03_LOST": None, "OPPORTUNITY": "0"},
+                    {"ID": "6", "TITLE": "6 · ТЕСТ сделка", "UF_CRM_ARTGAME_FIN03_LOST": "105000|KZT"}]
+        if f.get("STAGE_ID") == ["UC_AV00QK"]:
             return [{"ID": "3", "OPPORTUNITY": "1500000.00"}]
         return [{"ID": "4", "UF_CRM_ARTGAME_FIN03_DEBT": "500000|KZT"}, {"ID": "5", "UF_CRM_ARTGAME_FIN03_DEBT": "0|KZT"}]
     monkeypatch.setattr(bx, "read_all", fake)
     k = client.get("/api/fin/kpi", headers=hdr(1000)).json()
-    assert k["lost"] == {"sum": 280000, "count": 1} and k["debt"] == {"sum": 500000, "count": 1}
+    assert {k2: k["lost"][k2] for k2 in ("sum", "count")} == {"sum": 280000, "count": 1}
+    assert k["lost"]["items"][0]["title"] == "Киберклуб" and k["lost"]["items"][0]["reason"] == "Дорого"
+    assert k["debt"] == {"sum": 500000, "count": 1}
     assert k["in_work"] == {"sum": 1500000, "count": 1} and k["due_support"] == 0 and k["due_expenses"] == 0
     monkeypatch.setattr(bx, "read_all", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("нет связи")))
     assert "bx_error" in client.get("/api/fin/kpi", headers=hdr(1000)).json()
+
+
+def test_print_shift_is_workshop(client):
+    """HEAD 10.11: смена мастера печати без объекта — «Мастерская», а не «Офис / без объекта»."""
+    from datetime import datetime, timedelta, timezone
+    client.post("/api/register", json={"full_name": "HEAD"}, headers=hdr(1000))
+    pid = client.post("/api/register", json={"full_name": "Владимир"}, headers=hdr(6100)).json()["id"]
+    client.post(f"/api/people/{pid}", json={"role_code": "print_master", "zones": ["print"]}, headers=hdr(1000))
+    assert any(o["id"] == 0 and o["title"] == "Мастерская" for o in client.get("/api/work/dict", headers=hdr(6100)).json()["objects"])
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    with db.pool.connection() as c:
+        c.execute("""INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status)
+                     VALUES (%s,%s,0,'print',%s,%s,'submitted')""", (uuid.uuid4(), pid, t0, t0 + timedelta(minutes=1)))
+    today = client.get("/api/head/pulse", headers=hdr(1000)).json()["today"]
+    assert today[0]["object_title"] == "Мастерская"
+    assert client.get("/api/my", headers=hdr(6100)).json()["shifts"][0]["object_title"] == "Мастерская"

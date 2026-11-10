@@ -126,7 +126,7 @@ def weekly_pay(b: WeeklyPayIn, p: dict = Depends(require_head)):
 
 
 # ── Ключевые цифры Пульта (HEAD 10.11): ждут оплаты, упущено, долг клиентов, в работе ─────────────────────────────
-F_LOST, F_DEBT = "UF_CRM_ARTGAME_FIN03_LOST", "UF_CRM_ARTGAME_FIN03_DEBT"
+F_LOST, F_DEBT, F_REASON = "UF_CRM_ARTGAME_FIN03_LOST", "UF_CRM_ARTGAME_FIN03_DEBT", "UF_CRM_1753381316974"
 
 
 def _bx_kpi(ym: str) -> dict:
@@ -135,13 +135,27 @@ def _bx_kpi(ym: str) -> dict:
     y, m = map(int, ym.split("-"))
     t0, t1 = f"{y}-{m:02d}-01", (f"{y + 1}-01-01" if m == 12 else f"{y}-{m + 1:02d}-01")
     money = bx._money
-    lost = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": 0, "STAGE_SEMANTIC_ID": "F", ">=MOVED_TIME": t0, "<MOVED_TIME": t1},
-                                         "select": ["ID", "OPPORTUNITY", F_LOST]})
-    done = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": 0, "STAGE_ID": list(DONE)}, "select": ["ID", F_DEBT]})
-    work = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": 0, "STAGE_ID": "UC_AV00QK"}, "select": ["ID", "OPPORTUNITY"]})
-    lost_sum = [money(d.get(F_LOST)) for d in lost]
+    lost = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_SEMANTIC_ID": "F", ">=MOVED_TIME": t0, "<MOVED_TIME": t1},
+                                         "select": ["ID", "TITLE", "STAGE_ID", "MOVED_TIME", "OPPORTUNITY", F_LOST, F_REASON]})
+    try:
+        names = {k: v["name"] for k, v in bx.stages().items()}
+    except Exception:  # noqa: BLE001
+        names = {}
+    items = []
+    for d in lost:   # HEAD 10.11: по нажатию — список проигранных с причиной
+        if "ТЕСТ" in str(d.get("TITLE") or "").upper():
+            continue
+        amt, by_deal = money(d.get(F_LOST)), False
+        if not amt and money(d.get("OPPORTUNITY")):
+            amt, by_deal = money(d.get("OPPORTUNITY")), True   # «Упущено» пусто — берём сумму сделки
+        items.append({"id": int(d["ID"]), "title": str(d.get("TITLE") or "").split("·", 1)[-1].strip(), "amount": round(amt),
+                      "by_deal": by_deal, "reason": (d.get(F_REASON) or "").strip() or None,
+                      "stage": names.get(d.get("STAGE_ID"), d.get("STAGE_ID")), "day": str(d.get("MOVED_TIME") or "")[:10]})
+    items.sort(key=lambda x: -x["amount"])
+    done = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": list(DONE)}, "select": ["ID", F_DEBT]})
+    work = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": ["UC_AV00QK"]}, "select": ["ID", "OPPORTUNITY"]})
     debt = [money(d.get(F_DEBT)) for d in done]
-    return {"lost": {"sum": round(sum(lost_sum)), "count": sum(1 for x in lost_sum if x > 0)},
+    return {"lost": {"sum": round(sum(x["amount"] for x in items)), "count": sum(1 for x in items if x["amount"] > 0), "items": items},
             "debt": {"sum": round(sum(debt)), "count": sum(1 for x in debt if x > 0)},
             "in_work": {"sum": round(sum(money(d.get("OPPORTUNITY")) for d in work)), "count": len(work)}}
 

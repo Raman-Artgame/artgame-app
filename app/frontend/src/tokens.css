@@ -750,3 +750,4 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .paidlog summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
 .profitwhy { background: var(--alt); border-radius: 14px; padding: 10px 12px; margin-top: 8px; }
 .profitwhy .row { padding: 4px 0; } .profitwhy .row:last-of-type { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 8px; }
+.lostlist .row:last-of-type { border-top: 0; margin-top: 0; padding-top: 4px; } .lostlist .row { align-items: flex-start; gap: 10px; }

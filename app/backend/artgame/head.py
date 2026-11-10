@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 
 from . import db
 from .deps import require_head
+from .work import SHOP_SQL
 
 router = APIRouter(prefix="/api")
 
@@ -35,7 +36,7 @@ def pulse(p: dict = Depends(require_head)):
         dm = one("""SELECT count(*) AS unread, count(DISTINCT person_id) AS people FROM dm
                     WHERE NOT from_head AND read_at IS NULL""")   # «Диалог с HEAD» (09.11): непрочитанные от сотрудников
         today = conn.execute(
-            """SELECT s.id, pe.full_name, r.title AS role_title, o.title AS object_title, s.zone_code, s.started_at, s.ended_at, s.status
+            f"""SELECT s.id, pe.full_name, r.title AS role_title, {SHOP_SQL.format(s="s", pe="pe")} AS object_title, s.zone_code, s.started_at, s.ended_at, s.status
                FROM shifts s JOIN people pe ON pe.id=s.person_id LEFT JOIN roles r ON r.code=pe.role_code JOIN objects o ON o.id=s.object_id
                WHERE s.status <> 'cancelled' AND (s.started_at AT TIME ZONE 'Asia/Almaty')::date = (now() AT TIME ZONE 'Asia/Almaty')::date
                ORDER BY s.started_at""").fetchall()
