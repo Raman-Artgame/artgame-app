@@ -144,7 +144,7 @@ def test_mop_enters_payment_with_receipt(client, monkeypatch):
     monkeypatch.setattr(bx, "READ", lambda m, p: {"result": deals.get(str(p["id"]))} if m == "crm.deal.get" else {"result": []})
     saved = []
     monkeypatch.setattr(drive, "save_income_receipt", lambda conn, name, data, deal_id: saved.append((deal_id, name)) or "drv-income")
-    today = str(date.today())
+    today = str(dm.datetime.now(dm.TZ).date())   # дата по Алматы, как у сервера
     pay = {"client_uid": uid(), "amount": 800000, "op_date": today, "account": "kaspi", "receipt": JPG, "note": "аванс 50%"}
     r = client.post("/api/bx/deals/1347/payment", json=pay, headers=hdr(6000))
     assert r.status_code == 200, r.text
@@ -155,7 +155,7 @@ def test_mop_enters_payment_with_receipt(client, monkeypatch):
     assert client.post("/api/bx/deals/1347/payment", json=pay, headers=hdr(6000)).json()["row"]["id"] == row["id"]   # повтор очереди
     # чужая сделка, будущая дата, счёт «История», без чека — нельзя
     assert client.post("/api/bx/deals/1400/payment", json={**pay, "client_uid": uid()}, headers=hdr(6000)).status_code == 403
-    tomorrow = str(date.today() + timedelta(days=1))
+    tomorrow = str(dm.datetime.now(dm.TZ).date() + timedelta(days=1))
     assert client.post("/api/bx/deals/1347/payment", json={**pay, "client_uid": uid(), "op_date": tomorrow}, headers=hdr(6000)).status_code == 400
     assert client.post("/api/bx/deals/1347/payment", json={**pay, "client_uid": uid(), "account": "hist"}, headers=hdr(6000)).status_code == 400
     assert client.post("/api/bx/deals/1347/payment", json={**pay, "client_uid": uid(), "receipt": ""}, headers=hdr(6000)).status_code == 422

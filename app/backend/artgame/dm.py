@@ -2,8 +2,11 @@
 
 - У каждого сотрудника вкладка «HEAD» — личный диалог: HEAD пишет, сотрудник отвечает.
 - HEAD в «Ещё → Сообщения»: список диалогов (непрочитанные сверху), личный ответ, «Написать всем» — всем или по ролям.
-- О каждом сообщении бот пишет получателю в Telegram. Ответ на уведомление свайпом в Telegram попадает в тот же диалог
-  (tgbot.tg_hook → from_telegram); любое другое личное сообщение сотрудника боту тоже уходит HEAD.
+- Бот (HEAD 10.11: «личные не должны засорять бот»): текстом в Telegram уходит ТОЛЬКО рассылка HEAD (всем или по ролям).
+  Личные сообщения сотрудник↔HEAD — только в приложении. О них бот держит ОДНО уведомление на человека без текста письма
+  («✉️ Новое сообщение от HEAD», у HEAD — «от команды: N» с именами): новое сообщение — старое уведомление удаляется,
+  приходит новое со звуком; прочитал в приложении — бот удаляет уведомление (таблица dm_notice).
+  Ответ сотрудника свайпом на рассылку или любой текст боту (кроме /start) попадает в его диалог в приложении.
 Ничего не удаляется. Диалог общий для всех HEAD (если их несколько): сотрудник пишет «HEAD», подпись — кто ответил.
 """
 import sys
@@ -30,6 +33,67 @@ def send(tg_id: int, text: str) -> int | None:
 
 
 SEND = send   # тесты подменяют
+
+
+def _bot(method: str, **params):
+    from . import tgbot
+    return tgbot.CALL(method, **params)
+
+
+BOT = _bot   # тесты подменяют
+
+
+def _notice_text(conn, who: dict) -> tuple[int, str]:
+    """Сколько непрочитанных личных у человека и текст уведомления (без текста самих писем)."""
+    if who["role_code"] == "head":
+        rows = conn.execute("""SELECT pe.full_name, count(*) AS n FROM dm d JOIN people pe ON pe.id=d.person_id
+                               WHERE NOT d.from_head AND d.read_at IS NULL GROUP BY pe.id ORDER BY max(d.created_at) DESC""").fetchall()
+        n = sum(r["n"] for r in rows)
+        names = ", ".join(r["full_name"] for r in rows[:5]) + (" и др." if len(rows) > 5 else "")
+        return n, f"✉️ Новые сообщения от команды: {n}\n{names}\n\nОткрыть — «Ещё → Сообщения»."
+    n = conn.execute("""SELECT count(*) AS n FROM dm WHERE person_id=%s AND from_head AND broadcast_id IS NULL
+                         AND read_at IS NULL""", (who["id"],)).fetchone()["n"]
+    return n, ("✉️ Новое сообщение от HEAD" if n == 1 else f"✉️ Новых сообщений от HEAD: {n}") + "\n\nОткрыть — вкладка «HEAD»."
+
+
+def ping(ids: list[int]) -> None:
+    """Привести уведомление в боте к числу непрочитанных: 0 — удалить; больше, чем было, — удалить старое и прислать
+    новое (со звуком, в чате всё равно одно); меньше — поправить счётчик молча. Ошибки бота не мешают приложению."""
+    from . import tgbot
+    kb = {"inline_keyboard": [[{"text": "Открыть ARTGAME", "web_app": {"url": tgbot.app_url()}}]]}
+    for rid in dict.fromkeys(ids):
+        try:
+            with db.pool.connection() as conn:
+                who = conn.execute("SELECT id, tg_id, role_code, status FROM people WHERE id=%s", (rid,)).fetchone()
+                if not who:
+                    continue
+                cur = conn.execute("SELECT * FROM dm_notice WHERE person_id=%s", (rid,)).fetchone()
+                n, text = _notice_text(conn, who)
+                if cur and (n == 0 or n > cur["n"] or who["tg_id"] != cur["tg_id"]):
+                    try:
+                        BOT("deleteMessage", chat_id=cur["tg_id"], message_id=cur["msg_id"])
+                    except Exception as e:  # noqa: BLE001 — человек сам удалил или прошло 48 ч
+                        print("dm notice delete:", e, file=sys.stderr)
+                    conn.execute("DELETE FROM dm_notice WHERE person_id=%s", (rid,))
+                    cur = None
+                if n == 0 or not _real(who["tg_id"]) or who["status"] != "active":
+                    continue
+                if cur:
+                    if n != cur["n"]:
+                        BOT("editMessageText", chat_id=cur["tg_id"], message_id=cur["msg_id"], text=text, reply_markup=kb)
+                        conn.execute("UPDATE dm_notice SET n=%s, updated_at=now() WHERE person_id=%s", (n, rid))
+                    continue
+                mid = (BOT("sendMessage", chat_id=who["tg_id"], text=text, reply_markup=kb) or {}).get("message_id")
+                if mid:
+                    conn.execute("""INSERT INTO dm_notice (person_id, tg_id, msg_id, n) VALUES (%s,%s,%s,%s)
+                                    ON CONFLICT (person_id) DO UPDATE SET tg_id=EXCLUDED.tg_id, msg_id=EXCLUDED.msg_id, n=EXCLUDED.n, updated_at=now()""",
+                                 (rid, who["tg_id"], mid, n))
+        except Exception as e:  # noqa: BLE001
+            print("dm notice:", e, file=sys.stderr)
+
+
+def _head_ids(conn) -> list[int]:
+    return [h["id"] for h in _heads(conn)]
 
 
 def _real(tg) -> bool:
@@ -61,15 +125,15 @@ def _to_head(conn, p: dict, text: str, via: str = "app") -> tuple[dict, list]:
     row = conn.execute("INSERT INTO dm (person_id, from_head, author_id, text, via) VALUES (%s, false, %s, %s, %s) RETURNING *",
                        (p["id"], p["id"], text, via)).fetchone()
     db.audit(conn, p["id"], "dm_add", "dm", row["id"], {"via": via})
-    note = f"✉️ {p['full_name']}:\n{_short(text)}\n\nОтветить — свайпом на это сообщение или в «Ещё → Сообщения»."
-    jobs = [(row["id"], h["tg_id"], note) for h in _heads(conn) if _real(h["tg_id"])]
-    return row, jobs
+    return row, []   # HEAD 10.11: личные — только в приложении, в бот не дублируем
 
 
 def _from_head(conn, head: dict, person: dict, text: str, via: str = "app", bid: int | None = None) -> tuple[dict, list]:
     row = conn.execute("""INSERT INTO dm (person_id, from_head, author_id, text, via, broadcast_id)
                           VALUES (%s, true, %s, %s, %s, %s) RETURNING *""", (person["id"], head["id"], text, via, bid)).fetchone()
-    note = f"{'📣' if bid else '✉️'} HEAD:\n{_short(text)}\n\nОтветить — свайпом на это сообщение или во вкладке «HEAD»."
+    if not bid:   # HEAD 10.11: в бот — только общая рассылка, личные остаются в приложении
+        return row, []
+    note = f"📣 HEAD:\n{_short(text)}\n\nОтветить — во вкладке «HEAD» в приложении."
     return row, ([(row["id"], person["tg_id"], note)] if _real(person["tg_id"]) else [])
 
 
@@ -87,11 +151,12 @@ class TextIn(BaseModel):
 # ---------- сотрудник ----------
 
 @router.get("")
-def my_dialog(p: dict = Depends(active)):
+def my_dialog(bg: BackgroundTasks, p: dict = Depends(active)):
     with db.pool.connection() as conn:
         items = _items(conn, p["id"])
         if not ctx():   # HEAD «смотрит как» — прочтение не отмечаем за сотрудника
             conn.execute("UPDATE dm SET read_at=now() WHERE person_id=%s AND from_head AND read_at IS NULL", (p["id"],))
+            bg.add_task(ping, [p["id"]])   # прочитал — уведомление из бота убрать
     return {"items": items}
 
 
@@ -101,7 +166,8 @@ def write_head(b: TextIn, bg: BackgroundTasks, p: dict = Depends(active)):
         raise HTTPException(400, "HEAD пишет сотрудникам в «Сообщениях»")
     with db.pool.connection() as conn, conn.transaction():
         row, jobs = _to_head(conn, p, b.text.strip())
-    bg.add_task(_deliver, jobs)
+        heads = _head_ids(conn)
+    bg.add_task(ping, heads)
     return row
 
 
@@ -148,11 +214,12 @@ def _person(conn, pid: int) -> dict:
 
 
 @router.get("/with/{pid}")
-def dialog(pid: int, p: dict = Depends(require_head)):
+def dialog(pid: int, bg: BackgroundTasks, p: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         who = _person(conn, pid)
         items = _items(conn, pid)
         conn.execute("UPDATE dm SET read_at=now() WHERE person_id=%s AND NOT from_head AND read_at IS NULL", (pid,))
+        bg.add_task(ping, _head_ids(conn))
     return {"person": {k: who[k] for k in ("id", "full_name", "role_title", "status")}, "items": items}
 
 
@@ -165,7 +232,8 @@ def write_one(pid: int, b: TextIn, bg: BackgroundTasks, p: dict = Depends(requir
         row, jobs = _from_head(conn, p, who, b.text.strip())
         conn.execute("UPDATE dm SET read_at=now() WHERE person_id=%s AND NOT from_head AND read_at IS NULL", (pid,))   # ответил — значит прочитал
         db.audit(conn, p["id"], "dm_add", "dm", row["id"], {"to": pid})
-    bg.add_task(_deliver, jobs)
+        heads = _head_ids(conn)
+    bg.add_task(ping, [pid, *heads])
     return row
 
 
@@ -199,7 +267,8 @@ def broadcast(b: CastIn, bg: BackgroundTasks, p: dict = Depends(require_head)):
 
 def from_telegram(tg_id: int, text: str, reply_to: int | None) -> str | None:
     """Личное сообщение боту. Возвращает ответ бота человеку или None (тогда бот шлёт обычное приветствие).
-    Сотрудник: любое сообщение (кроме /start) → HEAD. HEAD: ответ свайпом на уведомление → в диалог того сотрудника."""
+    Сотрудник: любое сообщение (кроме /start) → в его диалог с HEAD (без уведомления HEAD в бот).
+    HEAD: ответ свайпом на старое уведомление сотрудника (до 10.11) → в диалог; иначе — подсказка писать в приложении."""
     text = (text or "").strip()
     if not text or text.startswith("/"):
         return None
@@ -213,14 +282,16 @@ def from_telegram(tg_id: int, text: str, reply_to: int | None) -> str | None:
             src = reply_to and conn.execute("SELECT person_id FROM dm WHERE tg_msg_id=%s AND NOT from_head ORDER BY id DESC LIMIT 1",
                                             (reply_to,)).fetchone()
             if not src:
-                return "Чтобы ответить сотруднику, ответьте свайпом на его сообщение. Написать всем — в приложении: «Ещё → Сообщения»."
+                return "Сотрудникам пишите в приложении: «Ещё → Сообщения». Там же — «Написать всем»."
             who = _person(conn, src["person_id"])
             row, jobs = _from_head(conn, p, who, text, via="tg")
             conn.execute("UPDATE dm SET read_at=now() WHERE person_id=%s AND NOT from_head AND read_at IS NULL", (who["id"],))
             db.audit(conn, p["id"], "dm_add", "dm", row["id"], {"to": who["id"], "via": "tg"})
             done = f"✓ Отправлено: {who['full_name']}"
+            notify = [who["id"], *_head_ids(conn)]
         else:
             row, jobs = _to_head(conn, p, text, via="tg")
-            done = "✓ Передал HEAD. Ответ придёт сюда и во вкладку «HEAD» в приложении."
-    _deliver(jobs)
+            done = "✓ Передал HEAD. Ответ — во вкладке «HEAD» в приложении."
+            notify = _head_ids(conn)
+    ping(notify)
     return done

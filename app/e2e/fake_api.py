@@ -128,6 +128,7 @@ SENT = []
 notify.SEND = lambda tg, text: SENT.append({"tg": tg, "text": text})
 from artgame import dm  # noqa: E402
 dm.SEND = lambda tg, text: SENT.append({"tg": tg, "text": text, "dm": True}) and None   # «Диалог с HEAD»: бот никуда не пишет
+dm.BOT = lambda m, **p: SENT.append({"bot": m, **{k: v for k, v in p.items() if k != "reply_markup"}}) or {"message_id": len(SENT)}   # уведомление «Новое сообщение»
 
 
 @app.get("/api/_e2e/sent")

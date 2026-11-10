@@ -51,3 +51,4 @@ def no_telegram(monkeypatch):
     monkeypatch.setattr(notify, "SEND", lambda tg, text: None)
     from artgame import dm
     monkeypatch.setattr(dm, "SEND", lambda tg, text: None)
+    monkeypatch.setattr(dm, "BOT", lambda m, **p: {"message_id": 1})

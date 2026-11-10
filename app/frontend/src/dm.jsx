@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { api } from './api.js'
 
 // «Диалог с HEAD» (HEAD 09.11): у сотрудника вкладка «HEAD» — личный диалог; у HEAD «Ещё → Сообщения» —
-// все диалоги и «Написать всем» (всем или по ролям). О каждом сообщении бот пишет в Telegram, ответ свайпом попадает сюда.
+// все диалоги и «Написать всем» (всем или по ролям). В бот уходит только рассылка HEAD; личные — только здесь (HEAD 10.11).
 const when = s => {
   const d = new Date(s), now = new Date()
   const t = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
@@ -62,7 +62,7 @@ export function DialogHead() {
   useEffect(() => { load() }, [])
   return <div className="card dm">
     <h2>Диалог с HEAD</h2>
-    <p className="small muted">Пиши по делу: вопрос, проблема на объекте, предложение. Ответ придёт сюда и в бот.</p>
+    <p className="small muted">Пиши по делу: вопрос, проблема на объекте, предложение. Ответ придёт сюда.</p>
     {items === null ? <p className="small muted">Загрузка…</p> : <Bubbles items={items} mine={m => !m.from_head} />}
     <Composer ph="Написать HEAD" send={text => api('/dm', { method: 'POST', body: { text } }).then(load)} />
   </div>
@@ -125,7 +125,7 @@ function Broadcast({ roles, back }) {
   return <div className="card dm">
     <button className="ghost mini dmback" onClick={back}>‹ Все диалоги</button>
     <h2>Написать всем</h2>
-    <p className="small muted">Кому: всем или выберите роли. Каждый получит сообщение в своём диалоге «HEAD» и в боте.</p>
+    <p className="small muted">Кому: всем или выберите роли. Каждый получит сообщение в своём диалоге «HEAD» и в боте Telegram. Личные сообщения в бот не уходят.</p>
     <div className="chips">
       <button className={pick.length ? '' : 'on'} onClick={() => setPick([])}>Всем<span>{total}</span></button>
       {roles.map(r => <button key={r.code} className={pick.includes(r.code) ? 'on' : ''} onClick={() => flip(r.code)}>{r.title}<span>{r.n}</span></button>)}
