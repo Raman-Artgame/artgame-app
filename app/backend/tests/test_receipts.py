@@ -53,7 +53,3 @@ def test_receipt_folders(monkeypatch):
     except RuntimeError:
         pass
 
-
-def test_head_receipts_go_to_head_folder():
-    assert drive.dept_for({"role_code": "head"}, "sales") == "office"
-    assert drive.dept_for({"role_code": "mop"}, "sales") == "sales"

@@ -188,11 +188,6 @@ def receipt_folder(conn, d: Drive, dept: str, deal_id: int | None) -> tuple[str,
     return month, False
 
 
-def dept_for(p: dict, dept: str) -> str:
-    """Личные траты HEAD без сделки — всегда «06 РАСХОДЫ HEAD», из какой бы формы он их ни внёс (HEAD 10.11: планшет лёг в «Продажи»)."""
-    return "office" if p.get("role_code") == "head" else dept
-
-
 def save_receipt(conn, dept: str, name: str, data_url: str, deal_id: int | None = None) -> str:
     """Единая точка для чеков всех трат (смены, МОП, склад, финансы). Возвращает ID файла на Диске."""
     data, mime = decode_data_url(data_url)

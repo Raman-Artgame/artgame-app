@@ -89,7 +89,7 @@ def add(e: StockIn, p: dict = Depends(active)):
         ok = limit > 0 and spent + e.amount <= limit
         name = f"Чек {datetime.now(TZ):%Y-%m-%d %H-%M} {p['full_name']} {e.amount:.0f}"
         try:
-            drive_id = drive.save_receipt(conn, drive.dept_for(p, "stock"), name, e.receipt, deal_id=e.deal_id)
+            drive_id = drive.save_receipt(conn, "stock", name, e.receipt, deal_id=e.deal_id)
         except Exception as ex:  # Диск недоступен — телефон повторит позже
             raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         data, mime = drive.decode_data_url(e.receipt)
@@ -276,7 +276,7 @@ def purchase(e: PurchaseIn, p: dict = Depends(active)):
         note = (summary + (" · " + e.note.strip() if e.note and e.note.strip() else ""))[:2000]
         name = f"Чек {datetime.now(TZ):%Y-%m-%d %H-%M} {p['full_name']} {total:.0f}"
         try:
-            drive_id = drive.save_receipt(conn, drive.dept_for(p, "stock"), name, e.receipt, deal_id=e.deal_id)
+            drive_id = drive.save_receipt(conn, "stock", name, e.receipt, deal_id=e.deal_id)
         except Exception as ex:  # Диск недоступен — телефон повторит позже
             raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         data, mime = drive.decode_data_url(e.receipt)
