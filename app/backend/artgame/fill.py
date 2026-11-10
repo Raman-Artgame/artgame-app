@@ -40,7 +40,7 @@ SPEC = [
     ("adv", "Аванс, %", "docs", "adv", ""),
     ("days", "Срок по договору, дней", "docs", "days", ""),
     ("warranty", "Гарантия, мес.", "docs", "warranty", ""),
-    ("paid", "Аванс поступил", "pay", None, "отмечает HEAD в финансах"),
+    ("paid", "Аванс поступил", "pay", None, "шаг «Оплата» → «Внести оплату» с фото чека"),
     ("signed", "Подписанный договор", "pay", None, "файл в поле «Договор подписанный» в Битриксе"),
     ("start", "Старт работ (факт)", "work", "start", ""),
     ("end", "Сдача (план)", "work", "end", ""),
@@ -104,7 +104,8 @@ def for_deal(p: dict, deal_id: int) -> dict:
     for f, title in bx.FILES.items():
         if d.get(f):
             files.append({"title": title})
-    card.update(files=files, pay={"received": bx._money(d.get(bx.FIN["received"]))}, norm={"shifts": bx._num(d.get(bx.F_SHIFTS))})
+    from . import deal_money   # «Аванс поступил» — по журналу приложения (HEAD 10.11), не по полю FIN03
+    card.update(files=files, pay={"received": deal_money.card(d)["received"]}, norm={"shifts": bx._num(d.get(bx.F_SHIFTS))})
     return state(d, card, saved_calc(deal_id))
 
 

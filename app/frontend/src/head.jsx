@@ -38,6 +38,7 @@ export function Pulse({ me, pulse, go }) {
   const asks = [
     r.shifts && { k: 'review', t: `Смены на проверке: ${r.shifts}`, s: r.shifts_late ? `${r.shifts_late} дольше 24 ч` : 'в срок', hot: r.shifts_late },
     r.expenses && { k: 'review', t: `Расходы на проверке: ${r.expenses}`, s: `на ${money(r.expenses_sum)}` + (r.over_cap ? ` · ${r.over_cap} выше потолка цены` : ''), hot: r.expenses_late || r.over_cap },
+    r.payments && { k: 'review', t: `Оплаты клиентов на сверку: ${r.payments}`, s: `на ${money(r.payments_sum)} · сверить чек и выписку` },
     p.pending.length && { k: 'people', t: `Ждут роли: ${p.pending.length}`, s: p.pending.map(x => x.full_name).join(', '), hot: true },
     p.catalogs && { k: 'design', t: `Каталоги дизайна на утверждение: ${p.catalogs}`, s: 'утвердить или вернуть' },
     p.dm?.unread && { k: 'chat', t: `Сообщения от команды: ${p.dm.unread}`, s: `от ${p.dm.people} чел. · ответить`, hot: true },
@@ -50,7 +51,7 @@ export function Pulse({ me, pulse, go }) {
       <span className="muted small">{new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
       <h1>{name ? `${name}, ` : ''}{asks.length ? 'ждёт решения' : 'всё решено'}</h1>
       <div className="pulse-kpi">
-        <button className={asks.length ? 'hot' : ''} onClick={() => go('review')}><b>{r.shifts + r.expenses}</b><span>на проверке</span></button>
+        <button className={asks.length ? 'hot' : ''} onClick={() => go('review')}><b>{r.shifts + r.expenses + (r.payments || 0)}</b><span>на проверке</span></button>
         <button className={p.pending.length ? 'hot' : ''} onClick={() => go('people')}><b>{p.pending.length}</b><span>новых людей</span></button>
         <button onClick={() => document.getElementById('pulse-today')?.scrollIntoView({ behavior: 'smooth' })}><b>{p.today.length}</b><span>смен сегодня</span></button>
       </div>

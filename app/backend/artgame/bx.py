@@ -432,9 +432,10 @@ def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
                 files.append({"title": title, "url": it.get("downloadUrl") or it.get("url") or "", "id": it.get("id")})
             elif isinstance(it, str) and it.startswith("http"):
                 files.append({"title": title, "url": it})
+    from . import deal_money   # «Поступило» и «Долг» — по журналу приложения, не по полям FIN03 (HEAD 10.11)
     card.update({"history": hist, "feed": feed, "files": files, "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), ""),
                  "created": d.get("DATE_CREATE"), "modified": d.get("DATE_MODIFY"), "comments": d.get("COMMENTS") or "",
-                 "pay": {k: (_money(d.get(f)) if k != "next" else d.get(f)) for k, f in FIN.items()}, "category": int(d.get("CATEGORY_ID") or 0),
+                 "pay": {**deal_money.card(d), "next": d.get(FIN["next"])}, "category": int(d.get("CATEGORY_ID") or 0),
                  "level": level_key(d.get(F_LEVEL)), "norm": {"shifts": _num(d.get(F_SHIFTS)), "crew": _num(d.get(F_CREW)), "term": _num(d.get(F_TERM))},
                  "norm_fields": all(k in deal_fields() for k in (F_SHIFTS, F_CREW, F_TERM))})
     from .sales_exp import for_deal
