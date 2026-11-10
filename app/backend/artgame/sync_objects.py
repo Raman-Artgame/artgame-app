@@ -121,7 +121,9 @@ def upsert(conn, deals: list[dict]) -> list[int]:
                ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, city=EXCLUDED.city, bitrix_stage=EXCLUDED.bitrix_stage,
                    level=EXCLUDED.level, area_m2=EXCLUDED.area_m2, address=EXCLUDED.address, geo=EXCLUDED.geo, level_guess=EXCLUDED.level_guess,
                    drive_folder=coalesce(objects.drive_folder, EXCLUDED.drive_folder),
-                   status=CASE WHEN objects.status='archived' THEN 'archived' ELSE EXCLUDED.status END, synced_at=now()
+                   status=CASE WHEN objects.status='archived' THEN 'archived' ELSE EXCLUDED.status END, synced_at=now(),
+                   left_work_at=CASE WHEN objects.bitrix_stage='UC_AV00QK' AND EXCLUDED.bitrix_stage<>'UC_AV00QK' THEN now()
+                                     ELSE objects.left_work_at END
                RETURNING (xmax = 0) AS inserted""",
             (int(d["ID"]), title, city, d["STAGE_ID"], int(d["CATEGORY_ID"]), status, d.get(FOLDER_FIELD) or None,
              str(d.get(F_LEVEL) or "") or None, _area(d.get(F_AREA)), addr, geo, guess)).fetchone()
