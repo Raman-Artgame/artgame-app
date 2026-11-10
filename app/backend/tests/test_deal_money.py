@@ -256,3 +256,53 @@ def test_payments_desk_and_history(client, monkeypatch):
     client.post(f"/api/people/{anna}", json={"pays": False}, headers=hdr(1000))
     assert client.get("/api/pay/deals/1611", headers=hdr(3000)).status_code == 403
     assert client.get("/api/pay/deals?q=1611", headers=hdr(6000)).status_code == 403
+
+
+def test_undated_slot_gets_date_and_receipt(client, monkeypatch):
+    """«Дата и чек» (HEAD 10.11): Анна вносила оплаты в «Поступление 1» без даты (525, 1317, 1329, 1587). В приложении к такой
+    оплате указывают дату и фото чека: она заменяет поле сделки, «Поступило» не задваивается, импорт поле больше не читает."""
+    from artgame import drive
+    from test_finance import JPG
+    ids = setup(client, monkeypatch)
+    deals = {"1317": {**deal(1317, opp=160_000, **{A1: "80000|KZT", D1: "", REC: "0|KZT", DEBT: "160000|KZT"}),
+                      "TITLE": "1317 · КИБЕРКЛУБ CYBORG — ШЫМКЕНТ", "ASSIGNED_BY_ID": "4565"},
+             "1329": {**deal(1329, stage="WON", sem="S", opp=250_000, **{A1: "250000|KZT", D1: ""}),
+                      "TITLE": "1329 · КОРЕЙСКИЙ МАГАЗИН РАМИ — АСТАНА", "ASSIGNED_BY_ID": "4565"},
+             "1277": {**deal(1277, opp=300_000, **{A1: "150000|KZT", D1: "2026-10-20"}), "ASSIGNED_BY_ID": "4565"}}
+    monkeypatch.setattr(bx, "READ", lambda m, p: {"result": deals.get(str(p["id"]))} if m == "crm.deal.get" else {"result": []})
+    monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False, **k: [dict(d) for d in deals.values()])
+    monkeypatch.setattr(drive, "save_income_receipt", lambda *a: "drv")
+    client.post(f"/api/people/{ids[3000]}", json={"pays": True}, headers=hdr(1000))
+    with db.pool.connection() as conn, conn.transaction():
+        assert fin_bx.import_payments(conn)["added"] == 1   # открытая 1317: без даты — днём, когда импорт увидел; закрытая 1329 — нет
+    c = dm.card(deals["1317"])
+    assert c["received"] == 80_000 and [(x["source"], x["slot"]) for x in c["items"]] == [("bitrix", 1)] and c["history"] == []
+    c = dm.card(deals["1329"])
+    assert c["received"] == 250_000 and c["debt"] == 0 and c["history"] == [{"n": 1, "slot": 1, "date": "", "amount": 250_000}]
+    assert dm.card(deals["1277"])["history"][0]["slot"] is None   # с датой — «Дата и чек» не нужна
+
+    pay = {"client_uid": uid(), "amount": 80000, "op_date": "2026-11-04", "account": "kaspi", "receipt": JPG, "slot": 1}
+    r = client.post("/api/bx/deals/1317/payment", json=pay, headers=hdr(3000))
+    assert r.status_code == 200, r.text
+    row = r.json()["row"]
+    assert row["source"] == "app" and row["source_ref"] == "deal:1317:pay1" and "вместо «Поступление 1» без даты" in row["note"]
+    c = r.json()["pay"]
+    assert c["received"] == 80_000 and c["debt"] == 80_000 and c["on_check"] == 80_000   # не 160 000
+    assert [(x["source"], x["status"], x["slot"]) for x in c["items"]] == [("app", "active", None)]   # строка импорта заменена
+    assert client.post("/api/bx/deals/1317/payment", json=pay, headers=hdr(3000)).json()["row"]["id"] == row["id"]   # повтор очереди
+    with db.pool.connection() as conn, conn.transaction():
+        assert fin_bx.import_payments(conn) == {"deals": 3, "added": 0, "changed": 0}   # поле больше не читаем
+    assert dm.card(deals["1317"])["received"] == 80_000
+
+    # закрытая сделка, оплата в октябре: «История», «Поступило» 250 000, а не 500 000
+    r = client.post("/api/bx/deals/1329/payment", json={**pay, "client_uid": uid(), "amount": 250000, "op_date": "2026-10-15"},
+                    headers=hdr(3000)).json()
+    assert r["row"]["account_code"] == "hist" and r["pay"]["received"] == 250_000 and r["pay"]["debt"] == 0 and r["pay"]["history"] == []
+    # второй раз к той же оплате, к оплате с датой, к пустому полю — нельзя
+    assert client.post("/api/bx/deals/1329/payment", json={**pay, "client_uid": uid()}, headers=hdr(3000)).status_code == 409
+    assert client.post("/api/bx/deals/1277/payment", json={**pay, "client_uid": uid()}, headers=hdr(3000)).status_code == 400
+    assert client.post("/api/bx/deals/1317/payment", json={**pay, "client_uid": uid(), "slot": 2}, headers=hdr(3000)).status_code == 400
+    # HEAD ✕: оплаты нет — и поле сделки обратно не считается
+    assert client.post(f"/api/fin/ledger/{row['id']}/cancel", headers=hdr(1000)).json()["ok"]
+    c = dm.card(deals["1317"])
+    assert c["received"] == 0 and c["debt"] == 160_000 and not any(x["slot"] for x in c["items"]) and c["history"] == []

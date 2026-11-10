@@ -5,11 +5,12 @@ import { PaySheet, Payments } from './dealcard.jsx'
 
 // «Оплаты» (HEAD 10.11): у кого в «Команде» стоит «Вносит оплаты клиентов» (Анна) — оплата клиента по любой сделке.
 // Сделка по номеру или части названия → «Поступило» и «Долг» по журналу → «Внести оплату» с фото чека; HEAD сверяет в «Проверке».
+// Оплата из поля сделки без даты (вносили в Битрикс до 10.11) — «Дата и чек»: заменяет поле, двойного счёта нет.
 export function PayDesk() {
   const [q, setQ] = useState('')
   const [list, setList] = useState(null)
   const [d, setD] = useState(null)
-  const [sheet, setSheet] = useState(false)
+  const [sheet, setSheet] = useState(null)   // {} — новая оплата, {slot} — «Дата и чек» к оплате из поля сделки без даты
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const open = id => { setErr(''); return api(`/pay/deals/${id}`).then(setD, e => setErr(e.message)) }
@@ -19,7 +20,7 @@ export function PayDesk() {
     setErr(''); setD(null); setList(null)
     api('/pay/deals?q=' + encodeURIComponent(s)).then(r => { setList(r); if (r.length === 1) open(r[0].id) }, e => setErr(e.message))
   }
-  const done = t => { setSheet(false); setMsg(t); open(d.id); setTimeout(() => setMsg(''), 5000) }
+  const done = t => { setSheet(null); setMsg(t); open(d.id); setTimeout(() => setMsg(''), 5000) }
   return <>
     <div className="card"><h2>Оплаты клиентов</h2>
       <p className="small muted">Найдите сделку по номеру или названию и внесите оплату с фото чека или выписки. HEAD сверит.</p>
@@ -41,9 +42,9 @@ export function PayDesk() {
         {d.pay.overpaid > 0 && <div><span className="muted small">Переплата</span><b>{money(d.pay.overpaid)}</b></div>}
       </div>
       {d.pay.on_check > 0 && <p className="small why">На сверке у HEAD: {money(d.pay.on_check)}.</p>}
-      <Payments pay={d.pay} />
-      <div className="dealbtns"><button className="mini" onClick={() => setSheet(true)}>+ Внести оплату</button></div>
+      <Payments pay={d.pay} onDate={x => setSheet({ slot: x })} />
+      <div className="dealbtns"><button className="mini" onClick={() => setSheet({})}>+ Внести оплату</button></div>
     </div>}
-    {sheet && d && <PaySheet d={d} onClose={() => setSheet(false)} onDone={done} />}
+    {sheet && d && <PaySheet d={d} slot={sheet.slot} onClose={() => setSheet(null)} onDone={done} />}
   </>
 }
