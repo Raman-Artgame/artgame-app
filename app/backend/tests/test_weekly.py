@@ -85,3 +85,23 @@ def test_trip_costs_and_receipt(client, team, monkeypatch):  # noqa: F811
     assert client.post(f"/api/fin/my/ack/{pay['id']}", headers=hdr(2000)).status_code == 404     # чужую — нельзя
     assert client.post(f"/api/fin/my/ack/{pay['id']}", headers=hdr(5000)).json()["ack_at"]
     assert client.get("/api/fin/weekly", headers=hdr(1000)).json()["paid"][0]["ack_at"]
+
+
+def test_pulse_kpi(client, monkeypatch):
+    """HEAD 10.11: плитки Пульта — ждут оплаты саппорт/расходы, упущено, долг клиентов, в работе."""
+    from artgame import bx
+    client.post("/api/register", json={"full_name": "HEAD"}, headers=hdr(1000))
+
+    def fake(method, params, fresh=False):
+        f = params["filter"]
+        if f.get("STAGE_SEMANTIC_ID") == "F":
+            return [{"ID": "1", "UF_CRM_ARTGAME_FIN03_LOST": "280000|KZT"}, {"ID": "2", "UF_CRM_ARTGAME_FIN03_LOST": None}]
+        if f.get("STAGE_ID") == "UC_AV00QK":
+            return [{"ID": "3", "OPPORTUNITY": "1500000.00"}]
+        return [{"ID": "4", "UF_CRM_ARTGAME_FIN03_DEBT": "500000|KZT"}, {"ID": "5", "UF_CRM_ARTGAME_FIN03_DEBT": "0|KZT"}]
+    monkeypatch.setattr(bx, "read_all", fake)
+    k = client.get("/api/fin/kpi", headers=hdr(1000)).json()
+    assert k["lost"] == {"sum": 280000, "count": 1} and k["debt"] == {"sum": 500000, "count": 1}
+    assert k["in_work"] == {"sum": 1500000, "count": 1} and k["due_support"] == 0 and k["due_expenses"] == 0
+    monkeypatch.setattr(bx, "read_all", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("нет связи")))
+    assert "bx_error" in client.get("/api/fin/kpi", headers=hdr(1000)).json()
