@@ -86,7 +86,7 @@ def work_dict(p: dict = Depends(active)):
             "safety": {k: x for k, x in consts.latest(conn).items() if k.startswith("safety.")},
             # ночь и переработка (HEAD 09.11): подпись в «Прошлой смене»; считает finance.shift_pay
             **(lambda v: {"shift_hours": v.get("shift.hours") or 10, "night_pct": v.get("pay.night") or 0,
-                          "night": f"{v.get('pay.night.from') or '0:00'}–{v.get('pay.night.to') or '6:00'}"})(consts.latest(conn)),
+                          "night": f"{v.get('pay.night.from') or '22:00'}–{v.get('pay.night.to') or '6:00'}"})(consts.latest(conn)),
             "stages": [{"key": k, "title": t} for k, t in __import__("artgame.promo", fromlist=["STAGES"]).STAGES],
             # задним числом с 1.11 (HEAD 09.11): объекты — и уже сданные
             "backfill": {**backfill_window(), "objects": conn.execute(
