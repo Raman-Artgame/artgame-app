@@ -2,8 +2,9 @@
 
 - У каждого сотрудника вкладка «HEAD» — личный диалог: HEAD пишет, сотрудник отвечает.
 - HEAD в «Ещё → Сообщения»: список диалогов (непрочитанные сверху), личный ответ, «Написать всем» — всем или по ролям.
-- О каждом сообщении бот пишет получателю в Telegram. Ответ на уведомление свайпом в Telegram попадает в тот же диалог
-  (tgbot.tg_hook → from_telegram); любое другое личное сообщение сотрудника боту тоже уходит HEAD.
+- Бот (HEAD 10.11: «личные не должны засорять бот»): в Telegram уходит ТОЛЬКО рассылка HEAD (всем или по ролям).
+  Личные сообщения сотрудник↔HEAD — только в приложении (цифра на вкладке, полоса «Новое сообщение», «Пульт»).
+  Ответ сотрудника свайпом на рассылку или любой текст боту (кроме /start) попадает в его диалог в приложении.
 Ничего не удаляется. Диалог общий для всех HEAD (если их несколько): сотрудник пишет «HEAD», подпись — кто ответил.
 """
 import sys
@@ -61,15 +62,15 @@ def _to_head(conn, p: dict, text: str, via: str = "app") -> tuple[dict, list]:
     row = conn.execute("INSERT INTO dm (person_id, from_head, author_id, text, via) VALUES (%s, false, %s, %s, %s) RETURNING *",
                        (p["id"], p["id"], text, via)).fetchone()
     db.audit(conn, p["id"], "dm_add", "dm", row["id"], {"via": via})
-    note = f"✉️ {p['full_name']}:\n{_short(text)}\n\nОтветить — свайпом на это сообщение или в «Ещё → Сообщения»."
-    jobs = [(row["id"], h["tg_id"], note) for h in _heads(conn) if _real(h["tg_id"])]
-    return row, jobs
+    return row, []   # HEAD 10.11: личные — только в приложении, в бот не дублируем
 
 
 def _from_head(conn, head: dict, person: dict, text: str, via: str = "app", bid: int | None = None) -> tuple[dict, list]:
     row = conn.execute("""INSERT INTO dm (person_id, from_head, author_id, text, via, broadcast_id)
                           VALUES (%s, true, %s, %s, %s, %s) RETURNING *""", (person["id"], head["id"], text, via, bid)).fetchone()
-    note = f"{'📣' if bid else '✉️'} HEAD:\n{_short(text)}\n\nОтветить — свайпом на это сообщение или во вкладке «HEAD»."
+    if not bid:   # HEAD 10.11: в бот — только общая рассылка, личные остаются в приложении
+        return row, []
+    note = f"📣 HEAD:\n{_short(text)}\n\nОтветить — во вкладке «HEAD» в приложении."
     return row, ([(row["id"], person["tg_id"], note)] if _real(person["tg_id"]) else [])
 
 
@@ -199,7 +200,8 @@ def broadcast(b: CastIn, bg: BackgroundTasks, p: dict = Depends(require_head)):
 
 def from_telegram(tg_id: int, text: str, reply_to: int | None) -> str | None:
     """Личное сообщение боту. Возвращает ответ бота человеку или None (тогда бот шлёт обычное приветствие).
-    Сотрудник: любое сообщение (кроме /start) → HEAD. HEAD: ответ свайпом на уведомление → в диалог того сотрудника."""
+    Сотрудник: любое сообщение (кроме /start) → в его диалог с HEAD (без уведомления HEAD в бот).
+    HEAD: ответ свайпом на старое уведомление сотрудника (до 10.11) → в диалог; иначе — подсказка писать в приложении."""
     text = (text or "").strip()
     if not text or text.startswith("/"):
         return None
@@ -213,7 +215,7 @@ def from_telegram(tg_id: int, text: str, reply_to: int | None) -> str | None:
             src = reply_to and conn.execute("SELECT person_id FROM dm WHERE tg_msg_id=%s AND NOT from_head ORDER BY id DESC LIMIT 1",
                                             (reply_to,)).fetchone()
             if not src:
-                return "Чтобы ответить сотруднику, ответьте свайпом на его сообщение. Написать всем — в приложении: «Ещё → Сообщения»."
+                return "Сотрудникам пишите в приложении: «Ещё → Сообщения». Там же — «Написать всем»."
             who = _person(conn, src["person_id"])
             row, jobs = _from_head(conn, p, who, text, via="tg")
             conn.execute("UPDATE dm SET read_at=now() WHERE person_id=%s AND NOT from_head AND read_at IS NULL", (who["id"],))
@@ -221,6 +223,6 @@ def from_telegram(tg_id: int, text: str, reply_to: int | None) -> str | None:
             done = f"✓ Отправлено: {who['full_name']}"
         else:
             row, jobs = _to_head(conn, p, text, via="tg")
-            done = "✓ Передал HEAD. Ответ придёт сюда и во вкладку «HEAD» в приложении."
+            done = "✓ Передал HEAD. Ответ — во вкладке «HEAD» в приложении."
     _deliver(jobs)
     return done
