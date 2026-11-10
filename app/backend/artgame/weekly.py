@@ -123,3 +123,40 @@ def weekly_pay(b: WeeklyPayIn, p: dict = Depends(require_head)):
                     conn.execute("UPDATE expenses SET payout_status='paid' WHERE payout_status='to_pay' AND id = ANY(%s)", (x["expense_ids"],))
             db.audit(conn, p["id"], "fin_weekly_pay", "fin_payees", r["payee_id"], {"amount": r["total"], "ledger": ids})
     return {"ok": True, "paid": r["total"], "ledger": ids}
+
+
+# ── Ключевые цифры Пульта (HEAD 10.11): ждут оплаты, упущено, долг клиентов, в работе ─────────────────────────────
+F_LOST, F_DEBT = "UF_CRM_ARTGAME_FIN03_LOST", "UF_CRM_ARTGAME_FIN03_DEBT"
+
+
+def _bx_kpi(ym: str) -> dict:
+    from . import bx
+    from .fin_bx import DONE
+    y, m = map(int, ym.split("-"))
+    t0, t1 = f"{y}-{m:02d}-01", (f"{y + 1}-01-01" if m == 12 else f"{y}-{m + 1:02d}-01")
+    money = bx._money
+    lost = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": 0, "STAGE_SEMANTIC_ID": "F", ">=MOVED_TIME": t0, "<MOVED_TIME": t1},
+                                         "select": ["ID", "OPPORTUNITY", F_LOST]})
+    done = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": 0, "STAGE_ID": list(DONE)}, "select": ["ID", F_DEBT]})
+    work = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": 0, "STAGE_ID": "UC_AV00QK"}, "select": ["ID", "OPPORTUNITY"]})
+    lost_sum = [money(d.get(F_LOST)) for d in lost]
+    debt = [money(d.get(F_DEBT)) for d in done]
+    return {"lost": {"sum": round(sum(lost_sum)), "count": sum(1 for x in lost_sum if x > 0)},
+            "debt": {"sum": round(sum(debt)), "count": sum(1 for x in debt if x > 0)},
+            "in_work": {"sum": round(sum(money(d.get("OPPORTUNITY")) for d in work)), "count": len(work)}}
+
+
+@router.get("/fin/kpi")
+def kpi(ym: str | None = None, p: dict = Depends(require_head)):
+    ym = ym or now_ym()
+    with db.pool.connection() as conn:
+        rows = due(conn, p)
+    out = {"month": ym,
+           "due_support": round(sum(r["total"] for r in rows if r["weekly"])),
+           "due_expenses": round(sum(r["total"] for r in rows if not r["weekly"])),
+           "monday": next_monday().isoformat()}
+    try:
+        out.update(_bx_kpi(ym))
+    except Exception as e:  # noqa: BLE001 — Битрикс недоступен: остальные цифры всё равно показываем
+        out["bx_error"] = str(e)[:200]
+    return out

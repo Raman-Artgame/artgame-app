@@ -22,7 +22,10 @@ export function Pulse({ me, pulse, go }) {
   const [fin, setFin] = useState(null)
   const [fb, setFb] = useState(null)   // обращения после ответа — заново с сервера
   const [year, setYear] = useState(null)
-  useEffect(() => { api('/fin/summary?ym=' + ym()).then(setFin, e => setFin({ err: e.message })); api('/fin/year').then(setYear, () => {}) }, [])
+  const [kpi, setKpi] = useState(null)
+  const [why, setWhy] = useState(false)
+  useEffect(() => { api('/fin/summary?ym=' + ym()).then(setFin, e => setFin({ err: e.message })); api('/fin/year').then(setYear, () => {})
+    api('/fin/kpi?ym=' + ym()).then(setKpi, () => {}) }, [])
   if (p === null) return <div className="card muted">Загрузка…</div>
   if (p === false) return <div className="card muted">Пульт не загрузился. Обновите страницу.</div>
   const r = p.review
@@ -62,12 +65,23 @@ export function Pulse({ me, pulse, go }) {
       <span className="muted">Финансы ›</span></div>
       {!fin ? <p className="small muted">Считаю…</p> : fin.err ? <p className="small muted">{fin.err}</p> : <>
         <div className="kpis">
-          <div><span>Выручка с НДС</span><b>{mln(fin.revenue?.gross)}</b></div>
-          <div><span>Прибыль до ИПН</span><b className={fin.profit < 0 ? 'neg' : 'pos'}>{mln(fin.profit)}</b></div>
-          <div><span>Пришло</span><b>{mln(fin.cash?.in)}</b>{fin.cash?.in_undated > 0 && <small>без даты в сделке {mln(fin.cash.in_undated)}</small>}</div>
-          <div><span>Ушло</span><b>{mln(fin.cash?.out)}</b>{fin.cash?.out_prev_payroll > 0 && <small>из них ЗП прошлых месяцев {mln(fin.cash.out_prev_payroll)}</small>}</div>
+          <div><span>Выручка с НДС</span><b>{mln(fin.revenue?.gross)}</b><small>сдано в этом месяце</small></div>
+          <div onClick={e => { e.stopPropagation(); setWhy(!why) }}><span>Прибыль до ИПН</span><b className={fin.profit < 0 ? 'neg' : 'pos'}>{mln(fin.profit)}</b><small>{why ? 'скрыть' : 'как посчитано ›'}</small></div>
+          <div><span>Пришло</span><b>{mln(fin.cash?.in)}</b>{fin.cash?.in_undated > 0 ? <small>без даты в сделке {mln(fin.cash.in_undated)}</small> : <small>оплаты клиентов</small>}</div>
+          <div><span>Упущенная выручка</span><b className={kpi?.lost?.sum ? 'neg' : ''}>{kpi?.lost ? mln(kpi.lost.sum) : kpi?.bx_error ? '—' : '…'}</b>{kpi?.lost && <small>сделок проиграно: {kpi.lost.count}</small>}</div>
+          <div><span>Ждут оплаты: саппорт</span><b>{kpi ? mln(kpi.due_support) : '…'}</b><small>в понедельник</small></div>
+          <div><span>Ждут оплаты: расходы</span><b>{kpi ? mln(kpi.due_expenses) : '…'}</b><small>свои деньги, чеки</small></div>
+          <div><span>Долг клиентов</span><b>{kpi?.debt ? mln(kpi.debt.sum) : kpi?.bx_error ? '—' : '…'}</b>{kpi?.debt && <small>по сданным: {kpi.debt.count}</small>}</div>
+          <div><span>В работе</span><b>{kpi?.in_work ? mln(kpi.in_work.sum) : kpi?.bx_error ? '—' : '…'}</b>{kpi?.in_work && <small>сделок на выполнении: {kpi.in_work.count}</small>}</div>
         </div>
-        <p className="small muted">Выручка — проекты, сданные в этом месяце (по концу работ). Прибыль — выручка минус начисления месяца, пока месяц идёт, она неполная. Пришло — «Поступления» с датой этого месяца в сделках Битрикса.</p>
+        {why && <div className="profitwhy small" onClick={e => e.stopPropagation()}>
+          <div className="row"><span>Выручка без НДС</span><b>{mln(fin.revenue?.net)}</b></div>
+          {[['payroll', 'ФОТ (смены, оклады, % МОП)'], ['fixed', 'Постоянные (аренда, подписки)'], ['variable', 'Переменные (реклама и пр.)'], ['project', 'Расходы проектов (чеки)'],
+            ['stock', 'Закупки склада'], ['canvas', 'Мастерская холстов'], ['sales', 'Отдел продаж'], ['materials', 'Материалы (история)']]
+            .filter(([k]) => fin.costs?.[k]).map(([k, t]) => <div key={k} className="row"><span>− {t}</span><b>{mln(fin.costs[k])}</b></div>)}
+          <div className="row"><span>= Прибыль до ИПН</span><b>{mln(fin.profit)}</b></div>
+          <p className="muted">Месяц идёт: выручка — только сданные проекты, расходы — всё, что уже начислено и одобрено.</p></div>}
+        {kpi?.bx_error && <p className="small muted">Битрикс не ответил — упущено, долг и «в работе» появятся позже.</p>}
         {year?.months?.length > 1 && <><Spark values={year.months.map(m => m.net)} /><p className="small muted">Выручка без НДС по месяцам {year.year}</p></>}
       </>}
     </div>
