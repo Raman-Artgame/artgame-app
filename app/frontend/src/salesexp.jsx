@@ -1,3 +1,4 @@
+import { Receipt } from './ui.jsx'
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { enqueue, pending } from './queue.js'
@@ -27,8 +28,7 @@ function Form({ cats, left, dealId, done, cancel }) {
     <input value={v.note} onChange={e => set({ ...v, note: e.target.value })} placeholder="На что (например, такси на замер)" />
     {!dealId && <input inputMode="numeric" value={v.deal_id} onChange={e => set({ ...v, deal_id: e.target.value.replace(/\D/g, '') })} placeholder="№ сделки, если трата по ней (не обязательно)" />}
     {dealId && <p className="small muted">По сделке № {dealId}.</p>}
-    <label className="photo">{v.receipt ? <img src={v.receipt} alt="чек" /> : <span>📷 Фото чека (обязательно)</span>}
-      <input type="file" accept="image/*" capture="environment" hidden onChange={async e => e.target.files[0] && set({ ...v, receipt: await shrink(e.target.files[0]) })} /></label>
+    <Receipt value={v.receipt} need pick={async f => set({ ...v, receipt: await shrink(f) })} />
     {+v.amount > 0 && <p className={'small ' + (over || left == null ? 'why' : 'muted')}>{left == null ? 'Лимит ещё не задан — трата уйдёт на одобрение HEAD.' : over ? `Сверх лимита (осталось ${money(left)}) — уйдёт на одобрение HEAD.` : `В пределах лимита, после неё останется ${money(left - v.amount)}.`}</p>}
     <div className="dealbtns"><button disabled={busy || !(+v.amount > 0) || !v.receipt} onClick={send}>Записать трату</button>
       <button className="ghost" onClick={cancel}>Отмена</button></div>

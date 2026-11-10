@@ -220,8 +220,8 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   await spend.locator('input[placeholder^="На что"]').fill('такси на замер')
   await spend.locator('input[placeholder^="№ сделки"]').fill('1601')
   const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
-  await spend.locator('input[type=file]').setInputFiles({ name: 'chek.png', mimeType: 'image/png', buffer: PNG })
-  await spend.locator('.photo img').waitFor()
+  await spend.locator('.receipt input').first().setInputFiles({ name: 'chek.png', mimeType: 'image/png', buffer: PNG })
+  await spend.locator('.receipt img').waitFor()
   await spend.getByRole('button', { name: 'Записать трату' }).click()
   await p.locator('text=Трата ушла на одобрение HEAD.').waitFor()
 

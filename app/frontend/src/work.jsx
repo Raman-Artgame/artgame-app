@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { StatusMark } from './ui.jsx'
+import { StatusMark, Receipt } from './ui.jsx'
 import { api, testAs, uuid, viewAs } from './api.js'
 import { clearFailed, enqueue, failed, flush, pending } from './queue.js'
 import { startViewAs } from './head.jsx'
@@ -426,10 +426,7 @@ export function ExpenseForm({ done }) {
       <button className={v.paid_by === 'company' ? '' : 'ghost'} onClick={() => set({ ...v, paid_by: 'company' })}>Компании</button>
     </div>
     <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
-    <label className="photo">
-      {v.receipt ? <img src={v.receipt} alt="чек" /> : <span>{past ? '🖼 Фото чека из галереи' : '📷 Фото чека'}</span>}
-      <input type="file" accept="image/*" {...(past ? {} : { capture: 'environment' })} hidden onChange={async e => e.target.files[0] && set({ ...v, receipt: await shrink(e.target.files[0]) })} />
-    </label>
+    <Receipt value={v.receipt} pick={async f => set({ ...v, receipt: await shrink(f) })} />
     <button disabled={!v.amount} onClick={send}>Отправить расход</button>
   </div>
 }
