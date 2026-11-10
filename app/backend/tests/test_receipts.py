@@ -52,3 +52,4 @@ def test_receipt_folders(monkeypatch):
         raise AssertionError("без папки чек не должен уходить в 02 ПРОЕКТЫ")
     except RuntimeError:
         pass
+
