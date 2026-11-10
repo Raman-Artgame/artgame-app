@@ -114,6 +114,14 @@ def _bx_calls():
     return BX_CALLS
 
 
+@app.post("/api/_e2e/deal/{deal_id}")
+def _deal_fields(deal_id: str, fields: dict):
+    """Поля сделки в подменённом Битриксе: например, «Поступление 1» без даты, как вносили до 10.11 (oplaty.cjs)."""
+    DEALS[deal_id].update(fields)
+    bx._cache.clear()
+    return DEALS[deal_id]
+
+
 # Бот: сообщения складываются в SENT (код входа с компьютера смотрит тест)
 from artgame import notify  # noqa: E402
 SENT = []

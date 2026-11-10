@@ -67,7 +67,8 @@ def _failed(d: dict) -> bool:
 
 def ledger(conn, ids=None) -> dict[int, dict]:
     """Оплаты клиента из журнала по сделкам: сумма (приходы − возвраты, без отменённых) и какие поступления 1–4 сделки
-    журнал уже знает (в любом статусе: строку, которую HEAD отменил, из поля сделки обратно не считаем)."""
+    журнал уже знает (в любом статусе: строку, которую HEAD отменил, из поля сделки обратно не считаем; поле без даты,
+    которое заменили оплатой в приложении с датой и чеком, — тоже)."""
     q = ("SELECT deal_id, direction, amount, status, source, source_ref, checked_at FROM fin_ledger "
          "WHERE deal_id IS NOT NULL AND article_code = ANY(%s)")
     args = [list(IN) + ["refund"]]
@@ -77,7 +78,7 @@ def ledger(conn, ids=None) -> dict[int, dict]:
     out: dict[int, dict] = {}
     for r in conn.execute(q, args):
         x = out.setdefault(int(r["deal_id"]), {"sum": 0.0, "refs": set()})
-        if r["source"] == "bitrix" and r["source_ref"]:
+        if r["source"] in ("bitrix", "app") and str(r["source_ref"] or "").startswith("deal:"):
             x["refs"].add(r["source_ref"])
         if r["status"] == "active" and (COUNT_UNCHECKED or r["source"] != "app" or r["checked_at"] is not None):
             x["sum"] += float(r["amount"]) * (1 if r["direction"] == "in" else -1)
@@ -217,19 +218,30 @@ def card(d: dict) -> dict:
     with db.pool.connection() as conn:
         led = ledger(conn, [did]).get(did)
         rows = conn.execute(
-            """SELECT l.id, l.op_date, l.direction, l.amount, l.article_code, l.source, l.status, l.checked_at, l.note, l.receipt_file_id,
-                      ac.title AS account_title, pe.full_name AS author
+            """SELECT l.id, l.op_date, l.direction, l.amount, l.article_code, l.source, l.source_ref, l.status, l.checked_at, l.note,
+                      l.receipt_file_id, ac.title AS account_title, pe.full_name AS author
                FROM fin_ledger l JOIN fin_accounts ac ON ac.code = l.account_code LEFT JOIN people pe ON pe.id = l.created_by
                WHERE l.deal_id = %s AND l.article_code = ANY(%s) ORDER BY l.op_date DESC, l.id DESC""", (did, list(IN) + ["refund"])).fetchall()
         accounts = conn.execute("SELECT code, title FROM fin_accounts WHERE active AND code <> 'hist' ORDER BY sort, code").fetchall()
     t = target(d, led, 0)
     refs = (led or {}).get("refs", ())
-    history = [{"n": n, "date": str(_day(d.get(fd)) or ""), "amount": bx._money(d.get(fa))} for n, fa, fd in PAY
-               if bx._money(d.get(fa)) > 0 and f"deal:{did}:pay{n}" not in refs]
+    undated = _undated(d)
+    history = [{"n": n, "slot": n if f"deal:{did}:pay{n}" in undated else None, "date": str(_day(d.get(fd)) or ""),
+                "amount": bx._money(d.get(fa))} for n, fa, fd in PAY if bx._money(d.get(fa)) > 0 and f"deal:{did}:pay{n}" not in refs]
+    # slot — оплата из поля «Поступление N» без даты: у неё кнопка «Дата и чек» (заменить оплатой с датой и чеком, без двойного счёта);
+    # строку импорта, которую заменили, не показываем — вместо неё оплата с датой и чеком
+    owned = {r["source_ref"] for r in rows if r["source"] == "app" and r["source_ref"]}
     items = [with_receipt({**r, "amount": float(r["amount"]) * (1 if r["direction"] == "in" else -1), "op_date": str(r["op_date"]),
-                           "on_check": _on_check(r)}) for r in rows]
+                           "on_check": _on_check(r),
+                           "slot": undated.get(r["source_ref"]) if r["source"] == "bitrix" and r["status"] == "active" else None})
+             for r in rows if not (r["source"] == "bitrix" and r["source_ref"] in owned)]
     return {"received": t["received"], "debt": t["debt"], "lost": t["lost"], "overpaid": t["overpaid"], "items": items, "history": history,
             "on_check": round(sum(x["amount"] for x in items if x["on_check"]), 2), "accounts": accounts, "count_unchecked": COUNT_UNCHECKED}
+
+
+def _undated(d: dict) -> dict[str, int]:
+    """Поля «Поступление N» сделки с суммой, но без даты: {'deal:<ID>:payN': N}."""
+    return {f"deal:{int(d['ID'])}:pay{n}": n for n, fa, fd in PAY if bx._money(d.get(fa)) > 0 and _day(d.get(fd)) is None}
 
 
 def _on_check(r: dict) -> bool:
@@ -261,6 +273,7 @@ class PaymentIn(BaseModel):
     account: str = Field(min_length=1, max_length=40)
     receipt: str = Field(min_length=30, max_length=8_000_000)
     note: str | None = Field(default=None, max_length=300)
+    slot: int | None = Field(default=None, ge=1, le=4)   # «Дата и чек»: эта оплата — «Поступление N» сделки без даты
 
 
 def _income_receipt(conn, p: dict, name: str, data_url: str, deal_id: int) -> int:
@@ -280,7 +293,8 @@ def _income_receipt(conn, p: dict, name: str, data_url: str, deal_id: int) -> in
 @router.post("/bx/deals/{deal_id}/payment")
 def add_payment(deal_id: int, b: PaymentIn, bg: BackgroundTasks, p: dict = Depends(active)):
     """Оплата клиента с фото чека → журнал денег (сразу в «Поступило»), чек — в папку сделки «Приходы чеки», HEAD сверяет.
-    Оплата до 01.11.2026 (нашли задним числом) — в счёт «История»: долг сделки уменьшает, в деньги ноября не входит."""
+    Оплата до 01.11.2026 (нашли задним числом) — в счёт «История»: долг сделки уменьшает, в деньги ноября не входит.
+    slot — «Дата и чек» к полю «Поступление N» без даты (Анна 09–10.11): оплата заменяет поле, поле больше не считается."""
     d = _deal_for_pay(p, deal_id)
     cat = int(d.get("CATEGORY_ID") or 0)
     if cat not in bx.CATEGORIES:
@@ -289,6 +303,7 @@ def add_payment(deal_id: int, b: PaymentIn, bg: BackgroundTasks, p: dict = Depen
     if not HIST_FROM <= b.op_date <= today:
         raise HTTPException(400, f"дата оплаты — с {HIST_FROM:%d.%m.%Y} по сегодня")
     hist = b.op_date < START
+    ref = f"deal:{deal_id}:pay{b.slot}" if b.slot else None
     with db.pool.connection() as conn, conn.transaction():
         dup = conn.execute("SELECT * FROM fin_ledger WHERE client_uid=%s", (b.client_uid,)).fetchone()
         if dup:   # повтор из офлайн-очереди телефона
@@ -296,15 +311,28 @@ def add_payment(deal_id: int, b: PaymentIn, bg: BackgroundTasks, p: dict = Depen
         account = "hist" if hist else b.account
         if (b.account == "hist" and not hist) or not conn.execute("SELECT 1 FROM fin_accounts WHERE code=%s AND active", (account,)).fetchone():
             raise HTTPException(400, "нет такого счёта")
+        if ref:
+            if ref not in _undated(d):
+                raise HTTPException(400, f"у «Поступление {b.slot}» в сделке нет суммы без даты")
+            known = conn.execute("SELECT source, status FROM fin_ledger WHERE source IN ('bitrix','app') AND source_ref=%s FOR UPDATE",
+                                 (ref,)).fetchall()
+            if any(r["source"] == "app" for r in known):
+                raise HTTPException(409, "дату и чек к этой оплате уже внесли")
+            if known and not any(r["status"] == "active" for r in known):
+                raise HTTPException(409, "эту оплату HEAD отменил в журнале")
+            # приход, который импорт поставил днём, когда увидел поле, — отменяем: вместо него оплата с датой и чеком
+            conn.execute("UPDATE fin_ledger SET status='cancelled' WHERE source='bitrix' AND source_ref=%s AND status='active'", (ref,))
         title = str(d.get("TITLE") or f"сделка {deal_id}")[:80]
         fid = _income_receipt(conn, p, f"{b.op_date} приход {b.amount:.0f} {title}".replace("/", "-"), b.receipt, deal_id)
-        note = " · ".join(x for x in (title, f"внёс {p['full_name']}", "до ноября" if hist else "", (b.note or "").strip()) if x)
+        note = " · ".join(x for x in (title, f"внёс {p['full_name']}", "до ноября" if hist else "",
+                                      f"вместо «Поступление {b.slot}» без даты" if ref else "", (b.note or "").strip()) if x)
         row = finance.add_ledger(conn, p, client_uid=b.client_uid, op_date=b.op_date, account=account, direction="in", amount=b.amount,
                                  article="design_prepay" if cat == DESIGN else "client_payment", period=f"{b.op_date:%Y-%m}",
-                                 deal_id=deal_id, note=note[:500], receipt_file_id=fid, source="app")
+                                 deal_id=deal_id, note=note[:500], receipt_file_id=fid, source="app", source_ref=ref)
         if p["role_code"] == "head" and not p.get("_view_as"):   # оплата, которую внёс сам HEAD, сверять не нужно
             row = conn.execute("UPDATE fin_ledger SET checked_at=now(), checked_by=%s WHERE id=%s RETURNING *", (p["id"], row["id"])).fetchone()
-        db.audit(conn, p["id"], "client_payment_add", "deal", deal_id, {"amount": b.amount, "ledger": row["id"], "account": account})
+        db.audit(conn, p["id"], "client_payment_add", "deal", deal_id,
+                 {"amount": b.amount, "ledger": row["id"], "account": account, **({"slot": b.slot} if ref else {})})
     bg.add_task(push_deal, deal_id)
     return {"ok": True, "row": with_receipt(row), "pay": card(d)}
 

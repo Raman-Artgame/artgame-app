@@ -48,7 +48,10 @@ def import_payments(conn, since: date = START, until: date | None = None, ids: l
         for n, fa, fd in PAY:
             amount, day = bx._money(d.get(fa)), _day(d.get(fd))
             ref = f"deal:{did}:pay{n}"
-            rows = conn.execute("SELECT * FROM fin_ledger WHERE source='bitrix' AND source_ref=%s ORDER BY id DESC", (ref,)).fetchall()
+            rows = conn.execute("SELECT * FROM fin_ledger WHERE source IN ('bitrix','app') AND source_ref=%s ORDER BY id DESC",
+                                (ref,)).fetchall()
+            if any(r["source"] == "app" for r in rows):
+                continue   # HEAD 10.11: к полю без даты внесли в приложении оплату с датой и чеком — поле больше не читаем
             old = next((r for r in rows if r["status"] == "active"), None)
             undated = False
             if amount > 0 and day is None and ids is None and not _closed(d.get("STAGE_ID")):

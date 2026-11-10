@@ -300,41 +300,48 @@ function ContactFix({ d, onDone }) {
 // Оплаты сделки (HEAD 10.11): журнал приложения — внесённые здесь, из полей «Поступление» и HEAD; ниже — история из полей сделки
 // год — только у прошлогодних оплат: «10 нояб.», но «5 дек. 2025»
 const pdate = x => { if (!x) return 'без даты'; const t = new Date(x); return t.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', ...(t.getFullYear() !== new Date().getFullYear() && { year: 'numeric' }) }) }
-export function Payments({ pay }) {
+// slot — оплата из поля «Поступление N» сделки без даты (так вносили до 10.11): «Дата и чек» заменяет её оплатой с датой и чеком
+export function Payments({ pay, onDate }) {
   const rows = [...(pay.items || []), ...(pay.history || []).map(h => ({ ...h, hist: true, op_date: h.date }))]
   if (!rows.length) return <p className="small muted">Оплат по сделке ещё нет.</p>
   return <div className="paylist">{rows.map((x, i) => <div key={x.id || 'h' + i} className="row" style={x.status === 'cancelled' ? { opacity: .45, textDecoration: 'line-through' } : null}>
     <div><b>{money(x.amount)}</b> <span className="small muted">{x.hist ? 'из поля сделки' : x.account_title}</span>
-      <div className="small muted">{[pdate(x.op_date), !x.hist && (x.source === 'bitrix' ? 'из поля «Поступление»' : x.author), x.status === 'cancelled' && 'отменено HEAD'].filter(Boolean).join(' · ')}
+      <div className="small muted">{[x.slot ? 'без даты' : pdate(x.op_date), !x.hist && (x.source === 'bitrix' ? 'из поля «Поступление»' : x.author), x.status === 'cancelled' && 'отменено HEAD'].filter(Boolean).join(' · ')}
         {x.receipt_url && <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></>}</div></div>
     {x.on_check && <span className="tag draft">на сверке</span>}
+    {x.slot && onDate && <button className="mini" onClick={() => onDate(x)}>Дата и чек</button>}
   </div>)}</div>
 }
 
 // «Внести оплату»: сумма, дата (сегодня), счёт, фото чека обязательно. Нет сети — запись ждёт на телефоне и уходит сама.
 // Оплата до 01.11.2026 (нашли задним числом) — в счёт «История»: долг сделки уменьшает, в деньги ноября не входит.
 const START = '2026-11-01'
-export function PaySheet({ d, onClose, onDone }) {
+// slot — «Дата и чек» к оплате из поля «Поступление N» без даты: сумма уже стоит, оплата заменит поле, двойного счёта нет.
+export function PaySheet({ d, slot, onClose, onDone }) {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Almaty' })
   const accounts = d.pay.accounts || []
-  const [v, set] = useState({ amount: '', op_date: today, account: accounts[0]?.code || '', note: '', receipt: '' })
+  const [v, set] = useState({ amount: slot ? String(Math.round(slot.amount)) : '', op_date: today, account: accounts[0]?.code || '', note: '', receipt: '' })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const hist = !!v.op_date && v.op_date < START
+  const undated = slot ? [] : [...(d.pay.items || []), ...(d.pay.history || [])].filter(x => x.slot)
   const send = async () => {
     const path = `/bx/deals/${d.id}/payment`
-    const body = { client_uid: uuid(), amount: +v.amount, op_date: v.op_date, account: hist ? 'hist' : v.account, note: v.note.trim() || null, receipt: v.receipt }
+    const body = { client_uid: uuid(), amount: +v.amount, op_date: v.op_date, account: hist ? 'hist' : v.account, note: v.note.trim() || null, receipt: v.receipt,
+      ...(slot && { slot: slot.slot }) }
     setBusy(true); setErr('')
     try {
       await api(path, { method: 'POST', body })
-      onDone(d.pay.count_unchecked ? 'Оплата внесена: «Поступило» обновлено, HEAD сверит чек.' : 'Оплата внесена: войдёт в «Поступило» после сверки HEAD.')
+      onDone(slot ? 'Дата и чек сохранены: оплата заменила поле сделки, HEAD сверит.' : d.pay.count_unchecked ? 'Оплата внесена: «Поступило» обновлено, HEAD сверит чек.' : 'Оплата внесена: войдёт в «Поступило» после сверки HEAD.')
     } catch (e) {
       if (!e.status || e.status >= 500) { await enqueue(path, body); onDone('Нет связи с сервером: оплата сохранена на телефоне и уйдёт сама.') }
       else setErr(e.message)
     } finally { setBusy(false) }
   }
-  return <Sheet title="Внести оплату" onClose={onClose}>
+  return <Sheet title={slot ? 'Дата и чек к оплате' : 'Внести оплату'} onClose={onClose}>
     <div className="dealedit">
+      {slot && <p className="small muted">Оплата {money(slot.amount)} из поля «Поступление {slot.slot}» без даты. Укажите дату и фото чека: она заменит поле, двойного счёта не будет.</p>}
+      {!!undated.length && <p className="small why">В сделке есть оплата без даты: {undated.map(x => money(x.amount)).join(', ')}. Если вносите её, закройте это окно и нажмите «Дата и чек» у неё в списке, иначе она задвоится.</p>}
       <input inputMode="numeric" value={v.amount} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder="Сумма, ₸" />
       <label className="small muted">Дата оплаты <input type="date" value={v.op_date} min="2025-01-01" max={today} onChange={e => set({ ...v, op_date: e.target.value })} /></label>
       {hist ? <p className="small why">Оплата до ноября уйдёт в «Историю»: долг сделки уменьшит, в деньги ноября не войдёт.</p> :
@@ -342,7 +349,7 @@ export function PaySheet({ d, onClose, onDone }) {
       <input value={v.note} onChange={e => set({ ...v, note: e.target.value })} placeholder="Комментарий, например «аванс 50%»" />
       <Receipt value={v.receipt} need pick={async f => set({ ...v, receipt: await shrink(f) })} />
       {err && <p className="small why">{err}</p>}
-      <div className="dealbtns"><button disabled={busy || !(+v.amount > 0) || !v.receipt || !v.op_date || !(hist || v.account)} onClick={send}>{busy ? 'Отправляю…' : `Внести ${+v.amount > 0 ? money(+v.amount) : ''}`}</button>
+      <div className="dealbtns"><button disabled={busy || !(+v.amount > 0) || !v.receipt || !v.op_date || !(hist || v.account)} onClick={send}>{busy ? 'Отправляю…' : `${slot ? 'Сохранить' : 'Внести'} ${+v.amount > 0 ? money(+v.amount) : ''}`}</button>
         <button className="ghost" onClick={onClose}>Отмена</button></div>
     </div>
   </Sheet>
@@ -445,7 +452,7 @@ export function DealCard({ id, back, place }) {
           {d.pay.next && <div><span className="muted small">Ближайший платёж</span><b>{d.pay.next.slice(0, 10)}</b></div>}
         </div>
         {d.pay.on_check > 0 && <p className="small why">На сверке у HEAD: {money(d.pay.on_check)}{d.pay.count_unchecked ? ' (уже в «Поступило»)' : ' (войдёт в «Поступило» после ✓ HEAD)'}.</p>}
-        <Payments pay={d.pay} />
+        <Payments pay={d.pay} onDate={x => setSheet({ kind: 'pay', slot: x })} />
         <p className="small muted">Оплату вносите здесь, с фото чека: чек ляжет в папку сделки «Приходы чеки», HEAD сверит, «Поступило» и «Долг» в Битриксе приложение запишет само. Когда аванс пришёл и договор подписан — переведите сделку в работу и передайте куратору.</p>
         <div className="dealbtns wrapbtns">
           <button className="mini" onClick={() => setSheet({ kind: 'pay' })}>+ Внести оплату</button>
@@ -471,7 +478,7 @@ export function DealCard({ id, back, place }) {
     {sheet?.kind === 'stage' && <StageSheet d={d} stages={stages} onClose={() => setSheet(null)} onDone={said} onFill={() => setSheet({ kind: 'fill' })} />}
     {sheet?.kind === 'fill' && <FillSheet d={d} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'note' && <NoteSheet d={d} initial={sheet.text} onClose={() => setSheet(null)} onDone={said} />}
-    {sheet?.kind === 'pay' && <PaySheet d={d} onClose={() => setSheet(null)} onDone={said} />}
+    {sheet?.kind === 'pay' && <PaySheet d={d} slot={sheet.slot} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'say' && <Scripts codes={codes} algoStep={algo[0]} title={`Скрипты: ${name(cur)}`} onClose={() => setSheet(null)} />}
   </>
 }
