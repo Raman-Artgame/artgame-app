@@ -742,3 +742,4 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 /* строка медиа с кнопкой «⬇» справа — в одну линию (галерея, медиатека, 10.11) */
 .mitem:has(> button.mini) { grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; }
 .mitem > button.mini { width: 44px; height: 44px; padding: 0; }
+.nowrap { white-space: nowrap; }

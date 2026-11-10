@@ -110,13 +110,16 @@ async function tab(p, name) {
 
   // 4. «ФОТ»: пересчёт — у плотника возмещение 12 000 (свои деньги), выплата с Kaspi
   await h.locator('.segf').getByRole('button', { name: 'ФОТ' }).click()
+  // «К выплате в понедельник» (HEAD 10.11): чек плотника «свои деньги» — к выплате, «Выплачено» — и он видит статус
+  const mon = h.locator('.card', { hasText: 'К выплате в понедельник' })
+  const mrow = mon.locator('.row', { hasText: 'Плотник Арман' })
+  await mrow.getByText(/чеки за 11\.2026: 12\s000/).waitFor()
+  await h.screenshot({ path: `${shots}/fin-ponedelnik.png` })
+  await mrow.getByRole('button', { name: 'Выплачено' }).click()
+  await mon.getByText('Всё выплачено.').waitFor()
+  const fot = h.locator('.card', { hasText: 'Пересчитать' })
   await h.getByRole('button', { name: 'Пересчитать' }).click()
-  const row = h.locator('.row', { hasText: 'Плотник Арман' }).first()
-  await row.getByText('осталось 12').waitFor()
-  await row.locator('.head').click()
-  await row.getByPlaceholder(/Выплата/).fill('12000')
-  await row.getByRole('button', { name: 'Отметить выплату' }).click()
-  await h.locator('.row', { hasText: 'Плотник Арман' }).first().getByText('выплачено').waitFor()
+  await fot.locator('.row', { hasText: 'Плотник Арман' }).first().getByText('выплачено').waitFor()
   await h.screenshot({ path: `${shots}/fin-payroll.png` })
 
   // 5. Сводка: Kaspi 1 500 000 → 1 488 000, мастерская холстов 12 000
