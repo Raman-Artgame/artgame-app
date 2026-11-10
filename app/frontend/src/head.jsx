@@ -23,8 +23,13 @@ export function Pulse({ me, pulse, go }) {
   const [fb, setFb] = useState(null)   // обращения после ответа — заново с сервера
   const [year, setYear] = useState(null)
   const [kpi, setKpi] = useState(null)
-  const [why, setWhy] = useState(false)
-  const [lostOpen, setLostOpen] = useState(false)
+  const [open, setOpen] = useState(null)   // HEAD 10.11: каждая плитка «Деньги» раскрывает расшифровку
+  const [det, setDet] = useState({})
+  const toggle = k => {
+    setOpen(open === k ? null : k)
+    if (open !== k && !['profit', 'lost'].includes(k) && !det[k])
+      api(`/fin/kpi/${k}?ym=` + ym()).then(r => setDet(d => ({ ...d, [k]: r })), e => setDet(d => ({ ...d, [k]: { err: e.message } })))
+  }
   useEffect(() => { api('/fin/summary?ym=' + ym()).then(setFin, e => setFin({ err: e.message })); api('/fin/year').then(setYear, () => {})
     api('/fin/kpi?ym=' + ym()).then(setKpi, () => {}) }, [])
   if (p === null) return <div className="card muted">Загрузка…</div>
@@ -62,33 +67,45 @@ export function Pulse({ me, pulse, go }) {
 
     <FeedbackInbox items={fb ?? p.feedback} reload={() => api('/head/pulse').then(x => setFb(x.feedback))} />
 
-    <div className="card pulse-money" onClick={() => go('fin')} role="button"><div className="head"><h3>Деньги · {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</h3>
-      <span className="muted">Финансы ›</span></div>
+    <div className="card pulse-money"><div className="head"><h3>Деньги · {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</h3>
+      <span className="muted" role="button" onClick={() => go('fin')}>Финансы ›</span></div>
       {!fin ? <p className="small muted">Считаю…</p> : fin.err ? <p className="small muted">{fin.err}</p> : <>
         <div className="kpis">
-          <div><span>Выручка с НДС</span><b>{mln(fin.revenue?.gross)}</b><small>сдано в этом месяце</small></div>
-          <div onClick={e => { e.stopPropagation(); setWhy(!why) }}><span>Прибыль до ИПН</span><b className={fin.profit < 0 ? 'neg' : 'pos'}>{mln(fin.profit)}</b><small>{why ? 'скрыть' : 'как посчитано ›'}</small></div>
-          <div><span>Пришло</span><b>{mln(fin.cash?.in)}</b>{fin.cash?.in_undated > 0 ? <small>без даты в сделке {mln(fin.cash.in_undated)}</small> : <small>оплаты клиентов</small>}</div>
-          <div onClick={e => { e.stopPropagation(); setLostOpen(!lostOpen) }}><span>Упущенная выручка</span><b className={kpi?.lost?.sum ? 'neg' : ''}>{kpi?.lost ? mln(kpi.lost.sum) : kpi?.bx_error ? '—' : '…'}</b>{kpi?.lost && <small>{lostOpen ? 'скрыть' : `проиграно: ${kpi.lost.count} · список ›`}</small>}</div>
-          <div><span>Ждут оплаты: саппорт</span><b>{kpi ? mln(kpi.due_support) : '…'}</b><small>в понедельник</small></div>
-          <div><span>Ждут оплаты: расходы</span><b>{kpi ? mln(kpi.due_expenses) : '…'}</b><small>свои деньги, чеки</small></div>
-          <div><span>Долг клиентов</span><b>{kpi?.debt ? mln(kpi.debt.sum) : kpi?.bx_error ? '—' : '…'}</b>{kpi?.debt && <small>по сданным: {kpi.debt.count}</small>}</div>
-          <div><span>В работе</span><b>{kpi?.in_work ? mln(kpi.in_work.sum) : kpi?.bx_error ? '—' : '…'}</b>{kpi?.in_work && <small>сделок на выполнении: {kpi.in_work.count}</small>}</div>
+          {[['revenue', 'Выручка с НДС', mln(fin.revenue?.gross), '', 'сдано в этом месяце'],
+            ['profit', 'Прибыль до ИПН', mln(fin.profit), fin.profit < 0 ? 'neg' : 'pos', 'как посчитано'],
+            ['cash_in', 'Пришло', mln(fin.cash?.in), '', fin.cash?.in_undated > 0 ? `без даты в сделке ${mln(fin.cash.in_undated)}` : 'оплаты клиентов'],
+            ['lost', 'Упущенная выручка', kpi?.lost ? mln(kpi.lost.sum) : kpi?.bx_error ? '—' : '…', kpi?.lost?.sum ? 'neg' : '', kpi?.lost ? `проиграно: ${kpi.lost.count}` : ''],
+            ['support', 'Ждут оплаты: саппорт', kpi ? mln(kpi.due_support) : '…', '', 'в понедельник'],
+            ['expenses', 'Ждут оплаты: расходы', kpi ? mln(kpi.due_expenses) : '…', '', 'свои деньги, чеки'],
+            ['debt', 'Долг клиентов', kpi?.debt ? mln(kpi.debt.sum) : kpi?.bx_error ? '—' : '…', '', kpi?.debt ? `по сданным: ${kpi.debt.count}` : ''],
+            ['in_work', 'В работе', kpi?.in_work ? mln(kpi.in_work.sum) : kpi?.bx_error ? '—' : '…', '', kpi?.in_work ? `сделок на выполнении: ${kpi.in_work.count}` : '']]
+            .map(([k, t, v, cls, sub]) => <div key={k} role="button" className={open === k ? 'on' : ''} onClick={() => toggle(k)}>
+              <span>{t}</span><b className={cls}>{v}</b><small>{sub} {open === k ? '▴' : '›'}</small></div>)}
         </div>
-        {why && <div className="profitwhy small" onClick={e => e.stopPropagation()}>
+        {open === 'profit' && <div className="profitwhy small">
           <div className="row"><span>Выручка без НДС</span><b>{mln(fin.revenue?.net)}</b></div>
           {[['payroll', 'ФОТ (смены, оклады, % МОП)'], ['fixed', 'Постоянные (аренда, подписки)'], ['variable', 'Переменные (реклама и пр.)'], ['project', 'Расходы проектов (чеки)'],
             ['stock', 'Закупки склада'], ['canvas', 'Мастерская холстов'], ['sales', 'Отдел продаж'], ['materials', 'Материалы (история)']]
             .filter(([k]) => fin.costs?.[k]).map(([k, t]) => <div key={k} className="row"><span>− {t}</span><b>{mln(fin.costs[k])}</b></div>)}
           <div className="row"><span>= Прибыль до ИПН</span><b>{mln(fin.profit)}</b></div>
           <p className="muted">Месяц идёт: выручка — только сданные проекты, расходы — всё, что уже начислено и одобрено.</p></div>}
-        {lostOpen && kpi?.lost && <div className="profitwhy lostlist small" onClick={e => e.stopPropagation()}>
+        {open === 'lost' && kpi?.lost && <div className="profitwhy lostlist small">
           <b>Проиграно в этом месяце</b>
           {!kpi.lost.items?.length ? <p className="muted">Проигранных сделок нет.</p> : kpi.lost.items.map(x => <div key={x.id} className="row">
             <div><b>№{x.id} {x.title}</b><div className={x.reason ? '' : 'why'}>{x.reason || 'причина не указана'}</div>
               <div className="muted">{x.stage}{x.day ? ' · ' + new Date(x.day + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : ''}{x.by_deal ? ' · «Упущено» пусто, взята сумма сделки' : ''}</div></div>
             <b className="nowrap">{x.amount ? mln(x.amount) : '—'}</b></div>)}
           <p className="muted">Причина — из поля причины отказа в сделке. Тестовые сделки не считаются.</p></div>}
+        {open && !['profit', 'lost'].includes(open) && <div className="profitwhy lostlist small">
+          {!det[open] ? <p className="muted">Загрузка…</p> : det[open].err ? <p className="why">{det[open].err}</p> : <>
+            {!det[open].items.length && <p className="muted">Пусто.</p>}
+            {det[open].items.map((x, i) => <div key={i} className="row">
+              <div><b>{x.title}</b>{x.sub && <div className={x.warn ? 'why' : 'muted'}>{x.sub}</div>}
+                {x.lines?.map((l, j) => <div key={j} className="muted">{l.t} · {money(l.amount)}{l.receipt_url && <> · <a href={l.receipt_url} target="_blank" rel="noreferrer">чек</a></>}</div>)}</div>
+              <b className="nowrap">{mln(x.amount)}</b></div>)}
+            <p className="muted">{det[open].note}</p>
+            {['support', 'expenses'].includes(open) && <button className="mini" onClick={() => go('fin')}>К выплате в понедельник ›</button>}</>}
+        </div>}
         {kpi?.bx_error && <p className="small muted">Битрикс не ответил — упущено, долг и «в работе» появятся позже.</p>}
         {year?.months?.length > 1 && <><Spark values={year.months.map(m => m.net)} /><p className="small muted">Выручка без НДС по месяцам {year.year}</p></>}
       </>}

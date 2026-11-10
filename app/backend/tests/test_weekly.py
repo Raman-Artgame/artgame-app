@@ -125,3 +125,23 @@ def test_print_shift_is_workshop(client):
     today = client.get("/api/head/pulse", headers=hdr(1000)).json()["today"]
     assert today[0]["object_title"] == "Мастерская"
     assert client.get("/api/my", headers=hdr(6100)).json()["shifts"][0]["object_title"] == "Мастерская"
+
+
+def test_kpi_tiles_detail(client, team, monkeypatch):
+    """HEAD 10.11: каждая плитка «Деньги» раскрывается — кто ждёт оплаты, чьи чеки, должники, сделки в работе."""
+    from artgame import bx
+    monkeypatch.setattr(bx, "read_all", lambda m, prm, fresh=False: [
+        {"ID": "943", "TITLE": "943 · ФОК — АТЫРАУ", "STAGE_ID": "UC_BMKDS4", "OPPORTUNITY": "9787500", "UF_CRM_ARTGAME_FIN03_DEBT": "6597500|KZT",
+         "UF_CRM_ARTGAME_FIN03_RECEIVED": "3190000|KZT"}])
+    e = client.post("/api/expenses", json={"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "category": "paint",
+                                            "amount": 4500, "note": "краска"}, headers=hdr(5000)).json()
+    client.post(f"/api/expense/{e['id']}/review", json={"approve": True}, headers=hdr(1000))
+    ex = client.get("/api/fin/kpi/expenses", headers=hdr(1000)).json()
+    assert ex["items"][0]["title"] == "P5000" and ex["items"][0]["lines"][0]["amount"] == 4500 and "краска" in ex["items"][0]["lines"][0]["t"]
+    assert client.get("/api/fin/kpi/support", headers=hdr(1000)).json()["items"] == []
+    d = client.get("/api/fin/kpi/debt", headers=hdr(1000)).json()["items"]
+    assert d[0]["amount"] == 6597500 and "ФОК" in d[0]["title"]
+    assert client.get("/api/fin/kpi/in_work", headers=hdr(1000)).json()["items"][0]["amount"] == 9787500
+    assert client.get("/api/fin/kpi/cash_in", headers=hdr(1000)).json()["items"] == []
+    assert client.get("/api/fin/kpi/nope", headers=hdr(1000)).status_code == 404
+    assert client.get("/api/fin/kpi/debt", headers=hdr(5000)).status_code == 403
