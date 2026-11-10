@@ -77,7 +77,12 @@ def work_dict(p: dict = Depends(active)):
             "objects": conn.execute("""SELECT o.id, o.title, o.city, c.person_id IS NOT NULL AS mine FROM objects o
                                        LEFT JOIN object_crew c ON c.object_id=o.id AND c.person_id=%s
                                        WHERE o.status='active' AND (o.id=0 OR o.bitrix_stage=%s)
-                                       ORDER BY (c.person_id IS NOT NULL) DESC, o.id DESC""", (p["id"], sync_objects.WORK)).fetchall(),
+                                       ORDER BY (c.person_id IS NOT NULL) DESC, o.id DESC""", (p["id"], sync_objects.WORK)).fetchall()
+                       if not set(p.get("roles") or [p["role_code"]]) & set(WORKSHOP_ROLES) else
+                       [{**o, "title": SHOP} if o["id"] == 0 else o for o in conn.execute("""SELECT o.id, o.title, o.city, c.person_id IS NOT NULL AS mine
+                                       FROM objects o LEFT JOIN object_crew c ON c.object_id=o.id AND c.person_id=%s
+                                       WHERE o.status='active' AND (o.id=0 OR o.bitrix_stage=%s)
+                                       ORDER BY (c.person_id IS NOT NULL) DESC, o.id DESC""", (p["id"], sync_objects.WORK)).fetchall()],
             "categories": cats_for(conn, p["role_code"]),
             "zones": p["zones"],
             "printer": consts.latest(conn).get("print.tech.printer"),
@@ -588,9 +593,15 @@ def more_photos(conn, rows: list[dict]) -> list[dict]:
     return rows
 
 
+SHOP = "Мастерская"
+# HEAD 10.11: печать (мастер, оператор) работает в мастерской — их смены без объекта подписываем «Мастерская»
+SHOP_SQL = ("CASE WHEN {s}.object_id=0 AND ({s}.kind='workshop' OR {pe}.role_code IN ('print_master','print_operator')) "
+            "THEN 'Мастерская' ELSE o.title END")
+
+
 def shop_title(s: dict) -> dict:
     """Смена в мастерской: вместо «Офис / без объекта» — «Мастерская · ТО принтера»."""
-    if s.get("kind") == "workshop":
+    if s.get("kind") == "workshop" or (s.get("object_id") == 0 and s.get("object_title") == SHOP):
         s["object_title"] = "Мастерская" + (f" · {s['task']}" if s.get("task") else "")
     return s
 
@@ -606,7 +617,8 @@ def with_receipt(e: dict) -> dict:
 def my(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         return {
-            "shifts": more_photos(conn, [shop_title(photos(s)) for s in conn.execute("""SELECT s.*, o.title AS object_title FROM shifts s JOIN objects o ON o.id=s.object_id
+            "shifts": more_photos(conn, [shop_title(photos(s)) for s in conn.execute(f"""SELECT s.*, {SHOP_SQL.format(s="s", pe="pe")} AS object_title FROM shifts s JOIN objects o ON o.id=s.object_id
+                                      JOIN people pe ON pe.id=s.person_id
                                       WHERE person_id=%s ORDER BY started_at DESC LIMIT 100""", (p["id"],)).fetchall()]),
             "expenses": [with_receipt(e) for e in conn.execute("""SELECT e.*, o.title AS object_title FROM expenses e JOIN objects o ON o.id=e.object_id
                                         WHERE person_id=%s ORDER BY created_at DESC LIMIT 100""", (p["id"],)).fetchall()],
@@ -648,9 +660,13 @@ def review_list(p: dict = Depends(active)):
         out = {}
         for kind, t in TABLE.items():
             out[t] = conn.execute(
-                f"""SELECT x.*, o.title AS object_title, pe.full_name AS person_name
+                f"""SELECT x.*, o.title AS object_title, pe.full_name AS person_name, pe.role_code AS person_role
                     FROM {t} x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id
                     WHERE x.status='submitted' AND {cond} ORDER BY x.created_at""", args).fetchall()
+            if t == "shifts":
+                for x in out[t]:
+                    if x["object_id"] == 0 and (x.get("kind") == "workshop" or x["person_role"] in WORKSHOP_ROLES):
+                        x["object_title"] = SHOP
         cats = {c["code"]: c for c in conn.execute("SELECT code, title, article FROM expense_categories").fetchall()}
         flags = {}   # покупки по каталогу: почему ждёт HEAD (выше потолка / нет ориентира)
         for r in conn.execute("""SELECT expense_id, array_agg(DISTINCT flag) AS f FROM stock_lines
