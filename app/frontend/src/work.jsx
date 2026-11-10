@@ -162,6 +162,7 @@ export function ShiftForm({ done }) {
 // фото по возможности → сразу на проверку с пометкой «задним числом». Открыто до даты из настроек сервера.
 const dm = x => new Date(x).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
 const yday = () => { const t = new Date(); t.setDate(t.getDate() - 1); return t.toISOString().slice(0, 10) }
+const tday = () => { const t = new Date(); return new Date(t - t.getTimezoneOffset() * 6e4).toISOString().slice(0, 10) }
 function PastShift({ d, done }) {
   const b = d.backfill
   const [open, setOpen] = useState(false)
@@ -191,10 +192,10 @@ function PastShift({ d, done }) {
   }
   return <div className="card past">
     <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
-      <div><h3>Прошлая смена</h3><p className="small muted">Внеси смены с {dm(b.from)} — до {dm(b.until)} включительно.</p></div>
+      <div><h3>Прошлая смена</h3><p className="small muted">Смены за дни с {dm(b.from)} по сегодня — если смена уже закончилась. Вносить можно до {dm(b.until)} включительно.</p></div>
       <button className="ghost mini">{open ? 'Свернуть' : 'Внести'}</button></div>
     {open && <>
-      <label className="muted">Дата</label><input type="date" min={b.from} max={yday()} value={v.day} onChange={e => set({ ...v, day: e.target.value })} />
+      <label className="muted">Дата</label><input type="date" min={b.from} max={tday()} value={v.day} onChange={e => set({ ...v, day: e.target.value })} />
       {d.workshop && <div className="segf"><button className={shop ? '' : 'on'} onClick={() => set({ ...v, workshop: '' })}>На объекте</button>
         <button className={shop ? 'on' : ''} onClick={() => set({ ...v, workshop: d.workshop[0] })}>Мастерская · без проекта</button></div>}
       {shop ? <><label className="muted">Что делал</label>

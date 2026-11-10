@@ -35,8 +35,16 @@ def test_past_shift_and_expense(client, team, monkeypatch):  # noqa: F811
     mine = next(x for x in client.get("/api/my", headers=hdr(5000)).json()["shifts"] if x["id"] == s["id"])
     assert len(mine["photos"]) == 3
     assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4())}, headers=hdr(5000)).status_code == 409
-    assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "day": _today().isoformat()},
-                       headers=hdr(5000)).status_code == 400
+    # сегодня (HEAD 10.11): ещё идущую смену — нельзя, с понятным текстом; уже закончившуюся — можно
+    r = client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "day": _today().isoformat(), "start_time": "23:59"},
+                    headers=hdr(5000))
+    assert r.status_code == 400 and "ещё не закончилась" in r.json()["detail"]
+    from datetime import datetime as _dt
+    from artgame.work import TZ as _TZ
+    if _dt.now(_TZ).hour >= 1:   # тест в первый час после полуночи пропускает этот шаг
+        ok = client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "day": _today().isoformat(), "start_time": "00:00",
+                                                   "hours": 0.5}, headers=hdr(5000))
+        assert ok.status_code == 200 and ok.json()["backfill"]
     assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "day": (y - timedelta(days=9)).isoformat()},
                        headers=hdr(5000)).status_code == 400
     # проверка видит её у Главного

@@ -44,12 +44,20 @@ def backfill_window() -> dict:
     return {"from": a.isoformat(), "until": b.isoformat(), "open": a <= today <= b}
 
 
-def check_past_day(day: date) -> datetime:
+def _ru(d: str) -> str:
+    x = date.fromisoformat(d)
+    return f"{x.day} {['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][x.month - 1]}"
+
+
+def check_past_day(day: date, today_ok: bool = False) -> datetime:
+    """День «задним числом». today_ok — смена, которая сегодня уже закончилась (HEAD 10.11: обучение в мастерской 15:30–18:00)."""
     w = backfill_window()
     if not w["open"]:
-        raise HTTPException(400, f"Внести задним числом можно было до {w['until']}")
-    if day < date.fromisoformat(w["from"]) or day >= datetime.now(TZ).date():
-        raise HTTPException(400, f"Дата — с {w['from']} по вчера")
+        raise HTTPException(400, f"Внести задним числом можно было до {_ru(w['until'])}")
+    today = datetime.now(TZ).date()
+    if day < date.fromisoformat(w["from"]) or day > today or (day == today and not today_ok):
+        raise HTTPException(400, f"Выберите день с {_ru(w['from'])} по {'сегодня' if today_ok else 'вчера'}"
+                                 + ("" if today_ok else ". Сегодняшнюю трату внесите обычным способом — без «задним числом»"))
     return datetime(day.year, day.month, day.day, 9, 0, tzinfo=TZ)
 
 
@@ -378,12 +386,14 @@ def past_shift(b: PastIn, p: dict = Depends(active)):
         check_zone(conn, p, b.zone_code, b.object_id, past=True)
         if not b.object_id and not shop:
             raise HTTPException(400, "Смена — только на объекте")
-        start = check_past_day(b.day)
+        start = check_past_day(b.day, today_ok=True)
         if b.start_time:
             h, m = (int(x) for x in b.start_time.split(":"))
             if h > 23 or m > 59:
                 raise HTTPException(422, "Время начала — от 0:00 до 23:59")
             start = start.replace(hour=h, minute=m)
+        if start + timedelta(hours=b.hours) > datetime.now(TZ) + timedelta(minutes=10):
+            raise HTTPException(400, "Эта смена ещё не закончилась. Начните её на вкладке «Смена», а когда закончите — нажмите «Закончить»")
         # день дороги не мешает рабочей смене в тот же день (HEAD 09.11: Ажар не могла внести 8.11 из-за дороги)
         if conn.execute("""SELECT 1 FROM shifts WHERE person_id=%s AND status NOT IN ('rejected','cancelled') AND kind <> 'road'
                            AND started_at >= %s AND started_at < %s + interval '1 day'""", (p["id"], start.replace(hour=0, minute=0), start.replace(hour=0, minute=0))).fetchone():
