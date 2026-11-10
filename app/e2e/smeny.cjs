@@ -85,8 +85,9 @@ async function tab(p, name) {
   // 3. Расход без сети → очередь → сеть вернулась → ушёл
   await a.getByRole('button', { name: 'Расход' }).click()
   await a.locator('input[inputmode=numeric]').fill('15000')
-  await a.locator('input[type=file]').setInputFiles(__dirname + '/chek.png')
-  await a.locator('.photo img').waitFor()
+  await a.locator('.receipt input').first().setInputFiles(__dirname + '/chek.png')   // из галереи (HEAD 10.11)
+  await a.locator('.receipt img').waitFor()
+  await a.screenshot({ path: `${shots}/rashod-chek.png`, fullPage: true })
   await ctx.setOffline(true)
   await a.getByRole('button', { name: 'Отправить расход' }).click()
   await a.getByText('Сохранено на телефоне').waitFor()

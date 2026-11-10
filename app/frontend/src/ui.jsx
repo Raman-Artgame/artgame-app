@@ -76,3 +76,17 @@ export function StatusMark({ status }) {
   const [i, t] = MARK[status] || ['?', status]
   return <span className={'stmark st-' + status} title={t} aria-label={t}>{i}</span>
 }
+
+// Чек: снять камерой или взять из галереи — чеки чаще всего скриншоты (HEAD 10.11). pick(file) — у вызывающего (сжатие).
+export function Receipt({ value, pick, need }) {
+  const input = cam => <input type="file" accept="image/*" {...(cam ? { capture: 'environment' } : {})} hidden
+    onChange={e => { const f = e.target.files[0]; e.target.value = ''; f && pick(f) }} />
+  return <div className="receipt">
+    {value && <img src={value} alt="чек" />}
+    <div className="seg">
+      <label className="btnlike">🖼 {value ? 'Другой' : 'Из галереи'}{input(false)}</label>
+      <label className="btnlike ghost">📷 Снять{input(true)}</label>
+    </div>
+    {!value && <p className="small muted">{need ? 'Фото чека обязательно: ' : ''}скриншот из галереи или снимок камерой.</p>}
+  </div>
+}

@@ -1,3 +1,4 @@
+import { Receipt } from './ui.jsx'
 import React, { useEffect, useState } from 'react'
 import { api, uuid } from './api.js'
 import { enqueue, pending } from './queue.js'
@@ -315,8 +316,7 @@ function PurchaseForm({ cat, done, cancel }) {
       <button className={v.paid_by === 'company' ? 'on' : ''} onClick={() => set({ ...v, paid_by: 'company' })}>Деньги компании</button></div>
     <input value={v.note} onChange={e => set({ ...v, note: e.target.value })} placeholder="Комментарий (магазин, зачем срочно)" />
     <input inputMode="numeric" value={v.deal_id} onChange={e => set({ ...v, deal_id: e.target.value.replace(/\D/g, '') })} placeholder="№ сделки, если под проект (не обязательно)" />
-    <label className="photo">{v.receipt ? <img src={v.receipt} alt="чек" /> : <span>📷 Фото чека (обязательно)</span>}
-      <input type="file" accept="image/*" capture="environment" hidden onChange={async e => e.target.files[0] && set({ ...v, receipt: await shrink(e.target.files[0]) })} /></label>
+    <Receipt value={v.receipt} need pick={async f => set({ ...v, receipt: await shrink(f) })} />
     {lines.length > 0 && <p className={'small ' + (toHead ? 'why' : 'muted')}>{toHead ? 'Есть цена выше потолка или позиция без ориентира — покупка уйдёт на одобрение HEAD.' : 'Все цены в пределах потолка — покупка примется сразу.'}</p>}
     <div className="dealbtns"><button disabled={busy || !ready} onClick={send}>Записать покупку</button>
       <button className="ghost" onClick={cancel}>Отмена</button></div>
