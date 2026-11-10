@@ -18,10 +18,11 @@ PROJECTS_ROOT_ID = "1_33LDppwOu02ToP4c3uUS-mPux5mPIJf"
 # Папка сделки (утверждено HEAD 10.11, названия буква в букву с тредом Диска):
 #   ДИЗАЙН (эскизы) / Утвержденные дизайны · ДИЗАЙН / Фото объекта (фото для наложения макетов)
 #   МЕДИА / Отчёты (всё, что снято на объекте) · МЕДИА / Продакшн (утверждённое HEAD) · МЕДИА / Рилс
-#   ДОКУМЕНТЫ · РАСХОДЫ ЧЕКИ.  Других подпапок приложение не создаёт.
+#   ДОКУМЕНТЫ · ПРИХОДЫ ЧЕКИ (оплаты клиентов) · РАСХОДЫ ЧЕКИ.  Других подпапок приложение не создаёт.
 SUBFOLDERS = {"report": "МЕДИА/Отчёты", "prod": "МЕДИА/Продакшн", "reels": "МЕДИА/Рилс", "design": "ДИЗАЙН",
-              "design_ok": "ДИЗАЙН/Утвержденные дизайны", "site": "ДИЗАЙН/Фото объекта", "doc": "ДОКУМЕНТЫ", "receipt": "РАСХОДЫ ЧЕКИ"}
-FOLDERS_V = 2   # старше — ID подпапок ищутся заново по именам (07.11 приложение плодило «Дизайн» и «Фото объекта» рядом)
+              "design_ok": "ДИЗАЙН/Утвержденные дизайны", "site": "ДИЗАЙН/Фото объекта", "doc": "ДОКУМЕНТЫ", "receipt": "РАСХОДЫ ЧЕКИ",
+              "income": "ПРИХОДЫ ЧЕКИ"}   # чеки и платёжки клиентов (HEAD 10.11 «да»)
+FOLDERS_V = 3   # старше — ID подпапок ищутся заново по именам (07.11 приложение плодило «Дизайн» и «Фото объекта» рядом)
 FOLDER_OF = {"photo": "report", "media": "report"}   # вид файла в базе → подпапка сделки
 
 
@@ -37,9 +38,9 @@ MONTHS = ["ЯНВАРЬ", "ФЕВРАЛЬ", "МАРТ", "АПРЕЛЬ", "МАЙ"
 RECEIPTS_ROOT_ID = "1PCTnoVlAqBhvwUgBRIc8dd4murbKKnkB"
 DEPTS = {"sales": "01 Продажи", "mural": "02 Роспись", "print": "03 Печать", "design": "04 Дизайн",
          "stock": "05 Склад и мастерская холстов", "office": "06 РАСХОДЫ HEAD", "income": "07 Приходы клиентов"}
-# Чеки оплат клиентов (HEAD 10.11): папка сделки / «Приходы чеки», рядом с «Расходы чеки». Создаётся при первом чеке,
+# Чеки оплат клиентов (HEAD 10.11): папка сделки / «ПРИХОДЫ ЧЕКИ», рядом с «Расходы чеки». Создаётся при первом чеке,
 # в SUBFOLDERS не входит — иначе пустая папка появилась бы в каждой сделке. Сделка без папки → «07 Приходы клиентов».
-INCOME = "Приходы чеки"
+INCOME = "ПРИХОДЫ ЧЕКИ"
 API = "https://www.googleapis.com/drive/v3/files"
 UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 ALL = {"supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
@@ -208,17 +209,12 @@ def receipt_folder(conn, d: Drive, dept: str, deal_id: int | None) -> tuple[str,
 
 
 def save_income_receipt(conn, name: str, data_url: str, deal_id: int) -> str:
-    """Чек оплаты клиента → папка сделки / «Приходы чеки» (нет папки сделки → 10 ФИНАНСЫ / … / 07 Приходы клиентов)."""
+    """Чек оплаты клиента → папка сделки / «ПРИХОДЫ ЧЕКИ» (нет папки сделки → 10 ФИНАНСЫ / … / 07 Приходы клиентов)."""
     data, mime = decode_data_url(data_url)
     d = Drive()
     obj = conn.execute("SELECT * FROM objects WHERE id=%s", (deal_id,)).fetchone() if deal_id else None
     if obj and obj["id"] != 0:
-        folders = ensure_folders(conn, obj, d)
-        if "income" not in folders:
-            root = conn.execute("SELECT drive_folder FROM objects WHERE id=%s", (obj["id"],)).fetchone()["drive_folder"]
-            folders["income"] = d.child(root, INCOME)
-            conn.execute("UPDATE objects SET folders=%s WHERE id=%s", (json.dumps(folders), obj["id"]))
-        folder = folders["income"]
+        folder = ensure_folders(conn, obj, d)["income"]
     else:
         folder, _ = receipt_folder(conn, d, "income", None)
         if deal_id and f"сделка {deal_id}" not in name:

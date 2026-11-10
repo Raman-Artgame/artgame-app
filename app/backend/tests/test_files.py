@@ -74,8 +74,8 @@ def test_photo_upload_view_and_folders(client, fake):
     with db.pool.connection() as c:
         o = c.execute("SELECT drive_folder, folders FROM objects WHERE id=731").fetchone()
     assert o["drive_folder"] == "deal-731" and o["folders"]["report"] == "deal-731/МЕДИА/Отчёты"
-    assert set(o["folders"]) == {"v", "report", "prod", "reels", "design", "design_ok", "site", "receipt", "doc"}
-    assert o["folders"]["site"] == "deal-731/ДИЗАЙН/Фото объекта" and o["folders"]["receipt"] == "deal-731/РАСХОДЫ ЧЕКИ"
+    assert set(o["folders"]) == {"v", "report", "prod", "reels", "design", "design_ok", "site", "receipt", "doc", "income"}
+    assert o["folders"]["site"] == "deal-731/ДИЗАЙН/Фото объекта" and o["folders"]["receipt"] == "deal-731/РАСХОДЫ ЧЕКИ" and o["folders"]["income"] == "deal-731/ПРИХОДЫ ЧЕКИ"
     # другой художник видит фото в приложении
     lst = client.get("/api/objects/731/files?kind=photo", headers=hdr(5000)).json()
     assert [x["id"] for x in lst] == [f["id"]] and lst[0]["by"] == "P2000"
