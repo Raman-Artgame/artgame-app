@@ -13,7 +13,9 @@ export const clearFailed = () => { try { localStorage.removeItem(FKEY) } catch {
 export function enqueue(path, body) {
   // HEAD смотрит как сотрудник: в очередь не кладём, иначе после выхода запись ушла бы от имени HEAD
   if (viewAs() && !testAs()) { readOnlyHit(); return Promise.reject(Object.assign(new Error('read only'), { status: 403 })) }
-  const q = load(); q.push({ path, body: { client_uid: uuid(), ...body } }); save(q)
+  const q = load(); const item = { path, body: { client_uid: uuid(), ...body } }
+  // та же запись уже ждёт в очереди (повторное нажатие) — второй раз не кладём
+  if (!q.some(x => x.path === path && x.body.client_uid === item.body.client_uid)) { q.push(item); save(q) }
   return flush()
 }
 

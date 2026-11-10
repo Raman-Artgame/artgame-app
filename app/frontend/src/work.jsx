@@ -402,13 +402,19 @@ function Running({ o, d, done }) {
 export function ExpenseForm({ done }) {
   const d = useDict()
   const [v, set] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [uid] = useState(uuid)   // один расход = один client_uid: повторное нажатие не создаёт дубль (Звягина 10.11)
   useEffect(() => { if (d) set({ object_id: d.objects[0]?.id, zone_code: d.zones[0], category: d.categories[0]?.code, amount: '', paid_by: 'own', note: '' }) }, [d])
   if (!d || !v) return <div className="card muted">Загрузка…</div>
   const past = !!v.day
   const objs = past ? d.backfill.objects : d.objects
   const send = async () => {
-    const left = await enqueue('/expenses', { ...v, amount: +v.amount, day: v.day || null })
-    done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Расход отправлен на проверку.')
+    if (busy) return
+    setBusy(true)
+    try {
+      const left = await enqueue('/expenses', { ...v, client_uid: uid, amount: +v.amount, day: v.day || null })
+      done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Расход отправлен на проверку.')
+    } catch (e) { setBusy(false); throw e }
   }
   return <div className="card">
     <h2>Расход</h2>
@@ -429,7 +435,7 @@ export function ExpenseForm({ done }) {
     <p className="small muted">{v.paid_by === 'own' ? 'Свои деньги: после одобрения чек «к выплате», возвращаем в понедельник вместе с выплатами.' : 'Деньги компании: платили картой или наличными компании, тебе возвращать нечего.'}</p>
     <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
     <Receipt value={v.receipt} pick={async f => set({ ...v, receipt: await shrink(f) })} />
-    <button disabled={!v.amount} onClick={send}>Отправить расход</button>
+    <button disabled={!v.amount || busy} onClick={send}>{busy ? 'Отправляю…' : 'Отправить расход'}</button>
   </div>
 }
 

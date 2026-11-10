@@ -541,6 +541,14 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
         dup = conn.execute("SELECT * FROM expenses WHERE client_uid=%s", (e.client_uid,)).fetchone()
         if dup:
             return dup
+        # тот же расход повторно (нажала «Отправить» 3 раза, Звягина 10.11) — второй не создаём
+        same = None if e.day else conn.execute("""SELECT * FROM expenses WHERE person_id=%s AND object_id=%s AND category=%s AND amount=%s
+                                   AND paid_by=%s AND coalesce(note,'')=coalesce(%s,'') AND backfill=%s AND status<>'cancelled'
+                                   AND created_at > now() - interval '10 minutes'
+                                   ORDER BY id LIMIT 1""",
+                            (p["id"], e.object_id, e.category, e.amount, e.paid_by, e.note, bool(e.day))).fetchone()
+        if same:
+            return with_receipt(same)
         check_zone(conn, p, e.zone_code, e.object_id, past=bool(e.day))
         at = check_past_day(e.day).replace(hour=12) if e.day else None
         if e.category not in {c["code"] for c in cats_for(conn, p["role_code"])}:
