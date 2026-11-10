@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field
 
 from . import db
 from .deps import require_head
-from .finance import TZ, _f, add_ledger, compute, now_ym, sync_payees
+from .work import with_receipt
+from .finance import TZ, _f, _receipt, add_ledger, compute, now_ym, sync_payees
 
 router = APIRouter(prefix="/api")
 
@@ -78,9 +79,13 @@ def next_monday(d: date | None = None) -> date:
 def weekly(p: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         rows = due(conn, p)
-        last = conn.execute("""SELECT max(op_date) AS d FROM fin_ledger WHERE article_code='payroll' AND status='active'
-                               AND note LIKE 'Понедельник%%'""").fetchone()["d"]
-    return {"monday": next_monday(), "rows": rows, "total": round(sum(r["total"] for r in rows), 2), "last": last}
+        # что уже выплатили (HEAD 10.11: «как отслеживать, что уже оплатили»): последние выплаты с датой и чеком перевода
+        paid = [with_receipt(x) for x in conn.execute(
+            """SELECT l.id, l.op_date, l.amount, l.period, l.note, l.receipt_file_id, l.account_code, l.ack_at, f.name, a.title AS account
+               FROM fin_ledger l JOIN fin_payees f ON f.id=l.payee_id JOIN fin_accounts a ON a.code=l.account_code
+               WHERE l.article_code='payroll' AND l.status='active' AND l.op_date >= current_date - 45
+               ORDER BY l.op_date DESC, l.id DESC LIMIT 60""").fetchall()]
+    return {"monday": next_monday(), "rows": rows, "total": round(sum(r["total"] for r in rows), 2), "paid": paid}
 
 
 class WeeklyPayIn(BaseModel):
@@ -89,6 +94,7 @@ class WeeklyPayIn(BaseModel):
     account: str
     op_date: date
     amount: float = Field(gt=0)    # сколько HEAD видел на экране — сверяем, чтобы не заплатить «не то»
+    receipt: str | None = Field(default=None, max_length=8_000_000)   # чек перевода (скриншот из галереи), HEAD 10.11
 
 
 @router.post("/fin/weekly/pay")
@@ -105,12 +111,13 @@ def weekly_pay(b: WeeklyPayIn, p: dict = Depends(require_head)):
         if abs(r["total"] - b.amount) >= 1:
             raise HTTPException(409, f"сумма изменилась: сейчас к выплате {r['total']:,.0f} ₸ — обновите экран".replace(",", " "))
         with conn.transaction():
+            fid = _receipt(conn, p, f"Выплата {b.op_date} {r['name']} {r['total']:.0f}", b.receipt) if b.receipt else None
             ids = []
             for i, x in enumerate(r["lines"]):
                 uid = b.client_uid if i == 0 else uuid.uuid5(b.client_uid, x["ym"])
                 row = add_ledger(conn, p, client_uid=uid, op_date=b.op_date, account=b.account, direction="out", amount=x["amount"],
                                  article="payroll", period=x["ym"], payee_id=r["payee_id"],
-                                 note=f"Понедельник: {r['name']}, {x['what']} за {x['ym']}", source="app")
+                                 note=f"Понедельник: {r['name']}, {x['what']} за {x['ym']}", source="app", receipt_file_id=fid)
                 ids.append(row["id"])
                 if x["expense_ids"]:
                     conn.execute("UPDATE expenses SET payout_status='paid' WHERE payout_status='to_pay' AND id = ANY(%s)", (x["expense_ids"],))

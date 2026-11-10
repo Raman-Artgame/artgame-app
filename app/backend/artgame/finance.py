@@ -527,6 +527,7 @@ class PayIn(BaseModel):
     account: str
     op_date: date
     note: str | None = Field(default=None, max_length=300)
+    receipt: str | None = Field(default=None, max_length=8_000_000)   # чек перевода (HEAD 10.11)
 
 
 @router.post("/fin/payroll/{ym}/pay")
@@ -543,7 +544,8 @@ def payroll_pay(ym: str, b: PayIn, p: dict = Depends(require_head)):
         if not conn.execute("SELECT 1 FROM fin_accounts WHERE code=%s AND active", (b.account,)).fetchone():
             raise HTTPException(400, "нет такого счёта")
         row = add_ledger(conn, p, client_uid=b.client_uid, op_date=b.op_date, account=b.account, direction="out", amount=b.amount,
-                         article="payroll", period=ym, payee_id=b.payee_id, note=b.note or f"{f['name']} за {ym}", source="app")
+                         article="payroll", period=ym, payee_id=b.payee_id, note=b.note or f"{f['name']} за {ym}", source="app",
+                         receipt_file_id=_receipt(conn, p, f"Выплата {b.op_date} {f['name']} {b.amount:.0f}", b.receipt) if b.receipt else None)
         accrued = _f(conn.execute("SELECT coalesce(sum(amount),0) AS s FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='active'",
                                   (ym, b.payee_id)).fetchone()["s"])
         paid = _f(conn.execute("""SELECT coalesce(sum(amount),0) AS s FROM fin_ledger WHERE period=%s AND payee_id=%s
@@ -592,10 +594,26 @@ def my_pay(ym: str | None = None, p: dict = Depends(active)):
         if not live:
             lines = conn.execute("""SELECT kind, amount, detail FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='active' ORDER BY id""",
                                  (ym, f["id"])).fetchall()
-        pays = conn.execute("""SELECT op_date, amount FROM fin_ledger WHERE period=%s AND payee_id=%s AND article_code='payroll'
-                               AND status='active' ORDER BY op_date""", (ym, f["id"])).fetchall()
+        pays = [with_receipt(x) for x in conn.execute("""SELECT l.id, l.op_date, l.amount, l.account_code, a.title AS account, l.ack_at, l.receipt_file_id
+                               FROM fin_ledger l JOIN fin_accounts a ON a.code=l.account_code WHERE l.period=%s AND l.payee_id=%s
+                               AND l.article_code='payroll' AND l.status='active' ORDER BY l.op_date""", (ym, f["id"])).fetchall()]
     accrued, paid = sum(_f(x["amount"]) for x in lines), sum(_f(x["amount"]) for x in pays)
     return {"month": ym, "lines": lines, "payments": pays, "accrued": accrued, "paid": paid, "left": round(accrued - paid, 2), "rate": rate, "live": live}
+
+
+@router.post("/fin/my/ack/{ledger_id}")
+def my_ack(ledger_id: int, p: dict = Depends(active)):
+    """«Получил» (HEAD 10.11): сотрудник подтверждает выплату — нужно для наличных, где нет чека перевода."""
+    if p.get("_view_as"):
+        raise HTTPException(403, "режим просмотра")
+    with db.pool.connection() as conn, conn.transaction():
+        row = conn.execute("""UPDATE fin_ledger l SET ack_at=now() FROM fin_payees f
+                              WHERE l.id=%s AND f.id=l.payee_id AND f.person_id=%s AND l.ack_at IS NULL AND l.status='active'
+                              RETURNING l.id, l.ack_at""", (ledger_id, p["id"])).fetchone()
+        if not row:
+            raise HTTPException(404, "нет такой выплаты или уже подтверждена")
+        db.audit(conn, p["id"], "fin_ack", "fin_ledger", ledger_id)
+        return row
 
 
 def my_rate(v: dict, role: str | None, f: dict | None) -> list[dict]:

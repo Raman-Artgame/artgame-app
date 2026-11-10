@@ -3,7 +3,7 @@ import uuid
 
 from conftest import hdr
 from test_dual_role import _shift
-from test_files import JPEG  # noqa: F401
+from test_files import JPEG
 from test_production import VALS, Copying, team  # noqa: F401
 
 from artgame import db
@@ -39,3 +39,49 @@ def test_weekly_payouts(client, team):  # noqa: F811
     assert my["paid"] == VALS["pay.support.shift"] and my["left"] == 0
     with db.pool.connection() as c:
         assert c.execute("SELECT count(*) n FROM fin_accruals").fetchone()["n"] == 0   # расчёт онлайн, ничего не пишет
+
+
+def test_trip_costs_and_receipt(client, team, monkeypatch):  # noqa: F811
+    """HEAD 10.11: галочка «Командировка» в проекте → пункты расходов; питание пересчитывается; выплата с чеком перевода."""
+    from artgame import drive
+    monkeypatch.setattr(drive, "save_receipt", lambda conn, z, name, data, deal_id=None: "drv-r")
+    from psycopg.types.json import Jsonb
+    with db.pool.connection() as c:
+        c.execute("INSERT INTO constants_versions (checksum, values) VALUES (%s, %s)",
+                  ("t2", Jsonb({k: {"value": str(v), "status": "Утверждено", "who": "head"} for k, v in {**VALS, "pay.trip_food": 3000}.items()})))
+    s = _shift(client, 2000, "mural", 3)
+    client.post(f"/api/shift/{s['id']}/review", json={"approve": True}, headers=hdr(1000))
+    d = client.get("/api/objects/731/trip-costs", headers=hdr(3000)).json()
+    assert d["can_edit"] and not d["on"] and [i["code"] for i in d["items"]][:2] == ["lodging", "trip_road"]
+    assert client.get("/api/objects/731/trip-costs", headers=hdr(5000)).json()["can_edit"] is False
+    assert client.post("/api/objects/731/trip-set", json={"trip": True}, headers=hdr(5000)).status_code == 403
+    r = client.post("/api/objects/731/trip-set", json={"trip": True}, headers=hdr(3000)).json()     # Главный художник
+    assert r["on"] and r["retrip"] == 1 and r["food"]["days"] == 1 and r["food"]["amount"] == 3000
+    body = {"client_uid": str(uuid.uuid4()), "item": "lodging", "amount": 45000, "note": "3 ночи"}
+    r = client.post("/api/objects/731/trip-costs", json=body, headers=hdr(3000)).json()
+    assert r["costs"][0]["category_title"].startswith("Проживание") and r["costs"][0]["status"] == "submitted"
+    r = client.post("/api/objects/731/trip-costs", json={**body, "client_uid": str(uuid.uuid4()), "item": "trip_road", "amount": 30000,
+                                                       "receipt": JPEG}, headers=hdr(1000)).json()
+    road = next(c for c in r["costs"] if c["category"] == "trip_road")
+    assert road["status"] == "approved" and road["paid_by"] == "company" and road["receipt_url"]
+    assert r["total"] == 45000 + 30000 + 3000
+    # выплата саппорту в понедельник: смена + питание, с чеком перевода; видна в «уже выплачено»
+    w = client.get("/api/fin/weekly", headers=hdr(1000)).json()
+    sup = next(x for x in w["rows"] if x["person_id"] == team[2000])
+    assert sup["total"] == VALS["pay.support.shift"] + 3000
+    client.post("/api/fin/weekly/pay", json={"client_uid": str(uuid.uuid4()), "payee_id": sup["payee_id"], "account": "kaspi",
+                                             "op_date": w["monday"], "amount": sup["total"], "receipt": JPEG}, headers=hdr(1000))
+    paid = client.get("/api/fin/weekly", headers=hdr(1000)).json()["paid"]
+    assert paid[0]["name"] == "P2000" and paid[0]["receipt_url"]
+    # наличными: без чека, сотрудник подтверждает «Получил»
+    e = client.post("/api/expenses", json={"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "category": "paint",
+                                           "amount": 2000, "paid_by": "own"}, headers=hdr(5000)).json()
+    client.post(f"/api/expense/{e['id']}/review", json={"approve": True}, headers=hdr(1000))
+    art = next(x for x in client.get("/api/fin/weekly", headers=hdr(1000)).json()["rows"] if x["person_id"] == team[5000])
+    client.post("/api/fin/weekly/pay", json={"client_uid": str(uuid.uuid4()), "payee_id": art["payee_id"], "account": "cash",
+                                             "op_date": w["monday"], "amount": 2000}, headers=hdr(1000))
+    pay = client.get("/api/fin/my?ym=2026-11", headers=hdr(5000)).json()["payments"][-1]
+    assert pay["account_code"] == "cash" and pay["ack_at"] is None
+    assert client.post(f"/api/fin/my/ack/{pay['id']}", headers=hdr(2000)).status_code == 404     # чужую — нельзя
+    assert client.post(f"/api/fin/my/ack/{pay['id']}", headers=hdr(5000)).json()["ack_at"]
+    assert client.get("/api/fin/weekly", headers=hdr(1000)).json()["paid"][0]["ack_at"]

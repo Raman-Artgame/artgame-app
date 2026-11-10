@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react'
-import { StatusMark } from './ui.jsx'
-import { api } from './api.js'
+import { Receipt, StatusMark } from './ui.jsx'
+import { api, uuid } from './api.js'
 import { Skeleton, cleanTitle, money } from './crm.jsx'
 import { Gallery } from './objects.jsx'
-import { More } from './work.jsx'
+import { More, shrink } from './work.jsx'
 
 // «Проекты» — общая вкладка (HEAD 06.11): кто где находится и сколько дней осталось до сдачи. Данные — сделки в работе
 // из Битрикса (срок из расчёта или договора) и смены из приложения (сделано, кто был на объекте последние дни).
@@ -93,6 +93,7 @@ function ProjectCard({ x, me, back, openDeal }) {
     </div>
     {me && ASSIGN.has(me.role_code) && <GipPick x={x} />}
     {me && x.id > 0 && <Crew id={x.id} />}
+    {me && x.id > 0 && <TripBox id={x.id} />}
     {me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} />}
     <Gallery obj={{ id: x.id, title: x.title }} me={me} />
   </>
@@ -136,6 +137,40 @@ function Crew({ id }) {
       {free.map(c => <option key={c.id} value={c.id}>{c.full_name} · {c.role_title}</option>)}</select>
       <button className="mini" disabled={!add} onClick={() => set(add, true)}>Поставить</button></div>}
     <p className="small muted">{msg || (d.can_edit ? 'Назначенный получит сообщение, объект у него станет первым в «Смене».' : 'Состав ставят ГИП и главные.')}</p></div>
+}
+
+// Командировка (HEAD 10.11): галочка в проекте → пункты расходов (проживание, дорога, транспорт на месте, прочее).
+// Питание — само, pay.trip_food за каждый день смены или дороги каждого на объекте; при смене галочки смены пересчитываются.
+function TripBox({ id }) {
+  const [d, setD] = useState(null)
+  const [add, setAdd] = useState(null)
+  const [msg, setMsg] = useState('')
+  useEffect(() => { api(`/objects/${id}/trip-costs`).then(setD, () => setD(false)) }, [id])
+  if (!d || (!d.on && !d.can_edit)) return null
+  const setTrip = v => api(`/objects/${id}/trip-set`, { method: 'POST', body: { trip: v } })
+    .then(r => { setD(r); setMsg(r.retrip ? `Пересчитал смен: ${r.retrip}.` : '') }, e => setMsg(e.message))
+  const save = () => api(`/objects/${id}/trip-costs`, { method: 'POST', body: { client_uid: uuid(), item: add.item, amount: +add.amount,
+    note: add.note || null, paid_by: add.paid_by, receipt: add.receipt || null } }).then(r => { setD(r); setAdd(null); setMsg('Записано.') }, e => setMsg(e.message))
+  const by = Object.fromEntries(d.items.map(i => [i.code, d.costs.filter(c => c.category === i.code)]))
+  return <div className="card trip"><div className="head"><h3>Командировка</h3>{d.on && <b className="nowrap">{money(d.total)}</b>}</div>
+    {d.can_edit && <div className="chips">{[[true, 'Да, выезд'], [false, 'Нет'], [null, 'По городу']].map(([v, t]) =>
+      <button key={String(v)} className={d.trip === v ? 'on' : ''} onClick={() => setTrip(v)}>{t}</button>)}</div>}
+    {!d.on ? <p className="small muted">Не командировка{d.trip === null ? ' (по городу сотрудников и объекта)' : ''}.</p> : <>
+      <div className="row"><div><b>Питание</b><div className="small muted">{d.food.rate ? `${d.food.days} чел.-дней × ${money(d.food.rate)} — начисляется в ФОТ само` : 'Ставки питания нет в «Значениях»'}</div></div>{d.food.rate ? <b className="nowrap">{money(d.food.amount)}</b> : null}</div>
+      {d.items.map(i => <div key={i.code} className="row"><div><b>{i.title}</b>
+        {by[i.code].map(c => <div key={c.id} className="small muted">{money(+c.amount)} · {c.paid_by === 'company' ? 'компании' : 'свои'} · {c.person}{c.note ? ' · ' + c.note : ''}
+          {c.status === 'submitted' ? ' · у HEAD' : c.status === 'rejected' ? ' · отклонено' : ''}{c.receipt_url ? <> · <a href={c.receipt_url}>чек</a></> : ''}</div>)}
+        {!by[i.code].length && <div className="small muted">не внесено</div>}</div>
+        {d.can_edit && <button className="ghost mini" onClick={() => setAdd({ item: i.code, amount: '', note: '', paid_by: 'company', receipt: '' })}>+ сумма</button>}</div>)}
+      {add && <div className="dealedit"><b>{d.items.find(i => i.code === add.item).title}</b>
+        <input inputMode="numeric" placeholder="Сумма, ₸" value={add.amount} onChange={e => setAdd({ ...add, amount: e.target.value.replace(/\D/g, '') })} />
+        <input placeholder="Комментарий (3 ночи, билеты туда-обратно…)" value={add.note} onChange={e => setAdd({ ...add, note: e.target.value })} />
+        <div className="seg"><button className={add.paid_by === 'company' ? '' : 'ghost'} onClick={() => setAdd({ ...add, paid_by: 'company' })}>Компании</button>
+          <button className={add.paid_by === 'own' ? '' : 'ghost'} onClick={() => setAdd({ ...add, paid_by: 'own' })}>Свои деньги</button></div>
+        <Receipt value={add.receipt} pick={async f => setAdd({ ...add, receipt: await shrink(f) })} />
+        <div className="seg"><button disabled={!(+add.amount > 0)} onClick={save}>Записать</button><button className="ghost" onClick={() => setAdd(null)}>Отмена</button></div></div>}</>}
+    {msg && <p className="small muted">{msg}</p>}
+  </div>
 }
 
 const ST = { submitted: 'на проверке', approved: 'принято', rejected: 'отклонено', open: 'идёт' }
