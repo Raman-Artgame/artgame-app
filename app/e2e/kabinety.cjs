@@ -160,7 +160,7 @@ async function tab(p, name) {
   // с Пульта «Каталоги дизайна на утверждение» — сразу во вкладку «Каталоги», не в «Сделки» (HEAD 11.11)
   await h.getByText(/Каталоги дизайна на утверждение/).click()
   await h.getByRole('heading', { name: 'Каталог референсов' }).waitFor()
-  await h.getByRole('button', { name: /Посмотреть каталог/ }).waitFor()
+  await h.getByRole('button', { name: /Посмотреть/ }).waitFor()
   await h.getByText(/64 работы/).waitFor()
   await h.screenshot({ path: `${shots}/kab-katalog-head.png` })
   await h.getByRole('button', { name: 'Утверждаю' }).click()

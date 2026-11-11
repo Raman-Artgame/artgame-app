@@ -234,11 +234,11 @@ function Catalogs({ me }) {
     {c.rows.map(r => <div key={r.id} className="row">
       <div><b>{r.title}</b>
         <div className="small muted">{[r.style, r.works ? works(r.works) : '', (r.author_names || []).join(' + '), r.authors.length > 1 ? 'пополам' : ''].filter(Boolean).join(' · ')}</div>
-        {r.url ? <button className="ghost mini catopen" onClick={() => openUrl(r.url)}>Посмотреть каталог ↗{host(r.url) ? <small> · {host(r.url)}</small> : null}</button>
-          : <div className="small why">Ссылки нет — верните с просьбой добавить</div>}
+        <div className={'small ' + (r.status === 'approved' ? 'ok' : r.status === 'returned' ? 'why' : 'muted')}>{c.is_head && r.status === 'sent' ? 'ждёт вашего решения' : CST[r.status]}</div>
+        {!r.url && <div className="small why">Ссылки нет — верните с просьбой добавить</div>}
         {c.is_head && r.status === 'sent' && r.works > 0 && r.works < 60 && <div className="small why">Меньше 60 работ</div>}
         {r.comment && <div className="small">HEAD: {r.comment}</div>}</div>
-      <div className="qbtns"><span className={'tag' + (r.status === 'approved' ? ' st-approved' : r.status === 'returned' ? ' st-rejected' : '')}>{CST[r.status]}</span>
+      <div className="qbtns">{r.url && <button className="ghost mini catopen" onClick={() => openUrl(r.url)}>Посмотреть ↗{host(r.url) ? <small>{host(r.url)}</small> : null}</button>}
         {mine(r) && ['draft', 'returned'].includes(r.status) && <>
           <button className="ghost mini" onClick={() => setForm({ id: r.id, title: r.title, style: r.style, url: r.url, works: r.works ?? '', authors: r.authors })}>Править</button>
           <button className="mini" onClick={() => act(`/design/catalogs/${r.id}/send`)}>Отправить HEAD</button></>}
