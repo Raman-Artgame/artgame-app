@@ -400,6 +400,45 @@ def test_push_holds_manual_total_without_app_payments(client, monkeypatch):
     assert out["held"] == 0 and out["diff"] == 0
 
 
+def test_fok_field_rows_cancelled_after_reentry(client, monkeypatch):
+    """ФОК 943 (HEAD 11.11): оплаты из полей «Поступление 1–2» (21.10 — 1 276 000, 28.10 — 1 914 000) Анна внесла заново
+    в приложении с чеками, строки из полей задваивали «Поступило». Миграция 048 отменяет ровно их (не удаляет): в списке оплат
+    сделки их нет, итог — по оплатам с чеками, импорт истории из полей их не возвращает, чужие сделки не трогаются."""
+    from datetime import date
+    from pathlib import Path
+    ids = setup(client, monkeypatch)
+    d = deal(943, opp=9_787_500, **{A1: "1276000|KZT", D1: "2026-10-21T03:00:00+05:00", A2: "1914000|KZT", D2: "2026-10-28T03:00:00+05:00"})
+    rows = [("2026-10-21", "hist", 1276000, "bitrix", "deal:943:pay1"), ("2026-10-28", "hist", 1914000, "bitrix", "deal:943:pay2"),
+            ("2026-10-28", "hist", 2914000, "app", None), ("2026-11-03", "kaspi", 3000000, "app", None),
+            ("2026-11-11", "kaspi", 1276000, "app", None),
+            ("2026-10-21", "hist", 1276000, "bitrix", "deal:944:pay1")]   # та же сумма и дата у другой сделки
+    with db.pool.connection() as conn:
+        for day, acc, amount, src, ref in rows:
+            conn.execute("""INSERT INTO fin_ledger (client_uid, op_date, account_code, direction, amount, article_code, period, deal_id,
+                                                    source, source_ref, created_by)
+                            VALUES (%s,%s,%s,'in',%s,'client_payment',%s,%s,%s,%s,%s)""",
+                         (uid(), day, acc, amount, day[:7], 944 if ref == "deal:944:pay1" else 943, src, ref,
+                          ids[3000] if src == "app" else None))
+    before = dm.card(d)
+    assert before["received"] == 10_380_000 and before["overpaid"] == 592_500 and before["debt"] == 0
+    sql = (Path(__file__).parents[1] / "migrations" / "049_fok943_dubli.sql").read_text()
+    with db.pool.connection() as conn:
+        conn.execute(sql)
+        conn.execute(sql)   # повторный прогон ничего не меняет
+        st = {r["source_ref"]: r["status"] for r in conn.execute("SELECT source_ref, status FROM fin_ledger WHERE source='bitrix'").fetchall()}
+        fixed = conn.execute("SELECT data FROM audit_log WHERE action='ledger_fix' ORDER BY id").fetchall()
+    assert st == {"deal:943:pay1": "cancelled", "deal:943:pay2": "cancelled", "deal:944:pay1": "active"}
+    assert [(x["data"]["ref"], x["data"]["amount"]) for x in fixed] == [("deal:943:pay1", 1276000), ("deal:943:pay2", 1914000)]
+    c = dm.card(d)
+    assert c["received"] == 7_190_000 and c["debt"] == 2_597_500 and c["overpaid"] == 0 and c["history"] == []
+    assert [(x["amount"], x["source"]) for x in c["items"]] == [(1_276_000, "app"), (3_000_000, "app"), (2_914_000, "app")]
+    # импорт истории из полей сделки отменённые строки не возвращает
+    monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False, **k: [dict(d)])
+    with db.pool.connection() as conn, conn.transaction():
+        assert fin_bx.import_payments(conn, since=date(2026, 1, 1), until=fin_bx.START, ids=[943]) == {"deals": 1, "added": 0, "changed": 0}
+    assert dm.card(d)["received"] == 7_190_000
+
+
 def test_act_goes_to_its_field():
     """АВР из приложения — в поле «АВР» блока «Документы», а не в «Прочие» (HEAD 11.11)."""
     assert bxw.KIND_FIELD["avr"] == "UF_CRM_ARTGAME_DOC05_ACTS" and bxw.F_ACTS in bxw.WRITABLE and bxw.F_ACTS in bxw.MULTI_FILE
