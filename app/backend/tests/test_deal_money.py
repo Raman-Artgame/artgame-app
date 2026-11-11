@@ -334,3 +334,73 @@ def test_cash_without_photo(client, monkeypatch):
     assert r["row"]["account_code"] == "hist" and "до ноября · наличными" in r["row"]["note"]
     assert client.post("/api/bx/deals/1611/payment", json={**pay, "client_uid": uid(), "op_date": "2026-10-20", "account": "hist"},
                        headers=hdr(6000)).status_code == 400
+
+
+def test_artamonov_account_until_year_end(client, monkeypatch):
+    """ИП Артамонов (HEAD 11.11): временный счёт для оплат клиентов — только оплаты по дату valid_until (31.12.2026)."""
+    from datetime import timedelta
+
+    from artgame import drive
+    from test_finance import JPG
+    ids = setup(client, monkeypatch)
+    client.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    d = {**deal(1611, opp=110_000), "ASSIGNED_BY_ID": "4565"}
+    monkeypatch.setattr(bx, "READ", lambda m, p: {"result": d})
+    monkeypatch.setattr(drive, "save_income_receipt", lambda *a: "drv")
+    full = client.get("/api/bx/deals/1611/full", headers=hdr(6000)).json()
+    acc = {a["code"]: a for a in full["pay"]["accounts"]}
+    assert acc["artamonov"]["title"] == "ИП Артамонов" and acc["artamonov"]["valid_until"] == "2026-12-31" and acc["kaspi"]["valid_until"] is None
+    today = dm.datetime.now(dm.TZ).date()
+    pay = {"client_uid": uid(), "amount": 60000, "op_date": str(today), "account": "artamonov", "receipt": JPG}
+    r = client.post("/api/bx/deals/1611/payment", json=pay, headers=hdr(6000))
+    assert r.status_code == 200, r.text
+    assert r.json()["row"]["account_code"] == "artamonov" and r.json()["pay"]["received"] == 60_000
+    # после срока счёт для новых оплат закрыт, внесённое остаётся
+    with db.pool.connection() as c:
+        c.execute("UPDATE fin_accounts SET valid_until=%s WHERE code='artamonov'", (today - timedelta(days=1),))
+    r = client.post("/api/bx/deals/1611/payment", json={**pay, "client_uid": uid()}, headers=hdr(6000))
+    assert r.status_code == 400 and "ИП Артамонов" in r.text
+    assert client.post("/api/bx/deals/1611/payment", json={**pay, "client_uid": uid(), "op_date": str(today - timedelta(days=1))},
+                       headers=hdr(6000)).status_code == 200
+    assert client.get("/api/bx/deals/1611/full", headers=hdr(6000)).json()["pay"]["received"] == 120_000
+
+
+def test_push_holds_manual_total_without_app_payments(client, monkeypatch):
+    """11.11: «Поступило», вписанное в Битриксе руками, приложение не обнуляет, пока по сделке нет ни одной оплаты в приложении
+    (1557, 1579, 1611); Айболит с «Поступлением 1» без итога — пишется сразу. После оплаты в приложении итоги ведёт журнал."""
+    setup(client, monkeypatch)
+    deals = {1579: deal(1579, stage="WON", sem="S", opp=300_000, **{REC: "300000|KZT"}),
+             1347: deal(1347, opp=1_600_000, **{A1: "800000|KZT", DEBT: "800000|KZT"})}
+    monkeypatch.setattr(bx, "read", lambda m, p, fresh=False, **k: {"result": [dict(d) for d in deals.values()]})
+    monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False, **k: [dict(d) for i, d in deals.items()
+                                                                         if i in [int(x) for x in (p.get("filter") or {}).get("ID", deals)]])
+    wrote = []
+
+    def call(method, params):
+        wrote.append((params["id"], params["fields"]))
+        deals[params["id"]].update(params["fields"])
+        return {"result": True}
+
+    monkeypatch.setattr(bxw, "CALL", call)
+    monkeypatch.setattr(settings, "bitrix_webhook", "https://bx.example/rest/1/x/")
+    monkeypatch.setattr(settings, "pay_push", True)
+    monkeypatch.setattr(dm, "PAUSE", 0)
+    chk = client.get("/api/fin/deal-money", headers=hdr(1000)).json()
+    assert chk["held"] == 1 and {r["id"]: r["hold"] for r in chk["rows"]} == {1347: False, 1579: True}
+    with db.pool.connection() as conn:
+        out = dm.push(conn)
+    assert out["held"] == 1 and [i for i, _ in wrote] == [1347] and wrote[0][1][REC] == "800000|KZT"
+    # Анна внесла оплату 1579 в приложении — сделку ведёт журнал: «Поступило» уже 300 000, фоном дописаны только «без НДС» и НДС
+    wrote.clear()
+    client.post("/api/fin/ledger", json={"client_uid": uid(), "op_date": "2026-11-06", "account": "kaspi", "amount": 300000,
+                                         "article": "client_payment", "deal_id": 1579}, headers=hdr(1000))
+    assert [(i, sorted(f)) for i, f in wrote] == [(1579, sorted([NET, VAT]))]
+    with db.pool.connection() as conn:
+        out = dm.push(conn)
+    assert out["held"] == 0 and out["diff"] == 0
+
+
+def test_act_goes_to_its_field():
+    """АВР из приложения — в поле «АВР» блока «Документы», а не в «Прочие» (HEAD 11.11)."""
+    assert bxw.KIND_FIELD["avr"] == "UF_CRM_ARTGAME_DOC05_ACTS" and bxw.F_ACTS in bxw.WRITABLE and bxw.F_ACTS in bxw.MULTI_FILE
+    assert bxw.kind_of("ARTGAME_avr_1347.pdf") == "avr" and bx.FILES[bxw.F_ACTS] == "АВР"

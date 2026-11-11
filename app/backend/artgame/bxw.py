@@ -22,13 +22,14 @@ from .work import active
 router = APIRouter(prefix="/api")
 
 F_KP, F_CONTRACT, F_INVOICES, F_OTHER = "UF_CRM_1753202415", "UF_CRM_1753202391", "UF_CRM_ARTGAME_DOC05_INVOICES", "UF_CRM_ARTGAME_DOC05_OTHER"
+F_ACTS = "UF_CRM_ARTGAME_DOC05_ACTS"   # «АВР» в блоке «Документы» карточки (HEAD 11.11: акт — в своё поле, не в «Прочие»)
 F_ADV, F_DAYS, F_WARR = "UF_CRM_ARTGAME_ADVANCE_PERCENT", "UF_CRM_1753295493279", "UF_CRM_ARTGAME_WARRANTY_MONTHS"
 F_INV_SUM, F_INV_PURPOSE, F_REASON = "UF_CRM_ARTGAME_INVOICE_AMOUNT", "UF_CRM_ARTGAME_INVOICE_PURPOSE", "UF_CRM_1753381316974"
 F_START, F_END = "UF_CRM_ARTGAME_PROJECT_START_ACTUAL", "UF_CRM_ARTGAME_PROJECT_END_PLAN"
 WRITABLE = {"OPPORTUNITY", "STAGE_ID", F_START, F_END, bx.AREA, bx.SERVICE, bx.ADDR, bx.CITY, F_ADV, F_DAYS, F_WARR, F_INV_SUM, F_INV_PURPOSE, F_REASON,
-            F_KP, F_CONTRACT, F_INVOICES, F_OTHER, bx.F_LEVEL, bx.F_SHIFTS, bx.F_CREW, bx.F_TERM, "TITLE", bx.OBJECT, *bx.PROJECT}
+            F_KP, F_CONTRACT, F_INVOICES, F_ACTS, F_OTHER, bx.F_LEVEL, bx.F_SHIFTS, bx.F_CREW, bx.F_TERM, "TITLE", bx.OBJECT, *bx.PROJECT}
 KEEP_EMPTY = {k for k, (_, kind) in bx.PROJECT.items() if kind in ("bool", "users")}   # «нет» и пустой список — тоже значение
-MULTI_FILE = {F_KP, F_CONTRACT, F_INVOICES, F_OTHER}
+MULTI_FILE = {F_KP, F_CONTRACT, F_INVOICES, F_ACTS, F_OTHER}
 # Переходы по документам: двигаем только вперёд и только из перечисленных стадий.
 STAGE_FLOW = {
     "kp": ("PREPARATION", {"NEW"}),
@@ -36,7 +37,7 @@ STAGE_FLOW = {
     "invoice": ("FINAL_INVOICE", {"NEW", "PREPARATION", "UC_VZFPUP", "UC_YV66BV", "UC_1EXUAC"}),
     "signed": ("UC_AV00QK", {"NEW", "PREPARATION", "UC_VZFPUP", "UC_YV66BV", "UC_1EXUAC", "FINAL_INVOICE"}),
 }
-KIND_FIELD = {"kp": F_KP, "dogovor": F_OTHER, "eskiz": F_OTHER, "invoice": F_INVOICES, "avr": F_OTHER, "signed": F_CONTRACT}
+KIND_FIELD = {"kp": F_KP, "dogovor": F_OTHER, "eskiz": F_OTHER, "invoice": F_INVOICES, "avr": F_ACTS, "signed": F_CONTRACT}
 POSTPONED = "UC_VCP4VO"   # «Отложено»: только с датой возврата — задача в Битриксе и напоминание бота
 # Причины отказа (HEAD 06.11 «причины ок»): одна из восьми + строка комментария. Поле-список в Битриксе создаст Кодекс,
 # до этого причина пишется текстом в поле причины и в ленту. «Прочее» нет нарочно — иначе отчёт пустеет.
