@@ -185,7 +185,7 @@ function PastShift({ d, done }) {
     if (tooLong) { setErr('Одной записью — до 48 часов. Дольше — внесите по дням.'); return }
     setBusy(true); setErr('')
     try {
-      const sh = await api('/shifts/past', { method: 'POST', body: { client_uid: uuid(), ...v, ...(shop ? { object_id: 0, zone_code: 'print' } : { workshop: null }),
+      const sh = await api('/shifts/past', { method: 'POST', body: { client_uid: uuid(), ...v, ...(shop ? { object_id: 0, zone_code: d.workshop_zone || 'print' } : { workshop: null }),
         hours, end_time: undefined, plus: undefined, area_m2: v.area_m2 === '' || shop ? null : +v.area_m2, photo_after: shop ? null : pics[0] || null } })
       const rest = shop ? [] : pics.slice(1)
       let bad = 0
@@ -203,7 +203,7 @@ function PastShift({ d, done }) {
     {open && <>
       <label className="muted">Дата</label><input type="date" min={b.from} max={tday()} value={v.day} onChange={e => set({ ...v, day: e.target.value })} />
       {d.workshop && <div className="segf"><button className={shop ? '' : 'on'} onClick={() => set({ ...v, workshop: '' })}>На объекте</button>
-        <button className={shop ? 'on' : ''} onClick={() => set({ ...v, workshop: d.workshop[0] })}>Мастерская · без проекта</button></div>}
+        <button className={shop ? 'on' : ''} onClick={() => set({ ...v, workshop: d.workshop[0] })}>{shopLabel(d)}</button></div>}
       {shop ? <><label className="muted">Что делал</label>
         <div className="chips">{d.workshop.map(t => <button key={t} className={v.workshop === t ? 'on' : ''} onClick={() => set({ ...v, workshop: t })}>{t}</button>)}</div></> : <>
       <label className="muted">Объект</label>
@@ -257,15 +257,18 @@ function Road({ obj, zone, done }) {
 }
 
 // «Мастерская» без проекта (HEAD 09.11): печать — ТО принтера, ремонт, тест печати, обучение. Без фото, оплата по часам.
+// «Без объекта» у всех художников (HEAD 11.11): подготовка, картины, эскизы, сбор, обучение.
+const shopLabel = d => d.workshop_zone === 'mural' ? 'Без объекта' : 'Мастерская · без проекта'
 function Workshop({ d, onStarted, back }) {
   const [task, setTask] = useState(d.workshop[0])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const zone = d.zones.includes('print') ? 'print' : d.zones[0]
+  const zone = d.workshop_zone || (d.zones.includes('print') ? 'print' : d.zones[0])
+  const t = d.workshop_title || 'Мастерская'
   const start = async () => {
     setBusy(true); setErr('')
     try {
-      const o = { client_uid: uuid(), object_id: 0, object_title: 'Мастерская · ' + task, zone_code: zone, started_at: new Date().toISOString(), workshop: task }
+      const o = { client_uid: uuid(), object_id: 0, object_title: t + ' · ' + task, zone_code: zone, started_at: new Date().toISOString(), workshop: task }
       const was = failed().length
       await enqueue('/shifts/start', { client_uid: o.client_uid, object_id: 0, zone_code: zone, started_at: o.started_at, workshop: task })
       const f = failed()
@@ -275,11 +278,11 @@ function Workshop({ d, onStarted, back }) {
   }
   return <div className="card workshop">
     <div className="steps"><span className="on">1 Начало</span><span>2 Работа</span><span>3 Конец смены</span></div>
-    <h2>Смена в мастерской</h2>
-    <p className="small muted">Без проекта: оплачивается как смена по часам, без плана и бонуса. Проверяет Мастер печати или HEAD.</p>
+    <h2>{zone === 'print' ? 'Смена в мастерской' : 'Смена без объекта'}</h2>
+    <p className="small muted">Без проекта: оплачивается как смена по часам, без плана и бонуса. {zone === 'print' ? 'Оценивает Мастер печати' : 'Оценивает Главный художник'}, утверждает HEAD.</p>
     <label className="muted">Что делаешь</label>
     <div className="chips">{d.workshop.map(t => <button key={t} className={task === t ? 'on' : ''} onClick={() => setTask(t)}>{t}</button>)}</div>
-    <button disabled={busy} onClick={start}>{busy ? 'Начинаю…' : 'Начать смену в мастерской'}</button>
+    <button disabled={busy} onClick={start}>{busy ? 'Начинаю…' : zone === 'print' ? 'Начать смену в мастерской' : 'Начать смену без объекта'}</button>
     {err && <p className="small why">{err}</p>}
     {back && <p className="small"><a onClick={back}>← на объект</a></p>}
   </div>
@@ -291,7 +294,7 @@ function StartShift(props) {
   if (!d.workshop) return <StartObject {...props} />
   return <>
     <div className="segf"><button className={mode === 'obj' ? 'on' : ''} onClick={() => setMode('obj')}>На объекте</button>
-      <button className={mode === 'shop' ? 'on' : ''} onClick={() => setMode('shop')}>Мастерская · без проекта</button></div>
+      <button className={mode === 'shop' ? 'on' : ''} onClick={() => setMode('shop')}>{shopLabel(d)}</button></div>
     {mode === 'shop' ? <Workshop d={d} onStarted={props.onStarted} /> : <StartObject {...props} />}
   </>
 }
@@ -304,7 +307,7 @@ function StartObject({ d, onStarted, onRoad }) {
   const [cond, setCond] = useState({})
   const [err, setErr] = useState('')
   const looking = viewAs() && !testAs()   // HEAD смотрит как сотрудник: только просмотр — предложить тест
-  if (!objs.length) return <div className="card"><h2>Смена</h2><p className="muted">Сейчас нет объектов в работе. Когда МОП переведёт сделку в «Выполнение проекта», объект появится здесь.{d.workshop ? ' Работа без проекта — «Мастерская».' : ''}</p></div>
+  if (!objs.length) return <div className="card"><h2>Смена</h2><p className="muted">Сейчас нет объектов в работе. Когда МОП переведёт сделку в «Выполнение проекта», объект появится здесь.{d.workshop ? ` Работа без проекта — «${d.workshop_title || 'Мастерская'}».` : ''}</p></div>
   const obj = objs.find(o => o.id === v.object_id) || objs[0]
   // две роли (HEAD 08.11): роль смены — по зоне объекта (печать → роль печати, роспись → роль художника), можно сменить
   const roles = d.roles || [d.role]
@@ -632,7 +635,7 @@ function LateAppeal({ d, done, close }) {
   const ok = v.day && why.trim().length >= 5 && (kind === 'shift_late' ? +v.hours > 0 && +v.hours <= 48 && v.work_done.trim().length >= 3 && (shop || v.object_id) : +v.amount > 0)
   const send = async () => {
     setBusy(true); setErr('')
-    const base = { client_uid: uuid(), kind, why, day: v.day, object_id: shop ? 0 : v.object_id, zone_code: shop ? 'print' : v.zone_code }
+    const base = { client_uid: uuid(), kind, why, day: v.day, object_id: shop ? 0 : v.object_id, zone_code: shop ? d.workshop_zone || 'print' : v.zone_code }
     const body = kind === 'shift_late' ? { ...base, start_time: v.start_time, hours: +v.hours, area_m2: v.area_m2 === '' || shop ? null : +v.area_m2, work_done: v.work_done,
       workshop: shop ? v.workshop : null, photo: shop ? null : pic } : { ...base, amount: +v.amount, category: v.category, paid_by: v.paid_by, note: v.note, receipt: pic }
     try { await api('/appeals', { method: 'POST', body }); done('Обращение ушло: сначала куратору, потом HEAD.') } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }
@@ -642,7 +645,7 @@ function LateAppeal({ d, done, close }) {
       <button className={kind === 'expense_late' ? 'on' : ''} onClick={() => setKind('expense_late')}>Расход</button></div>
     <label className="muted small">За какой день</label><input type="date" min={min} max={tday()} value={v.day} onChange={e => set({ ...v, day: e.target.value })} />
     {kind === 'shift_late' && d.workshop && <div className="segf"><button className={shop ? '' : 'on'} onClick={() => set({ ...v, workshop: '' })}>На объекте</button>
-      <button className={shop ? 'on' : ''} onClick={() => set({ ...v, workshop: d.workshop[0] })}>Мастерская</button></div>}
+      <button className={shop ? 'on' : ''} onClick={() => set({ ...v, workshop: d.workshop[0] })}>{d.workshop_title || 'Мастерская'}</button></div>}
     {shop ? <div className="chips">{d.workshop.map(t => <button key={t} className={v.workshop === t ? 'on' : ''} onClick={() => set({ ...v, workshop: t })}>{t}</button>)}</div> : <>
       <label className="muted small">Объект</label>
       <select value={v.object_id} onChange={e => set({ ...v, object_id: +e.target.value })}>

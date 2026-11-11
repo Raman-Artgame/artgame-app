@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import db, drive
-from .work import (DIRECT_SQL, HAS_CUR_SQL, SHOP, TZ, WORKSHOP_ROLES, WORKSHOP_ZONES, Decision, RateIn, active, cats_for,
+from .work import (DIRECT_SQL, HAS_CUR_SQL, SHOP, TZ, WORKSHOP_TITLE, check_workshop, Decision, RateIn, active, cats_for,
                    check_rate, check_zone, is_trip, overlap, review_filter, shift_role, stage_of, _photo)
 
 router = APIRouter(prefix="/api")
@@ -134,8 +134,8 @@ def add_appeal(b: AppealIn, p: dict = Depends(active)):
             day = _check_day(b.day)
             shop = bool(b.workshop)
             obj, zone = (0 if shop else b.object_id), b.zone_code or ""
-            if shop and (not set(p.get("roles") or [p["role_code"]]) & set(WORKSHOP_ROLES) or zone not in WORKSHOP_ZONES):
-                raise HTTPException(400, "Мастерская без проекта — у печати")
+            if shop:
+                check_workshop(p, zone)
             check_zone(conn, p, zone, obj, past=True)
             if not obj and not shop:
                 raise HTTPException(400, "Смена — только на объекте")
@@ -186,7 +186,7 @@ def out(conn, a: dict) -> dict:
         a["object_title"] = o["title"] if o else ""
     d = a["data"] or {}
     if a["object_id"] == 0 and (d.get("workshop") or a["zone_code"] == "print"):
-        a["object_title"] = SHOP + (f" · {d['workshop']}" if d.get("workshop") else "")
+        a["object_title"] = WORKSHOP_TITLE.get(a["zone_code"], SHOP) + (f" · {d['workshop']}" if d.get("workshop") else "")
     a["photo_url"] = sign(d["photo_id"], "thumb") if d.get("photo_id") else None
     a["photo_full"] = sign(d["photo_id"], "content") if d.get("photo_id") else None
     a["receipt_url"] = sign(d["receipt_file_id"], "content") if d.get("receipt_file_id") else None
