@@ -4,6 +4,17 @@
 const { chromium } = require('playwright')
 const { execSync } = require('child_process')
 const assert = require('assert')
+// «Команда» по отделам (HEAD 11.11): раскрыть отдел и человека
+const person = async (h, name) => {
+  const r = h.locator('.person', { hasText: name }).first()
+  await h.locator('.dept').first().waitFor()
+  if (!(await r.locator('.pedit').count())) {
+    if (!(await r.count())) await h.locator('.dept', { hasText: name }).first().locator('.head').click()
+    await h.locator('.prow', { hasText: name }).first().click()
+  }
+  await r.locator('.pedit').waitFor()
+  return r
+}
 const BE = __dirname + '/../backend'
 const PY = process.env.PY || `${BE}/.venv/bin/python`
 const sign = id => execSync(`cd ${BE} && ${PY} -c "import sys;sys.path+=['tests'];from conftest import make_init_data;print(make_init_data({'id':${id},'first_name':'Тест'}))"`).toString().trim()
@@ -58,7 +69,7 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   // HEAD: связывает МОП с пользователем Битрикса во вкладке «Команда», видит все сделки
   const h = await open(b, 1000)
   await tab(h, 'Команда')
-  await h.locator('.person', { hasText: 'Ануар' }).locator('label', { hasText: 'В Битриксе' }).locator('select').selectOption({ label: 'Ануар Минкеев' })
+  await (await person(h, 'Ануар')).locator('label', { hasText: 'В Битриксе' }).locator('select').selectOption({ label: 'Ануар Минкеев' })
   await h.waitForTimeout(500)
   assert.strictEqual((await call(1000, '/people')).find(x => x.id === m.id).bitrix_user_id, 4565)
   await dealsOpen(h)

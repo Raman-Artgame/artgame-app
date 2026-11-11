@@ -13,19 +13,55 @@ export function People({ ROLE, ZONE, openViewAs }) {
   const [list, setList] = useState(null)
   const [bx, setBx] = useState(null)
   const [err, setErr] = useState('')
+  const [opened, setOpened] = useState(new Set())
+  const [depts, setDepts] = useState(new Set())
   const load = () => api('/people').then(setList, () => setList([]))
   useEffect(() => { load(); api('/bx/users').then(setBx, () => setBx([])) }, [])
   if (!list) return <div className="card muted">Загрузка…</div>
   const save = (id, body) => api(`/people/${id}`, { method: 'POST', body }).then(load, e => setErr(e.message))
   // Роль без зоны не пускает в «Смену»: при первой роли сразу ставим её зону, HEAD может поменять кнопками ниже.
-  const setRole = (p, role) => save(p.id, { role_code: role, ...(p.zones.length || !ROLE_ZONE[role] ? {} : { zones: [ROLE_ZONE[role]] }) })
-  const pendingFirst = [...list].sort((a, b) => (a.status === 'pending' ? -1 : 0) - (b.status === 'pending' ? -1 : 0))
-  return <div className="card"><h2>Команда</h2>{err && <p className="muted">{err}</p>}
-    {openViewAs && <p className="small"><a className="seeas" onClick={openViewAs}>Посмотреть приложение глазами роли →</a></p>}
-    {pendingFirst.map(p => <div key={p.id} className="person">
-      <div><b>{p.full_name}</b> {p.tg_username && <span className="muted small">@{p.tg_username}</span>}
-        {p.status === 'pending' && <span className="tag st-rejected">ждёт роли</span>}
-        {p.status === 'blocked' && <span className="tag">вход закрыт</span>}
+  const setRole = (p, role) => (setOpened(o => new Set([...o, p.id])), save(p.id, { role_code: role, ...(p.zones.length || !ROLE_ZONE[role] ? {} : { zones: [ROLE_ZONE[role]] }) }))
+  // Плашки отделов (HEAD 11.11): «ждут роли» сверху, потом отделы, внизу — у кого вход закрыт.
+  const groups = DEPTS.map(([t, roles]) => [t, list.filter(p => p.status !== 'blocked' && p.status !== 'pending' && roles.includes(p.role_code || ''))])
+  const known = new Set(DEPTS.flatMap(([, r]) => r))
+  const other = list.filter(p => p.status === 'active' && !known.has(p.role_code || ''))
+  const all = [['Ждут роли', list.filter(p => p.status === 'pending')], ...groups, ['Без отдела', other], ['Вход закрыт', list.filter(p => p.status === 'blocked')]]
+  // кто раскрыт — помним здесь: после смены роли человек переезжает в другой отдел и остаётся раскрытым
+  const isOpen = p => opened.has(p.id) || (p.status === 'pending' && !opened.has(-p.id))
+  const flip = p => setOpened(o => { const n = new Set(o); if (isOpen(p)) { n.delete(p.id); n.add(-p.id) } else { n.add(p.id); n.delete(-p.id) } return n })
+  const one = p => <PersonRow key={p.id} p={p} open={isOpen(p)} flip={() => flip(p)} ROLE={ROLE} ZONE={ZONE} bx={bx} save={save} setRole={setRole} />
+  const dOpen = (t, l) => depts.has(t) || l.some(isOpen)
+  const dFlip = (t, l) => { if (dOpen(t, l)) { setDepts(d => { const n = new Set(d); n.delete(t); return n }); setOpened(o => { const n = new Set(o); l.forEach(p => { n.delete(p.id); n.add(-p.id) }); return n }) }
+    else setDepts(d => new Set([...d, t])) }
+  return <><div className="card"><h2>Команда · {list.filter(p => p.status === 'active').length}</h2>{err && <p className="muted">{err}</p>}
+    {openViewAs && <p className="small"><a className="seeas" onClick={openViewAs}>Посмотреть приложение глазами роли →</a></p>}</div>
+    {all.filter(([, l]) => l.length).map(([t, l]) => <Dept key={t} title={t} list={l} open={dOpen(t, l)} flip={() => dFlip(t, l)} warn={t === 'Ждут роли'} closed={t === 'Вход закрыт'} ROLE={ROLE}>{l.map(one)}</Dept>)}
+  </>
+}
+
+const DEPTS = [['HEAD', ['head']], ['Роспись', ['lead_artist', 'artist_pro', 'artist', 'support']], ['Печать', ['print_master', 'print_operator']],
+  ['Дизайн', ['lead_designer', 'designer_asst']], ['Продажи', ['mop_vip', 'mop']], ['Плотники', ['carpenter']]]
+const RANK = Object.fromEntries(DEPTS.flatMap(([, r]) => r).map((r, i) => [r, i]))
+
+function Dept({ title, list, open, flip, warn, closed, children }) {
+  const names = [...list].sort((a, b) => (RANK[a.role_code] ?? 99) - (RANK[b.role_code] ?? 99))
+  return <div className={'card dept' + (closed ? ' closed' : '')}>
+    <div className="head" onClick={flip}><div><h3>{title} <span className={warn ? 'tag st-rejected' : 'tag'}>{list.length}</span></h3>
+      {!open && <p className="small muted">{names.map(p => p.full_name.split(' ')[0]).join(', ')}</p>}</div>
+      <span className="muted">{open ? '▴' : '▾'}</span></div>
+    {open && [...children].sort((a, b) => (RANK[a.props.p.role_code] ?? 99) - (RANK[b.props.p.role_code] ?? 99))}
+  </div>
+}
+
+function PersonRow({ p, open, flip, ROLE, ZONE, bx, save, setRole }) {
+  return <div className="person">
+    <div className="prow" onClick={flip}><div><b>{p.full_name}</b> {p.status === 'pending' && <span className="tag st-rejected">ждёт роли</span>}
+      <div className="small muted">{[p.acting_role ? `${ROLE[p.role_code] || '—'} · и.о. ${ROLE[p.acting_role]}` : ROLE[p.role_code] || 'роль не назначена',
+        (p.extra_roles || [])[0] && `+ ${ROLE[p.extra_roles[0]]}`, p.city].filter(Boolean).join(' · ')}{!p.profile_at && <span className="why"> · анкета не заполнена</span>}</div></div>
+      <span className="muted">{open ? '▴' : '›'}</span></div>
+    {open && <div className="pedit">
+
+      <div>{p.tg_username && <span className="muted small">@{p.tg_username} </span>}
         {p.profile_at ? <div className="small muted">{[[p.last_name, p.first_name, p.middle_name].filter(Boolean).join(' '),
           p.birth_date && new Date(p.birth_date).toLocaleDateString('ru-RU'), p.phone, p.city, p.clothes_size && `размер ${p.clothes_size}`,
           p.emergency_phone && `экстренно: ${[p.emergency_name, p.emergency_phone].filter(Boolean).join(' ')}`].filter(Boolean).join(' · ')}</div>
@@ -67,7 +103,7 @@ export function People({ ROLE, ZONE, openViewAs }) {
       {p.role_code !== 'head' && (p.status === 'blocked'
         ? <a onClick={() => save(p.id, { status: 'active' })}>открыть вход</a>
         : p.status === 'active' && <a onClick={() => confirm(`Закрыть вход: ${p.full_name}?`) && save(p.id, { status: 'blocked' })}>закрыть вход</a>)}
-    </div>)}
+    </div>}
   </div>
 }
 
