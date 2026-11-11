@@ -778,3 +778,13 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .dm .dmhq { border-top: 0; padding-top: 4px; }
 .dm .dmsearch { margin: 6px 0 4px; }
 .dm .dmsub { margin: 10px 0 0; }
+/* Проверка в две ступени (HEAD 11.11): оценка куратора */
+.ratebox { margin-top: 8px; padding: 10px; border-radius: 12px; background: var(--alt); display: grid; gap: 8px; }
+.ratebox textarea { margin: 0; }
+.starpick { display: flex; gap: 4px; }
+.starpick button { flex: 1; width: auto; padding: 8px 0; font-size: 22px; line-height: 1; background: transparent; color: var(--line2); border: 1px solid var(--line2); border-radius: 10px; }
+.starpick button.on { color: #f5b301; border-color: #f5b301; background: transparent; }
+.curmark { margin-top: 4px; overflow-wrap: anywhere; }
+.curmark .stars { color: #f5b301; letter-spacing: 1px; }
+.curmark.why .stars { color: var(--hot); }
+.stagehd { margin: 12px 0 2px; font-weight: 600; }

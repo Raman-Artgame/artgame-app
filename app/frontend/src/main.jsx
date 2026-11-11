@@ -114,7 +114,7 @@ function Main({ me, onMe, web, logout }) {
   const pulse = usePulse(isHead)
   const unread = useUnread(tab)   // «Диалог с HEAD» (09.11): цифра на вкладке «HEAD» / «Сообщения»
   const counts = { chat: unread, ...(t ? { today: t.queue.hot.length + t.queue.today.length, leads: [...t.queue.hot, ...t.queue.today].filter(x => x.entity === 'lead').length } : {}),
-    ...(pulse ? { review: +pulse.review.shifts + +pulse.review.expenses + +(pulse.review.payments || 0), people: pulse.pending.length } : {}) }
+    ...(pulse ? { review: +pulse.review.shifts + +pulse.review.expenses + +(pulse.review.appeals || 0) + +(pulse.review.payments || 0), people: pulse.pending.length } : {}) }
   const mop = ['mop', 'mop_vip'].includes(me.role_code)
   const carp = me.role_code === 'carpenter'
   // HEAD 08.11 (вечер): у художников и печати всё внизу одной лентой, в таком порядке — Сбор · Смена · Расход · Продакшн ·

@@ -341,6 +341,19 @@ def shift_pay(v: dict, role: str, hours: float, night: float = 0.0) -> tuple[flo
     return round(pay, 2), ""
 
 
+def one_shift_pay(v: dict, role: str, kind: str | None, started_at: datetime, ended_at: datetime | None) -> tuple[float, str]:
+    """Оплата одной смены: часы, ночь, мастерская по часовой ставке. Возвращает (сумма, чего не хватает в «Значениях»)."""
+    hours = ((ended_at - started_at).total_seconds() / 3600) if ended_at else (v.get("shift.hours") or 10)
+    wk = WORKSHOP_RATE.get(role) if kind == "workshop" else None
+    night = night_hours(v, started_at, ended_at)
+    if wk and v.get(wk):
+        return round(hours * v[wk] + min(night, hours) * v[wk] * (v.get("pay.night") or 0) / 100, 2), ""
+    pay, miss = shift_pay(v, role, hours, night)
+    if wk:
+        miss = f"нет ставки {wk} в «Значениях» — мастерская посчитана как смена"
+    return pay, miss
+
+
 def company_revenue(y: int, m: int) -> tuple[float | None, str]:
     """Выручка компании за месяц (с НДС) — тот же источник, что у «Месяца» МОП: лист «Проекты <год>» по концу работ."""
     from . import fin
@@ -393,21 +406,15 @@ def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
     for f in payees_:
         role = f["role_code"]
         if f["scheme"] == "shifts" and f["person_id"]:
-            shifts = conn.execute("""SELECT id, started_at, ended_at, bonus, kind, trip, role_code FROM shifts WHERE person_id=%s AND status='approved'
-                                     AND started_at >= %s AND started_at < %s ORDER BY started_at""", (f["person_id"], t0, t1)).fetchall()
+            # по обращению за закрытый месяц (HEAD 11.11) смена считается в месяце, когда HEAD её утвердил (pay_ym)
+            shifts = conn.execute("""SELECT id, started_at, ended_at, bonus, kind, trip, role_code, pay_ym FROM shifts WHERE person_id=%s AND status='approved'
+                                     AND ((pay_ym IS NULL AND started_at >= %s AND started_at < %s) OR pay_ym=%s) ORDER BY started_at""",
+                                  (f["person_id"], t0, t1, ym)).fetchall()
             piece, bonus, missing = 0.0, 0.0, ""
             by_role: dict[str, int] = {}
             for s in shifts:   # две роли (HEAD 08.11): каждая смена — по ставке своей роли
-                hours = ((s["ended_at"] - s["started_at"]).total_seconds() / 3600) if s["ended_at"] else (v.get("shift.hours") or 10)
                 r = s["role_code"] or role
-                wk = WORKSHOP_RATE.get(r) if s["kind"] == "workshop" else None
-                night = night_hours(v, s["started_at"], s["ended_at"])
-                if wk and v.get(wk):
-                    pay, miss = round(hours * v[wk] + min(night, hours) * v[wk] * (v.get("pay.night") or 0) / 100, 2), ""
-                else:
-                    pay, miss = shift_pay(v, r, hours, night)
-                    if wk:
-                        miss = f"нет ставки {wk} в «Значениях» — мастерская посчитана как смена"
+                pay, miss = one_shift_pay(v, r, s["kind"], s["started_at"], s["ended_at"])
                 missing = miss or missing
                 piece += pay
                 bonus += _f(s["bonus"])
@@ -416,7 +423,9 @@ def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
                 warn.append(f"{f['name']}: {missing}")
             roads = sum(s["kind"] == "road" for s in shifts)
             split = ", ".join(f"{role_title(conn, r)} {n}" for r, n in by_role.items()) if len(by_role) > 1 else ""
-            acc(f["id"], "piece", piece, f"{len(shifts)} смен" + (f" ({split})" if split else "") + (f", из них дорога {roads}" if roads else ""),
+            late = [s for s in shifts if s["pay_ym"] == ym and s["started_at"] < t0]
+            acc(f["id"], "piece", piece, f"{len(shifts)} смен" + (f" ({split})" if split else "") + (f", из них дорога {roads}" if roads else "")
+                + (f", из них {len(late)} за прошлый месяц по обращению" if late else ""),
                 ",".join(str(s["id"]) for s in shifts))
             # суточные (HEAD 08.11): за каждый день со сменой или дорогой в командировке — pay.trip_food из «Значений»
             trip_days = sorted({s["started_at"].astimezone(TZ).date() for s in shifts if s["trip"]})
@@ -457,8 +466,15 @@ def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
         if f["person_id"]:   # свои деньги по одобренным чекам — к возмещению
             for e in conn.execute("""SELECT e.id, e.amount, c.title FROM expenses e JOIN expense_categories c ON c.code=e.category
                                      WHERE e.person_id=%s AND e.paid_by='own' AND e.status='approved' AND e.payout_status IN ('to_pay','paid')
-                                       AND e.created_at >= %s AND e.created_at < %s""", (f["person_id"], t0, t1)).fetchall():
+                                       AND ((e.pay_ym IS NULL AND e.created_at >= %s AND e.created_at < %s) OR e.pay_ym=%s)""",
+                                  (f["person_id"], t0, t1, ym)).fetchall():
                 acc(f["id"], "reimburse", _f(e["amount"]), f"чек: {e['title']}", str(e["id"]))
+            # исправление по обращению в закрытом месяце (HEAD 11.11): разница — строкой этого месяца, прошлый не трогаем
+            for a in conn.execute("""SELECT id, kind, day, pay_delta FROM appeals WHERE person_id=%s AND status='approved' AND pay_ym=%s
+                                     AND coalesce(pay_delta, 0) <> 0 ORDER BY id""", (f["person_id"], ym)).fetchall():
+                what = "смены" if a["kind"].startswith("shift") else "чека"
+                acc(f["id"], "appeal", _f(a["pay_delta"]), f"{'доначисление' if _f(a['pay_delta']) > 0 else 'удержание'}: исправление {what} "
+                    f"{a['day']:%d.%m} по обращению № {a['id']}", str(a["id"]))
     if only_person is None:
         db.audit(conn, by["id"], "fin_payroll_compute", "fin_accruals", ym, {"warn": warn})
     return {"warn": warn}

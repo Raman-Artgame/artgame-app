@@ -36,7 +36,9 @@ export function Pulse({ me, pulse, go }) {
   if (p === false) return <div className="card muted">Пульт не загрузился. Обновите страницу.</div>
   const r = p.review
   const asks = [
-    r.shifts && { k: 'review', t: `Смены на проверке: ${r.shifts}`, s: r.shifts_late ? `${r.shifts_late} дольше 24 ч` : 'в срок', hot: r.shifts_late },
+    r.shifts && { k: 'review', t: `Смены на утверждение: ${r.shifts}`, s: [r.rated_good ? `${r.rated_good} с оценкой 4–5★ — одним нажатием` : '',
+      r.shifts_late ? `${r.shifts_late} дольше 2 суток` : ''].filter(Boolean).join(' · ') || 'в срок', hot: r.shifts_late },
+    r.appeals && { k: 'review', t: `Обращения на правку: ${r.appeals}`, s: 'не внёс вовремя или ошибся — утвердить или отклонить' },
     r.expenses && { k: 'review', t: `Расходы на проверке: ${r.expenses}`, s: `на ${money(r.expenses_sum)}` + (r.over_cap ? ` · ${r.over_cap} выше потолка цены` : ''), hot: r.expenses_late || r.over_cap },
     r.payments && { k: 'review', t: `Оплаты клиентов на сверку: ${r.payments}`, s: `на ${money(r.payments_sum)} · сверить чек и выписку` },
     p.pending.length && { k: 'people', t: `Ждут роли: ${p.pending.length}`, s: p.pending.map(x => x.full_name).join(', '), hot: true },
@@ -44,6 +46,7 @@ export function Pulse({ me, pulse, go }) {
     p.dm?.unread && { k: 'chat', t: `Чат: новых ${p.dm.unread}`, s: `от ${p.dm.people} чел. · ответить`, hot: true },
     p.media && { k: 'prod', t: `Материал с объектов на утверждение: ${p.media}`, s: 'в «Продакшн» и рилс к оплате' },
   ].filter(Boolean)
+  const curating = r.curating ? `Ещё ${r.curating} ждут оценки куратора (до 24 ч), потом придут сюда` : ''
   const name = (me.full_name || '').split(' ')[0]
   const active = p.team.reduce((n, t) => n + +t.active, 0)
   return <>
@@ -51,7 +54,7 @@ export function Pulse({ me, pulse, go }) {
       <span className="muted small">{new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
       <h1>{name ? `${name}, ` : ''}{asks.length ? 'ждёт решения' : 'всё решено'}</h1>
       <div className="pulse-kpi">
-        <button className={asks.length ? 'hot' : ''} onClick={() => go('review')}><b>{r.shifts + r.expenses + (r.payments || 0)}</b><span>на проверке</span></button>
+        <button className={asks.length ? 'hot' : ''} onClick={() => go('review')}><b>{r.shifts + r.expenses + (r.appeals || 0) + (r.payments || 0)}</b><span>на проверке</span></button>
         <button className={p.pending.length ? 'hot' : ''} onClick={() => go('people')}><b>{p.pending.length}</b><span>новых людей</span></button>
         <button onClick={() => document.getElementById('pulse-today')?.scrollIntoView({ behavior: 'smooth' })}><b>{p.today.length}</b><span>смен сегодня</span></button>
       </div>
@@ -61,6 +64,7 @@ export function Pulse({ me, pulse, go }) {
       {asks.map((a, i) => <div key={i} className="qrow" onClick={() => go(a.k)}>
         <div className="qmain"><b>{a.t}</b><div className={'small ' + (a.hot ? 'why' : 'muted')}>{a.s}</div></div><span className="muted">›</span>
       </div>)}
+      {curating && <p className="small muted">{curating}</p>}
     </div>}
 
     <div className="qrow card dmpulse" onClick={() => go('chat')}><div className="qmain"><b>📣 Написать команде</b>
