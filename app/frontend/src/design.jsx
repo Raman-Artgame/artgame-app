@@ -9,8 +9,8 @@ const money = n => Number(n || 0).toLocaleString('ru-RU') + ' ₸'
 const CST = { draft: 'черновик', sent: 'у HEAD', returned: 'вернул', approved: 'утверждено' }
 const dmy = s => s ? new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : ''
 
-export function Design({ me }) {
-  const [view, setView] = useState('deals')
+export function Design({ me, initial }) {
+  const [view, setView] = useState(initial || 'deals')
   return <>
     <div className="card"><div className="segf">
       <button className={view === 'deals' ? 'on' : ''} onClick={() => setView('deals')}>Сделки</button>

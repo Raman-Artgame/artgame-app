@@ -3,6 +3,17 @@
 const { chromium } = require('playwright')
 const { execSync } = require('child_process')
 const assert = require('assert')
+// «Команда» по отделам (HEAD 11.11): раскрыть отдел и человека
+const person = async (h, name) => {
+  const r = h.locator('.person', { hasText: name }).first()
+  await h.locator('.dept').first().waitFor()
+  if (!(await r.locator('.pedit').count())) {
+    if (!(await r.count())) await h.locator('.dept', { hasText: name }).first().locator('.head').click()
+    await h.locator('.prow', { hasText: name }).first().click()
+  }
+  await r.locator('.pedit').waitFor()
+  return r
+}
 const BE = __dirname + '/../backend'
 const PY = process.env.PY || `${BE}/.venv/bin/python`
 const sign = id => execSync(`cd ${BE} && ${PY} -c "import sys;sys.path+=['tests'];from conftest import make_init_data;print(make_init_data({'id':${id},'first_name':'Тест'}))"`).toString().trim()
@@ -144,8 +155,9 @@ async function tab(p, name) {
   await as.getByText('у HEAD').waitFor()
   await as.screenshot({ path: `${shots}/kab-katalog.png` })
   const h = await open(b, 1000)
-  await tab(h, 'Дизайн')
-  await h.getByRole('button', { name: 'Каталоги' }).click()
+  // с Пульта «Каталоги дизайна на утверждение» — сразу во вкладку «Каталоги», не в «Сделки» (HEAD 11.11)
+  await h.getByText(/Каталоги дизайна на утверждение/).click()
+  await h.getByRole('heading', { name: 'Каталог референсов' }).waitFor()
   await h.getByRole('button', { name: 'Утверждаю' }).click()
   await h.getByText('утверждено').waitFor()
   const cat = (await call(7100, '/design/catalogs')).rows[0]
@@ -170,6 +182,7 @@ async function tab(p, name) {
   await io.screenshot({ path: `${shots}/kab-grow-pro.png` })
   // HEAD в «Команде»: поле и.о. и день повышения
   await tab(h, 'Команда')
+  await person(h, 'Дана')
   await h.getByText('Исполняет обязанности (и.о.)').first().waitFor()
   await h.locator('input[type=date]').first().waitFor()
   // 7. HEAD 09.11: «Оплачиваемые рилс» дизайнеру — появляется «Продакшн»

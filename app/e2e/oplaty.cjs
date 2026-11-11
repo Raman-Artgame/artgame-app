@@ -14,6 +14,17 @@ const bxCalls = async () => (await fetch(API + '/_e2e/bx_calls')).json()
 const shots = process.env.SHOTS || '/var/tmp'
 const CHEK = __dirname + '/chek.png'
 const PNG = 'data:image/png;base64,' + require('fs').readFileSync(CHEK).toString('base64')
+// «Команда» по отделам (HEAD 11.11): раскрыть отдел и человека
+const person = async (h, name) => {
+  const r = h.locator('.person', { hasText: name }).first()
+  await h.locator('.dept').first().waitFor()
+  if (!(await r.locator('.pedit').count())) {
+    if (!(await r.count())) await h.locator('.dept', { hasText: name }).first().locator('.head').click()
+    await h.locator('.prow', { hasText: name }).first().click()
+  }
+  await r.locator('.pedit').waitFor()
+  return r
+}
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Almaty' })
 
 async function open(b, id) {
@@ -145,7 +156,7 @@ const noFin03 = async () => assert.ok(!(await bxCalls()).some(c => Object.keys(c
   await an0.context().close()
   await h.reload()
   await tab(h, 'Команда')
-  await h.locator('.person', { hasText: 'Анна' }).locator('label', { hasText: 'Вносит оплаты клиентов' }).locator('input').click()
+  await (await person(h, 'Анна')).locator('label', { hasText: 'Вносит оплаты клиентов' }).locator('input').click()
   await h.waitForFunction(id => fetch('/api/people', { headers: { 'X-Telegram-Init-Data': window.Telegram.WebApp.initData } })
     .then(r => r.json()).then(l => l.find(x => x.id === id)?.pays), a.id)
   const an = await open(b, 7000)
