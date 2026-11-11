@@ -16,6 +16,7 @@ import { Kit } from './kit.jsx'
 import { Production } from './production.jsx'
 import { Design } from './design.jsx'
 import { DUTIES, GROW, POLICY } from './duties.js'
+import { TeamPath, countOf, markLabel, markOf, useMarks } from './grow.jsx'
 import { Feedback } from './feedback.jsx'
 import { Chat, useUnread } from './dm.jsx'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
@@ -155,7 +156,9 @@ function Main({ me, onMe, web, logout }) {
   // У «и.о.» путь — к исполняемой роли (от основной); путь от старшей роли — в её «Правилах игры».
   const pathCode = me.acting ? me.role_main : role
   const path = GROW[pathCode] && pathCode !== "head" ? <MyPath g={GROW[pathCode]} me={me} code={pathCode} /> : null
-  const folds = dcodes.map(r => <DutyFold key={r} d={DUTIES[r]} g={path && r === pathCode ? null : GROW[r]} me={me} />)
+  // наставник видит путь своих (HEAD 11.11): Главный и Про — саппортов, художников (Про — и Главных), Мастер — операторов, Главный дизайнер — дизайнеров
+  const team = MENTOR.has(role) && !me._view_as ? <TeamPath /> : null
+  const folds = dcodes.map(r => <DutyFold key={r} code={r} d={DUTIES[r]} g={path && r === pathCode ? null : GROW[r]} me={me} />)
   if (tab === 'place' || tab === 'study') return <>
     {me.roles?.length > 1 && <div className="wrap"><RoleSwitch me={me} /></div>}
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, studyOpts(p.code)]))}
@@ -172,14 +175,14 @@ function Main({ me, onMe, web, logout }) {
       {toast && <div className="toast">{toast}</div>}
       {unread > 0 && tab !== 'chat' && !isHead && <button className="dmbar" onClick={() => go('chat')}>✉️ Новое сообщение в чате<span>Открыть ›</span></button>}
       {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'chat' ? <Chat head={isHead} /> : tab === 'viewas' ? <ViewAsCard /> :
-        tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} openViewAs={isHead ? () => setTab('viewas') : null} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
+        tab === 'people' ? <><TeamPath head /><People ROLE={ROLE} ZONE={ZONE} openViewAs={isHead ? () => setTab('viewas') : null} /></> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
         tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> :
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
         tab === 'fin' ? <Finance /> : tab === 'pays' ? <PayDesk /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design key={designView || 'd'} me={me} initial={designView} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
-        tab === 'mine' && (mop || carp || !me.zones.length) ? <><Acting me={me} />{path}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} />{path}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
+        tab === 'mine' && (mop || carp || !me.zones.length) ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
     </div>
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={!isHead} />
   </>
@@ -215,26 +218,27 @@ function useGrowVals() {
   return v || {}
 }
 const fill = (t, v) => String(t).replace(/\{([a-z0-9_.]+)\}/g, (_, k) => v[k] != null && v[k] !== '' ? String(v[k]).replace('.', ',') : 'по «Значениям»')
-function Grow({ g, me, flat, onCount, part }) {
+function Grow({ g, me, flat, part, code, marks: mk, flip: fl }) {
   const on = k => !part || part === k   // «Мой путь»: разделы вкладками, иначе — всё подряд
   const v = useGrowVals()
   const f = t => fill(t, v)
-  const key = `artgame.grow.${me?.id || 0}.${g.step}`
-  const [ok, setOk] = useState(() => { if (me?._view_as) return []; try { return JSON.parse(localStorage.getItem(key) || '[]') } catch { return [] } })
-  const ro = !!me?._view_as   // HEAD смотрит как сотрудник: отметки — личные, тут их не ставим и не показываем свои
-  const flip = i => { if (ro) return
-    const n = ok.includes(i) ? ok.filter(x => x !== i) : [...ok, i]; setOk(n); onCount?.(n.length); try { localStorage.setItem(key, JSON.stringify(n)) } catch { /* без памяти */ } }
+  const [own, ownFlip] = useMarks(mk ? null : code, me)   // отметки на сервере (HEAD 11.11), наставник подтверждает
+  const marks = mk || own, flip0 = fl || ownFlip
+  const ro = !!me?._view_as   // HEAD смотрит как сотрудник: видит отметки, но не ставит
+  const flip = i => { if (!ro) flip0(i) }
+  const cnt = countOf(marks)
   return <div className={'card duty grow' + (flat ? ' flat' : '')}>
     {!flat && <><span className="tag">{g.step}</span>{g.draft && <span className="tag draft">черновик</span>}<h2>{g.title}</h2></>}{on('check') && <p>{g.about}</p>}
     {on('know') && g.change && <><h3>Что меняется</h3>{g.change.map(([was, now]) => <div key={was} className="growchange"><span className="small muted">Было: {was}</span><span>{now}</span></div>)}</>}
     {on('know') && g.know && <><h3>Что знать</h3>{g.know.map(([t, where]) => <div key={t} className="growknow"><span>{f(t)}</span><em className="small">{where}</em></div>)}
       <p className="small muted">Кн. 1 — Книга художника, Кн. 2 — Книга главного художника.</p></>}
-    {on('check') && <><h3>Что нужно для ступени{ro ? '' : ` · есть ${ok.length} из ${g.check.length}`}</h3>
-    {ro && <p className="small muted">Отметки «есть / нет» сотрудник ставит у себя — в просмотре их не видно.</p>}
-    {g.check.map((x, i) => { const [t, how, dev] = Array.isArray(x) ? x : [x]
-      return <div key={i} className={'growrow' + (ok.includes(i) ? ' ok' : '')} onClick={() => flip(i)}>
-        <span>{ok.includes(i) ? '✓' : i + 1}</span><div>{f(t)}{dev && <p className="small">Как развивать: {f(dev)}</p>}{how && <p className="small muted">Как подтверждаем: {how}</p>}</div>
-        {!ro && <em className="small">{ok.includes(i) ? 'есть' : 'нет'}</em>}</div> })}</>}
+    {on('check') && <><h3>Что нужно для ступени · есть {cnt.marked} из {g.check.length}</h3>
+    <p className="small muted">{ro ? 'Отметки сотрудника — только просмотр.' : 'Нажми пункт, когда он у тебя есть, — наставник подтвердит или вернёт с комментарием.'}</p>
+    {g.check.map((x, i) => { const [t, how, dev] = Array.isArray(x) ? x : [x], m = markOf(marks, i), [lab, cls] = markLabel(m)
+      return <div key={i} className={'growrow' + (m.marked_at ? ' ok' : '') + (cls ? ' ' + cls : '')} onClick={() => flip(i)}>
+        <span>{m.marked_at ? '✓' : i + 1}</span><div>{f(t)}{dev && <p className="small">Как развивать: {f(dev)}</p>}{how && <p className="small muted">Как подтверждаем: {how}</p>}
+          {m.returned_at && !m.marked_at && <p className="small back">Наставник вернул{m.note ? `: ${m.note}` : ''}</p>}</div>
+        <em className="small">{lab}</em></div> })}</>}
     {on('app') && g.app && <><h3>В приложении — освоить</h3>{g.app.map(([t, x]) => <div key={t} className="growknow"><b>{t}</b><span className="small">{f(x)}</span></div>)}</>}
     {on('steps') && g.steps && <><h3>Шаги</h3>{g.steps.map(([t, x], i) => <div key={t} className="growstep"><span>{i + 1}</span><div>{t}<p className="small muted">{f(x)}</p></div></div>)}</>}
     {on('steps') && g.exam && <><h3>Экзамен</h3>{g.exam.map(([t, how, ok]) => <div key={t} className="growexam"><b>{t}</b><span className="small">{how}</span><span className="small muted">Зачёт: {ok}</span></div>)}</>}
@@ -244,6 +248,7 @@ function Grow({ g, me, flat, onCount, part }) {
   </div>
 }
 
+const MENTOR = new Set(['lead_artist', 'artist_pro', 'print_master', 'lead_designer'])
 // Лестница (HEAD 11.11: «Саппорт → Художник → Главный → Про → Партнёр»): вся ветка наверху «Моего пути», где ты — подсвечено.
 const LADDER = [
   [['support', 'Саппорт'], ['artist', 'Художник'], ['lead_artist', 'Главный'], ['artist_pro', 'Про'], ['partner', 'Партнёр']],
@@ -264,19 +269,19 @@ function MyPath({ g, me, code }) {
   const [open, setOpen] = useState(false)
   const [part, setPart] = useState('check')
   const segs = [['check', 'Чек-лист'], ['know', 'Что знать'], ['steps', 'Шаги'], ['app', 'В приложении']].filter(([k]) => k === 'check' || g[k])
-  const key = `artgame.grow.${me?.id || 0}.${g.step}`
-  const [done, setDone] = useState(() => { try { return me?._view_as ? 0 : JSON.parse(localStorage.getItem(key) || '[]').length } catch { return 0 } })
+  const [marks, flip] = useMarks(code, me)
+  const c = countOf(marks)
   const promo = me.acting && me.acting_promo ? new Date(me.acting_promo) : null
   const days = promo ? Math.ceil((promo - new Date()) / 864e5) : null
   return <div className="card mypath">
     <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
       <div><span className="tag">Мой путь</span>{g.draft && <span className="tag draft">черновик</span>}<h2>{g.title}</h2>
-        <p className="small muted">{me?._view_as ? 'Следующая ступень' : `Готово ${done} из ${g.check.length}`}</p>
+        <p className="small muted">Есть {c.marked} из {g.check.length} · подтверждено {c.conf}</p>
         {promo && days > 0 && <p className="small"><b>До повышения {days} дн.</b> — {promo.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</p>}</div>
       <button className="ghost mini">{open ? 'Свернуть' : 'Открыть'}</button></div>
     <Ladder code={code} />
     {open && <>{segs.length > 1 && <div className="segf pathseg">{segs.map(([k, t]) => <button key={k} className={part === k ? 'on' : ''} onClick={() => setPart(k)}>{t}</button>)}</div>}
-      <Grow key={part} g={g} me={me} flat part={part} onCount={setDone} /></>}
+      <Grow key={part} g={g} me={me} flat part={part} code={code} marks={marks} flip={flip} /></>}
   </div>
 }
 
@@ -296,17 +301,17 @@ function Acting({ me }) {
 
 // «Правила игры» (HEAD 08.11 — вместо «Должностной»): роль, кому подчиняешься, что делаешь; ниже — как вырасти на ступень.
 // «Правила игры» в «Кабинете» у всех (HEAD 08.11): свёрнуто одной карточкой, раскрывается целиком.
-function DutyFold({ d, g, me }) {
+function DutyFold({ d, g, me, code }) {
   const [open, setOpen] = useState(false)
   return <div className="card dutyfold">
     <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
       <div><span className="tag">Правила игры</span><h3>{d.title}</h3><p className="small muted">{d.about}</p></div>
       <button className="ghost mini">{open ? 'Свернуть' : 'Открыть'}</button></div>
-    {open && <div className="dutybody"><Duty d={d} g={g} me={me} /></div>}
+    {open && <div className="dutybody"><Duty d={d} g={g} me={me} code={code} /></div>}
   </div>
 }
 
-function Duty({ d, g, me }) {
+function Duty({ d, g, me, code }) {
   return <div className="wrap"><div className="card duty">
     <span className="tag">{d.step}</span><h2>Правила игры · {d.title}</h2><p>{d.about}</p><p className="small muted">{d.boss}</p>
     {d.goal && <><h3>Зачем ты в команде{dr(d, 'goal')}</h3><p>{d.goal}</p></>}
@@ -326,7 +331,7 @@ function Duty({ d, g, me }) {
     <p className="small">{POLICY.after}</p></div>
   <Policy />
   {d.next && <div className="card duty"><h3>Куда дальше</h3><p className="small">{d.next}</p></div>}
-  {g && <Grow g={g} me={me} />}
+  {g && <Grow g={g} me={me} code={code} />}
   <p className="small muted">Источник: {d.src}{d.drafts?.length ? ' «Черновик» — нет в документах компании, ждёт утверждения HEAD.' : ''}</p></div>
 }
 
