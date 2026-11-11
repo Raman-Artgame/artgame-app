@@ -170,6 +170,9 @@ def test_catalog_and_pay(client, dz):
     c = client.post("/api/design/catalogs", json=b, headers=hdr(7000)).json()
     assert client.post(f"/api/design/catalogs/{c['id']}/send", headers=hdr(7000)).status_code == 409   # без ссылки
     client.post(f"/api/design/catalogs/{c['id']}", json={**b, "url": "https://pin/x"}, headers=hdr(7100))
+    assert client.post(f"/api/design/catalogs/{c['id']}/send", headers=hdr(7100)).status_code == 409   # без числа работ
+    client.post(f"/api/design/catalogs/{c['id']}", json={**b, "url": "https://pin/x", "works": 64}, headers=hdr(7100))
+    assert client.get("/api/design/catalogs", headers=hdr(1000)).json()["rows"][0]["works"] == 64
     assert client.post(f"/api/design/catalogs/{c['id']}/send", headers=hdr(7100)).json()["ok"]
     assert client.post(f"/api/design/catalogs/{c['id']}/decide", json={"approve": True}, headers=hdr(7000)).status_code == 403
     assert client.post(f"/api/design/catalogs/{c['id']}/decide", json={"approve": False}, headers=hdr(1000)).status_code == 400

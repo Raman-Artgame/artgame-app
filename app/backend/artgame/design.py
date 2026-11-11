@@ -282,6 +282,7 @@ class CatalogIn(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     style: str | None = Field(default=None, max_length=120)
     url: str | None = Field(default=None, max_length=500)
+    works: int | None = Field(default=None, ge=0, le=10000)   # сколько работ внутри (HEAD 11.11)
     authors: list[int] = Field(min_length=1, max_length=2)
 
 
@@ -308,8 +309,8 @@ def catalog_add(b: CatalogIn, p: dict = Depends(active)):
         raise HTTPException(403, "Каталог заводит дизайнер")
     with db.pool.connection() as conn, conn.transaction():
         _authors_ok(conn, b.authors)
-        row = conn.execute("""INSERT INTO design_catalogs (title, style, url, authors, created_by) VALUES (%s,%s,%s,%s,%s) RETURNING *""",
-                           (b.title.strip(), b.style, b.url, sorted(set(b.authors)), p["id"])).fetchone()
+        row = conn.execute("""INSERT INTO design_catalogs (title, style, url, works, authors, created_by) VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""",
+                           (b.title.strip(), b.style, b.url, b.works, sorted(set(b.authors)), p["id"])).fetchone()
         db.audit(conn, p["id"], "catalog_add", "design_catalogs", row["id"], b.model_dump())
         return row
 
@@ -323,8 +324,8 @@ def catalog_edit(cid: int, b: CatalogIn, p: dict = Depends(active)):
         if c["status"] not in ("draft", "returned"):
             raise HTTPException(409, "Каталог уже у HEAD или утверждён")
         _authors_ok(conn, b.authors)
-        conn.execute("UPDATE design_catalogs SET title=%s, style=%s, url=%s, authors=%s WHERE id=%s",
-                     (b.title.strip(), b.style, b.url, sorted(set(b.authors)), cid))
+        conn.execute("UPDATE design_catalogs SET title=%s, style=%s, url=%s, works=%s, authors=%s WHERE id=%s",
+                     (b.title.strip(), b.style, b.url, b.works, sorted(set(b.authors)), cid))
         db.audit(conn, p["id"], "catalog_edit", "design_catalogs", cid, b.model_dump())
     return {"ok": True}
 
@@ -339,6 +340,8 @@ def catalog_send(cid: int, p: dict = Depends(active)):
             raise HTTPException(409, "Каталог уже отправлен")
         if not (c["url"] or "").strip():
             raise HTTPException(409, "Добавьте ссылку на папку или рефборд")
+        if not c.get("works"):
+            raise HTTPException(409, "Укажите, сколько работ в каталоге")
         conn.execute("UPDATE design_catalogs SET status='sent', sent_at=now() WHERE id=%s", (cid,))
         db.audit(conn, p["id"], "catalog_send", "design_catalogs", cid)
         head = conn.execute("SELECT tg_id FROM people WHERE role_code='head' AND status='active' ORDER BY id LIMIT 1").fetchone()

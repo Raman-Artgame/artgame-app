@@ -149,6 +149,7 @@ async function tab(p, name) {
   await as.getByRole('button', { name: '+ Новый' }).click()
   await as.getByPlaceholder('Название').fill('Лофт')
   await as.getByPlaceholder('Ссылка на папку или рефборд').fill('https://drive.google.com/x')
+  await as.getByPlaceholder(/Сколько работ/).fill('64')
   await as.locator('.warnbox .chips button', { hasText: 'Главный дизайнер Алия' }).click()
   await as.getByRole('button', { name: 'Сохранить' }).click()
   await as.getByText('Лофт').waitFor()
@@ -159,6 +160,9 @@ async function tab(p, name) {
   // с Пульта «Каталоги дизайна на утверждение» — сразу во вкладку «Каталоги», не в «Сделки» (HEAD 11.11)
   await h.getByText(/Каталоги дизайна на утверждение/).click()
   await h.getByRole('heading', { name: 'Каталог референсов' }).waitFor()
+  await h.getByRole('button', { name: /Посмотреть каталог/ }).waitFor()
+  await h.getByText(/64 работы/).waitFor()
+  await h.screenshot({ path: `${shots}/kab-katalog-head.png` })
   await h.getByRole('button', { name: 'Утверждаю' }).click()
   await h.getByText('утверждено').waitFor()
   const cat = (await call(7100, '/design/catalogs')).rows[0]

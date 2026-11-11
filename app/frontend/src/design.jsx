@@ -7,6 +7,10 @@ import { bxLink, usePortal } from './crm.jsx'
 // Единица — только при «УТВЕРЖДЕНО» (макет и эскиз утверждены); каждый переход в «Правки» — новый круг, без доплаты.
 const money = n => Number(n || 0).toLocaleString('ru-RU') + ' ₸'
 const CST = { draft: 'черновик', sent: 'у HEAD', returned: 'вернул', approved: 'утверждено' }
+// Ссылку из мини-приложения Telegram открываем через openLink — обычная ссылка там может не открыться (HEAD 11.11)
+const openUrl = u => { const t = window.Telegram?.WebApp; if (t?.openLink && t.initData) t.openLink(u); else window.open(u, '_blank', 'noopener') }
+const host = u => { try { const h = new URL(u).hostname.replace(/^www\./, ''); return /drive\.google|docs\.google/.test(h) ? 'Google Диск' : /pinterest|pin\.it/.test(h) ? 'Pinterest' : /figma/.test(h) ? 'Figma' : /behance/.test(h) ? 'Behance' : h } catch { return '' } }
+const works = n => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'работа' : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'работы' : 'работ'}`
 const dmy = s => s ? new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : ''
 
 export function Design({ me, initial }) {
@@ -212,27 +216,31 @@ function Catalogs({ me }) {
   const act = (path, body) => api(path, { method: 'POST', body }).then(() => { setMsg(''); load() }, ex => setMsg(ex.message))
   const mine = r => r.authors.includes(me.id) || r.created_by === me.id
   return <div className="card">
-    <div className="head"><h2>Каталог референсов</h2>{!c.is_head && !form && <button className="mini" onClick={() => setForm({ title: '', style: '', url: '', authors: [me.id] })}>+ Новый</button>}</div>
+    <div className="head"><h2>Каталог референсов</h2>{!c.is_head && !form && <button className="mini" onClick={() => setForm({ title: '', style: '', url: '', works: '', authors: [me.id] })}>+ Новый</button>}</div>
     <p className="small muted">Собрал каталог (60+ работ) — отправь HEAD. После «утверждаю» {money(c.amount)} в «Кабинет»; двое исполнителей — пополам.</p>
     {form && <div className="warnbox">
       <input placeholder="Название" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
       <input placeholder="Стиль" value={form.style || ''} onChange={e => setForm({ ...form, style: e.target.value })} />
       <input placeholder="Ссылка на папку или рефборд" value={form.url || ''} onChange={e => setForm({ ...form, url: e.target.value })} />
+      <input inputMode="numeric" placeholder="Сколько работ внутри (60+)" value={form.works ?? ''} onChange={e => setForm({ ...form, works: e.target.value.replace(/\D/g, '') })} />
       <label className="muted small">Исполнители (1–2)</label>
       <div className="chips">{team.filter(t => t.id).map(t => { const on = form.authors.includes(t.id)
         return <button key={t.id} className={on ? 'on' : ''} onClick={() => setForm({ ...form, authors: on ? form.authors.filter(a => a !== t.id) : [...form.authors, t.id].slice(-2) })}>{t.full_name}</button> })}</div>
       <div className="seg"><button className="ghost" onClick={() => setForm(null)}>Отмена</button>
-        <button disabled={form.title.trim().length < 2 || !form.authors.length} onClick={() => api(form.id ? `/design/catalogs/${form.id}` : '/design/catalogs', { method: 'POST', body: form })
+        <button disabled={form.title.trim().length < 2 || !form.authors.length} onClick={() => api(form.id ? `/design/catalogs/${form.id}` : '/design/catalogs', { method: 'POST', body: { ...form, works: form.works === '' || form.works == null ? null : +form.works } })
           .then(() => { setForm(null); load() }, ex => setMsg(ex.message))}>Сохранить</button></div>
     </div>}
     {msg && <p className="small why">{msg}</p>}
     {c.rows.map(r => <div key={r.id} className="row">
-      <div><b>{r.title}</b>{r.url && <> · <a href={r.url} target="_blank" rel="noreferrer">открыть</a></>}
-        <div className="small muted">{[r.style, (r.author_names || []).join(' + '), r.authors.length > 1 ? 'пополам' : ''].filter(Boolean).join(' · ')}</div>
+      <div><b>{r.title}</b>
+        <div className="small muted">{[r.style, r.works ? works(r.works) : '', (r.author_names || []).join(' + '), r.authors.length > 1 ? 'пополам' : ''].filter(Boolean).join(' · ')}</div>
+        {r.url ? <button className="ghost mini catopen" onClick={() => openUrl(r.url)}>Посмотреть каталог ↗{host(r.url) ? <small> · {host(r.url)}</small> : null}</button>
+          : <div className="small why">Ссылки нет — верните с просьбой добавить</div>}
+        {c.is_head && r.status === 'sent' && r.works > 0 && r.works < 60 && <div className="small why">Меньше 60 работ</div>}
         {r.comment && <div className="small">HEAD: {r.comment}</div>}</div>
       <div className="qbtns"><span className={'tag' + (r.status === 'approved' ? ' st-approved' : r.status === 'returned' ? ' st-rejected' : '')}>{CST[r.status]}</span>
         {mine(r) && ['draft', 'returned'].includes(r.status) && <>
-          <button className="ghost mini" onClick={() => setForm({ id: r.id, title: r.title, style: r.style, url: r.url, authors: r.authors })}>Править</button>
+          <button className="ghost mini" onClick={() => setForm({ id: r.id, title: r.title, style: r.style, url: r.url, works: r.works ?? '', authors: r.authors })}>Править</button>
           <button className="mini" onClick={() => act(`/design/catalogs/${r.id}/send`)}>Отправить HEAD</button></>}
         {c.is_head && r.status === 'sent' && <>
           <button className="mini" onClick={() => act(`/design/catalogs/${r.id}/decide`, { approve: true })}>Утверждаю</button>
