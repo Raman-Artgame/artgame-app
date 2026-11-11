@@ -830,3 +830,6 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .teampath .tpitem.wait em { color: var(--accent); font-weight: 600; }
 .teampath .tpitem.conf em { color: var(--ok); font-weight: 600; }
 .teampath .tpitem .row { display: flex; gap: 8px; margin-top: 6px; }
+/* Каталог референсов: заметная кнопка «Посмотреть» (HEAD 11.11) */
+.catopen { display: inline-block; margin-top: 8px; width: auto; }
+.catopen small { color: var(--muted); font-weight: 400; }
