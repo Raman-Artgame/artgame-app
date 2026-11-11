@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from . import db, drive
 from .work import (DIRECT_SQL, HAS_CUR_SQL, SHOP, TZ, WORKSHOP_ROLES, WORKSHOP_ZONES, Decision, RateIn, active, cats_for,
-                   check_rate, check_zone, is_trip, review_filter, shift_role, stage_of, _photo)
+                   check_rate, check_zone, is_trip, overlap, review_filter, shift_role, stage_of, _photo)
 
 router = APIRouter(prefix="/api")
 MAX_DAYS = 60
@@ -147,12 +147,12 @@ def add_appeal(b: AppealIn, p: dict = Depends(active)):
             start = datetime(day.year, day.month, day.day, h, m, tzinfo=TZ)
             if start + timedelta(hours=b.hours) > datetime.now(TZ) + timedelta(minutes=10):
                 raise HTTPException(400, "Эта смена ещё не закончилась — внеси её на вкладке «Смена»")
-            if conn.execute("""SELECT 1 FROM shifts WHERE person_id=%s AND status NOT IN ('rejected','cancelled') AND kind <> 'road'
-                               AND started_at >= %s AND started_at < %s + interval '1 day'""",
-                            (p["id"], start.replace(hour=0, minute=0), start.replace(hour=0, minute=0))).fetchone():
-                raise HTTPException(409, "В этот день смена уже есть. Если в ней ошибка — «Мои смены» → «Ошибка? Обращение»")
-            if conn.execute("SELECT 1 FROM appeals WHERE person_id=%s AND kind='shift_late' AND day=%s AND status='submitted'", (p["id"], day)).fetchone():
-                raise HTTPException(409, "За этот день обращение уже подано — дождись решения")
+            busy = overlap(conn, p["id"], start, start + timedelta(hours=b.hours))   # HEAD 11.11: несколько смен в день — без пересечений
+            if busy:
+                raise HTTPException(409, busy)
+            if conn.execute("""SELECT 1 FROM appeals WHERE person_id=%s AND kind='shift_late' AND day=%s AND object_id=%s AND status='submitted'
+                                 AND coalesce(data->>'start_time','') = %s""", (p["id"], day, obj, f"{h}:{m:02d}")).fetchone():
+                raise HTTPException(409, "Такое обращение уже подано — дождись решения")
             data = {"start_time": f"{h}:{m:02d}", "hours": b.hours, "area_m2": None if shop else b.area_m2, "work_done": b.work_done.strip(),
                     "workshop": b.workshop.strip() if shop else None, "role": shift_role(p, zone, b.role)}
             if b.photo and not shop:

@@ -197,6 +197,8 @@ async function tab(p, name) {
     const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
     await io.locator('.card.past input[type=date]').fill(y)
     await io.locator('.card.past textarea').fill('Фон и контур')
+    await io.locator('.card.past').getByText('Был на двух объектах за день').waitFor()
+    await io.locator('.card.past').screenshot({ path: `${shots}/kab-proshlaya-smena.png` })
     // сколько угодно фото из галереи (HEAD 09.11)
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC', 'base64')
     await io.locator('.card.past .pics input[type=file]').setInputFiles([1, 2, 3].map(i => ({ name: `p${i}.png`, mimeType: 'image/png', buffer: png })))

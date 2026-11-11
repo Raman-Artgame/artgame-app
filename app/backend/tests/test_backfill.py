@@ -42,7 +42,12 @@ def test_past_shift_and_expense(client, team, monkeypatch):  # noqa: F811
     assert client.post(f"/api/shifts/{s['id']}/photos", json={"client_uid": str(uuid.uuid4()), "photo": JPEG}, headers=hdr(2000)).status_code == 404
     mine = next(x for x in client.get("/api/my", headers=hdr(5000)).json()["shifts"] if x["id"] == s["id"])
     assert len(mine["photos"]) == 3
-    assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4())}, headers=hdr(5000)).status_code == 409
+    assert client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4())}, headers=hdr(5000)).status_code == 409   # то же время
+    # HEAD 11.11: утром один объект, вечером другой — две смены в один день; пересекаться по времени нельзя
+    eve = {**body, "object_id": 731, "start_time": "19:00", "hours": 2.5, "work_done": "Высвечивал рисунок"}
+    r = client.post("/api/shifts/past", json={**eve, "client_uid": str(uuid.uuid4()), "start_time": "16:00"}, headers=hdr(5000))
+    assert r.status_code == 409 and "пересекаются" in r.json()["detail"]           # 9:00 + 8 ч = до 17:00
+    assert client.post("/api/shifts/past", json={**eve, "client_uid": str(uuid.uuid4())}, headers=hdr(5000)).json()["status"] == "submitted"
     # сегодня (HEAD 10.11): ещё идущую смену — нельзя, с понятным текстом; уже закончившуюся — можно
     r = client.post("/api/shifts/past", json={**body, "client_uid": str(uuid.uuid4()), "day": _today().isoformat(), "start_time": "23:59"},
                     headers=hdr(5000))
