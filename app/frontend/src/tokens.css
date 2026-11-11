@@ -772,3 +772,9 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .dm .dmseg .dmcnt { margin-left: 2px; }
 .dm .dmrow:first-child, .dm h2 + .qrow { border-top: 0; }
 .dm .dmseg button { font-size: 12.5px; padding: 9px 2px; min-width: 0; }
+.dm .dmav { border-radius: 50%; font-size: 13px; background: var(--alt); color: var(--text); }
+.dm .dmav.head { background: var(--dark); color: #fff; }
+.dm .dmav.hq { border-radius: 12px; background: var(--accent); color: #fff; font-size: 10px; letter-spacing: .3px; }
+.dm .dmhq { border-top: 0; padding-top: 4px; }
+.dm .dmsearch { margin: 6px 0 4px; }
+.dm .dmsub { margin: 10px 0 0; }
