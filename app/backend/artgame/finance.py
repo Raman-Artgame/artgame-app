@@ -33,7 +33,7 @@ RATE = {"support": ("pay.support.shift", "pay.support.hour"), "artist": ("pay.ar
         "carpenter": ("pay.carpenter.shift", "pay.carpenter.hour")}
 # «Мастерская» без проекта (HEAD 09.11): печать — своя ставка в час из «Значений»; нет ключа — как обычная смена (с предупреждением)
 WORKSHOP_RATE = {"print_master": "pay.print.master.workshop_hour", "print_operator": "pay.print.operator.workshop_hour"}
-# Роли на окладе (HEAD 06–07.11): плотник, помощник и главный дизайнер — сумма из «Значений».
+# Роли на окладе (HEAD 06–07.11): плотник, дизайнер и главный дизайнер — сумма из «Значений».
 SALARY_ROLE = {"carpenter": "pay.carpenter.month", "designer_asst": "pay.design_assistant.month",
                "lead_designer": "pay.design.lead.month"}
 MINIMUM = {"lead_artist": "pay.chief.min_month", "artist_pro": "pay.pro.min_month"}
