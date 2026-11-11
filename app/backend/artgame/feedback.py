@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 
 from . import db
 from .config import settings
-from .deps import require_head
+from .deps import require_head  # noqa: F401
+from .dm import require_owner   # HEAD 11.11: обращения, как и личные диалоги, — только HEAD-владелец
 from .work import active
 
 router = APIRouter(prefix="/api")
@@ -49,7 +50,7 @@ def my_feedback(p: dict = Depends(active)):
 
 
 @router.get("/feedback")
-def all_feedback(status: str | None = None, p: dict = Depends(require_head)):
+def all_feedback(status: str | None = None, p: dict = Depends(require_owner)):
     with db.pool.connection() as conn:
         return {"items": conn.execute(
             """SELECT f.*, pe.full_name, r.title AS role_title FROM feedback f JOIN people pe ON pe.id=f.person_id
@@ -63,7 +64,7 @@ class AnswerIn(BaseModel):
 
 
 @router.post("/feedback/{fid}")
-def answer_feedback(fid: int, b: AnswerIn, p: dict = Depends(require_head)):
+def answer_feedback(fid: int, b: AnswerIn, p: dict = Depends(require_owner)):
     with db.pool.connection() as conn, conn.transaction():
         f = conn.execute("SELECT f.*, pe.tg_id FROM feedback f JOIN people pe ON pe.id=f.person_id WHERE f.id=%s", (fid,)).fetchone()
         if not f:

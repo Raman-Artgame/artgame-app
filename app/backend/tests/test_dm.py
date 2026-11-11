@@ -85,3 +85,20 @@ def test_no_bot_for_private(client, team, monkeypatch):  # noqa: F811
     assert len(bot) == 1
     client.post("/api/dm/broadcast", json={"text": "Сбор в 9"}, headers=hdr(1000))
     assert len(sent) == 3 and len(bot) == 1
+
+
+def test_only_owner_sees_dialogs(client, team):  # noqa: F811
+    """HEAD 11.11: «Алина увидела сообщение Анны» — второй человек с ролью HEAD личных диалогов и обращений не видит."""
+    pid = client.post("/api/register", json={"full_name": "Алина"}, headers=hdr(6000)).json()["id"]
+    client.post(f"/api/people/{pid}", json={"role_code": "head"}, headers=hdr(1000))
+    client.post("/api/dm", json={"text": "Личное от Анны"}, headers=hdr(2000))
+    client.post("/api/feedback", json={"kind": "bug", "text": "Не грузится фото"}, headers=hdr(2000))
+    for path in ["/api/dm/threads", f"/api/dm/with/{team[2000]}", "/api/feedback"]:
+        assert client.get(path, headers=hdr(6000)).status_code == 403, path
+    assert client.post(f"/api/dm/with/{team[2000]}", json={"text": "x"}, headers=hdr(6000)).status_code == 403
+    assert client.post("/api/dm/broadcast", json={"text": "x"}, headers=hdr(6000)).status_code == 403
+    assert client.get("/api/dm/unread", headers=hdr(6000)).json() == {"n": 0}
+    pulse = client.get("/api/head/pulse", headers=hdr(6000)).json()
+    assert pulse["dm"] == {"unread": 0, "people": 0} and pulse["feedback"] == []
+    assert client.get("/api/dm/threads", headers=hdr(1000)).status_code == 200                 # владелец — как раньше
+    assert client.get("/api/head/pulse", headers=hdr(1000)).json()["dm"]["unread"] == 1

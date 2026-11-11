@@ -80,8 +80,21 @@ def _short(t: str, n: int = 700) -> str:
     return t if len(t) <= n else t[:n] + "…"
 
 
+def is_owner(p: dict) -> bool:
+    """HEAD 11.11 («Алина увидела сообщение Анны»): личные диалоги видит ТОЛЬКО владелец — HEAD с ARTGAME_HEAD_TG_ID.
+    Другие люди с ролью «HEAD» диалогов, счётчика и уведомлений не получают."""
+    return p.get("role_code") == "head" and (not settings.head_tg_id or p.get("tg_id") == settings.head_tg_id)
+
+
+def require_owner(p: dict = Depends(require_head)) -> dict:
+    if not is_owner(p):
+        raise HTTPException(403, "личные диалоги видит только HEAD-владелец")
+    return p
+
+
 def _heads(conn) -> list[dict]:
-    return conn.execute("SELECT id, tg_id FROM people WHERE role_code='head' AND status='active'").fetchall()
+    rows = conn.execute("SELECT id, tg_id, role_code FROM people WHERE role_code='head' AND status='active'").fetchall()
+    return [h for h in rows if is_owner(h)]
 
 
 def _to_head(conn, p: dict, text: str, via: str = "app") -> tuple[dict, list]:
@@ -138,7 +151,7 @@ def write_head(b: TextIn, bg: BackgroundTasks, p: dict = Depends(active)):
 def unread(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         if p["role_code"] == "head" and not p.get("_view_as"):
-            n = conn.execute("SELECT count(*) AS n FROM dm WHERE NOT from_head AND read_at IS NULL").fetchone()["n"]
+            n = conn.execute("SELECT count(*) AS n FROM dm WHERE NOT from_head AND read_at IS NULL").fetchone()["n"] if is_owner(p) else 0
         else:
             n = conn.execute("SELECT count(*) AS n FROM dm WHERE person_id=%s AND from_head AND read_at IS NULL", (p["id"],)).fetchone()["n"]
     return {"n": n}
@@ -147,7 +160,7 @@ def unread(p: dict = Depends(active)):
 # ---------- HEAD ----------
 
 @router.get("/threads")
-def threads(p: dict = Depends(require_head)):
+def threads(p: dict = Depends(require_owner)):
     """Все активные сотрудники: сначала с непрочитанным, потом по последнему сообщению, потом без переписки."""
     with db.pool.connection() as conn:
         rows = conn.execute(
@@ -177,7 +190,7 @@ def _person(conn, pid: int) -> dict:
 
 
 @router.get("/with/{pid}")
-def dialog(pid: int, bg: BackgroundTasks, p: dict = Depends(require_head)):
+def dialog(pid: int, bg: BackgroundTasks, p: dict = Depends(require_owner)):
     with db.pool.connection() as conn:
         who = _person(conn, pid)
         items = _items(conn, pid)
@@ -187,7 +200,7 @@ def dialog(pid: int, bg: BackgroundTasks, p: dict = Depends(require_head)):
 
 
 @router.post("/with/{pid}")
-def write_one(pid: int, b: TextIn, bg: BackgroundTasks, p: dict = Depends(require_head)):
+def write_one(pid: int, b: TextIn, bg: BackgroundTasks, p: dict = Depends(require_owner)):
     with db.pool.connection() as conn, conn.transaction():
         who = _person(conn, pid)
         if who["status"] != "active":
@@ -205,7 +218,7 @@ class CastIn(TextIn):
 
 
 @router.post("/broadcast")
-def broadcast(b: CastIn, bg: BackgroundTasks, p: dict = Depends(require_head)):
+def broadcast(b: CastIn, bg: BackgroundTasks, p: dict = Depends(require_owner)):
     """Всем активным сотрудникам (или только этим ролям: основная, вторая или «и.о.»). Тестовых «Тест · роль» не трогаем."""
     roles = [r for r in (b.roles or []) if r and r != "head"] or None
     text = b.text.strip()
@@ -242,6 +255,8 @@ def from_telegram(tg_id: int, text: str, reply_to: int | None) -> str | None:
         if not p or p["status"] != "active":
             return None
         if p["role_code"] == "head":
+            if not is_owner(p):
+                return "Личные диалоги с сотрудниками ведёт только HEAD-владелец."
             src = reply_to and conn.execute("SELECT person_id FROM dm WHERE tg_msg_id=%s AND NOT from_head ORDER BY id DESC LIMIT 1",
                                             (reply_to,)).fetchone()
             if not src:
