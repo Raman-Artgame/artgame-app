@@ -439,6 +439,47 @@ def test_fok_field_rows_cancelled_after_reentry(client, monkeypatch):
     assert dm.card(d)["received"] == 7_190_000
 
 
+def test_fok_advance_moved_to_history(client, monkeypatch):
+    """ФОК 943 (HEAD 11.11 «да»): аванс 1 276 000 Анна внесла датой 11.11 на Kaspi, а пришёл он 21.10. Миграция 050 переносит
+    ровно эту оплату на 21.10 в «Историю» (как оплату до ноября): итог сделки тот же, у Kaspi и в ноябре её больше нет;
+    повторный прогон ничего не меняет; если таких строк не одна — ничего не трогает."""
+    from pathlib import Path
+    ids = setup(client, monkeypatch)
+    d = deal(943, opp=9_787_500)
+    note = "943 · ФОК — АТЫРАУ · внёс Анна Тарапата · Аванс"
+
+    def add(day, acc, amount, deal_id=943):
+        with db.pool.connection() as conn:
+            return conn.execute("""INSERT INTO fin_ledger (client_uid, op_date, account_code, direction, amount, article_code, period, deal_id,
+                                                           note, source, created_by)
+                                   VALUES (%s,%s,%s,'in',%s,'client_payment',%s,%s,%s,'app',%s) RETURNING id""",
+                                (uid(), day, acc, amount, day[:7], deal_id, note, ids[3000])).fetchone()["id"]
+    sql = (Path(__file__).parents[1] / "migrations" / "050_fok943_avans_data.sql").read_text()
+    avans = add("2026-11-11", "kaspi", 1276000)
+    add("2026-10-28", "hist", 2914000)
+    add("2026-11-03", "kaspi", 3000000)
+    other = add("2026-11-11", "kaspi", 1276000, deal_id=944)   # та же оплата у другой сделки — не трогаем
+    before = dm.card(d)
+    with db.pool.connection() as conn:
+        conn.execute(sql)
+        conn.execute(sql)   # повторно: строки от 11.11 больше нет — пропуск
+        rows = {r["id"]: r for r in conn.execute("SELECT * FROM fin_ledger").fetchall()}
+        log = conn.execute("SELECT data FROM audit_log WHERE action='ledger_fix'").fetchall()
+    a = rows[avans]
+    assert (str(a["op_date"]), a["account_code"], a["period"], a["status"]) == ("2026-10-21", "hist", "2026-10", "active")
+    assert a["note"] == "943 · ФОК — АТЫРАУ · внёс Анна Тарапата · до ноября · Аванс"
+    assert (str(rows[other]["op_date"]), rows[other]["account_code"]) == ("2026-11-11", "kaspi")
+    assert [x["data"]["to"] for x in log] == [["2026-10-21", "hist", "2026-10"]]
+    after = dm.card(d)
+    assert after["received"] == before["received"] == 7_190_000 and after["debt"] == 2_597_500
+    # две одинаковые строки — непонятно, какую переносить: ничего не меняем
+    add("2026-11-11", "kaspi", 1276000)
+    add("2026-11-11", "kaspi", 1276000)
+    with db.pool.connection() as conn:
+        conn.execute(sql)
+        assert conn.execute("SELECT count(*) AS n FROM fin_ledger WHERE deal_id=943 AND op_date='2026-11-11'").fetchone()["n"] == 2
+
+
 def test_act_goes_to_its_field():
     """АВР из приложения — в поле «АВР» блока «Документы», а не в «Прочие» (HEAD 11.11)."""
     assert bxw.KIND_FIELD["avr"] == "UF_CRM_ARTGAME_DOC05_ACTS" and bxw.F_ACTS in bxw.WRITABLE and bxw.F_ACTS in bxw.MULTI_FILE
