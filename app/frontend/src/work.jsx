@@ -166,7 +166,7 @@ const tday = () => { const t = new Date(); return new Date(t - t.getTimezoneOffs
 function PastShift({ d, done }) {
   const b = d.backfill
   const [open, setOpen] = useState(false)
-  const [v, set] = useState({ object_id: b.objects[0]?.id, zone_code: d.zones[0], day: '', start_time: '09:00', hours: '10', area_m2: '', work_done: '', workshop: '' })
+  const [v, set] = useState({ object_id: b.objects[0]?.id, zone_code: d.zones[0], day: '', start_time: '09:00', end_time: '19:00', plus: '', area_m2: '', work_done: '', workshop: '' })
   const shop = !!v.workshop   // мастерская без проекта (печать, HEAD 09.11)
   const [pics, setPics] = useState([])     // сколько угодно фото из галереи (HEAD 09.11)
   const [busy, setBusy] = useState(false)
@@ -175,12 +175,18 @@ function PastShift({ d, done }) {
   const pick = async files => {
     for (const f of [...files]) { const x = await shrink(f); setPics(a => [...a, x]) }
   }
+  // Часы считаем из «начали» и «закончили» (Диана 11.11 ввела конец «1930» в поле часов)
+  const hm = t => { const m = String(t || '').trim().match(/^(\d{1,2})(?:[:.\s,-]?(\d{2}))?$/); return m && +m[1] < 24 && +(m[2] || 0) < 60 ? +m[1] * 60 + +(m[2] || 0) : null }
+  const a = hm(v.start_time), z = hm(v.end_time)
+  const late = v.plus === '' ? (a != null && z != null && z <= a ? 1 : 0) : +v.plus   // конец раньше начала — значит, на следующий день
+  const hours = a == null || z == null ? 0 : Math.round((z - a + late * 1440) / 6) / 10
+  const tooLong = hours > 48
   const send = async () => {
-    if (+v.hours > 48) { setErr('Одной записью — до 48 часов. Дольше — внесите по дням.'); return }
+    if (tooLong) { setErr('Одной записью — до 48 часов. Дольше — внесите по дням.'); return }
     setBusy(true); setErr('')
     try {
       const sh = await api('/shifts/past', { method: 'POST', body: { client_uid: uuid(), ...v, ...(shop ? { object_id: 0, zone_code: 'print' } : { workshop: null }),
-        hours: +v.hours, area_m2: v.area_m2 === '' || shop ? null : +v.area_m2, photo_after: shop ? null : pics[0] || null } })
+        hours, end_time: undefined, plus: undefined, area_m2: v.area_m2 === '' || shop ? null : +v.area_m2, photo_after: shop ? null : pics[0] || null } })
       const rest = shop ? [] : pics.slice(1)
       let bad = 0
       for (let i = 0; i < rest.length; i++) {
@@ -206,7 +212,9 @@ function PastShift({ d, done }) {
       </select>
       {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}</>}
       <div className="pair"><div><label className="muted">Начали в</label><input type="time" value={v.start_time} onChange={e => set({ ...v, start_time: e.target.value })} /></div>
-        <div><label className="muted">Часов (до 48)</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} /></div></div>
+        <div><label className="muted">Закончили в</label><input type="time" value={v.end_time} onChange={e => set({ ...v, end_time: e.target.value })} /></div></div>
+      <div className="segf">{['тот же день', 'следующий', 'через день'].map((t, i) => <button key={i} className={late === i ? 'on' : ''} onClick={() => set({ ...v, plus: String(i) })}>{t}</button>)}</div>
+      <p className={'small ' + (tooLong || !hours ? 'why' : 'muted')}>{a == null || z == null ? 'Укажите время начала и конца, например 09:00 и 19:30.' : !hours ? 'Конец совпадает с началом — проверьте время.' : `Получается ${String(hours).replace('.', ',')} ч.${tooLong ? ' Одной записью — до 48 часов, дольше — внесите по дням.' : ''}`}</p>
       <p className="small muted">Сверх {d.shift_hours || 10} ч — по часовой ставке, ночные часы ({d.night || '22:00–6:00'}) — +{d.night_pct ?? 10}% к часу. Посчитается само.</p>
       {!shop && <><label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} /></>}
       <label className="muted">Что сделал</label><textarea value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Фон, контур, детали…" />
@@ -214,7 +222,7 @@ function PastShift({ d, done }) {
         <div className="pics">{pics.map((x, i) => <span key={i}><img src={x} alt="" /><button className="ghost mini" onClick={() => setPics(pics.filter((_, j) => j !== i))}>✕</button></span>)}
           <label className="photo snap add"><span>🖼 Добавить фото</span><input type="file" accept="image/*" multiple hidden onChange={e => { pick(e.target.files); e.target.value = '' }} /></label></div></>}
       {prog && <p className="small muted">{prog}</p>}
-      <button disabled={busy || !v.day || (!shop && !v.object_id) || !+v.hours || v.work_done.trim().length < 3} onClick={send}>{busy ? 'Отправляю…' : 'Отправить на проверку'}</button>
+      <button disabled={busy || !v.day || (!shop && !v.object_id) || !hours || tooLong || v.work_done.trim().length < 3} onClick={send}>{busy ? 'Отправляю…' : 'Отправить на проверку'}</button>
       {err && <p className="small why">{err}</p>}
     </>}
   </div>
