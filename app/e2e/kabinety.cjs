@@ -101,17 +101,18 @@ async function tab(p, name) {
   await l.getByText('Фасадная: 10 л').waitFor()
   await l.screenshot({ path: `${shots}/kab-sbor-sdan.png` })
 
-  // 3. Про выше Главного: видит и принимает смену Главного; Главный смену Про не видит
+  // 3. HEAD 11.11: смены кураторов (Главный, Про) — сразу к HEAD, кураторы их не видят
   const sh = await call(3000, '/shifts', { client_uid: crypto.randomUUID(), object_id: obj.id, zone_code: 'mural',
     started_at: '2026-11-04T09:00:00+05:00', ended_at: '2026-11-04T19:00:00+05:00' })
   const shp = await call(4000, '/shifts', { client_uid: crypto.randomUUID(), object_id: obj.id, zone_code: 'mural',
     started_at: '2026-11-04T09:00:00+05:00', ended_at: '2026-11-04T19:00:00+05:00' })
   assert.ok(!(await call(3000, '/review')).shifts.some(x => x.id === shp.id))
+  assert.ok(!(await call(4000, '/review')).shifts.some(x => x.id === sh.id))
   const pr = await open(b, 4000)
   await tab(pr, 'Проверка')
-  await pr.getByText('Главный Ержан').first().waitFor()
-  await pr.getByRole('button', { name: '✓' }).first().click()
-  await pr.waitForTimeout(500)
+  await pr.getByText('Ты ставишь оценку').waitFor()
+  assert.strictEqual((await call(1000, '/review')).shifts.find(x => x.id === sh.id).stage, 'direct')
+  await call(1000, `/shift/${sh.id}/review`, { approve: true })
   assert.strictEqual((await call(3000, '/my')).shifts.find(x => x.id === sh.id).status, 'approved')
 
   // 4. Главный дизайнер: воронка «Дизайн РК», назначает помощника и размер XS, срок; запись в Битрикс

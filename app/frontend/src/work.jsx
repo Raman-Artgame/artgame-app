@@ -469,6 +469,8 @@ function AddPics({ id, done }) {
 
 export function Mine() {
   const [m, setM] = useState(null)
+  const [re, setRe] = useState(0)        // обращение подано — обновить список обращений
+  const [note, setNote] = useState('')
   const load = () => api('/my').then(setM, () => {})
   useEffect(() => {
     flush(); load()
@@ -483,6 +485,8 @@ export function Mine() {
       {failed().map((x, i) => <div key={i} className="row"><div><b>{x.amount ? money(x.amount) : x.path}</b>{x.note ? ` · ${x.note}` : ''}
         <div className="small why">{x.error}</div></div></div>)}
       <button className="ghost mini" onClick={() => { clearFailed(); load() }}>Понятно, скрыть</button></div>}
+    {note && <div className="card">{note}</div>}
+    <Appeals reload={re} />
     <div className="card"><h2>Мои смены</h2>
       {m.shifts.length ? m.shifts.map(s => <div key={s.id} className="row">
         <div><b>{s.object_title}</b><br /><span className="muted small">{when(s.started_at, s.ended_at)}{s.area_m2 ? ` · ${+s.area_m2} м²` : ''}{s.backfill ? ' · задним числом' : ''}</span>
@@ -491,7 +495,9 @@ export function Mine() {
           {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <img src={s.photo_before_url} alt="до" />}{s.photo_after_url && <img src={s.photo_after_url} alt="после" />}</div>}
           <More x={s} />
           {s.backfill && s.status === 'submitted' && s.object_id ? <AddPics id={s.id} done={load} /> : null}
-          {s.reason && <div className="small">Причина: {s.reason}</div>}</div>
+          {s.reason && <div className="small">Причина: {s.reason}</div>}
+          <CurMark x={s} />
+          {['submitted', 'approved', 'rejected'].includes(s.status) && <FixAppeal k="shift" x={s} done={t => { setNote(t); setRe(n => n + 1) }} />}</div>
         <StatusMark status={s.status} />
         {s.status === 'submitted' && <a onClick={() => cancel('shift', s.id)}>отменить</a>}
       </div>) : <p className="muted">Пока нет</p>}
@@ -500,7 +506,9 @@ export function Mine() {
       {m.expenses.length ? m.expenses.map(e => <div key={e.id} className="row">
         <div><b>{money(e.amount)}</b> · {e.object_title}{e.backfill ? <span className="small muted"> · {new Date(e.created_at).toLocaleDateString('ru-RU')}, задним числом</span> : null}<br /><span className="muted small">{e.payout_status === 'to_pay' ? 'к выплате' : e.payout_status === 'paid' ? 'выплачено' : ''}</span>
           {e.receipt_url && <a href={e.receipt_url} target="_blank" rel="noreferrer"> чек</a>}
-          {e.reason && <div className="small">Причина: {e.reason}</div>}</div>
+          {e.reason && <div className="small">Причина: {e.reason}</div>}
+          <CurMark x={e} />
+          {['submitted', 'approved', 'rejected'].includes(e.status) && <FixAppeal k="expense" x={e} done={t => { setNote(t); setRe(n => n + 1) }} />}</div>
         <StatusMark status={e.status} />
         {e.status === 'submitted' && <a onClick={() => cancel('expense', e.id)}>отменить</a>}
       </div>) : <p className="muted">Пока нет</p>}
@@ -529,33 +537,220 @@ function FixShift({ x, done }) {
   </div>
 }
 
+// ---------- Проверка в две ступени и обращения (HEAD 11.11) ----------
+// Куратор (ГИП объекта или старший по зоне) ставит 1–5★ и комментарий, расходу — «верно / есть вопрос». Утверждает HEAD.
+const STARS = n => '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n)
+export function CurMark({ x }) {
+  if (!x.cur_at) return null
+  const bad = x.cur_stars ? x.cur_stars <= 2 : x.cur_ok === false
+  return <div className={'small curmark' + (bad ? ' why' : '')}><b className="stars">{x.cur_stars ? STARS(x.cur_stars) : x.cur_ok ? '✓ верно' : '⚠ есть вопрос'}</b>
+    {' '}{x.cur_name || 'Куратор'}{x.cur_note ? `: ${x.cur_note}` : ''}</div>
+}
+function RateBox({ path, stars, done }) {
+  const [v, set] = useState({ stars: 0, ok: null, note: '' })
+  const [err, setErr] = useState('')
+  const need = stars ? v.stars > 0 && v.stars <= 2 : v.ok === false
+  const can = (stars ? v.stars > 0 : v.ok !== null) && (!need || v.note.trim())
+  const send = () => api(path, { method: 'POST', body: stars ? { stars: v.stars, note: v.note } : { ok: v.ok, note: v.note } }).then(done, e => setErr(e.message))
+  return <div className="ratebox">
+    {stars ? <div className="starpick" role="group" aria-label="Оценка смены">{[1, 2, 3, 4, 5].map(n =>
+      <button key={n} className={n <= v.stars ? 'on' : ''} aria-label={`${n} из 5`} onClick={() => set({ ...v, stars: n })}>★</button>)}</div>
+      : <div className="segf"><button className={v.ok === true ? 'on' : ''} onClick={() => set({ ...v, ok: true })}>✓ Верно</button>
+        <button className={v.ok === false ? 'on' : ''} onClick={() => set({ ...v, ok: false })}>⚠ Есть вопрос</button></div>}
+    <textarea value={v.note} onChange={e => set({ ...v, note: e.target.value })} rows={2}
+      placeholder={need ? 'Обязательно: что не так' : 'Комментарий для HEAD (по желанию)'} />
+    {err && <p className="small why">{err}</p>}
+    <button className="mini" disabled={!can} onClick={send}>Оценить</button>
+  </div>
+}
+
+const AK = { shift_late: 'Не внёс смену', expense_late: 'Не внёс расход', shift_fix: 'Ошибка в смене', expense_fix: 'Ошибка в расходе' }
+const FIELD = { start_time: 'начало', hours: 'часов', area_m2: 'м²', work_done: 'сделал', amount: 'сумма', note: 'комментарий' }
+const fv = (k, x) => x == null || x === '' ? '—' : k === 'amount' ? money(x) : k === 'hours' ? String(x).replace('.', ',') + ' ч' : String(x)
+const dshort = x => new Date(x).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+export function AppealView({ a }) {
+  const d = a.data || {}
+  return <>
+    <div><b>{AK[a.kind]}</b> · {dshort(a.day)} · {a.object_title}{a.closed && <span className="tag draft">месяц закрыт</span>}</div>
+    <div className="small">Почему: {a.why}</div>
+    {a.old ? <div className="small">{Object.keys(d).map(k => <div key={k}>{FIELD[k] || k}: <s className="muted">{fv(k, a.old[k])}</s> → <b>{fv(k, d[k])}</b></div>)}
+      {a.old.status === 'rejected' && <div className="muted">запись была отклонена</div>}</div>
+      : a.kind === 'shift_late' ? <div className="small">с {d.start_time}, {fv('hours', d.hours)}{d.area_m2 ? ` · ${d.area_m2} м²` : ''}{d.workshop ? ` · ${d.workshop}` : ''} · {d.work_done}</div>
+      : <div className="small">{money(d.amount)} · {a.category_title || d.category} · {d.paid_by === 'own' ? 'свои' : 'компании'}{d.note ? ` · ${d.note}` : ''}
+        {a.receipt_url ? <> · <a href={a.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</div>}
+    {a.photo_url && <div className="pair"><a href={a.photo_full} target="_blank" rel="noreferrer"><img src={a.photo_url} alt="фото" /></a></div>}
+  </>
+}
+
+// «Ошибка? Обращение» у своей смены / расхода: что исправить + почему. Пока HEAD не утвердил, запись не меняется.
+function FixAppeal({ k, x, done }) {
+  const hrs = x.ended_at ? Math.round((new Date(x.ended_at) - new Date(x.started_at)) / 36e5 * 10) / 10 : ''
+  const [open, setOpen] = useState(false)
+  const [v, set] = useState(k === 'shift' ? { start_time: x.started_at ? clockAt(x.started_at) : '', hours: String(hrs), area_m2: x.area_m2 != null ? String(+x.area_m2) : '', work_done: x.work_done || '' }
+    : { amount: String(+x.amount), note: x.note || '' })
+  const [why, setWhy] = useState('')
+  const [err, setErr] = useState('')
+  if (!open) return <a className="small fixlink" onClick={() => setOpen(true)}>Ошибка? Обращение</a>
+  const num = t => t.replace(',', '.').replace(/[^\d.]/g, '')
+  const send = () => {
+    const body = k === 'shift' ? { start_time: v.start_time || null, hours: v.hours ? +v.hours : null, area_m2: v.area_m2 === '' ? null : +v.area_m2, work_done: v.work_done }
+      : { amount: v.amount ? +v.amount : null, note: v.note }
+    api('/appeals', { method: 'POST', body: { client_uid: uuid(), kind: k + '_fix', target_id: x.id, why, ...body } })
+      .then(() => { setOpen(false); done('Обращение ушло: сначала куратору, потом HEAD.') }, e => setErr(e.message))
+  }
+  return <div className="fixbox">
+    <p className="small muted">Напиши, как правильно. Пока HEAD не утвердит, запись не меняется.</p>
+    {k === 'shift' ? <>
+      <div className="pair"><div><label className="muted small">Начали в</label><input type="time" value={v.start_time} onChange={e => set({ ...v, start_time: e.target.value })} /></div>
+        <div><label className="muted small">Часов (до 48)</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: num(e.target.value) })} /></div></div>
+      {x.object_id ? <><label className="muted small">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: num(e.target.value) })} /></> : null}
+      <label className="muted small">Что сделал</label><textarea rows={2} value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} />
+    </> : <>
+      <label className="muted small">Сумма, ₸</label><input inputMode="decimal" value={v.amount} onChange={e => set({ ...v, amount: num(e.target.value) })} />
+      <label className="muted small">Комментарий</label><input value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
+    </>}
+    <label className="muted small">Почему ошибся</label><textarea rows={2} value={why} onChange={e => setWhy(e.target.value)} placeholder="Например: работал до 21:00, а записал до 19:00" />
+    {err && <p className="small why">{err}</p>}
+    <div className="seg"><button className="mini" disabled={why.trim().length < 5} onClick={send}>Отправить</button><button className="ghost mini" onClick={() => setOpen(false)}>Отмена</button></div>
+  </div>
+}
+
+// «Не внёс вовремя»: смена или расход за прошедший день (до 60 дней) — через обращение.
+function LateAppeal({ d, done, close }) {
+  const [kind, setKind] = useState('shift_late')
+  const objs = d.backfill?.objects?.length ? d.backfill.objects : d.objects.filter(o => o.id)
+  const [v, set] = useState({ day: '', object_id: objs[0]?.id, zone_code: d.zones[0], start_time: '09:00', hours: '10', area_m2: '', work_done: '',
+    workshop: '', amount: '', category: d.categories[0]?.code, paid_by: 'own', note: '' })
+  const [why, setWhy] = useState('')
+  const [pic, setPic] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const shop = kind === 'shift_late' && !!v.workshop
+  const num = t => t.replace(',', '.').replace(/[^\d.]/g, '')
+  const min = (() => { const t = new Date(); t.setDate(t.getDate() - 60); return t.toISOString().slice(0, 10) })()
+  const ok = v.day && why.trim().length >= 5 && (kind === 'shift_late' ? +v.hours > 0 && +v.hours <= 48 && v.work_done.trim().length >= 3 && (shop || v.object_id) : +v.amount > 0)
+  const send = async () => {
+    setBusy(true); setErr('')
+    const base = { client_uid: uuid(), kind, why, day: v.day, object_id: shop ? 0 : v.object_id, zone_code: shop ? 'print' : v.zone_code }
+    const body = kind === 'shift_late' ? { ...base, start_time: v.start_time, hours: +v.hours, area_m2: v.area_m2 === '' || shop ? null : +v.area_m2, work_done: v.work_done,
+      workshop: shop ? v.workshop : null, photo: shop ? null : pic } : { ...base, amount: +v.amount, category: v.category, paid_by: v.paid_by, note: v.note, receipt: pic }
+    try { await api('/appeals', { method: 'POST', body }); done('Обращение ушло: сначала куратору, потом HEAD.') } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }
+  }
+  return <div className="fixbox">
+    <div className="segf"><button className={kind === 'shift_late' ? 'on' : ''} onClick={() => setKind('shift_late')}>Смену</button>
+      <button className={kind === 'expense_late' ? 'on' : ''} onClick={() => setKind('expense_late')}>Расход</button></div>
+    <label className="muted small">За какой день</label><input type="date" min={min} max={tday()} value={v.day} onChange={e => set({ ...v, day: e.target.value })} />
+    {kind === 'shift_late' && d.workshop && <div className="segf"><button className={shop ? '' : 'on'} onClick={() => set({ ...v, workshop: '' })}>На объекте</button>
+      <button className={shop ? 'on' : ''} onClick={() => set({ ...v, workshop: d.workshop[0] })}>Мастерская</button></div>}
+    {shop ? <div className="chips">{d.workshop.map(t => <button key={t} className={v.workshop === t ? 'on' : ''} onClick={() => set({ ...v, workshop: t })}>{t}</button>)}</div> : <>
+      <label className="muted small">Объект</label>
+      <select value={v.object_id} onChange={e => set({ ...v, object_id: +e.target.value })}>
+        {(kind === 'expense_late' ? d.objects : objs).map(o => <option key={o.id} value={o.id}>{o.id ? `№${o.id} · ` : ''}{o.title}{o.city ? ` — ${o.city}` : ''}</option>)}</select>
+      {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}</>}
+    {kind === 'shift_late' ? <>
+      <div className="pair"><div><label className="muted small">Начали в</label><input type="time" value={v.start_time} onChange={e => set({ ...v, start_time: e.target.value })} /></div>
+        <div><label className="muted small">Часов (до 48)</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: num(e.target.value) })} /></div></div>
+      {!shop && <><label className="muted small">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: num(e.target.value) })} /></>}
+      <label className="muted small">Что сделал</label><textarea rows={2} value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} />
+      {!shop && <label className="photo snap add"><span>{pic ? '✓ Фото выбрано' : '🖼 Фото работы (по возможности)'}</span>
+        <input type="file" accept="image/*" hidden onChange={async e => { const f = e.target.files[0]; e.target.value = ''; f && setPic(await shrink(f)) }} /></label>}
+    </> : <>
+      <label className="muted small">Категория</label>
+      <select value={v.category} onChange={e => set({ ...v, category: e.target.value })}>{d.categories.map(c => <option key={c.code} value={c.code}>{c.title}</option>)}</select>
+      <label className="muted small">Сумма, ₸</label><input inputMode="decimal" value={v.amount} onChange={e => set({ ...v, amount: num(e.target.value) })} />
+      <div className="segf"><button className={v.paid_by === 'own' ? 'on' : ''} onClick={() => set({ ...v, paid_by: 'own' })}>Свои деньги</button>
+        <button className={v.paid_by === 'company' ? 'on' : ''} onClick={() => set({ ...v, paid_by: 'company' })}>Компании</button></div>
+      <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
+      <Receipt value={pic} pick={async f => setPic(await shrink(f))} />
+    </>}
+    <label className="muted small">Почему не внёс вовремя</label><textarea rows={2} value={why} onChange={e => setWhy(e.target.value)} placeholder="Например: не было связи на объекте" />
+    {err && <p className="small why">{err}</p>}
+    <div className="seg"><button className="mini" disabled={!ok || busy} onClick={send}>{busy ? 'Отправляю…' : 'Отправить'}</button><button className="ghost mini" onClick={close}>Отмена</button></div>
+  </div>
+}
+
+export function Appeals({ reload }) {
+  const [list, setList] = useState(null)
+  const [d, setD] = useState(null)
+  const [open, setOpen] = useState(false)
+  const [msg, setMsg] = useState('')
+  const load = () => api('/appeals/my').then(setList, () => setList([]))
+  useEffect(() => { load() }, [reload])
+  const start = () => { setMsg(''); d ? setOpen(true) : api('/work/dict').then(x => { setD(x); setOpen(true) }, e => setMsg(e.message)) }
+  const cancel = id => api(`/appeals/${id}/cancel`, { method: 'POST' }).then(load)
+  return <div className="card"><h2>Исправить или внести поздно</h2>
+    <p className="small muted">Не внёс смену или расход вовремя, или ошибся? Подай обращение: сначала его смотрит куратор, утверждает HEAD.
+      Ошибку в записи — кнопкой «Ошибка? Обращение» под ней в «Мои смены» и «Мои расходы».</p>
+    {msg && <p className="small">{msg}</p>}
+    {open && d ? <LateAppeal d={d} close={() => setOpen(false)} done={t => { setOpen(false); setMsg(t); load() }} />
+      : <button className="ghost mini" onClick={start}>Не внёс вовремя</button>}
+    {list?.map(a => <div key={a.id} className="row"><div><AppealView a={a} /><CurMark x={a} />{a.reason && <div className="small">HEAD: {a.reason}</div>}</div>
+      <StatusMark status={a.status} />{a.status === 'submitted' && <a onClick={() => cancel(a.id)}>отменить</a>}</div>)}
+  </div>
+}
+
+const STAGE = { rated: 'Оценил куратор', direct: 'Смены кураторов и без куратора', late: 'Без оценки: куратор не успел за 24 ч', wait: 'Ждут оценки куратора' }
 export function Review() {
   const [r, setR] = useState(null)
   const [pays, setPays] = useState(null)   // оплаты клиентов, которые внесли МОП (HEAD 10.11) — только у HEAD
-  const load = () => api('/review').then(setR, () => setR({ shifts: [], expenses: [] }))
+  const load = () => api('/review').then(setR, () => setR({ shifts: [], expenses: [], appeals: [] }))
   const loadPays = () => api('/fin/payments/check').then(setPays, () => setPays(null))
   useEffect(() => { load(); loadPays() }, [])
   if (!r) return <div className="card muted">Загрузка…</div>
+  const cur = r.curator
+  const apps = r.appeals || []
   const pay = (id, ok) => (ok || confirm('Отменить оплату? Она останется в журнале зачёркнутой, «Поступило» в сделке уменьшится.')) &&
     api(`/fin/ledger/${id}/${ok ? 'check' : 'cancel'}`, { method: 'POST' }).then(loadPays, e => alert(e.message))
-  const decide = (k, id, approve) => {
+  const decide = (path, approve) => {
     const reason = approve ? null : prompt('Причина отказа')
     if (!approve && !reason) return
-    api(`/${k}/${id}/review`, { method: 'POST', body: { approve, reason } }).then(load)
+    api(path, { method: 'POST', body: { approve, reason } }).then(load, e => alert(e.message))
   }
+  const good = r.shifts.filter(x => x.cur_stars >= 4).length
+  const bulk = () => confirm(`Утвердить ${good} смен с оценкой куратора 4–5★?`) &&
+    api('/review/bulk', { method: 'POST', body: { min_stars: 4 } }).then(load, e => alert(e.message))
   const Item = ({ k, x, children }) => <div className="row">
     <div><b>{x.person_name}</b> · {x.object_title}{x.backfill && <span className="tag draft">задним числом</span>}<br /><span className="muted small">{children}</span>
       {x.work_done && <div className="small">Сделал: {x.work_done}</div>}
       {(x.photo_before_url || x.photo_after_url) && <div className="pair">{x.photo_before_url && <a href={x.photo_before_full} target="_blank" rel="noreferrer"><img src={x.photo_before_url} alt="до" /></a>}
         {x.photo_after_url && <a href={x.photo_after_full} target="_blank" rel="noreferrer"><img src={x.photo_after_url} alt="после" /></a>}</div>}
       <More x={x} />
-      {k === 'shift' && <FixShift x={x} done={load} />}</div>
-    <div className="seg"><button onClick={() => decide(k, x.id, true)}>✓</button><button className="ghost" onClick={() => decide(k, x.id, false)}>✕</button></div>
+      {cur ? null : <CurMark x={x} />}
+      {k === 'shift' && <FixShift x={x} done={load} />}
+      {cur && <RateBox path={`/${k}/${x.id}/rate`} stars={k === 'shift'} done={load} />}</div>
+    {!cur && <div className="seg"><button onClick={() => decide(`/${k}/${x.id}/review`, true)}>✓</button><button className="ghost" onClick={() => decide(`/${k}/${x.id}/review`, false)}>✕</button></div>}
   </div>
+  const Appeal = ({ a }) => <div className="row">
+    <div><b>{a.person_name}</b><AppealView a={a} />
+      {cur ? <RateBox path={`/appeals/${a.id}/rate`} stars={a.kind === 'shift_late'} done={load} /> : <CurMark x={a} />}
+      {!cur && a.closed && <div className="small muted">Месяц закрыт — сумма пойдёт в ФОТ текущего месяца, прошлый не меняется.</div>}</div>
+    {!cur && <div className="seg"><button onClick={() => decide(`/appeals/${a.id}/decide`, true)}>✓</button><button className="ghost" onClick={() => decide(`/appeals/${a.id}/decide`, false)}>✕</button></div>}
+  </div>
+  const shiftLine = x => <>{when(x.started_at, x.ended_at)}{x.area_m2 ? ` · ${+x.area_m2} м²` : ''} · {ZONE[x.zone_code]}{x.plan_m2 ? ` · ${x.zone_code === 'print' ? 'план' : 'норма'} ${m2(x.plan_m2)} м²` : ''}{x.kpd != null ? ` · КПД ${pct(x.kpd)}` : ''}{x.printer ? ` · ${x.printer}` : ''}</>
+  const expLine = x => <>{money(x.amount)}{x.category_title && !(x.object_title || '').includes(x.category_title) ? ' · ' + x.category_title : ''} · {x.paid_by === 'own' ? 'свои' : 'компании'}{x.note ? ' · ' + x.note : ''}{x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</>
+  // HEAD: по этапам; «ждут куратора» — свёрнуто внизу, но утвердить можно и сразу
+  const groups = (list, k, line) => {
+    const by = st => list.filter(x => x.stage === st).sort((a, b) => (b.cur_stars || 0) - (a.cur_stars || 0))
+    return <>{['rated', 'direct', 'late'].map(st => by(st).length ? <div key={st}><h3 className="small muted stagehd">{STAGE[st]} · {by(st).length}</h3>
+      {by(st).map(x => <Item key={x.id} k={k} x={x}>{line(x)}</Item>)}</div> : null)}
+      {by('wait').length ? <details className="how"><summary className="small muted">{STAGE.wait} · {by('wait').length}</summary>
+        {by('wait').map(x => <Item key={x.id} k={k} x={x}>{line(x)}</Item>)}</details> : null}</>
+  }
+  if (cur) return <>
+    <div className="card"><p className="small muted">Ты ставишь оценку и комментарий, утверждает HEAD. Не оценишь за 24 ч — запись уйдёт к HEAD без оценки.
+      Смены кураторов идут сразу к HEAD.</p></div>
+    <div className="card"><h2>Оценить смены</h2>
+      {r.shifts.length ? r.shifts.map(x => <Item key={x.id} k="shift" x={x}>{shiftLine(x)}</Item>) : <p className="muted">Всё оценено</p>}</div>
+    {apps.length > 0 && <div className="card"><h2>Обращения</h2>{apps.map(a => <Appeal key={a.id} a={a} />)}</div>}
+    <div className="card"><h2>Проверить расходы</h2>
+      {r.expenses.length ? r.expenses.map(x => <Item key={x.id} k="expense" x={x}>{expLine(x)}</Item>) : <p className="muted">Всё проверено</p>}</div>
+  </>
   return <>
-    <div className="card"><h2>Смены на проверку</h2>
-      {r.shifts.length ? r.shifts.map(x => <Item key={x.id} k="shift" x={x}>{when(x.started_at, x.ended_at)}{x.area_m2 ? ` · ${+x.area_m2} м²` : ''} · {ZONE[x.zone_code]}{x.plan_m2 ? ` · ${x.zone_code === 'print' ? 'план' : 'норма'} ${m2(x.plan_m2)} м²` : ''}{x.kpd != null ? ` · КПД ${pct(x.kpd)}` : ''}{x.printer ? ` · ${x.printer}` : ''}</Item>) : <p className="muted">Всё проверено</p>}
+    <div className="card"><h2>Смены на утверждение</h2>
+      {good > 0 && <button className="mini" onClick={bulk}>Утвердить все с оценкой 4–5★ · {good}</button>}
+      {r.shifts.length ? groups(r.shifts, 'shift', shiftLine) : <p className="muted">Всё проверено</p>}
     </div>
+    {apps.length > 0 && <div className="card"><h2>Обращения на правку</h2>{apps.map(a => <Appeal key={a.id} a={a} />)}</div>}
     {pays && <div className="card"><h2>Оплаты клиентов на сверку</h2>
       {pays.length ? pays.map(x => <div key={x.id} className="row">
         <div><b>{money(x.amount)}</b> · сделка № {x.deal_id}<br /><span className="muted small">{[new Date(x.op_date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }),
@@ -564,8 +759,8 @@ export function Review() {
       </div>) : <p className="muted">Всё сверено</p>}
       <p className="small muted">✓ — деньги пришли, сумма и чек совпадают с выпиской. ✕ — ошибка: оплата отменяется, итог сделки в Битриксе пересчитается.</p>
     </div>}
-    <div className="card"><h2>Расходы на проверку</h2>
-      {r.expenses.length ? r.expenses.map(x => <Item key={x.id} k="expense" x={x}>{money(x.amount)}{x.category_title && !(x.object_title || '').includes(x.category_title) ? ' · ' + x.category_title : ''} · {x.paid_by === 'own' ? 'свои' : 'компании'}{x.note ? ' · ' + x.note : ''}{x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</Item>) : <p className="muted">Всё проверено</p>}
+    <div className="card"><h2>Расходы на утверждение</h2>
+      {r.expenses.length ? groups(r.expenses, 'expense', expLine) : <p className="muted">Всё проверено</p>}
     </div>
   </>
 }

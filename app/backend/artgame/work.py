@@ -22,6 +22,30 @@ CHECKS = {"lead_artist": {"mural"}, "artist_pro": {"mural"}, "print_master": {"p
 # Главный не проверяет Главного и Про; Про проверяет Главного. ГИП своего объекта и HEAD — всех.
 RANK_SQL = "(SELECT r.level FROM people pp JOIN roles r ON r.code=pp.role_code WHERE pp.id=x.person_id)"
 
+# Проверка в две ступени (HEAD 11.11): куратор (ГИП объекта или старший по зоне) ставит оценку, утверждает только HEAD.
+# Смены и траты самих кураторов — сразу к HEAD. Нет куратора или он не успел за 24 ч — тоже к HEAD («без оценки»).
+CURATORS = ("lead_artist", "artist_pro", "print_master", "lead_designer")
+CURATE_HOURS = 24
+DIRECT_SQL = ("((SELECT coalesce(pp.acting_role, pp.role_code) FROM people pp WHERE pp.id=x.person_id) = ANY('{%s}'::text[]))"
+              % ",".join(CURATORS + ("head",)))
+_ZONE_PAIRS = ",".join(f"('{z}','{r}')" for r, zs in CHECKS.items() for z in sorted(zs))
+HAS_CUR_SQL = f"""EXISTS (SELECT 1 FROM people c JOIN roles cr ON cr.code = coalesce(c.acting_role, c.role_code)
+                     WHERE c.status='active' AND c.id <> x.person_id
+                       AND (c.id = o.gip_person_id OR ((x.zone_code, cr.code) IN ({_ZONE_PAIRS}) AND cr.level > COALESCE({RANK_SQL}, 0))))"""
+# к HEAD: оценено, или автор — куратор, или оценить некому, или куратор не успел
+READY_SQL = (f"(x.cur_at IS NOT NULL OR {DIRECT_SQL} OR NOT {HAS_CUR_SQL} "
+             f"OR coalesce(x.submitted_at, x.created_at) < now() - interval '{CURATE_HOURS} hours')")
+
+
+def stage_of(x: dict) -> str:
+    """Где запись у HEAD: rated — куратор оценил; direct — смена куратора / оценить некому; late — куратор не успел; wait — ждёт оценки."""
+    if x.get("cur_at"):
+        return "rated"
+    if x.get("direct") or not x.get("has_cur"):
+        return "direct"
+    sent = x.get("submitted_at") or x.get("created_at")
+    return "late" if sent and sent < datetime.now(TZ) - timedelta(hours=CURATE_HOURS) else "wait"
+
 
 def active(p: dict = Depends(current_person)) -> dict:
     if p["status"] != "active":
@@ -491,7 +515,7 @@ def finish_shift(b: FinishIn, p: dict = Depends(active)):
         apply_cond(conn, s)
         n = {"plan_m2": None, "kpd": None, "bonus": None} if shop else shift_norm(consts.latest(conn), s, p["role_code"])   # мастерская — без плана
         row = conn.execute(
-            """UPDATE shifts SET status='submitted', ended_at=%s, area_m2=%s, work_done=%s, note=%s, photo_after=%s, printer=%s,
+            """UPDATE shifts SET status='submitted', submitted_at=now(), ended_at=%s, area_m2=%s, work_done=%s, note=%s, photo_after=%s, printer=%s,
                    complexity=%s, at_height=%s, outdoor=%s, hard_surface=%s, plan_m2=%s, kpd=%s, bonus=%s, stage=%s
                WHERE id=%s RETURNING *""",
             (b.ended_at, b.area_m2, b.work_done.strip(), b.note, ph, s.printer, s.complexity, s.at_height, s.outdoor, s.hard_surface,
@@ -636,11 +660,11 @@ def with_receipt(e: dict) -> dict:
 def my(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         return {
-            "shifts": more_photos(conn, [shop_title(photos(s)) for s in conn.execute(f"""SELECT s.*, {SHOP_SQL.format(s="s", pe="pe")} AS object_title FROM shifts s JOIN objects o ON o.id=s.object_id
-                                      JOIN people pe ON pe.id=s.person_id
-                                      WHERE person_id=%s ORDER BY started_at DESC LIMIT 100""", (p["id"],)).fetchall()]),
-            "expenses": [with_receipt(e) for e in conn.execute("""SELECT e.*, o.title AS object_title FROM expenses e JOIN objects o ON o.id=e.object_id
-                                        WHERE person_id=%s ORDER BY created_at DESC LIMIT 100""", (p["id"],)).fetchall()],
+            "shifts": more_photos(conn, [shop_title(photos(s)) for s in conn.execute(f"""SELECT s.*, {SHOP_SQL.format(s="s", pe="pe")} AS object_title, cb.full_name AS cur_name FROM shifts s JOIN objects o ON o.id=s.object_id
+                                      JOIN people pe ON pe.id=s.person_id LEFT JOIN people cb ON cb.id=s.cur_by
+                                      WHERE s.person_id=%s ORDER BY s.started_at DESC LIMIT 100""", (p["id"],)).fetchall()]),
+            "expenses": [with_receipt(e) for e in conn.execute("""SELECT e.*, o.title AS object_title, cb.full_name AS cur_name FROM expenses e JOIN objects o ON o.id=e.object_id
+                                        LEFT JOIN people cb ON cb.id=e.cur_by WHERE e.person_id=%s ORDER BY e.created_at DESC LIMIT 100""", (p["id"],)).fetchall()],
         }
 
 
@@ -663,12 +687,14 @@ def cancel(kind: str, item_id: int, p: dict = Depends(active)):
 
 
 def review_filter(p: dict) -> tuple[str, list]:
-    """SQL-условие: какие записи человек может проверять (не свои)."""
+    """SQL-условие: какие записи человек может проверять (не свои). HEAD — всё; куратор — ещё не оценённое у младших
+    (ГИП — на своём объекте), кроме записей других кураторов: они идут сразу к HEAD (HEAD 11.11)."""
     if p["role_code"] == "head":
         return "TRUE", []
     zones = sorted(CHECKS.get(p["role_code"], set()))
     own = f"(SELECT level FROM roles WHERE code=%s)"
-    return (f"((x.zone_code = ANY(%s) AND COALESCE({RANK_SQL}, 0) < {own}) OR o.gip_person_id = %s) AND x.person_id <> %s",
+    return (f"((x.zone_code = ANY(%s) AND COALESCE({RANK_SQL}, 0) < {own}) OR o.gip_person_id = %s) AND x.person_id <> %s"
+            f" AND x.cur_at IS NULL AND NOT {DIRECT_SQL}",
             [zones, p["role_code"], p["id"], p["id"]])
 
 
@@ -679,9 +705,12 @@ def review_list(p: dict = Depends(active)):
         out = {}
         for kind, t in TABLE.items():
             out[t] = conn.execute(
-                f"""SELECT x.*, o.title AS object_title, pe.full_name AS person_name, pe.role_code AS person_role
-                    FROM {t} x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id
+                f"""SELECT x.*, o.title AS object_title, pe.full_name AS person_name, pe.role_code AS person_role,
+                           cb.full_name AS cur_name, {DIRECT_SQL} AS direct, {HAS_CUR_SQL} AS has_cur
+                    FROM {t} x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id LEFT JOIN people cb ON cb.id=x.cur_by
                     WHERE x.status='submitted' AND {cond} ORDER BY x.created_at""", args).fetchall()
+            for x in out[t]:
+                x["stage"] = stage_of(x)
             if t == "shifts":
                 for x in out[t]:
                     if x["object_id"] == 0 and (x.get("kind") == "workshop" or x["person_role"] in WORKSHOP_ROLES):
@@ -703,6 +732,9 @@ def review_list(p: dict = Depends(active)):
                 e["object_title"] = "Отдел продаж · " + e["category_title"] + (f" · сделка № {e['deal_id']}" if e.get("deal_id") else "") + (" · сверх лимита" if e.get("over_limit") else "")
         out["expenses"] = [with_receipt(e) for e in out["expenses"]]
         out["shifts"] = more_photos(conn, [shop_title(photos(x)) for x in out["shifts"]])
+        from .appeals import review_appeals
+        out["appeals"] = review_appeals(conn, p)
+        out["curator"] = p["role_code"] != "head"   # куратор оценивает, HEAD утверждает (HEAD 11.11)
         if p["role_code"] != "head":
             for x in out["shifts"]:
                 x.pop("bonus", None)
@@ -755,6 +787,8 @@ def review(kind: str, item_id: int, d: Decision, p: dict = Depends(active)):
         raise HTTPException(404)
     if not d.approve and not (d.reason or "").strip():
         raise HTTPException(400, "reason required")
+    if p["role_code"] != "head":
+        raise HTTPException(403, "Куратор ставит оценку, утверждает HEAD")
     cond, args = review_filter(p)
     with db.pool.connection() as conn, conn.transaction():
         ok = conn.execute(f"SELECT x.id FROM {t} x JOIN objects o ON o.id=x.object_id WHERE x.id=%s AND x.status='submitted' AND {cond}",
@@ -767,3 +801,64 @@ def review(kind: str, item_id: int, d: Decision, p: dict = Depends(active)):
                      (status, d.reason, p["id"], item_id))
         db.audit(conn, p["id"], f"{kind}_{status}", t, item_id, {"reason": d.reason})
     return {"ok": True, "status": status}
+
+
+class RateIn(BaseModel):
+    stars: int | None = Field(default=None, ge=1, le=5)   # смена: 1–5 звёзд
+    ok: bool | None = None                                # расход: верно / есть вопрос
+    note: str | None = Field(default=None, max_length=1000)
+
+
+def check_rate(kind: str, b: RateIn) -> str | None:
+    """Оценка куратора: смене — звёзды (1–2 — с комментарием), расходу — «верно / есть вопрос» (вопрос — с комментарием)."""
+    note = (b.note or "").strip() or None
+    if kind in ("shift", "shift_late"):
+        if not b.stars:
+            raise HTTPException(400, "Поставь оценку от 1 до 5 звёзд")
+        if b.stars <= 2 and not note:
+            raise HTTPException(400, "Оценка 1–2 — напиши, что не так")
+    else:
+        if b.ok is None:
+            raise HTTPException(400, "Отметь: верно или есть вопрос")
+        if not b.ok and not note:
+            raise HTTPException(400, "Напиши, какой вопрос")
+    return note
+
+
+@router.post("/{kind}/{item_id}/rate")
+def rate(kind: str, item_id: int, b: RateIn, p: dict = Depends(active)):
+    """Куратор оценивает смену или расход младшего (HEAD 11.11). Статус не меняется — запись уходит HEAD на утверждение."""
+    t = TABLE.get(kind)
+    if not t:
+        raise HTTPException(404)
+    if p["role_code"] == "head":
+        raise HTTPException(400, "HEAD утверждает сразу")
+    note = check_rate(kind, b)
+    cond, args = review_filter(p)
+    with db.pool.connection() as conn, conn.transaction():
+        if not conn.execute(f"SELECT x.id FROM {t} x JOIN objects o ON o.id=x.object_id WHERE x.id=%s AND x.status='submitted' AND {cond}",
+                            [item_id, *args]).fetchone():
+            raise HTTPException(403, "оценить можно запись на проверке у младшего, ещё без оценки")
+        if t == "shifts":
+            conn.execute("UPDATE shifts SET cur_by=%s, cur_at=now(), cur_stars=%s, cur_note=%s WHERE id=%s", (p["id"], b.stars, note, item_id))
+        else:
+            conn.execute("UPDATE expenses SET cur_by=%s, cur_at=now(), cur_ok=%s, cur_note=%s WHERE id=%s", (p["id"], b.ok, note, item_id))
+        db.audit(conn, p["id"], f"{kind}_rate", t, item_id, {"stars": b.stars, "ok": b.ok, "note": note})
+    return {"ok": True}
+
+
+class BulkIn(BaseModel):
+    min_stars: int = Field(default=4, ge=1, le=5)
+
+
+@router.post("/review/bulk")
+def review_bulk(b: BulkIn, p: dict = Depends(active)):
+    """HEAD одним нажатием утверждает смены, которые куратор оценил на min_stars и выше (HEAD 11.11)."""
+    if p["role_code"] != "head":
+        raise HTTPException(403, "утверждает HEAD")
+    with db.pool.connection() as conn, conn.transaction():
+        rows = conn.execute("""UPDATE shifts SET status='approved', checked_by=%s, checked_at=now()
+                               WHERE status='submitted' AND cur_stars >= %s RETURNING id""", (p["id"], b.min_stars)).fetchall()
+        for r in rows:
+            db.audit(conn, p["id"], "shift_approved", "shifts", r["id"], {"bulk": b.min_stars})
+    return {"ok": True, "approved": len(rows)}

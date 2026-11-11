@@ -54,7 +54,7 @@ def due(conn, by: dict, payee_id: int | None = None) -> list[dict]:
                     exp = [int(a["ref"]) for a in acc if a["kind"] == "reimburse" and a["ref"]]
                     lines.append({"ym": ym, "amount": left, "what": "смены" + (" и чеки" if exp else ""), "expense_ids": exp})
         else:
-            rows = conn.execute("""SELECT id, amount, to_char(created_at AT TIME ZONE 'Asia/Almaty', 'YYYY-MM') AS ym FROM expenses
+            rows = conn.execute("""SELECT id, amount, coalesce(pay_ym, to_char(created_at AT TIME ZONE 'Asia/Almaty', 'YYYY-MM')) AS ym FROM expenses
                                    WHERE person_id=%s AND paid_by='own' AND status='approved' AND payout_status='to_pay'
                                    ORDER BY created_at""", (f["person_id"],)).fetchall()
             by_ym = {}

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 
 from . import db
 from .deps import require_head
-from .work import SHOP_SQL
+from .work import READY_SQL, SHOP_SQL
 
 router = APIRouter(prefix="/api")
 
@@ -20,11 +20,16 @@ def pulse(p: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         one = lambda q, a=(): conn.execute(q, a).fetchone()  # noqa: E731
         pending = conn.execute("SELECT id, full_name, tg_username, created_at FROM people WHERE status='pending' ORDER BY created_at").fetchall()
-        rv = one("""SELECT (SELECT count(*) FROM shifts WHERE status='submitted') AS shifts,
-                           (SELECT count(*) FROM expenses WHERE status='submitted') AS expenses,
+        # HEAD 11.11: у HEAD — то, что куратор оценил, записи кураторов и то, что куратор не оценил за 24 ч; остальное ждёт куратора
+        q = lambda t, extra="": f"(SELECT count(*) FROM {t} x JOIN objects o ON o.id=x.object_id WHERE x.status='submitted' {extra})"  # noqa: E731
+        rv = one(f"""SELECT {q('shifts', 'AND ' + READY_SQL)} AS shifts,
+                           {q('expenses', 'AND ' + READY_SQL)} AS expenses,
+                           {q('appeals', 'AND ' + READY_SQL)} AS appeals,
+                           {q('shifts', 'AND NOT ' + READY_SQL)} + {q('expenses', 'AND NOT ' + READY_SQL)} + {q('appeals', 'AND NOT ' + READY_SQL)} AS curating,
+                           (SELECT count(*) FROM shifts WHERE status='submitted' AND cur_stars >= 4) AS rated_good,
                            (SELECT coalesce(sum(amount),0) FROM expenses WHERE status='submitted') AS expenses_sum,
-                           (SELECT count(*) FROM shifts WHERE status='submitted' AND created_at < now() - interval '24 hours') AS shifts_late,
-                           (SELECT count(*) FROM expenses WHERE status='submitted' AND created_at < now() - interval '24 hours') AS expenses_late,
+                           {q('shifts', "AND coalesce(x.submitted_at, x.created_at) < now() - interval '48 hours'")} AS shifts_late,
+                           {q('expenses', "AND coalesce(x.submitted_at, x.created_at) < now() - interval '48 hours'")} AS expenses_late,
                            (SELECT count(DISTINCT expense_id) FROM stock_lines l JOIN expenses e ON e.id=l.expense_id
                              WHERE e.status='submitted' AND l.flag IN ('over_cap','no_ref')) AS over_cap,
                            -- оплаты клиентов, которые внесли МОП (HEAD 10.11): сверить с чеком и выпиской
