@@ -47,7 +47,7 @@ async function tab(p, name) {
 
   // 1. Саппорт: меню без склада и «Объектов», промо объекта со сложностью из сделки, расходы — такси и докупка
   const s = await open(b, 2000)
-  assert.deepStrictEqual(await navText(s), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Кабинет', 'HEAD'])
+  assert.deepStrictEqual(await navText(s), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Кабинет', 'Чат'])
   await s.locator('.promo').getByText('Сложный').waitFor()
   await s.locator('.promo').getByText('Кабанбай батыра 5', { exact: false }).waitFor()
   await s.screenshot({ path: `${shots}/support-smena.png`, fullPage: true })
@@ -110,7 +110,7 @@ async function tab(p, name) {
   // 2. Оператор печати: склада нет
   const op = await open(b, 4000)
   assert.ok(!(await navText(op)).includes('Склад'))
-  assert.deepStrictEqual(await navText(op), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Кабинет', 'HEAD'])
+  assert.deepStrictEqual(await navText(op), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Кабинет', 'Чат'])
   await tab(op, 'Учёба')   // печать — как у художников: Учебник, Тест, Фотозадание, Клиентам + ТБ и «Правила игры»
   assert.deepStrictEqual(await op.locator('.place .chips button').allTextContents(), ['Учебник', 'Подготовка к печати', 'Клиентам', 'ТБ'])   // HEAD 09.11
   await tab(op, 'Кабинет')

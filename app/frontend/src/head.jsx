@@ -41,7 +41,7 @@ export function Pulse({ me, pulse, go }) {
     r.payments && { k: 'review', t: `Оплаты клиентов на сверку: ${r.payments}`, s: `на ${money(r.payments_sum)} · сверить чек и выписку` },
     p.pending.length && { k: 'people', t: `Ждут роли: ${p.pending.length}`, s: p.pending.map(x => x.full_name).join(', '), hot: true },
     p.catalogs && { k: 'design:cat', t: `Каталоги дизайна на утверждение: ${p.catalogs}`, s: 'утвердить или вернуть' },
-    p.dm?.unread && { k: 'chat', t: `Сообщения от команды: ${p.dm.unread}`, s: `от ${p.dm.people} чел. · ответить`, hot: true },
+    p.dm?.unread && { k: 'chat', t: `Чат: новых ${p.dm.unread}`, s: `от ${p.dm.people} чел. · ответить`, hot: true },
     p.media && { k: 'prod', t: `Материал с объектов на утверждение: ${p.media}`, s: 'в «Продакшн» и рилс к оплате' },
   ].filter(Boolean)
   const name = (me.full_name || '').split(' ')[0]
@@ -63,8 +63,8 @@ export function Pulse({ me, pulse, go }) {
       </div>)}
     </div>}
 
-    {p.dm_owner !== false && <div className="qrow card dmpulse" onClick={() => go('chat')}><div className="qmain"><b>📣 Написать команде</b>
-      <div className="small muted">всем или по ролям — придёт в приложение и в бот; одному — только в приложение</div></div><span className="muted">›</span></div>}
+    <div className="qrow card dmpulse" onClick={() => go('chat')}><div className="qmain"><b>📣 Написать команде</b>
+      <div className="small muted">всем или по ролям — придёт в приложение и в бот; одному — только в приложение</div></div><span className="muted">›</span></div>
 
     <FeedbackInbox items={fb ?? p.feedback} reload={() => api('/head/pulse').then(x => setFb(x.feedback))} />
 

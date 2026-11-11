@@ -7,8 +7,7 @@ from pydantic import BaseModel, Field
 
 from . import db
 from .config import settings
-from .deps import require_head  # noqa: F401
-from .dm import require_owner   # HEAD 11.11: обращения, как и личные диалоги, — только HEAD-владелец
+from .deps import require_head   # HEAD 11.11: обращения видят ВСЕ HEAD
 from .work import active
 
 router = APIRouter(prefix="/api")
@@ -38,8 +37,7 @@ def send_feedback(b: FeedbackIn, p: dict = Depends(active)):
         row = conn.execute("""INSERT INTO feedback (person_id, role_code, kind, text, place) VALUES (%s,%s,%s,%s,%s) RETURNING *""",
                            (p["id"], p["role_code"], b.kind, b.text.strip(), (b.place or "").strip() or None)).fetchone()
         db.audit(conn, p["id"], "feedback_add", "feedback", row["id"], {"kind": b.kind})
-    if p["role_code"] != "head":
-        _send(settings.head_tg_id, f"{KIND[b.kind]} от {p['full_name']}: {b.text.strip()[:300]}\nОтветить — «Пульт» → «Обращения».")
+    # HEAD 11.11: в бот — только объявления; обращение видят все HEAD в «Пульте» и в «Чат → Руководство»
     return row
 
 
@@ -50,7 +48,7 @@ def my_feedback(p: dict = Depends(active)):
 
 
 @router.get("/feedback")
-def all_feedback(status: str | None = None, p: dict = Depends(require_owner)):
+def all_feedback(status: str | None = None, p: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         return {"items": conn.execute(
             """SELECT f.*, pe.full_name, r.title AS role_title FROM feedback f JOIN people pe ON pe.id=f.person_id
@@ -64,7 +62,7 @@ class AnswerIn(BaseModel):
 
 
 @router.post("/feedback/{fid}")
-def answer_feedback(fid: int, b: AnswerIn, p: dict = Depends(require_owner)):
+def answer_feedback(fid: int, b: AnswerIn, p: dict = Depends(require_head)):
     with db.pool.connection() as conn, conn.transaction():
         f = conn.execute("SELECT f.*, pe.tg_id FROM feedback f JOIN people pe ON pe.id=f.person_id WHERE f.id=%s", (fid,)).fetchone()
         if not f:

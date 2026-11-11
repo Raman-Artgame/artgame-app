@@ -123,8 +123,8 @@ function Main({ me, onMe, web, logout }) {
   const pays = me.pays && role !== 'head' ? [['pays', 'Оплаты']] : []   // «Вносит оплаты клиентов» (HEAD 10.11): любая сделка
   const tabs = worker ? [...(KIT.has(role) ? [['kit', 'Сбор']] : []), ['shift', 'Смена'], ['expense', 'Расход'], ...pays,
     ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ...(CHECKERS.has(role) ? [['review', 'Проверка']] : []), ['projects', 'Проекты'],
-    ['study', 'Учёба'], ['mine', 'Кабинет'], ['chat', 'HEAD']] :
-    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход'], ...pays, ['chat', 'HEAD']] :   // «Проверки» у дизайнеров нет (HEAD 09.11)
+    ['study', 'Учёба'], ['mine', 'Кабинет'], ['chat', 'Чат']] :
+    dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход'], ...pays, ['chat', 'Чат']] :   // «Проверки» у дизайнеров нет (HEAD 09.11)
    [...(sales ? [['today', 'Сегодня'], ['leads', 'Лиды'], ['deals', 'Сделки'], ['projects', 'Проекты'], ['month', 'Месяц']] : []),
     ...(mopPlace ? [['study', 'Учёба']] : []),
     ...(other.length ? [['place', 'Место']] : []),
@@ -134,7 +134,7 @@ function Main({ me, onMe, web, logout }) {
     ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []),
     ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []),
     ...(KIT.has(role) ? [['kit', 'Сбор']] : []),
-    ...(role === 'head' ? [['design', 'Дизайн'], ['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда'], ['chat', 'Сообщения']] : [['chat', 'HEAD']])]
+    ...(role === 'head' ? [['design', 'Дизайн'], ['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда'], ['chat', 'Чат']] : [['chat', 'Чат']])]
   // Кабинет HEAD (08.11): Пульт · Проверка · Сделки · Финансы · Команда, остальное — в «Ещё», там же «Смотреть как».
   // HEAD 09.11 («кабинет — хаос, много дублей»): внизу 5 главных + «Ещё». Без Смены, Расхода, Кабинета, Места, Сбора и «Сегодня» —
   // у HEAD это дубли Пульта и Сделок. В «Ещё» — по важности.
@@ -159,7 +159,7 @@ function Main({ me, onMe, web, logout }) {
       <RoleSwitch me={me} />
       {!PLAIN.has(tab) && tab !== 'home' && tab !== 'chat' && !isHead && <div className="card"><h1>{me.full_name}</h1><span className="tag">{me.acting ? `${ROLE[me.role_main]} · и.о. ${gen(me.role_code)}` : ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
       {toast && <div className="toast">{toast}</div>}
-      {unread > 0 && tab !== 'chat' && !isHead && <button className="dmbar" onClick={() => go('chat')}>✉️ Новое сообщение от HEAD<span>Открыть ›</span></button>}
+      {unread > 0 && tab !== 'chat' && !isHead && <button className="dmbar" onClick={() => go('chat')}>✉️ Новое сообщение в чате<span>Открыть ›</span></button>}
       {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'chat' ? (isHead ? <Messages /> : <DialogHead />) : tab === 'viewas' ? <ViewAsCard /> :
         tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} openViewAs={isHead ? () => setTab('viewas') : null} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :

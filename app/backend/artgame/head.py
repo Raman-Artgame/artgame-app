@@ -38,11 +38,9 @@ def pulse(p: dict = Depends(require_head)):
                FROM feedback f JOIN people pe ON pe.id=f.person_id LEFT JOIN roles r ON r.code=f.role_code
                WHERE f.status<>'done' ORDER BY f.status='work', f.created_at DESC LIMIT 20""").fetchall()
         media = one("SELECT count(*) AS n FROM files WHERE kind='media' AND status='ready' AND review='pending'")["n"]
-        dm = one("""SELECT count(*) AS unread, count(DISTINCT person_id) AS people FROM dm
-                    WHERE NOT from_head AND read_at IS NULL""")
-        from .dm import is_owner
-        if not is_owner(p):   # HEAD 11.11: личные диалоги и обращения — только владелец
-            dm, feedback = {"unread": 0, "people": 0}, []   # «Диалог с HEAD» (09.11): непрочитанные от сотрудников
+        from .dm import _head_unread   # «Чат» (HEAD 11.11): «Руководство» + мои личные; обращения — всем HEAD
+        u = _head_unread(conn, p["id"])
+        dm = {"unread": u["group"] + u["mine"], "people": u["people"]}   # «Диалог с HEAD» (09.11): непрочитанные от сотрудников
         today = conn.execute(
             f"""SELECT s.id, pe.full_name, r.title AS role_title, {SHOP_SQL.format(s="s", pe="pe")} AS object_title, s.zone_code, s.started_at, s.ended_at, s.status
                FROM shifts s JOIN people pe ON pe.id=s.person_id LEFT JOIN roles r ON r.code=pe.role_code JOIN objects o ON o.id=s.object_id
@@ -61,5 +59,5 @@ def pulse(p: dict = Depends(require_head)):
                              count(DISTINCT person_id) AS people
                       FROM shifts WHERE started_at > now() - interval '7 days' AND status<>'cancelled'""")
     return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"]), "payments_sum": float(rv["payments_sum"])},
-            "catalogs": catalogs, "media": media, "feedback": feedback, "dm": dm, "dm_owner": is_owner(p),
+            "catalogs": catalogs, "media": media, "feedback": feedback, "dm": dm,
             "today": today, "team": team, "feed": feed, "week": week}
