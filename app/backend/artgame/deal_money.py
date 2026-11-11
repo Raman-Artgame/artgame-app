@@ -236,12 +236,13 @@ def card(d: dict) -> dict:
     history = [{"n": n, "slot": n if f"deal:{did}:pay{n}" in undated else None, "date": str(_day(d.get(fd)) or ""),
                 "amount": bx._money(d.get(fa))} for n, fa, fd in PAY if bx._money(d.get(fa)) > 0 and f"deal:{did}:pay{n}" not in refs]
     # slot — оплата из поля «Поступление N» без даты: у неё кнопка «Дата и чек» (заменить оплатой с датой и чеком, без двойного счёта);
-    # строку импорта, которую заменили, не показываем — вместо неё оплата с датой и чеком
+    # строку импорта, которую заменили, не показываем — вместо неё оплата с датой и чеком; отменённую строку из поля тоже
+    # (HEAD 11.11, ФОК: оплаты внесли заново с чеками — старые строки из полей убрать); в журнале и витрине она остаётся «отменено»
     owned = {r["source_ref"] for r in rows if r["source"] == "app" and r["source_ref"]}
     items = [with_receipt({**r, "amount": float(r["amount"]) * (1 if r["direction"] == "in" else -1), "op_date": str(r["op_date"]),
                            "on_check": _on_check(r),
                            "slot": undated.get(r["source_ref"]) if r["source"] == "bitrix" and r["status"] == "active" else None})
-             for r in rows if not (r["source"] == "bitrix" and r["source_ref"] in owned)]
+             for r in rows if not (r["source"] == "bitrix" and (r["source_ref"] in owned or r["status"] == "cancelled"))]
     return {"received": t["received"], "debt": t["debt"], "lost": t["lost"], "overpaid": t["overpaid"], "items": items, "history": history,
             "on_check": round(sum(x["amount"] for x in items if x["on_check"]), 2), "accounts": accounts, "count_unchecked": COUNT_UNCHECKED}
 
