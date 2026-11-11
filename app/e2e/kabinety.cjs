@@ -118,7 +118,9 @@ async function tab(p, name) {
   await dz.locator('.modal .dzcontact a', { hasText: 'Связаться с клиентом' }).waitFor()   // связь с клиентом через Битрикс (HEAD 09.11)
   await dz.locator('.modal select').nth(1).selectOption({ label: 'Помощник Мира' })
   await dz.locator('.modal .chips button', { hasText: 'XS' }).click()
-  await dz.locator('.modal input[type=date]').fill('2026-11-12')
+  // срок через 10 дней от сегодня (Алматы): «завтра» и раньше уводит сделку в «Горит»
+  const due = new Date(Date.now() + 5 * 3600e3 + 10 * 864e5).toISOString().slice(0, 10)
+  await dz.locator('.modal input[type=date]').fill(due)
   await dz.screenshot({ path: `${shots}/kab-dizain-karta.png` })
   await dz.getByRole('button', { name: 'Сохранить в Битрикс' }).click()
   await dz.locator('.modal').waitFor({ state: 'detached' })
