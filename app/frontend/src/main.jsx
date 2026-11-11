@@ -17,7 +17,7 @@ import { Production } from './production.jsx'
 import { Design } from './design.jsx'
 import { DUTIES, GROW, POLICY } from './duties.js'
 import { Feedback } from './feedback.jsx'
-import { DialogHead, Messages, useUnread } from './dm.jsx'
+import { Chat, useUnread } from './dm.jsx'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
 import './tokens.css'
 import { MyData, ProfileForm } from './profile.jsx'
@@ -160,7 +160,7 @@ function Main({ me, onMe, web, logout }) {
       {!PLAIN.has(tab) && tab !== 'home' && tab !== 'chat' && !isHead && <div className="card"><h1>{me.full_name}</h1><span className="tag">{me.acting ? `${ROLE[me.role_main]} · и.о. ${gen(me.role_code)}` : ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
       {toast && <div className="toast">{toast}</div>}
       {unread > 0 && tab !== 'chat' && !isHead && <button className="dmbar" onClick={() => go('chat')}>✉️ Новое сообщение в чате<span>Открыть ›</span></button>}
-      {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'chat' ? (isHead ? <Messages /> : <DialogHead />) : tab === 'viewas' ? <ViewAsCard /> :
+      {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'chat' ? <Chat head={isHead} /> : tab === 'viewas' ? <ViewAsCard /> :
         tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} openViewAs={isHead ? () => setTab('viewas') : null} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
         tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> :
