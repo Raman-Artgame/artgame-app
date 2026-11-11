@@ -49,7 +49,8 @@ const noWide = async p => assert.ok(await p.evaluate(() => document.documentElem
   await mp.getByRole('button', { name: 'Открыть' }).click()
   await mp.getByText(/выше нормы — 10 м² Среднего за смену/).waitFor()   // число из «Значений»
   await mp.locator('.growrow').first().click()
-  await mp.getByText('Готово 1 из 8').waitFor()
+  await mp.locator('.growrow').first().getByText('ждёт наставника').waitFor()   // отметка ушла на сервер, ждёт Главного
+  await mp.getByText('Есть 1 из 8 · подтверждено 0').waitFor()
   await noWide(a)
   await long(a, mp, '2-angelina-cheklist')
   const seg = async (p, t, f) => { await p.locator('.pathseg').getByRole('button', { name: t }).click(); await noWide(p)
@@ -62,7 +63,7 @@ const noWide = async p => assert.ok(await p.evaluate(() => document.documentElem
   await mp.getByText(/по окончании смены — статус и 3 фото/).waitFor()
   await seg(a, 'В приложении', '2d-angelina-prilozhenie')
   await seg(a, 'Чек-лист', '2e-angelina-cheklist-snova')
-  await mp.getByText('Готово 1 из 8').waitFor()   // отметка не пропала
+  await mp.getByText('Есть 1 из 8 · подтверждено 0').waitFor()   // отметка не пропала
   // путь к Главному не повторяется в «Правилах игры» художника; путь к Про — в «Правилах игры» Главного
   const folds = a.locator('.dutyfold')
   assert.strictEqual(await folds.count(), 2)
@@ -102,6 +103,38 @@ const noWide = async p => assert.ok(await p.evaluate(() => document.documentElem
   await k.screenshot({ path: `${shots}/7-kuanysh-kniga-glavnogo.png` })
   await chips.getByRole('button', { name: 'Учебник', exact: true }).click()
   await k.waitForFunction(() => /\/art\//.test(document.querySelector('.placeframe')?.src || ''))
+
+  // Отметки на сервере (HEAD 11.11): Главный подтверждает пункт художника в «Пути команды», HEAD видит прогресс каждого
+  await tab(k, 'Кабинет')
+  const tp = k.locator('.teampath')
+  await tp.getByText('Ждут подтверждения: 1').waitFor()
+  await tp.getByText('Ангелина').click()
+  await tp.locator('.tpitem.wait').getByRole('button', { name: 'Подтвердить' }).click()
+  await tp.getByText('Всё отмеченное подтверждено').waitFor()
+  await tp.locator('.tpitem.conf').getByText('✓ Куаныш').waitFor()
+  await noWide(k)
+  await long(k, tp, '8-kuanysh-put-komandy')
+  assert.strictEqual((await call(5101, '/grow/confirm', { person_id: ids[5102], path: 'lead_artist', idx: 0, ok: true })).detail ? 1 : 0, 1, 'художник не подтверждает Главного')
+  const ret = await call(5102, '/grow/confirm', { person_id: ids[5101], path: 'artist', idx: 1, ok: false, note: 'Покажи 3 смены выше нормы' })
+  assert.ok(ret.marks.some(m => m.idx === 1 && m.returned_at))
+  const a2 = await open(b, 5101)
+  await tab(a2, 'Кабинет')
+  const mp2 = a2.locator('.mypath')
+  await mp2.getByText('Есть 1 из 8 · подтверждено 1').waitFor()   // с другого телефона — те же отметки
+  await mp2.getByRole('button', { name: 'Открыть' }).click()
+  await mp2.locator('.growrow').first().getByText('✓ Куаныш').waitFor()
+  await mp2.locator('.growrow').first().click()   // подтверждённый пункт сам не снять
+  await mp2.getByText('Наставник вернул: Покажи 3 смены выше нормы').waitFor()
+  await mp2.getByText('Есть 1 из 8 · подтверждено 1').waitFor()
+  await long(a2, mp2, '9-angelina-podtverzhdeno')
+  const h = await open(b, 1000)
+  await h.locator('nav button').last().click()
+  await h.locator('.sheetbox').getByRole('button', { name: 'Команда', exact: true }).click()
+  const hp = h.locator('.teampath')
+  await hp.getByText('Куаныш').waitFor()
+  await hp.getByText('Ангелина').waitFor()
+  await noWide(h)
+  await long(h, hp, '10-head-put-komandy')
 
   // Остальные роли (HEAD 11.11: «Мой путь» для каждой группы): карточка есть, открывается, без горизонтальной прокрутки
   const consts2 = { 'print.plan_per_shift': '18', 'mop.reply_min': '30' }
