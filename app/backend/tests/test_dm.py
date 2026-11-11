@@ -68,33 +68,20 @@ def test_reply_from_telegram(client, team, monkeypatch):  # noqa: F811
     assert bot[-1][0] == "sendPhoto"
 
 
-def test_one_notice_per_person(client, team, monkeypatch):  # noqa: F811
-    """HEAD 10.11: о личных сообщениях — одно уведомление без текста письма; новое — старое удаляется; прочитал — удаляется."""
+def test_no_bot_for_private(client, team, monkeypatch):  # noqa: F811
+    """HEAD 11.11: о личных сообщениях в бот не уходит ничего; старое уведомление (10.11) удаляется; рассылка — в бот."""
     bot, sent = [], []
     monkeypatch.setattr(dm, "SEND", lambda tg, text: sent.append((tg, text)))
-    monkeypatch.setattr(dm, "BOT", lambda m, **p: bot.append((m, p)) or {"message_id": 100 + len(bot)})
-    client.post(f"/api/dm/with/{team[2000]}", json={"text": "Секретная сумма 500 000"}, headers=hdr(1000))
-    m, p = bot[-1]
-    assert m == "sendMessage" and p["chat_id"] == 2000 and p["text"].startswith("✉️ Новое сообщение от HEAD") and "500" not in p["text"]
-    first = 100 + len(bot)
-    client.post(f"/api/dm/with/{team[2000]}", json={"text": "Ещё одно"}, headers=hdr(1000))
-    assert [b[0] for b in bot[-2:]] == ["deleteMessage", "sendMessage"] and bot[-2][1]["message_id"] == first
-    assert "2" in bot[-1][1]["text"] and sent == []
-    n = len(bot)
-    client.get("/api/dm", headers=hdr(2000))                                                # прочитал → уведомление удалено
-    assert bot[n:] == [("deleteMessage", {"chat_id": 2000, "message_id": 100 + n})]
+    monkeypatch.setattr(dm, "BOT", lambda m, **p: bot.append((m, p)) or {"message_id": 1})
+    client.post(f"/api/dm/with/{team[2000]}", json={"text": "Лично"}, headers=hdr(1000))
+    client.post("/api/dm", json={"text": "Ответ"}, headers=hdr(2000))
+    client.get("/api/dm", headers=hdr(2000)); client.get(f"/api/dm/with/{team[2000]}", headers=hdr(1000))
+    assert bot == [] and sent == []
+    with db.pool.connection() as c:                                                         # уведомление, присланное 10.11
+        c.execute("INSERT INTO dm_notice (person_id, tg_id, msg_id, n) VALUES (%s, 2000, 55, 1)", (team[2000],))
+    client.post(f"/api/dm/with/{team[2000]}", json={"text": "Ещё"}, headers=hdr(1000))
+    assert bot == [("deleteMessage", {"chat_id": 2000, "message_id": 55})]
     client.get("/api/dm", headers=hdr(2000))
-    assert len(bot) == n + 1                                                                 # второй раз удалять нечего
-    # HEAD: одно уведомление «от команды» с именами, без текста
-    client.post("/api/dm", json={"text": "Вопрос по смене"}, headers=hdr(2000))
-    client.post("/api/dm", json={"text": "Краска"}, headers=hdr(3000))
-    m, p = bot[-1]
-    assert m == "sendMessage" and p["chat_id"] == 1000 and "команды: 2" in p["text"] and "P3000, P2000" in p["text"] and "Краска" not in p["text"]
-    client.get(f"/api/dm/with/{team[3000]}", headers=hdr(1000))                            # прочитал одного — счётчик молча
-    assert bot[-1][0] == "editMessageText" and "команды: 1" in bot[-1][1]["text"]
-    client.get(f"/api/dm/with/{team[2000]}", headers=hdr(1000))
-    assert bot[-1][0] == "deleteMessage" and bot[-1][1]["chat_id"] == 1000
-    # рассылка уведомление «Новое сообщение» не создаёт — она сама приходит текстом
-    n = len(bot)
+    assert len(bot) == 1
     client.post("/api/dm/broadcast", json={"text": "Сбор в 9"}, headers=hdr(1000))
-    assert len(bot) == n and len(sent) == 3
+    assert len(sent) == 3 and len(bot) == 1

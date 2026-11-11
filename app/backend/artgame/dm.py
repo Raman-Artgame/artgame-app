@@ -3,9 +3,7 @@
 - У каждого сотрудника вкладка «HEAD» — личный диалог: HEAD пишет, сотрудник отвечает.
 - HEAD в «Ещё → Сообщения»: список диалогов (непрочитанные сверху), личный ответ, «Написать всем» — всем или по ролям.
 - Бот (HEAD 10.11: «личные не должны засорять бот»): текстом в Telegram уходит ТОЛЬКО рассылка HEAD (всем или по ролям).
-  Личные сообщения сотрудник↔HEAD — только в приложении. О них бот держит ОДНО уведомление на человека без текста письма
-  («✉️ Новое сообщение от HEAD», у HEAD — «от команды: N» с именами): новое сообщение — старое уведомление удаляется,
-  приходит новое со звуком; прочитал в приложении — бот удаляет уведомление (таблица dm_notice).
+  Личные сообщения сотрудник↔HEAD — только в приложении, в бот о них не уходит ничего (HEAD 11.11, даже уведомления).
   Ответ сотрудника свайпом на рассылку или любой текст боту (кроме /start) попадает в его диалог в приложении.
 Ничего не удаляется. Диалог общий для всех HEAD (если их несколько): сотрудник пишет «HEAD», подпись — кто ответил.
 """
@@ -43,53 +41,18 @@ def _bot(method: str, **params):
 BOT = _bot   # тесты подменяют
 
 
-def _notice_text(conn, who: dict) -> tuple[int, str]:
-    """Сколько непрочитанных личных у человека и текст уведомления (без текста самих писем)."""
-    if who["role_code"] == "head":
-        rows = conn.execute("""SELECT pe.full_name, count(*) AS n FROM dm d JOIN people pe ON pe.id=d.person_id
-                               WHERE NOT d.from_head AND d.read_at IS NULL GROUP BY pe.id ORDER BY max(d.created_at) DESC""").fetchall()
-        n = sum(r["n"] for r in rows)
-        names = ", ".join(r["full_name"] for r in rows[:5]) + (" и др." if len(rows) > 5 else "")
-        return n, f"✉️ Новые сообщения от команды: {n}\n{names}\n\nОткрыть — «Ещё → Сообщения»."
-    n = conn.execute("""SELECT count(*) AS n FROM dm WHERE person_id=%s AND from_head AND broadcast_id IS NULL
-                         AND read_at IS NULL""", (who["id"],)).fetchone()["n"]
-    return n, ("✉️ Новое сообщение от HEAD" if n == 1 else f"✉️ Новых сообщений от HEAD: {n}") + "\n\nОткрыть — вкладка «HEAD»."
-
-
 def ping(ids: list[int]) -> None:
-    """Привести уведомление в боте к числу непрочитанных: 0 — удалить; больше, чем было, — удалить старое и прислать
-    новое (со звуком, в чате всё равно одно); меньше — поправить счётчик молча. Ошибки бота не мешают приложению."""
-    from . import tgbot
-    kb = {"inline_keyboard": [[{"text": "Открыть ARTGAME", "web_app": {"url": tgbot.app_url()}}]]}
+    """HEAD 11.11: «чтобы сообщения не приходили в чат-бот» — о личных сообщениях бот больше НЕ пишет ничего,
+    даже короткое уведомление. Остаётся только уборка: уведомление, присланное 10–11.11, удаляется из чата
+    при следующем сообщении или прочтении. Новое — только в приложении (цифра на вкладке, полоса, «Пульт»)."""
     for rid in dict.fromkeys(ids):
         try:
             with db.pool.connection() as conn:
-                who = conn.execute("SELECT id, tg_id, role_code, status FROM people WHERE id=%s", (rid,)).fetchone()
-                if not who:
-                    continue
-                cur = conn.execute("SELECT * FROM dm_notice WHERE person_id=%s", (rid,)).fetchone()
-                n, text = _notice_text(conn, who)
-                if cur and (n == 0 or n > cur["n"] or who["tg_id"] != cur["tg_id"]):
-                    try:
-                        BOT("deleteMessage", chat_id=cur["tg_id"], message_id=cur["msg_id"])
-                    except Exception as e:  # noqa: BLE001 — человек сам удалил или прошло 48 ч
-                        print("dm notice delete:", e, file=sys.stderr)
-                    conn.execute("DELETE FROM dm_notice WHERE person_id=%s", (rid,))
-                    cur = None
-                if n == 0 or not _real(who["tg_id"]) or who["status"] != "active":
-                    continue
-                if cur:
-                    if n != cur["n"]:
-                        BOT("editMessageText", chat_id=cur["tg_id"], message_id=cur["msg_id"], text=text, reply_markup=kb)
-                        conn.execute("UPDATE dm_notice SET n=%s, updated_at=now() WHERE person_id=%s", (n, rid))
-                    continue
-                mid = (BOT("sendMessage", chat_id=who["tg_id"], text=text, reply_markup=kb) or {}).get("message_id")
-                if mid:
-                    conn.execute("""INSERT INTO dm_notice (person_id, tg_id, msg_id, n) VALUES (%s,%s,%s,%s)
-                                    ON CONFLICT (person_id) DO UPDATE SET tg_id=EXCLUDED.tg_id, msg_id=EXCLUDED.msg_id, n=EXCLUDED.n, updated_at=now()""",
-                                 (rid, who["tg_id"], mid, n))
-        except Exception as e:  # noqa: BLE001
-            print("dm notice:", e, file=sys.stderr)
+                cur = conn.execute("DELETE FROM dm_notice WHERE person_id=%s RETURNING tg_id, msg_id", (rid,)).fetchone()
+            if cur:
+                BOT("deleteMessage", chat_id=cur["tg_id"], message_id=cur["msg_id"])
+        except Exception as e:  # noqa: BLE001 — человек сам удалил или прошло 48 ч
+            print("dm notice delete:", e, file=sys.stderr)
 
 
 def _head_ids(conn) -> list[int]:
