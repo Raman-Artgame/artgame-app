@@ -25,7 +25,7 @@ import { FileLinks } from './objects.jsx'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
   print_operator: 'Оператор настенного принтера', print_master: 'Мастер настенной печати', mop: 'МОП', mop_vip: 'VIP МОП',
-  lead_designer: 'Главный дизайнер', designer_asst: 'Помощник дизайнера', carpenter: 'Мастер-плотник', head: 'HEAD' }
+  lead_designer: 'Главный дизайнер', designer_asst: 'Дизайнер', carpenter: 'Мастер-плотник', head: 'HEAD' }
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
 
 function App() {
