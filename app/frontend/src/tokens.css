@@ -778,3 +778,55 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .dm .dmhq { border-top: 0; padding-top: 4px; }
 .dm .dmsearch { margin: 6px 0 4px; }
 .dm .dmsub { margin: 10px 0 0; }
+/* Проверка в две ступени (HEAD 11.11): оценка куратора */
+.ratebox { margin-top: 8px; padding: 10px; border-radius: 12px; background: var(--alt); display: grid; gap: 8px; }
+.ratebox textarea { margin: 0; }
+.starpick { display: flex; gap: 4px; }
+.starpick button { flex: 1; width: auto; padding: 8px 0; font-size: 22px; line-height: 1; background: transparent; color: var(--line2); border: 1px solid var(--line2); border-radius: 10px; }
+.starpick button.on { color: #f5b301; border-color: #f5b301; background: transparent; }
+.curmark { margin-top: 4px; overflow-wrap: anywhere; }
+.curmark .stars { color: #f5b301; letter-spacing: 1px; }
+.curmark.why .stars { color: var(--hot); }
+.stagehd { margin: 12px 0 2px; font-weight: 600; }
+/* «Мой путь» (HEAD 11.11) */
+.card.mypath { border-left: 4px solid var(--accent); }
+.mypath .head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
+.mypath .head > div { min-width: 0; }
+.mypath h2 { margin: 6px 0 2px; }
+.mypath .head p { margin: 2px 0 0; }
+.card.duty.grow.flat { box-shadow: none; padding: 0; margin: 10px 0 0; background: none; border: 0; }
+.growchange { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-top: 1px solid var(--line2); font-size: 14px; }
+.growknow { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-top: 1px solid var(--line2); font-size: 14px; }
+.growknow em { font-style: normal; color: var(--muted); }
+.growstep { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line2); font-size: 14px; align-items: flex-start; }
+.growstep span { width: 24px; height: 24px; flex: none; border-radius: 50%; border: 1px solid var(--line2); color: var(--muted); font: 700 12px/22px Onest, Inter, system-ui; text-align: center; }
+.growstep p { margin: 2px 0 0; }
+.segf.pathseg { display: grid; grid-template-columns: 1fr 1fr; }
+.segf.pathseg button { white-space: normal; }
+.ladder { display: grid; gap: 4px; margin: 12px 0 2px; }
+.ladder span { display: flex; flex-direction: column; gap: 6px; font-size: 11px; line-height: 1.2; color: var(--muted); text-align: center; overflow-wrap: normal; word-break: keep-all; }
+.ladder em { display: block; height: 6px; border-radius: 3px; background: var(--line2); }
+.ladder .done em { background: var(--ok); } .ladder .done { color: var(--ok); }
+.ladder .now em { background: var(--accent); } .ladder .now { color: var(--text); font-weight: 700; }
+.ladder .next em { background: none; border: 1px dashed var(--text); box-sizing: border-box; } .ladder .next { color: var(--text); }
+/* «Мой путь» на сервере (HEAD 11.11): статус пункта и «Путь команды» у наставника и HEAD */
+.grow .growrow.wait em { color: var(--accent); font-weight: 600; }
+.grow .growrow.conf em { color: var(--ok); font-weight: 600; }
+.grow .growrow.wait span { background: var(--accent); }
+.grow .growrow .back { color: var(--accent); }
+.teampath .tprow { border-top: 1px solid var(--line2); padding: 10px 0; }
+.teampath .tphead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; cursor: pointer; }
+.teampath .tphead p { margin: 2px 0 0; }
+.teampath .tpnum { text-align: right; flex: none; display: flex; flex-direction: column; }
+.teampath .tpnum span { color: var(--accent); }
+.teampath .tpbar { display: flex; height: 6px; border-radius: 3px; background: var(--line2); overflow: hidden; margin-top: 8px; }
+.teampath .tpbar i { background: var(--ok); }
+.teampath .tpbar i.w { background: var(--accent); opacity: .6; }
+.teampath .tpitem { display: flex; gap: 10px; padding: 8px 0 8px 4px; font-size: 14px; align-items: flex-start; }
+.teampath .tpitem > span { width: 22px; height: 22px; flex: none; border-radius: 50%; background: var(--dark); color: #fff; font: 700 11px/22px Onest, Inter, system-ui; text-align: center; }
+.teampath .tpitem > div { flex: 1; min-width: 0; }
+.teampath .tpitem p { margin: 2px 0 0; }
+.teampath .tpitem em { font-style: normal; color: var(--muted); flex: none; }
+.teampath .tpitem.wait em { color: var(--accent); font-weight: 600; }
+.teampath .tpitem.conf em { color: var(--ok); font-weight: 600; }
+.teampath .tpitem .row { display: flex; gap: 8px; margin-top: 6px; }

@@ -41,10 +41,17 @@ def test_shift_flow(client):
     # мастер печати не видит роспись, главный художник видит
     assert client.get("/api/review", headers=hdr(4000)).json()["shifts"] == []
     assert [x["id"] for x in client.get("/api/review", headers=hdr(3000)).json()["shifts"]] == [s1["id"]]
-    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": True}, headers=hdr(4000)).status_code == 403
+    assert client.post(f"/api/shift/{s1['id']}/rate", json={"stars": 5}, headers=hdr(4000)).status_code == 403
+    # HEAD 11.11: куратор оценивает (1–2 — с комментарием), утверждает только HEAD
+    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": True}, headers=hdr(3000)).status_code == 403
+    assert client.post(f"/api/shift/{s1['id']}/rate", json={"stars": 2}, headers=hdr(3000)).status_code == 400
+    assert client.post(f"/api/shift/{s1['id']}/rate", json={"stars": 2, "note": "грязно"}, headers=hdr(3000)).json()["ok"]
+    assert client.post(f"/api/shift/{s1['id']}/rate", json={"stars": 5}, headers=hdr(3000)).status_code == 403   # второй раз — нет
     # отказ без причины — нельзя
-    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": False}, headers=hdr(3000)).status_code == 400
-    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": True}, headers=hdr(3000)).json()["status"] == "approved"
+    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": False}, headers=hdr(1000)).status_code == 400
+    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": True}, headers=hdr(1000)).json()["status"] == "approved"
+    mine = client.get("/api/my", headers=hdr(2000)).json()["shifts"][0]
+    assert mine["cur_stars"] == 2 and mine["cur_note"] == "грязно"
     # после проверки отменить нельзя
     assert client.post(f"/api/shift/{s1['id']}/cancel", headers=hdr(2000)).status_code == 409
     assert len(client.get("/api/my", headers=hdr(2000)).json()["shifts"]) == 1
@@ -56,7 +63,9 @@ def test_expense_flow_gip_and_payout(client):
                                            "category": "paint", "amount": 15000}, headers=hdr(2000)).json()
     # ГИП объекта 731 видит расход
     assert [x["id"] for x in client.get("/api/review", headers=hdr(5000)).json()["expenses"]] == [e["id"]]
-    client.post(f"/api/expense/{e['id']}/review", json={"approve": True}, headers=hdr(5000))
+    assert client.post(f"/api/expense/{e['id']}/rate", json={"ok": False}, headers=hdr(5000)).status_code == 400   # вопрос — с текстом
+    assert client.post(f"/api/expense/{e['id']}/rate", json={"ok": True}, headers=hdr(5000)).json()["ok"]
+    client.post(f"/api/expense/{e['id']}/review", json={"approve": True}, headers=hdr(1000))
     assert client.get("/api/my", headers=hdr(2000)).json()["expenses"][0]["payout_status"] == "to_pay"
     # своё отменить можно, пока не проверено; запись остаётся
     e2 = client.post("/api/expenses", json={"client_uid": str(uuid.uuid4()), "object_id": 0, "zone_code": "mural",

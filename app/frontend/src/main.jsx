@@ -16,6 +16,7 @@ import { Kit } from './kit.jsx'
 import { Production } from './production.jsx'
 import { Design } from './design.jsx'
 import { DUTIES, GROW, POLICY } from './duties.js'
+import { TeamPath, countOf, markLabel, markOf, useMarks } from './grow.jsx'
 import { Feedback } from './feedback.jsx'
 import { Chat, useUnread } from './dm.jsx'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
@@ -77,7 +78,8 @@ const STUDY = {
   // «Подготовка к печати» (HEAD 09.11) — инструкция производителя по шагам с фото, рядом с учебником
   print: () => ({ home: 'ucheb', hide: ['start', 'kit', 'exam', 'test', 'foto'], sections: [['ucheb', 'Учебник'], ['prep', 'Подготовка к печати'], ['mat', 'Клиентам']] }),
   dz: () => ({ home: 'learn', hide: ['board', 'handoff', 'test'] }),
-  mop: () => ({ home: 'ucheb', hide: ['test', 'job'] }),   // «Правила игры» — только в «Кабинете» (HEAD 09.11)
+  mop: () => ({ home: 'ucheb', hide: ['test', 'job'] }),
+  chief: () => ({ home: 'top' }),   // Книга главного художника (HEAD 11.11): своя страница, без вкладок места   // «Правила игры» — только в «Кабинете» (HEAD 09.11)
 }
 const PLAIN = new Set(['today', 'leads', 'deals', 'projects', 'month', 'pays'])
 
@@ -90,7 +92,13 @@ function Main({ me, onMe, web, logout }) {
   const role = me.role_code
   const art = ART.has(role), dz = DZ.has(role), prn = PRINT.has(role), cab = art || dz || prn
   const own = art ? 'art' : prn ? 'print' : 'dz'   // своё место: Главному доступно и «Печать», но в «Учёбе» — только своё
-  const studyList = cab ? places.filter(p => p.code === own) : []
+  // HEAD 11.11: Главным и Про — ещё учебник печати (путь к Про: «печать на уровне оператора»)
+  // и «Книга главного» (HEAD 11.11) — у Главных, Про и и.о. Главного
+  const studyList = cab ? places.filter(p => p.code === own || (SENIOR.has(role) && (p.code === 'print' || p.code === 'chief'))) : []
+  const both = studyList.length > 1   // у Главного и Про один ряд чипов: свои разделы + «Учебник печати» (раздел места печати)
+  const studyOpts = c => { const o = STUDY[c](role)
+    return both ? { ...o, sections: [...STUDY.art(role).sections.map(([h, t]) => [h, t, 'art']),
+      ...(studyList.some(p => p.code === 'chief') ? [['top', 'Книга главного', 'chief']] : []), ['ucheb', 'Учебник печати', 'print']] } : o }
   const isHead = role === 'head'
   const [tab, setTab] = useState(isHead ? 'home' : DEAL_ROLES.has(role) ? 'today' : role === 'carpenter' ? 'stock' : dz ? 'design' : 'shift')
   const [dealId, setDealId] = useState(null)
@@ -114,7 +122,7 @@ function Main({ me, onMe, web, logout }) {
   const pulse = usePulse(isHead)
   const unread = useUnread(tab)   // «Диалог с HEAD» (09.11): цифра на вкладке «HEAD» / «Сообщения»
   const counts = { chat: unread, ...(t ? { today: t.queue.hot.length + t.queue.today.length, leads: [...t.queue.hot, ...t.queue.today].filter(x => x.entity === 'lead').length } : {}),
-    ...(pulse ? { review: +pulse.review.shifts + +pulse.review.expenses + +(pulse.review.payments || 0), people: pulse.pending.length } : {}) }
+    ...(pulse ? { review: +pulse.review.shifts + +pulse.review.expenses + +(pulse.review.appeals || 0) + +(pulse.review.payments || 0), people: pulse.pending.length } : {}) }
   const mop = ['mop', 'mop_vip'].includes(me.role_code)
   const carp = me.role_code === 'carpenter'
   // HEAD 08.11 (вечер): у художников и печати всё внизу одной лентой, в таком порядке — Сбор · Смена · Расход · Продакшн ·
@@ -144,10 +152,16 @@ function Main({ me, onMe, web, logout }) {
     ...HEAD_MORE.map(k => tabs.find(x => x[0] === k)).filter(Boolean)] : tabs
   // в «Кабинете» — обе роли; у «и.о.» — исполняемая и основная; у каждой — «Как подняться» (HEAD 09.11)
   const dcodes = [...new Set([...(me.acting ? [role] : []), ...(me.roles?.length ? me.roles : [role])])].filter(r => DUTIES[r])
-  const folds = dcodes.map(r => <DutyFold key={r} d={DUTIES[r]} g={GROW[r]} me={me} />)
+  // «Мой путь» (HEAD 11.11): следующая ступень — первой карточкой «Кабинета», а не в конце «Правил игры».
+  // У «и.о.» путь — к исполняемой роли (от основной); путь от старшей роли — в её «Правилах игры».
+  const pathCode = me.acting ? me.role_main : role
+  const path = GROW[pathCode] && pathCode !== "head" ? <MyPath g={GROW[pathCode]} me={me} code={pathCode} /> : null
+  // наставник видит путь своих (HEAD 11.11): Главный и Про — саппортов, художников (Про — и Главных), Мастер — операторов, Главный дизайнер — дизайнеров
+  const team = MENTOR.has(role) && !me._view_as ? <TeamPath /> : null
+  const folds = dcodes.map(r => <DutyFold key={r} code={r} d={DUTIES[r]} g={path && r === pathCode ? null : GROW[r]} me={me} />)
   if (tab === 'place' || tab === 'study') return <>
     {me.roles?.length > 1 && <div className="wrap"><RoleSwitch me={me} /></div>}
-    {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
+    {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, studyOpts(p.code)]))}
       extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> }].filter(Boolean)} /> :
     <Places key={tab} list={tab === 'study' ? (isHead ? [mopPlace, ...other].filter(Boolean) : [mopPlace]) : other}   // HEAD 09.11: «Место» убрано — места ролей у HEAD в «Учёбе»
       mode={tab === 'study' && !isHead ? 'study' : ''} opts={tab === 'study' ? { mop: STUDY.mop() } : {}} />}
@@ -161,14 +175,14 @@ function Main({ me, onMe, web, logout }) {
       {toast && <div className="toast">{toast}</div>}
       {unread > 0 && tab !== 'chat' && !isHead && <button className="dmbar" onClick={() => go('chat')}>✉️ Новое сообщение в чате<span>Открыть ›</span></button>}
       {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'chat' ? <Chat head={isHead} /> : tab === 'viewas' ? <ViewAsCard /> :
-        tab === 'people' ? <People ROLE={ROLE} ZONE={ZONE} openViewAs={isHead ? () => setTab('viewas') : null} /> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
+        tab === 'people' ? <><TeamPath head /><People ROLE={ROLE} ZONE={ZONE} openViewAs={isHead ? () => setTab('viewas') : null} /></> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
         tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> :
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
         tab === 'fin' ? <Finance /> : tab === 'pays' ? <PayDesk /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design key={designView || 'd'} me={me} initial={designView} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
-        tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyData me={me} onMe={onMe} /><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyData me={me} onMe={onMe} /><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
+        tab === 'mine' && (mop || carp || !me.zones.length) ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
     </div>
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={!isHead} />
   </>
@@ -195,22 +209,79 @@ function ExpenseTab({ done }) {
 
 // «Как подняться» (HEAD 09.11): у каждого игрока — что нужно для следующей ступени, самопроверка «есть / нет»
 // (отметки — только у себя на телефоне; подтверждает руководитель), экзамен, кто решает.
-function Grow({ g, me }) {
-  const key = `artgame.grow.${me?.id || 0}.${g.step}`
-  const [ok, setOk] = useState(() => { if (me?._view_as) return []; try { return JSON.parse(localStorage.getItem(key) || '[]') } catch { return [] } })
-  const ro = !!me?._view_as   // HEAD смотрит как сотрудник: отметки — личные, тут их не ставим и не показываем свои
-  const flip = i => { if (ro) return
-    const n = ok.includes(i) ? ok.filter(x => x !== i) : [...ok, i]; setOk(n); try { localStorage.setItem(key, JSON.stringify(n)) } catch { /* без памяти */ } }
-  return <div className="card duty grow">
-    <span className="tag">{g.step}</span>{g.draft && <span className="tag draft">черновик</span>}<h2>{g.title}</h2><p>{g.about}</p>
-    <h3>Что нужно для ступени{ro ? '' : ` · есть ${ok.length} из ${g.check.length}`}</h3>
-    {ro && <p className="small muted">Отметки «есть / нет» сотрудник ставит у себя — в просмотре их не видно.</p>}
-    {g.check.map((x, i) => { const [t, how] = Array.isArray(x) ? x : [x]
-      return <div key={i} className={'growrow' + (ok.includes(i) ? ' ok' : '')} onClick={() => flip(i)}>
-        <span>{ok.includes(i) ? '✓' : i + 1}</span><div>{t}{how && <p className="small muted">Как подтверждаем: {how}</p>}</div>
-        {!ro && <em className="small">{ok.includes(i) ? 'есть' : 'нет'}</em>}</div> })}
-    {g.exam && <><h3>Экзамен</h3>{g.exam.map(([t, how, ok]) => <div key={t} className="growexam"><b>{t}</b><span className="small">{how}</span><span className="small muted">Зачёт: {ok}</span></div>)}</>}
-    <p className="small muted">{g.who}</p><p className="small muted">Источник: {g.src}</p>
+// «Мой путь» (HEAD 11.11): ещё «что меняется», «что знать», «в приложении», шаги и предложения (черновик до «да» HEAD).
+// {ключ} в тексте — число из «Значений» (/work/dict → grow), в код не вшиваем.
+let growVals = null
+function useGrowVals() {
+  const [v, setV] = useState(growVals)
+  useEffect(() => { if (!growVals) api('/work/dict').then(d => { growVals = d.grow || {}; setV(growVals) }, () => setV({})) }, [])
+  return v || {}
+}
+const fill = (t, v) => String(t).replace(/\{([a-z0-9_.]+)\}/g, (_, k) => v[k] != null && v[k] !== '' ? String(v[k]).replace('.', ',') : 'по «Значениям»')
+function Grow({ g, me, flat, part, code, marks: mk, flip: fl }) {
+  const on = k => !part || part === k   // «Мой путь»: разделы вкладками, иначе — всё подряд
+  const v = useGrowVals()
+  const f = t => fill(t, v)
+  const [own, ownFlip] = useMarks(mk ? null : code, me)   // отметки на сервере (HEAD 11.11), наставник подтверждает
+  const marks = mk || own, flip0 = fl || ownFlip
+  const ro = !!me?._view_as   // HEAD смотрит как сотрудник: видит отметки, но не ставит
+  const flip = i => { if (!ro) flip0(i) }
+  const cnt = countOf(marks)
+  return <div className={'card duty grow' + (flat ? ' flat' : '')}>
+    {!flat && <><span className="tag">{g.step}</span>{g.draft && <span className="tag draft">черновик</span>}<h2>{g.title}</h2></>}{on('check') && <p>{g.about}</p>}
+    {on('know') && g.change && <><h3>Что меняется</h3>{g.change.map(([was, now]) => <div key={was} className="growchange"><span className="small muted">Было: {was}</span><span>{now}</span></div>)}</>}
+    {on('know') && g.know && <><h3>Что знать</h3>{g.know.map(([t, where]) => <div key={t} className="growknow"><span>{f(t)}</span><em className="small">{where}</em></div>)}
+      <p className="small muted">Кн. 1 — Книга художника, Кн. 2 — Книга главного художника.</p></>}
+    {on('check') && <><h3>Что нужно для ступени · есть {cnt.marked} из {g.check.length}</h3>
+    <p className="small muted">{ro ? 'Отметки сотрудника — только просмотр.' : 'Нажми пункт, когда он у тебя есть, — наставник подтвердит или вернёт с комментарием.'}</p>
+    {g.check.map((x, i) => { const [t, how, dev] = Array.isArray(x) ? x : [x], m = markOf(marks, i), [lab, cls] = markLabel(m)
+      return <div key={i} className={'growrow' + (m.marked_at ? ' ok' : '') + (cls ? ' ' + cls : '')} onClick={() => flip(i)}>
+        <span>{m.marked_at ? '✓' : i + 1}</span><div>{f(t)}{dev && <p className="small">Как развивать: {f(dev)}</p>}{how && <p className="small muted">Как подтверждаем: {how}</p>}
+          {m.returned_at && !m.marked_at && <p className="small back">Наставник вернул{m.note ? `: ${m.note}` : ''}</p>}</div>
+        <em className="small">{lab}</em></div> })}</>}
+    {on('app') && g.app && <><h3>В приложении — освоить</h3>{g.app.map(([t, x]) => <div key={t} className="growknow"><b>{t}</b><span className="small">{f(x)}</span></div>)}</>}
+    {on('steps') && g.steps && <><h3>Шаги</h3>{g.steps.map(([t, x], i) => <div key={t} className="growstep"><span>{i + 1}</span><div>{t}<p className="small muted">{f(x)}</p></div></div>)}</>}
+    {on('steps') && g.exam && <><h3>Экзамен</h3>{g.exam.map(([t, how, ok]) => <div key={t} className="growexam"><b>{t}</b><span className="small">{how}</span><span className="small muted">Зачёт: {ok}</span></div>)}</>}
+    {on('check') && g.offer && <><h3>Задачи на ближайший месяц <span className="tag draft">предложение</span></h3>
+      <ul>{g.offer.map(x => <li key={x} className="small">{x}</li>)}</ul><p className="small muted">Предложение — ждёт утверждения HEAD.</p></>}
+    {on('steps') && <p className="small muted">{g.who}</p>}<p className="small muted">Источник: {g.src}</p>
+  </div>
+}
+
+const MENTOR = new Set(['lead_artist', 'artist_pro', 'print_master', 'lead_designer'])
+// Лестница (HEAD 11.11: «Саппорт → Художник → Главный → Про → Партнёр»): вся ветка наверху «Моего пути», где ты — подсвечено.
+const LADDER = [
+  [['support', 'Саппорт'], ['artist', 'Художник'], ['lead_artist', 'Главный'], ['artist_pro', 'Про'], ['partner', 'Партнёр']],
+  [['print_operator', 'Оператор'], ['print_master', 'Мастер печати'], ['partner', 'Партнёр']],
+  [['designer_asst', 'Дизайнер'], ['lead_designer', 'Главный дизайнер'], ['partner', 'Своё направление']],
+  [['mop', 'МОП'], ['mop_vip', 'VIP МОП'], ['partner', 'Руководитель продаж']],
+]
+function Ladder({ code }) {
+  const l = LADDER.find(x => x.some(([c]) => c === code))
+  if (!l) return null
+  const i = l.findIndex(([c]) => c === code)
+  return <div className="ladder" style={{ gridTemplateColumns: `repeat(${l.length}, 1fr)` }}>{l.map(([c, t], k) =>
+    <span key={c} className={k === i ? 'now' : k === i + 1 ? 'next' : k < i ? 'done' : ''}><em />{t}</span>)}</div>
+}
+
+// «Мой путь» (HEAD 11.11): первая карточка «Кабинета» — куда расту, сколько готово, у «и.о.» — сколько дней до повышения.
+function MyPath({ g, me, code }) {
+  const [open, setOpen] = useState(false)
+  const [part, setPart] = useState('check')
+  const segs = [['check', 'Чек-лист'], ['know', 'Что знать'], ['steps', 'Шаги'], ['app', 'В приложении']].filter(([k]) => k === 'check' || g[k])
+  const [marks, flip] = useMarks(code, me)
+  const c = countOf(marks)
+  const promo = me.acting && me.acting_promo ? new Date(me.acting_promo) : null
+  const days = promo ? Math.ceil((promo - new Date()) / 864e5) : null
+  return <div className="card mypath">
+    <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
+      <div><span className="tag">Мой путь</span>{g.draft && <span className="tag draft">черновик</span>}<h2>{g.title}</h2>
+        <p className="small muted">Есть {c.marked} из {g.check.length} · подтверждено {c.conf}</p>
+        {promo && days > 0 && <p className="small"><b>До повышения {days} дн.</b> — {promo.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</p>}</div>
+      <button className="ghost mini">{open ? 'Свернуть' : 'Открыть'}</button></div>
+    <Ladder code={code} />
+    {open && <>{segs.length > 1 && <div className="segf pathseg">{segs.map(([k, t]) => <button key={k} className={part === k ? 'on' : ''} onClick={() => setPart(k)}>{t}</button>)}</div>}
+      <Grow key={part} g={g} me={me} flat part={part} code={code} marks={marks} flip={flip} /></>}
   </div>
 }
 
@@ -230,17 +301,17 @@ function Acting({ me }) {
 
 // «Правила игры» (HEAD 08.11 — вместо «Должностной»): роль, кому подчиняешься, что делаешь; ниже — как вырасти на ступень.
 // «Правила игры» в «Кабинете» у всех (HEAD 08.11): свёрнуто одной карточкой, раскрывается целиком.
-function DutyFold({ d, g, me }) {
+function DutyFold({ d, g, me, code }) {
   const [open, setOpen] = useState(false)
   return <div className="card dutyfold">
     <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
       <div><span className="tag">Правила игры</span><h3>{d.title}</h3><p className="small muted">{d.about}</p></div>
       <button className="ghost mini">{open ? 'Свернуть' : 'Открыть'}</button></div>
-    {open && <div className="dutybody"><Duty d={d} g={g} me={me} /></div>}
+    {open && <div className="dutybody"><Duty d={d} g={g} me={me} code={code} /></div>}
   </div>
 }
 
-function Duty({ d, g, me }) {
+function Duty({ d, g, me, code }) {
   return <div className="wrap"><div className="card duty">
     <span className="tag">{d.step}</span><h2>Правила игры · {d.title}</h2><p>{d.about}</p><p className="small muted">{d.boss}</p>
     {d.goal && <><h3>Зачем ты в команде{dr(d, 'goal')}</h3><p>{d.goal}</p></>}
@@ -260,7 +331,7 @@ function Duty({ d, g, me }) {
     <p className="small">{POLICY.after}</p></div>
   <Policy />
   {d.next && <div className="card duty"><h3>Куда дальше</h3><p className="small">{d.next}</p></div>}
-  {g && <Grow g={g} me={me} />}
+  {g && <Grow g={g} me={me} code={code} />}
   <p className="small muted">Источник: {d.src}{d.drafts?.length ? ' «Черновик» — нет в документах компании, ждёт утверждения HEAD.' : ''}</p></div>
 }
 

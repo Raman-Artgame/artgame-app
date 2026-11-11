@@ -59,9 +59,12 @@ async function tab(p, name) {
   await tab(s, 'Учёба')   // «Правила игры» в «Учёбе» больше нет — только в «Кабинете» (HEAD 09.11)
   assert.ok(!(await s.locator('.place .chips button').allTextContents()).includes('Правила игры'))
   await tab(s, 'Кабинет')
+  // «Мой путь» (HEAD 11.11): следующая ступень — первой карточкой «Кабинета», в «Правилах игры» не повторяется
+  await s.locator('.mypath').getByText('Как стать художником').waitFor()
+  await s.locator('.mypath').getByRole('button', { name: 'Открыть' }).click()
+  await s.locator('.mypath').getByText(/Что нужно для ступени/).waitFor()
   await s.locator('.dutyfold').getByRole('button', { name: 'Открыть' }).click()
   await s.getByText('Правила игры · Саппорт').waitFor()
-  await s.getByText(/Что нужно для ступени/).waitFor()
   // Полная должностная (HEAD 08.11): требования, права, запрещено, политика; без источника — «черновик»
   await s.getByText('Требования', { exact: true }).waitFor()
   await s.getByText('Что запрещено').waitFor()

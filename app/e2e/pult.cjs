@@ -61,7 +61,7 @@ async function tab(p, name) {
   const nav = await navText(h)
   assert.deepStrictEqual(nav.slice(0, 5), ['Пульт', 'Проверка', 'Сделки', 'Проекты', 'Финансы'], nav.join(','))
   await h.getByText('Ждёт вашего решения').waitFor()
-  await h.getByText('Смены на проверке: 1').waitFor()
+  await h.getByText('Смены на утверждение: 1').waitFor()
   await h.getByText('Ждут роли: 1').waitFor()
   await h.locator('#pulse-today').getByText('Дана Художник').waitFor()
   // HEAD 10.11: плитки «Деньги» — ждут оплаты, упущено, долг, в работе; «как посчитано» раскрывает прибыль

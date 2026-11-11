@@ -30,8 +30,8 @@ export function Places({ list, mode, opts = {}, extra: ex }) {
   const src = cur ? cur.url + (q ? '?' + q : '') + (hash || (o.home ? '#' + o.home : mode === 'study' ? '#ucheb' : '')) : ''
   const curSec = (hash || '#' + (o.home || 'ucheb')).slice(1).split('-')[0]
   return <div className="place">
-    {(list.length > 1 || extras.length > 0 || secs) && <div className="chips placechips">{secs ? secs.map(([h, t]) =>
-      <button key={h} className={!onExtra && curSec === h ? 'on' : ''} onClick={() => { setCode(cur.code); setHash('#' + h) }}>{t}</button>) : list.map(p =>
+    {(list.length > 1 || extras.length > 0 || secs) && <div className="chips placechips">{secs ? secs.map(([h, t, c]) =>   // c — раздел другого места (HEAD 11.11: Главным и Про — учебник печати рядом со своим)
+      <button key={(c || '') + h} className={!onExtra && curSec === h && (c || cur.code) === cur.code ? 'on' : ''} onClick={() => { setCode(c || cur.code); setHash('#' + h) }}>{t}</button>) : list.map(p =>
       <button key={p.code} className={!onExtra && p.code === cur.code ? 'on' : ''} onClick={() => { setCode(p.code); setHash('') }}>{p.title}</button>)}
       {extras.map(x => <button key={x.code} className={code === x.code ? 'on' : ''} onClick={() => setCode(x.code)}>{x.title}</button>)}</div>}
     {onExtra || !cur ? <div className="placeextra">{(extra || extras[0]).render()}</div> : <iframe ref={frame} key={cur.code + hash + (mode || '')} title={cur.title} src={src} className="placeframe" allow="fullscreen" allowFullScreen />}

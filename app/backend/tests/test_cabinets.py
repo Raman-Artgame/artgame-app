@@ -39,10 +39,13 @@ def test_review_by_rank(client):
     a, l2, pro = shift(client, 2000), shift(client, 3100), shift(client, 4000)
     seen = lambda tg: {x["id"] for x in client.get("/api/review", headers=hdr(tg)).json()["shifts"]}  # noqa: E731
     assert seen(3000) == {a}                 # Главный: художника да, Главного и Про — нет
-    assert seen(4000) == {a, l2}             # Про выше Главного — проверяет его, себя нет
-    assert client.post(f"/api/shift/{pro}/review", json={"approve": True}, headers=hdr(3000)).status_code == 403
-    assert client.post(f"/api/shift/{l2}/review", json={"approve": True}, headers=hdr(4000)).json()["status"] == "approved"
-    assert seen(1000) >= {a, pro}
+    assert seen(4000) == {a}                 # HEAD 11.11: смены кураторов (Главный, Про) — сразу к HEAD
+    assert client.post(f"/api/shift/{pro}/rate", json={"stars": 5}, headers=hdr(3000)).status_code == 403
+    assert client.post(f"/api/shift/{a}/review", json={"approve": True}, headers=hdr(4000)).status_code == 403   # утверждает только HEAD
+    assert client.post(f"/api/shift/{a}/rate", json={"stars": 4}, headers=hdr(4000)).json()["ok"]
+    assert seen(3000) == set()               # оценили — у кураторов больше нет
+    rv = {x["id"]: x for x in client.get("/api/review", headers=hdr(1000)).json()["shifts"]}
+    assert rv[a]["stage"] == "rated" and rv[a]["cur_stars"] == 4 and rv[l2]["stage"] == rv[pro]["stage"] == "direct"
 
 
 def test_kit_flow(client):

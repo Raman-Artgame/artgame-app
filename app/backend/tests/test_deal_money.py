@@ -334,3 +334,153 @@ def test_cash_without_photo(client, monkeypatch):
     assert r["row"]["account_code"] == "hist" and "до ноября · наличными" in r["row"]["note"]
     assert client.post("/api/bx/deals/1611/payment", json={**pay, "client_uid": uid(), "op_date": "2026-10-20", "account": "hist"},
                        headers=hdr(6000)).status_code == 400
+
+
+def test_artamonov_account_until_year_end(client, monkeypatch):
+    """ИП Артамонов (HEAD 11.11): временный счёт для оплат клиентов — только оплаты по дату valid_until (31.12.2026)."""
+    from datetime import timedelta
+
+    from artgame import drive
+    from test_finance import JPG
+    ids = setup(client, monkeypatch)
+    client.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    d = {**deal(1611, opp=110_000), "ASSIGNED_BY_ID": "4565"}
+    monkeypatch.setattr(bx, "READ", lambda m, p: {"result": d})
+    monkeypatch.setattr(drive, "save_income_receipt", lambda *a: "drv")
+    full = client.get("/api/bx/deals/1611/full", headers=hdr(6000)).json()
+    acc = {a["code"]: a for a in full["pay"]["accounts"]}
+    assert acc["artamonov"]["title"] == "ИП Артамонов" and acc["artamonov"]["valid_until"] == "2026-12-31" and acc["kaspi"]["valid_until"] is None
+    today = dm.datetime.now(dm.TZ).date()
+    pay = {"client_uid": uid(), "amount": 60000, "op_date": str(today), "account": "artamonov", "receipt": JPG}
+    r = client.post("/api/bx/deals/1611/payment", json=pay, headers=hdr(6000))
+    assert r.status_code == 200, r.text
+    assert r.json()["row"]["account_code"] == "artamonov" and r.json()["pay"]["received"] == 60_000
+    # после срока счёт для новых оплат закрыт, внесённое остаётся
+    with db.pool.connection() as c:
+        c.execute("UPDATE fin_accounts SET valid_until=%s WHERE code='artamonov'", (today - timedelta(days=1),))
+    r = client.post("/api/bx/deals/1611/payment", json={**pay, "client_uid": uid()}, headers=hdr(6000))
+    assert r.status_code == 400 and "ИП Артамонов" in r.text
+    assert client.post("/api/bx/deals/1611/payment", json={**pay, "client_uid": uid(), "op_date": str(today - timedelta(days=1))},
+                       headers=hdr(6000)).status_code == 200
+    assert client.get("/api/bx/deals/1611/full", headers=hdr(6000)).json()["pay"]["received"] == 120_000
+
+
+def test_push_holds_manual_total_without_app_payments(client, monkeypatch):
+    """11.11: «Поступило», вписанное в Битриксе руками, приложение не обнуляет, пока по сделке нет ни одной оплаты в приложении
+    (1557, 1579, 1611); Айболит с «Поступлением 1» без итога — пишется сразу. После оплаты в приложении итоги ведёт журнал."""
+    setup(client, monkeypatch)
+    deals = {1579: deal(1579, stage="WON", sem="S", opp=300_000, **{REC: "300000|KZT"}),
+             1347: deal(1347, opp=1_600_000, **{A1: "800000|KZT", DEBT: "800000|KZT"})}
+    monkeypatch.setattr(bx, "read", lambda m, p, fresh=False, **k: {"result": [dict(d) for d in deals.values()]})
+    monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False, **k: [dict(d) for i, d in deals.items()
+                                                                         if i in [int(x) for x in (p.get("filter") or {}).get("ID", deals)]])
+    wrote = []
+
+    def call(method, params):
+        wrote.append((params["id"], params["fields"]))
+        deals[params["id"]].update(params["fields"])
+        return {"result": True}
+
+    monkeypatch.setattr(bxw, "CALL", call)
+    monkeypatch.setattr(settings, "bitrix_webhook", "https://bx.example/rest/1/x/")
+    monkeypatch.setattr(settings, "pay_push", True)
+    monkeypatch.setattr(dm, "PAUSE", 0)
+    chk = client.get("/api/fin/deal-money", headers=hdr(1000)).json()
+    assert chk["held"] == 1 and {r["id"]: r["hold"] for r in chk["rows"]} == {1347: False, 1579: True}
+    with db.pool.connection() as conn:
+        out = dm.push(conn)
+    assert out["held"] == 1 and [i for i, _ in wrote] == [1347] and wrote[0][1][REC] == "800000|KZT"
+    # Анна внесла оплату 1579 в приложении — сделку ведёт журнал: «Поступило» уже 300 000, фоном дописаны только «без НДС» и НДС
+    wrote.clear()
+    client.post("/api/fin/ledger", json={"client_uid": uid(), "op_date": "2026-11-06", "account": "kaspi", "amount": 300000,
+                                         "article": "client_payment", "deal_id": 1579}, headers=hdr(1000))
+    assert [(i, sorted(f)) for i, f in wrote] == [(1579, sorted([NET, VAT]))]
+    with db.pool.connection() as conn:
+        out = dm.push(conn)
+    assert out["held"] == 0 and out["diff"] == 0
+
+
+def test_fok_field_rows_cancelled_after_reentry(client, monkeypatch):
+    """ФОК 943 (HEAD 11.11): оплаты из полей «Поступление 1–2» (21.10 — 1 276 000, 28.10 — 1 914 000) Анна внесла заново
+    в приложении с чеками, строки из полей задваивали «Поступило». Миграция 048 отменяет ровно их (не удаляет): в списке оплат
+    сделки их нет, итог — по оплатам с чеками, импорт истории из полей их не возвращает, чужие сделки не трогаются."""
+    from datetime import date
+    from pathlib import Path
+    ids = setup(client, monkeypatch)
+    d = deal(943, opp=9_787_500, **{A1: "1276000|KZT", D1: "2026-10-21T03:00:00+05:00", A2: "1914000|KZT", D2: "2026-10-28T03:00:00+05:00"})
+    rows = [("2026-10-21", "hist", 1276000, "bitrix", "deal:943:pay1"), ("2026-10-28", "hist", 1914000, "bitrix", "deal:943:pay2"),
+            ("2026-10-28", "hist", 2914000, "app", None), ("2026-11-03", "kaspi", 3000000, "app", None),
+            ("2026-11-11", "kaspi", 1276000, "app", None),
+            ("2026-10-21", "hist", 1276000, "bitrix", "deal:944:pay1")]   # та же сумма и дата у другой сделки
+    with db.pool.connection() as conn:
+        for day, acc, amount, src, ref in rows:
+            conn.execute("""INSERT INTO fin_ledger (client_uid, op_date, account_code, direction, amount, article_code, period, deal_id,
+                                                    source, source_ref, created_by)
+                            VALUES (%s,%s,%s,'in',%s,'client_payment',%s,%s,%s,%s,%s)""",
+                         (uid(), day, acc, amount, day[:7], 944 if ref == "deal:944:pay1" else 943, src, ref,
+                          ids[3000] if src == "app" else None))
+    before = dm.card(d)
+    assert before["received"] == 10_380_000 and before["overpaid"] == 592_500 and before["debt"] == 0
+    sql = (Path(__file__).parents[1] / "migrations" / "049_fok943_dubli.sql").read_text()
+    with db.pool.connection() as conn:
+        conn.execute(sql)
+        conn.execute(sql)   # повторный прогон ничего не меняет
+        st = {r["source_ref"]: r["status"] for r in conn.execute("SELECT source_ref, status FROM fin_ledger WHERE source='bitrix'").fetchall()}
+        fixed = conn.execute("SELECT data FROM audit_log WHERE action='ledger_fix' ORDER BY id").fetchall()
+    assert st == {"deal:943:pay1": "cancelled", "deal:943:pay2": "cancelled", "deal:944:pay1": "active"}
+    assert [(x["data"]["ref"], x["data"]["amount"]) for x in fixed] == [("deal:943:pay1", 1276000), ("deal:943:pay2", 1914000)]
+    c = dm.card(d)
+    assert c["received"] == 7_190_000 and c["debt"] == 2_597_500 and c["overpaid"] == 0 and c["history"] == []
+    assert [(x["amount"], x["source"]) for x in c["items"]] == [(1_276_000, "app"), (3_000_000, "app"), (2_914_000, "app")]
+    # импорт истории из полей сделки отменённые строки не возвращает
+    monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False, **k: [dict(d)])
+    with db.pool.connection() as conn, conn.transaction():
+        assert fin_bx.import_payments(conn, since=date(2026, 1, 1), until=fin_bx.START, ids=[943]) == {"deals": 1, "added": 0, "changed": 0}
+    assert dm.card(d)["received"] == 7_190_000
+
+
+def test_fok_advance_moved_to_history(client, monkeypatch):
+    """ФОК 943 (HEAD 11.11 «да»): аванс 1 276 000 Анна внесла датой 11.11 на Kaspi, а пришёл он 21.10. Миграция 050 переносит
+    ровно эту оплату на 21.10 в «Историю» (как оплату до ноября): итог сделки тот же, у Kaspi и в ноябре её больше нет;
+    повторный прогон ничего не меняет; если таких строк не одна — ничего не трогает."""
+    from pathlib import Path
+    ids = setup(client, monkeypatch)
+    d = deal(943, opp=9_787_500)
+    note = "943 · ФОК — АТЫРАУ · внёс Анна Тарапата · Аванс"
+
+    def add(day, acc, amount, deal_id=943):
+        with db.pool.connection() as conn:
+            return conn.execute("""INSERT INTO fin_ledger (client_uid, op_date, account_code, direction, amount, article_code, period, deal_id,
+                                                           note, source, created_by)
+                                   VALUES (%s,%s,%s,'in',%s,'client_payment',%s,%s,%s,'app',%s) RETURNING id""",
+                                (uid(), day, acc, amount, day[:7], deal_id, note, ids[3000])).fetchone()["id"]
+    sql = (Path(__file__).parents[1] / "migrations" / "050_fok943_avans_data.sql").read_text()
+    avans = add("2026-11-11", "kaspi", 1276000)
+    add("2026-10-28", "hist", 2914000)
+    add("2026-11-03", "kaspi", 3000000)
+    other = add("2026-11-11", "kaspi", 1276000, deal_id=944)   # та же оплата у другой сделки — не трогаем
+    before = dm.card(d)
+    with db.pool.connection() as conn:
+        conn.execute(sql)
+        conn.execute(sql)   # повторно: строки от 11.11 больше нет — пропуск
+        rows = {r["id"]: r for r in conn.execute("SELECT * FROM fin_ledger").fetchall()}
+        log = conn.execute("SELECT data FROM audit_log WHERE action='ledger_fix'").fetchall()
+    a = rows[avans]
+    assert (str(a["op_date"]), a["account_code"], a["period"], a["status"]) == ("2026-10-21", "hist", "2026-10", "active")
+    assert a["note"] == "943 · ФОК — АТЫРАУ · внёс Анна Тарапата · до ноября · Аванс"
+    assert (str(rows[other]["op_date"]), rows[other]["account_code"]) == ("2026-11-11", "kaspi")
+    assert [x["data"]["to"] for x in log] == [["2026-10-21", "hist", "2026-10"]]
+    after = dm.card(d)
+    assert after["received"] == before["received"] == 7_190_000 and after["debt"] == 2_597_500
+    # две одинаковые строки — непонятно, какую переносить: ничего не меняем
+    add("2026-11-11", "kaspi", 1276000)
+    add("2026-11-11", "kaspi", 1276000)
+    with db.pool.connection() as conn:
+        conn.execute(sql)
+        assert conn.execute("SELECT count(*) AS n FROM fin_ledger WHERE deal_id=943 AND op_date='2026-11-11'").fetchone()["n"] == 2
+
+
+def test_act_goes_to_its_field():
+    """АВР из приложения — в поле «АВР» блока «Документы», а не в «Прочие» (HEAD 11.11)."""
+    assert bxw.KIND_FIELD["avr"] == "UF_CRM_ARTGAME_DOC05_ACTS" and bxw.F_ACTS in bxw.WRITABLE and bxw.F_ACTS in bxw.MULTI_FILE
+    assert bxw.kind_of("ARTGAME_avr_1347.pdf") == "avr" and bx.FILES[bxw.F_ACTS] == "АВР"

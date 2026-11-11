@@ -93,7 +93,7 @@ def test_pulse(client):
     assert client.get("/api/head/pulse", headers=va(1000, ids[2000])).status_code == 403   # глазами художника пульта нет
     p = client.get("/api/head/pulse", headers=hdr(1000)).json()
     assert [x["full_name"] for x in p["pending"]] == ["Новый"]
-    assert p["review"]["shifts"] == 1 and p["review"]["expenses"] == 0
+    assert p["review"]["shifts"] == 0 and p["review"]["curating"] == 1 and p["review"]["expenses"] == 0   # ждёт оценки куратора (HEAD 11.11)
     assert any(t["code"] == "artist" and t["active"] == 2 for t in p["team"])
     assert p["feed"][0]["action"] in ("shift_add", "register")
 
