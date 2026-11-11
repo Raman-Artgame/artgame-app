@@ -111,7 +111,7 @@ def work_dict(p: dict = Depends(active)):
                                        WHERE o.status='active' AND (o.id=0 OR o.bitrix_stage=%s)
                                        ORDER BY (c.person_id IS NOT NULL) DESC, o.id DESC""", (p["id"], sync_objects.WORK)).fetchall()
                        if not set(p.get("roles") or [p["role_code"]]) & set(WORKSHOP_ROLES) else
-                       [{**o, "title": SHOP} if o["id"] == 0 else o for o in conn.execute("""SELECT o.id, o.title, o.city, c.person_id IS NOT NULL AS mine
+                       [{**o, "title": WORKSHOP_TITLE.get(workshop_zone(p) or "", SHOP)} if o["id"] == 0 else o for o in conn.execute("""SELECT o.id, o.title, o.city, c.person_id IS NOT NULL AS mine
                                        FROM objects o LEFT JOIN object_crew c ON c.object_id=o.id AND c.person_id=%s
                                        WHERE o.status='active' AND (o.id=0 OR o.bitrix_stage=%s)
                                        ORDER BY (c.person_id IS NOT NULL) DESC, o.id DESC""", (p["id"], sync_objects.WORK)).fetchall()],
@@ -119,7 +119,8 @@ def work_dict(p: dict = Depends(active)):
             "zones": p["zones"],
             "printer": consts.latest(conn).get("print.tech.printer"),
             "role": p["role_code"],
-            "workshop": WORKSHOP_TASKS if set(p.get("roles") or [p["role_code"]]) & set(WORKSHOP_ROLES) else None,
+            "workshop": WORKSHOP_TASKS_BY[workshop_zone(p)] if workshop_zone(p) else None,
+            "workshop_zone": workshop_zone(p), "workshop_title": WORKSHOP_TITLE.get(workshop_zone(p) or ""),
             "roles": p.get("roles") or [p["role_code"]],   # две роли: в какой роли смена — по зоне объекта, можно сменить
             # подсказки смены (HEAD 08.11): ТБ из «Значений», этапы работ
             "safety": {k: x for k, x in consts.latest(conn).items() if k.startswith("safety.")},
@@ -268,9 +269,29 @@ class StartIn(BaseModel):
 
 
 PRINT_ROLES = ("print_master", "print_operator")
-WORKSHOP_ROLES = PRINT_ROLES   # «Мастерская» без проекта (HEAD 09.11)
-WORKSHOP_ZONES = ("print",)
+MURAL_ROLES = ("support", "artist", "artist_pro", "lead_artist")
+# «Мастерская» без проекта (HEAD 09.11) у печати; «Без объекта» у всех художников (HEAD 11.11)
+WORKSHOP_ROLES = PRINT_ROLES + MURAL_ROLES
+WORKSHOP_ZONES = ("print", "mural")
 WORKSHOP_TASKS = ["ТО принтера", "Ремонт и запчасти", "Тест печати", "Подготовка к объекту", "Обучение", "Другое"]
+WORKSHOP_TASKS_BY = {"print": WORKSHOP_TASKS,
+                     "mural": ["Подготовка к объекту", "Картины и холсты", "Эскиз и пробы", "Сбор и инвентарь", "Обучение", "Другое"]}
+WORKSHOP_TITLE = {"print": "Мастерская", "mural": "Без объекта"}
+
+
+def workshop_zone(p: dict) -> str | None:
+    """Зона смены без объекта: печать — если есть роль печати, иначе роспись. None — такой смены у человека нет."""
+    roles = set(p.get("roles") or [p["role_code"]])
+    for z, rs in (("print", PRINT_ROLES), ("mural", MURAL_ROLES)):
+        if roles & set(rs) and z in (p.get("zones") or []):
+            return z
+    return None
+
+
+def check_workshop(p: dict, zone: str) -> None:
+    roles = set(p.get("roles") or [p["role_code"]])
+    if zone not in WORKSHOP_ZONES or not roles & set(PRINT_ROLES if zone == "print" else MURAL_ROLES):
+        raise HTTPException(400, "Смена без объекта — у печати и художников")
 
 
 def shift_role(p: dict, zone: str, want: str | None = None) -> str:
@@ -334,8 +355,7 @@ def start_shift(b: StartIn, p: dict = Depends(active)):
         shop = bool(b.workshop)
         if shop:   # мастерская: без объекта, только печать (HEAD 09.11)
             b.object_id = 0
-            if not set(p.get("roles") or [p["role_code"]]) & set(WORKSHOP_ROLES) or b.zone_code not in WORKSHOP_ZONES:
-                raise HTTPException(400, "Мастерская без проекта — у печати")
+            check_workshop(p, b.zone_code)
         check_zone(conn, p, b.zone_code, b.object_id)
         if not b.object_id and not shop:
             raise HTTPException(400, "Смена — только на объекте")
@@ -424,8 +444,7 @@ def past_shift(b: PastIn, p: dict = Depends(active)):
         shop = bool(b.workshop)
         if shop:
             b.object_id, b.area_m2 = 0, None
-            if not set(p.get("roles") or [p["role_code"]]) & set(WORKSHOP_ROLES) or b.zone_code not in WORKSHOP_ZONES:
-                raise HTTPException(400, "Мастерская без проекта — у печати")
+            check_workshop(p, b.zone_code)
         check_zone(conn, p, b.zone_code, b.object_id, past=True)
         if not b.object_id and not shop:
             raise HTTPException(400, "Смена — только на объекте")
@@ -657,13 +676,14 @@ def more_photos(conn, rows: list[dict]) -> list[dict]:
 SHOP = "Мастерская"
 # HEAD 10.11: печать (мастер, оператор) работает в мастерской — их смены без объекта подписываем «Мастерская»
 SHOP_SQL = ("CASE WHEN {s}.object_id=0 AND ({s}.kind='workshop' OR {pe}.role_code IN ('print_master','print_operator')) "
-            "THEN 'Мастерская' ELSE o.title END")
+            "THEN CASE WHEN {s}.zone_code='mural' THEN 'Без объекта' ELSE 'Мастерская' END ELSE o.title END")
 
 
 def shop_title(s: dict) -> dict:
-    """Смена в мастерской: вместо «Офис / без объекта» — «Мастерская · ТО принтера»."""
-    if s.get("kind") == "workshop" or (s.get("object_id") == 0 and s.get("object_title") == SHOP):
-        s["object_title"] = "Мастерская" + (f" · {s['task']}" if s.get("task") else "")
+    """Смена без объекта: вместо «Офис / без объекта» — «Мастерская · ТО принтера» (печать) или «Без объекта · Эскиз и пробы» (роспись)."""
+    if s.get("kind") == "workshop" or (s.get("object_id") == 0 and s.get("object_title") in WORKSHOP_TITLE.values()):
+        t = WORKSHOP_TITLE.get(s.get("zone_code"), SHOP)
+        s["object_title"] = t + (f" · {s['task']}" if s.get("task") else "")
     return s
 
 
@@ -731,8 +751,8 @@ def review_list(p: dict = Depends(active)):
                 x["stage"] = stage_of(x)
             if t == "shifts":
                 for x in out[t]:
-                    if x["object_id"] == 0 and (x.get("kind") == "workshop" or x["person_role"] in WORKSHOP_ROLES):
-                        x["object_title"] = SHOP
+                    if x["object_id"] == 0 and (x.get("kind") == "workshop" or x["person_role"] in PRINT_ROLES):
+                        x["object_title"] = WORKSHOP_TITLE.get(x["zone_code"], SHOP)
         cats = {c["code"]: c for c in conn.execute("SELECT code, title, article FROM expense_categories").fetchall()}
         flags = {}   # покупки по каталогу: почему ждёт HEAD (выше потолка / нет ориентира)
         for r in conn.execute("""SELECT expense_id, array_agg(DISTINCT flag) AS f FROM stock_lines
