@@ -61,7 +61,7 @@ def test_finance_flow(client, monkeypatch):
     assert led(account="kaspi", amount=200_000, article="transfer").status_code == 400     # без счёта «куда»
     assert led(account="kaspi", amount=10, article="payroll").status_code == 400            # выплаты — только через ФОТ
     bal = {b["code"]: float(b["balance"]) for b in client.get("/api/fin/summary", params={"ym": YM}, headers=hdr(1000)).json()["cash"]["closing"]}
-    assert bal == {"kaspi": 5_000_000 - 300_000 + 1_160_000 - 200_000, "cash": 500_000, "head": 0, "hist": 0}
+    assert bal == {"kaspi": 5_000_000 - 300_000 + 1_160_000 - 200_000, "cash": 500_000, "head": 0, "artamonov": 0, "hist": 0}
     # смены: художник 2 полные + 1 короткая (4 ч по часу), главный художник 1 смена → доплата до минимума
     shift(client, 2000, "2026-11-04T09:00:00+05:00", "2026-11-04T19:00:00+05:00")
     shift(client, 2000, "2026-11-05T09:00:00+05:00", "2026-11-05T19:00:00+05:00")

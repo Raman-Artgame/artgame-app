@@ -320,7 +320,10 @@ const START = '2026-11-01'
 export function PaySheet({ d, slot, onClose, onDone }) {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Almaty' })
   const accounts = d.pay.accounts || []
-  const [v, set] = useState({ amount: slot ? String(Math.round(slot.amount)) : '', op_date: today, account: accounts[0]?.code || '', note: '', receipt: '', cash: false })
+  // счёт выбирают сами, без подстановки (HEAD 11.11: два ИП — Яковлев и Артамонов, ошибка в счёте = ошибка в налогах)
+  const [v, set] = useState({ amount: slot ? String(Math.round(slot.amount)) : '', op_date: today, account: '', note: '', receipt: '', cash: false })
+  const fits = (a, day) => !a.valid_until || day <= a.valid_until   // «ИП Артамонов» — только оплаты по 31.12.2026
+  const accs = accounts.filter(a => fits(a, v.op_date))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const hist = !!v.op_date && v.op_date < START
@@ -344,11 +347,14 @@ export function PaySheet({ d, slot, onClose, onDone }) {
       {slot && <p className="small muted">Оплата {money(slot.amount)} из поля «Поступление {slot.slot}» без даты. Укажите дату и фото чека: она заменит поле, двойного счёта не будет.</p>}
       {!!undated.length && <p className="small why">В сделке есть оплата без даты: {undated.map(x => money(x.amount)).join(', ')}. Если вносите её, закройте это окно и нажмите «Дата и чек» у неё в списке, иначе она задвоится.</p>}
       <input inputMode="numeric" value={v.amount} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder="Сумма, ₸" />
-      <label className="small muted">Дата оплаты <input type="date" value={v.op_date} min="2025-01-01" max={today} onChange={e => set({ ...v, op_date: e.target.value })} /></label>
+      <label className="small muted">Дата оплаты <input type="date" value={v.op_date} min="2025-01-01" max={today} onChange={e => { const day = e.target.value; set({ ...v, op_date: day, account: accounts.some(a => a.code === v.account && fits(a, day)) ? v.account : '' }) }} /></label>
       {hist ? <>
         <p className="small why">Оплата до ноября уйдёт в «Историю»: долг сделки уменьшит, в деньги ноября не войдёт.</p>
         <div className="chips"><button className={v.cash ? 'on' : ''} onClick={() => set({ ...v, cash: !v.cash })}>Наличные</button></div>
-      </> : <div className="chips">{accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>}
+      </> : <>
+        <div className="chips">{accs.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>
+        {!v.account && <p className="small muted">Выберите счёт, куда пришли деньги.</p>}
+      </>}
       <input value={v.note} onChange={e => set({ ...v, note: e.target.value })} placeholder="Комментарий, например «аванс 50%»" />
       <Receipt value={v.receipt} need={!cash} pick={async f => set({ ...v, receipt: await shrink(f) })} />
       {cash && !v.receipt && <p className="small muted">Наличные: добавьте фото расписки, если она есть. Без фото HEAD сверит сам.</p>}

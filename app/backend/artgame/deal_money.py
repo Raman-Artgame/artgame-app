@@ -174,8 +174,11 @@ def plan(conn, ids: list[int] | None = None) -> list[dict]:
         tgt = target(d, led.get(did), vat)
         diff = changes(d, tgt)
         if diff:
+            # «Поступило» вписали в Битриксе руками, а приложение по сделке не знает ни одной оплаты (ни строки в журнале,
+            # ни поля «Поступление»): не обнуляем, ждём оплату в приложении (1557, 1579, 1611 — 10.11). HEAD видит их в сверке.
+            hold = did not in led and tgt["received"] == 0 and (_cur(d, "received") or 0.0) > 0
             out.append({"id": did, "title": d.get("TITLE") or "", "stage": d.get("STAGE_ID"), "currency": d.get("CURRENCY_ID") or "KZT",
-                        "fields": {k: (_cur(d, k), v) for k, v in diff.items()}})
+                        "fields": {k: (_cur(d, k), v) for k, v in diff.items()}, "hold": hold})
     return out
 
 
@@ -185,6 +188,8 @@ def push(conn, ids: list[int] | None = None) -> dict:
     on = settings.pay_push and bxw.enabled()
     done, errors = 0, []
     for x in todo if on else []:
+        if x["hold"]:
+            continue
         fields = {F[k]: _money_str(v, x["currency"]) for k, (_, v) in x["fields"].items()}
         log = {"fields": {TITLE[k]: [a, b] for k, (a, b) in x["fields"].items()}}
         try:
@@ -198,7 +203,7 @@ def push(conn, ids: list[int] | None = None) -> dict:
             time.sleep(PAUSE)
     if done:
         bx._cache.clear()
-    return {"push": on, "diff": len(todo), "written": done, "errors": errors}
+    return {"push": on, "diff": len(todo), "written": done, "errors": errors, "held": sum(1 for x in todo if x["hold"])}
 
 
 def push_deal(deal_id: int) -> dict:
@@ -223,7 +228,8 @@ def card(d: dict) -> dict:
                       l.receipt_file_id, ac.title AS account_title, pe.full_name AS author
                FROM fin_ledger l JOIN fin_accounts ac ON ac.code = l.account_code LEFT JOIN people pe ON pe.id = l.created_by
                WHERE l.deal_id = %s AND l.article_code = ANY(%s) ORDER BY l.op_date DESC, l.id DESC""", (did, list(IN) + ["refund"])).fetchall()
-        accounts = conn.execute("SELECT code, title FROM fin_accounts WHERE active AND code <> 'hist' ORDER BY sort, code").fetchall()
+        # valid_until: счёт только для оплат по эту дату (ИП Артамонов — до 31.12.2026, HEAD 11.11); окно фильтрует по дате оплаты
+        accounts = conn.execute("SELECT code, title, valid_until FROM fin_accounts WHERE active AND code <> 'hist' ORDER BY sort, code").fetchall()
     t = target(d, led, 0)
     refs = (led or {}).get("refs", ())
     undated = _undated(d)
@@ -312,8 +318,11 @@ def add_payment(deal_id: int, b: PaymentIn, bg: BackgroundTasks, p: dict = Depen
         if dup:   # повтор из офлайн-очереди телефона
             return {"ok": True, "row": with_receipt(dup)}
         account = "hist" if hist else b.account
-        if (b.account == "hist" and not hist) or not conn.execute("SELECT 1 FROM fin_accounts WHERE code=%s AND active", (account,)).fetchone():
+        acc = conn.execute("SELECT title, valid_until FROM fin_accounts WHERE code=%s AND active", (account,)).fetchone()
+        if (b.account == "hist" and not hist) or not acc:
             raise HTTPException(400, "нет такого счёта")
+        if acc["valid_until"] and b.op_date > acc["valid_until"]:
+            raise HTTPException(400, f"на счёт «{acc['title']}» — только оплаты по {acc['valid_until']:%d.%m.%Y}")
         cash = account == CASH or (hist and (b.cash or b.account == CASH))
         if not b.receipt and not cash:
             raise HTTPException(400, "нужно фото чека или выписки; без фото — только оплата наличными")
@@ -411,5 +420,5 @@ def check(p: dict = Depends(require_head)):
     """Сверка для HEAD: где итоги в Битриксе расходятся с журналом приложения (до включения записи и после)."""
     with db.pool.connection() as conn:
         rows = plan(conn)
-    return {"push": bool(settings.pay_push and bxw.enabled()), "count": len(rows),
+    return {"push": bool(settings.pay_push and bxw.enabled()), "count": len(rows), "held": sum(1 for r in rows if r["hold"]),
             "rows": [{**r, "fields": {TITLE[k]: {"bitrix": a, "app": b} for k, (a, b) in r["fields"].items()}} for r in rows]}
