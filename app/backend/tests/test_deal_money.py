@@ -480,6 +480,88 @@ def test_fok_advance_moved_to_history(client, monkeypatch):
         assert conn.execute("SELECT count(*) AS n FROM fin_ledger WHERE deal_id=943 AND op_date='2026-11-11'").fetchone()["n"] == 2
 
 
+def test_test_deal_out_of_money(client, monkeypatch):
+    """HEAD 11.11 «1409 нужно удалить это же тест?»: тестовая сделка (в названии «ТЕСТ») в деньги приложения не идёт.
+    Миграция 054 отменяет приход 50 000, который импорт 10.11 поставил ей ноябрём (поле без даты, Kaspi); импорт её больше не читает,
+    итоги в неё не пишутся, оплату в неё не внести, в поиске «Оплат» её нет. Сделку, проигранную на своей стадии («Другое»,
+    UC_ZK5C91), импорт считает закрытой: её поле без даты в деньги ноября не идёт. «ТЕСТО» в названии — не тест."""
+    from pathlib import Path
+
+    from artgame import drive
+    from test_finance import JPG
+    ids = setup(client, monkeypatch)
+    t = "1409 · ТЕСТ ARTGAME — ДОКУМЕНТЫ — НЕ КЛИЕНТ — АЛМАТЫ"
+    deals = {"1409": {**deal(1409, stage="UC_ZK5C91", sem="F", opp=200_000, moved="2026-11-08T10:14:05+03:00",
+                             **{A1: "50000|KZT", D1: "2026-10-18T03:00:00+03:00", A2: "50000|KZT", D2: "", REC: "95000|KZT", LOST: "105000|KZT",
+                                "UF_CRM_ARTGAME_FIN03_PAY3_AMOUNT": "20000|KZT", "UF_CRM_ARTGAME_FIN03_PAY3_DATE": "2026-11-09"}),
+                      "TITLE": t, "ASSIGNED_BY_ID": "15"},   # «Поступление 3» с датой ноября — тоже не деньги
+             "1501": {**deal(1501, stage="UC_ZK5C91", sem="F", opp=300_000, moved="2026-11-05T10:00:00+03:00", **{A1: "100000|KZT", D1: ""}),
+                      "TITLE": "1501 · ПЕКАРНЯ ТЕСТО — АСТАНА", "ASSIGNED_BY_ID": "4565"}}
+
+    def read(m, p):
+        if m == "crm.deal.get":
+            return {"result": deals.get(str(p["id"]))}
+        f = p.get("filter") or {}
+        return {"result": [dict(d) for d in deals.values() if ("ID" not in f or int(d["ID"]) in [int(x) for x in f["ID"]])
+                           and ("%TITLE" not in f or f["%TITLE"].lower() in d["TITLE"].lower())]}
+
+    monkeypatch.setattr(bx, "READ", read)
+    monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False, **k: read(m, p)["result"])
+    monkeypatch.setattr(bx, "stages", lambda: {})
+    monkeypatch.setattr(bx, "users", lambda: [])
+    monkeypatch.setattr(drive, "save_income_receipt", lambda *a: "drv")
+    with db.pool.connection() as conn:   # как было на test: импорт 10.11 записал «Поступление 2» без даты приходом ноября
+        row = conn.execute("""INSERT INTO fin_ledger (client_uid, op_date, account_code, direction, amount, article_code, period, deal_id,
+                                                      note, source, source_ref)
+                              VALUES (%s,'2026-11-10','kaspi','in',50000,'client_payment','2026-11',1409,%s,'bitrix','deal:1409:pay2')
+                              RETURNING id""", (uid(), f"{t} · поступление 2 · дата не указана в сделке")).fetchone()["id"]
+        other = conn.execute("""INSERT INTO fin_ledger (client_uid, op_date, account_code, direction, amount, article_code, period, deal_id,
+                                                        note, source) VALUES (%s,'2026-11-10','kaspi','in',70000,'client_payment','2026-11',1410,
+                                                        '1410 · КАФЕ — АСТАНА','app') RETURNING id""", (uid(),)).fetchone()["id"]
+    assert [x["title"] for x in client.get("/api/fin/kpi/cash_in", headers=hdr(1000)).json()["items"]] == ["1410 · КАФЕ — АСТАНА", t]
+    sql = (Path(__file__).parents[1] / "migrations" / "054_test_1409_otmena.sql").read_text()
+    with db.pool.connection() as conn:
+        conn.execute(sql)
+        conn.execute(sql)   # повторно ничего не меняет
+        st = {r["id"]: r["status"] for r in conn.execute("SELECT id, status FROM fin_ledger").fetchall()}
+        log = conn.execute("SELECT entity_id, data FROM audit_log WHERE action='ledger_fix'").fetchall()
+    assert st == {row: "cancelled", other: "active"}
+    assert [(x["entity_id"], x["data"]["amount"], x["data"]["to"]) for x in log] == [(str(row), 50000, "cancelled")]
+    assert [x["title"] for x in client.get("/api/fin/kpi/cash_in", headers=hdr(1000)).json()["items"]] == ["1410 · КАФЕ — АСТАНА"]
+    # импорт: тестовую не читает, проигранную на своей стадии считает закрытой — поле без даты в ноябрь не идёт
+    with db.pool.connection() as conn, conn.transaction():
+        assert fin_bx.import_payments(conn) == {"deals": 2, "added": 0, "changed": 0}
+        assert [x["id"] for x in dm.plan(conn)] == [1501]   # тестовая — без сверки и записи итогов
+    # оплату в тестовую не внести, в поиске «Оплат» её нет
+    pay = {"client_uid": uid(), "amount": 50000, "op_date": "2026-11-10", "account": "kaspi", "receipt": JPG}
+    r = client.post("/api/bx/deals/1409/payment", json=pay, headers=hdr(1000))
+    assert r.status_code == 400 and "Тестовая" in r.json()["detail"]
+    assert client.get("/api/pay/deals/1409", headers=hdr(1000)).status_code == 400
+    assert client.get("/api/pay/deals?q=1409", headers=hdr(1000)).json() == []
+    assert [x["id"] for x in client.get("/api/pay/deals?q=тест", headers=hdr(1000)).json()] == [1501]   # «ТЕСТО» — живая сделка
+    assert bx.is_test({"TITLE": "Тестовая сделка"}) and not bx.is_test({"TITLE": "КОНТЕСТ"}) and not bx.is_test({})
+
+
+def test_closed_deal_keeps_undated_payment(client, monkeypatch):
+    """Поле «Поступление» без даты импорт записал приходом (сделка была открыта); сделку потом закрыли — приход остаётся,
+    «Поступило» не падает и ложного долга нет. Новое поле без даты у закрытой сделки в текущий месяц не переносим."""
+    setup(client, monkeypatch)
+    d = deal(1502, opp=160_000, **{A1: "80000|KZT", D1: ""})
+    deals = {1502: d}
+    monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False, **k: [dict(x) for x in deals.values()])
+    with db.pool.connection() as conn, conn.transaction():
+        assert fin_bx.import_payments(conn)["added"] == 1
+    for stage, sem in (("WON", "S"), ("UC_ZK5C91", "F")):
+        d.update(STAGE_ID=stage, STAGE_SEMANTIC_ID=sem)
+        with db.pool.connection() as conn, conn.transaction():
+            assert fin_bx.import_payments(conn) == {"deals": 1, "added": 0, "changed": 0}
+            assert dm.target(d, dm.ledger(conn).get(1502), 16)["received"] == 80_000
+    d[A2] = "20000|KZT"   # закрытая сделка, новое поле без даты — не в ноябрь
+    with db.pool.connection() as conn, conn.transaction():
+        assert fin_bx.import_payments(conn) == {"deals": 1, "added": 0, "changed": 0}
+        assert [(float(r["amount"]), r["status"]) for r in conn.execute("SELECT amount, status FROM fin_ledger")] == [(80000.0, "active")]
+
+
 def test_act_goes_to_its_field():
     """АВР из приложения — в поле «АВР» блока «Документы», а не в «Прочие» (HEAD 11.11)."""
     assert bxw.KIND_FIELD["avr"] == "UF_CRM_ARTGAME_DOC05_ACTS" and bxw.F_ACTS in bxw.WRITABLE and bxw.F_ACTS in bxw.MULTI_FILE

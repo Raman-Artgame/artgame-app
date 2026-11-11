@@ -23,13 +23,16 @@ def _day(v) -> date | None:
         return None
 
 
-def _closed(stage) -> bool:
-    """Сделка закрыта (успешно или нет) — старые поступления без даты не переносим в текущий месяц."""
-    s = str(stage or "")
+def _closed(d: dict) -> bool:
+    """Сделка закрыта (успешно или нет) — старые поступления без даты не переносим в текущий месяц.
+    Свою стадию провала («Другое», UC_ZK5C91 у 1409 — 11.11) узнаём по семантике стадии, а не по имени."""
+    if d.get("STAGE_SEMANTIC_ID") in ("S", "F"):
+        return True
+    s = str(d.get("STAGE_ID") or "")
     return s == "WON" or s.endswith(":WON") or "LOSE" in s or "APOLOGY" in s
 
 
-SELECT = ["ID", "TITLE", "CATEGORY_ID", "STAGE_ID"] + [f for _, a, d in PAY for f in (a, d)]
+SELECT = ["ID", "TITLE", "CATEGORY_ID", "STAGE_ID", "STAGE_SEMANTIC_ID"] + [f for _, a, d in PAY for f in (a, d)]
 
 
 def import_payments(conn, since: date = START, until: date | None = None, ids: list[int] | None = None,
@@ -45,6 +48,8 @@ def import_payments(conn, since: date = START, until: date | None = None, ids: l
     added = changed = 0
     for d in deals:
         did = int(d["ID"])
+        if bx.is_test(d):
+            continue   # HEAD 11.11: тестовая сделка (1409) — её «поступления» не деньги
         for n, fa, fd in PAY:
             amount, day = bx._money(d.get(fa)), _day(d.get(fd))
             ref = f"deal:{did}:pay{n}"
@@ -54,13 +59,16 @@ def import_payments(conn, since: date = START, until: date | None = None, ids: l
                 continue   # HEAD 10.11: к полю без даты внесли в приложении оплату с датой и чеком — поле больше не читаем
             old = next((r for r in rows if r["status"] == "active"), None)
             undated = False
-            if amount > 0 and day is None and ids is None and not _closed(d.get("STAGE_ID")):
+            if amount > 0 and day is None and ids is None:
                 # HEAD 09.11: сумма есть, даты нет (сделка 525) — деньги пришли, приход ставим днём, когда импорт его увидел;
-                # уже записан — держим ту дату; МОП поставит дату в сделке — строка переедет на неё
+                # уже записан — держим ту дату, и когда сделку потом закрыли (раньше приход тогда отменялся и «Поступило» падало);
+                # МОП поставит дату в сделке — строка переедет на неё
                 if old:
                     continue
                 if rows:
                     continue   # HEAD сам отменил — не возвращаем
+                if _closed(d):
+                    continue   # закрытая сделка: её старое поле без даты в текущий месяц не переносим
                 day, undated = datetime.now(ZoneInfo("Asia/Almaty")).date(), True
             if (day and day < since) or (old and old["op_date"] < since) or (until and ((day and day >= until) or (old and old["op_date"] >= until))):
                 continue   # чужой период: история не трогается текущим импортом и наоборот
@@ -131,7 +139,7 @@ def import_projects(conn, since: date = START) -> dict:
     for d in deals:
         did = int(d["ID"])
         end = end_of_works(d)
-        if did in in_sheet or not end or end < since:
+        if did in in_sheet or not end or end < since or bx.is_test(d):
             continue
         row_no = ROW0 + did
         title = (d.get(bx.OBJECT) or "").strip() or str(d.get("TITLE") or "").split("·", 1)[-1].split("—")[0].strip()
