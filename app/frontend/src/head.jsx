@@ -63,8 +63,8 @@ export function Pulse({ me, pulse, go }) {
       </div>)}
     </div>}
 
-    <div className="qrow card dmpulse" onClick={() => go('chat')}><div className="qmain"><b>📣 Написать команде</b>
-      <div className="small muted">всем или по ролям — придёт в приложение и в бот; одному — только в приложение</div></div><span className="muted">›</span></div>
+    {p.dm_owner !== false && <div className="qrow card dmpulse" onClick={() => go('chat')}><div className="qmain"><b>📣 Написать команде</b>
+      <div className="small muted">всем или по ролям — придёт в приложение и в бот; одному — только в приложение</div></div><span className="muted">›</span></div>}
 
     <FeedbackInbox items={fb ?? p.feedback} reload={() => api('/head/pulse').then(x => setFb(x.feedback))} />
 
