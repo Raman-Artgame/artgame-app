@@ -49,7 +49,7 @@ const noWide = async p => assert.ok(await p.evaluate(() => document.documentElem
   await mp.getByRole('button', { name: 'Открыть' }).click()
   await mp.getByText(/выше нормы — 10 м² Среднего за смену/).waitFor()   // число из «Значений»
   await mp.locator('.growrow').first().click()
-  await mp.getByText('готово 1 из 8').waitFor()
+  await mp.getByText('Готово 1 из 8').waitFor()
   await noWide(a)
   await long(a, mp, '2-angelina-cheklist')
   const seg = async (p, t, f) => { await p.locator('.pathseg').getByRole('button', { name: t }).click(); await noWide(p)
@@ -62,7 +62,7 @@ const noWide = async p => assert.ok(await p.evaluate(() => document.documentElem
   await mp.getByText(/по окончании смены — статус и 3 фото/).waitFor()
   await seg(a, 'В приложении', '2d-angelina-prilozhenie')
   await seg(a, 'Чек-лист', '2e-angelina-cheklist-snova')
-  await mp.getByText('готово 1 из 8').waitFor()   // отметка не пропала
+  await mp.getByText('Готово 1 из 8').waitFor()   // отметка не пропала
   // путь к Главному не повторяется в «Правилах игры» художника; путь к Про — в «Правилах игры» Главного
   const folds = a.locator('.dutyfold')
   assert.strictEqual(await folds.count(), 2)
@@ -86,6 +86,48 @@ const noWide = async p => assert.ok(await p.evaluate(() => document.documentElem
   await long(k, kp, '4c-kuanysh-shagi')
   await k.locator('.dutyfold').first().getByRole('button', { name: 'Открыть' }).click()
   assert.strictEqual(await k.locator('.dutyfold').getByText('Как стать Художником-Про').count(), 0)
+  // Учебник печати Главному (пункт пути к Про «печать на уровне оператора», HEAD 11.11): чип рядом со своим учебником
+  await tab(k, 'Учёба')
+  const chips = k.locator('.placechips')
+  await chips.getByRole('button', { name: 'Учебник печати' }).click()
+  await k.waitForFunction(() => /\/print\//.test(document.querySelector('.placeframe')?.src || ''))
+  await chips.getByRole('button', { name: 'Учебник печати' }).and(k.locator('.on')).waitFor()
+  await k.frameLocator('.placeframe').getByText(/Из чего состоит принтер/).first().waitFor()
+  await k.waitForTimeout(500)
+  await k.screenshot({ path: `${shots}/6-kuanysh-uchebnik-pechati.png` })
+  await chips.getByRole('button', { name: 'Книга главного' }).click()
+  await k.frameLocator('.placeframe').getByText('Путь к Художнику-Про').first().waitFor()
+  assert.strictEqual(await k.frameLocator('.placeframe').getByText('₸').count(), 0, 'в книге без цен')
+  await k.waitForTimeout(400)
+  await k.screenshot({ path: `${shots}/7-kuanysh-kniga-glavnogo.png` })
+  await chips.getByRole('button', { name: 'Учебник', exact: true }).click()
+  await k.waitForFunction(() => /\/art\//.test(document.querySelector('.placeframe')?.src || ''))
+
+  // Остальные роли (HEAD 11.11: «Мой путь» для каждой группы): карточка есть, открывается, без горизонтальной прокрутки
+  const consts2 = { 'print.plan_per_shift': '18', 'mop.reply_min': '30' }
+  await call(1000, '/_e2e/consts', { 'norm.mural.medium': '10', 'curator.report_time': 'по окончании смены', 'curator.report_photos': '3',
+    'curator.final_report_days': '3', 'shift.hours': '10', ...consts2 })
+  const roles = [[5201, 'support', ['mural'], 'Как стать художником'], [5202, 'artist_pro', ['mural'], 'Дальше после Про'],
+    [5203, 'print_operator', ['print'], 'Как стать Мастером печати'], [5204, 'print_master', ['print'], 'Дальше после Мастера печати'],
+    [5205, 'designer_asst', ['design'], 'Как стать Главным дизайнером'], [5206, 'lead_designer', ['design'], 'Дальше после Главного дизайнера'],
+    [5207, 'mop', ['sales'], 'Как стать VIP МОП'], [5208, 'mop_vip', ['sales'], 'Дальше после VIP МОП']]
+  for (const [tg, role, zones, title] of roles) {
+    const id = (await call(tg, '/register', { full_name: 'Тест ' + role })).id
+    await call(1000, `/people/${id}`, { role_code: role, zones })
+    const p = await open(b, tg)
+    const nav = p.locator('nav')
+    const btn = nav.getByRole('button', { name: 'Кабинет', exact: true })
+    if (await btn.count()) await btn.click(); else { await nav.locator('button').last().click(); await p.locator('.sheetbox').getByRole('button', { name: 'Кабинет', exact: true }).click() }
+    const c = p.locator('.mypath')
+    await c.getByText(title, { exact: true }).waitFor()
+    await c.getByRole('button', { name: 'Открыть' }).click()
+    await c.getByText(/Что нужно для ступени/).waitFor()
+    await p.waitForFunction(() => !document.querySelector('.mypath').textContent.includes('по «Значениям»'), null, { timeout: 5000 }).catch(() => {})
+    { const tx = await c.textContent(); assert.ok(!tx.includes('по «Значениям»'), `${role}: ${tx.slice(Math.max(0, tx.indexOf('по «Значениям»') - 80), tx.indexOf('по «Значениям»') + 20)}`) }
+    await noWide(p)
+    await long(p, c, `5-${role}`)
+    await p.context().close()
+  }
   console.log('put ok')
   await b.close()
 })().catch(e => { console.error(e); process.exit(1) })

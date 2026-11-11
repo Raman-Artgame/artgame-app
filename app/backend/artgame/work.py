@@ -124,7 +124,7 @@ def work_dict(p: dict = Depends(active)):
             # подсказки смены (HEAD 08.11): ТБ из «Значений», этапы работ
             "safety": {k: x for k, x in consts.latest(conn).items() if k.startswith("safety.")},
             # «Мой путь» (HEAD 11.11): норма росписи и отчёт ГИП — цифры в пути роста только из «Значений»
-            "grow": {k: x for k, x in consts.latest(conn).items() if k.startswith(("norm.mural.", "curator."))},
+            "grow": {k: x for k, x in consts.latest(conn).items() if k.startswith(("norm.mural.", "curator.")) or k in ("print.plan_per_shift", "mop.reply_min")},
             # ночь и переработка (HEAD 09.11): подпись в «Прошлой смене»; считает finance.shift_pay
             **(lambda v: {"shift_hours": v.get("shift.hours") or 10, "night_pct": v.get("pay.night") or 0,
                           "night": f"{v.get('pay.night.from') or '22:00'}–{v.get('pay.night.to') or '6:00'}"})(consts.latest(conn)),

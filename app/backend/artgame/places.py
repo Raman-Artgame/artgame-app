@@ -36,11 +36,13 @@ DZ = {"lead_designer", "designer_asst"}
 # editors — кто видит закрытое (vip) и правит общие документы; shared — коллекции, которые правят все, кому место открыто.
 PLACES = {
     "art":   {"title": "Художники", "roles": ART | {"head"}, "aud": {"все", "производство"}},
-    "print": {"title": "Печать", "roles": PRINT | {"lead_artist", "head"}, "aud": {"все", "производство"}},
+    "print": {"title": "Печать", "roles": PRINT | {"lead_artist", "artist_pro", "head"}, "aud": {"все", "производство"}},
     "mop":   {"title": "МОП", "roles": MOP | {"head"}, "aud": {"все", "моп"}, "editors": {"mop_vip", "head"}},
     "dz":    {"title": "Дизайн", "roles": DZ | {"head"}, "aud": {"все", "дизайн"}, "shared": {"projects"}},
+    # Книга главного художника (HEAD 11.11) — только Главным, Про и HEAD; без ставок и бонусов
+    "chief": {"title": "Книга главного", "roles": {"lead_artist", "artist_pro", "head"}, "aud": {"все", "производство"}},
 }
-ORDER = ["art", "print", "mop", "dz"]
+ORDER = ["art", "print", "mop", "dz", "chief"]
 BX_PLACES = {"mop"}  # на этих страницах работает подтяжка сделок Битрикса (bx.py, place_bx.js)
 # Ссылки между артефактами → места приложения (переписывает place_shim.js).
 ARTIFACTS = {"AUsM36vXPoSqk6J4LQUZqj": "art", "QvriqYAuWNEvypeNKAVAcE": "print", "8uecjatZFajVxKQwneyYQp": "mop",

@@ -77,7 +77,8 @@ const STUDY = {
   // «Подготовка к печати» (HEAD 09.11) — инструкция производителя по шагам с фото, рядом с учебником
   print: () => ({ home: 'ucheb', hide: ['start', 'kit', 'exam', 'test', 'foto'], sections: [['ucheb', 'Учебник'], ['prep', 'Подготовка к печати'], ['mat', 'Клиентам']] }),
   dz: () => ({ home: 'learn', hide: ['board', 'handoff', 'test'] }),
-  mop: () => ({ home: 'ucheb', hide: ['test', 'job'] }),   // «Правила игры» — только в «Кабинете» (HEAD 09.11)
+  mop: () => ({ home: 'ucheb', hide: ['test', 'job'] }),
+  chief: () => ({ home: 'top' }),   // Книга главного художника (HEAD 11.11): своя страница, без вкладок места   // «Правила игры» — только в «Кабинете» (HEAD 09.11)
 }
 const PLAIN = new Set(['today', 'leads', 'deals', 'projects', 'month', 'pays'])
 
@@ -90,7 +91,13 @@ function Main({ me, onMe, web, logout }) {
   const role = me.role_code
   const art = ART.has(role), dz = DZ.has(role), prn = PRINT.has(role), cab = art || dz || prn
   const own = art ? 'art' : prn ? 'print' : 'dz'   // своё место: Главному доступно и «Печать», но в «Учёбе» — только своё
-  const studyList = cab ? places.filter(p => p.code === own) : []
+  // HEAD 11.11: Главным и Про — ещё учебник печати (путь к Про: «печать на уровне оператора»)
+  // и «Книга главного» (HEAD 11.11) — у Главных, Про и и.о. Главного
+  const studyList = cab ? places.filter(p => p.code === own || (SENIOR.has(role) && (p.code === 'print' || p.code === 'chief'))) : []
+  const both = studyList.length > 1   // у Главного и Про один ряд чипов: свои разделы + «Учебник печати» (раздел места печати)
+  const studyOpts = c => { const o = STUDY[c](role)
+    return both ? { ...o, sections: [...STUDY.art(role).sections.map(([h, t]) => [h, t, 'art']),
+      ...(studyList.some(p => p.code === 'chief') ? [['top', 'Книга главного', 'chief']] : []), ['ucheb', 'Учебник печати', 'print']] } : o }
   const isHead = role === 'head'
   const [tab, setTab] = useState(isHead ? 'home' : DEAL_ROLES.has(role) ? 'today' : role === 'carpenter' ? 'stock' : dz ? 'design' : 'shift')
   const [dealId, setDealId] = useState(null)
@@ -147,11 +154,11 @@ function Main({ me, onMe, web, logout }) {
   // «Мой путь» (HEAD 11.11): следующая ступень — первой карточкой «Кабинета», а не в конце «Правил игры».
   // У «и.о.» путь — к исполняемой роли (от основной); путь от старшей роли — в её «Правилах игры».
   const pathCode = me.acting ? me.role_main : role
-  const path = GROW[pathCode] && ART.has(pathCode) ? <MyPath g={GROW[pathCode]} me={me} /> : null
+  const path = GROW[pathCode] && pathCode !== "head" ? <MyPath g={GROW[pathCode]} me={me} code={pathCode} /> : null
   const folds = dcodes.map(r => <DutyFold key={r} d={DUTIES[r]} g={path && r === pathCode ? null : GROW[r]} me={me} />)
   if (tab === 'place' || tab === 'study') return <>
     {me.roles?.length > 1 && <div className="wrap"><RoleSwitch me={me} /></div>}
-    {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
+    {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, studyOpts(p.code)]))}
       extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> }].filter(Boolean)} /> :
     <Places key={tab} list={tab === 'study' ? (isHead ? [mopPlace, ...other].filter(Boolean) : [mopPlace]) : other}   // HEAD 09.11: «Место» убрано — места ролей у HEAD в «Учёбе»
       mode={tab === 'study' && !isHead ? 'study' : ''} opts={tab === 'study' ? { mop: STUDY.mop() } : {}} />}
@@ -237,22 +244,38 @@ function Grow({ g, me, flat, onCount, part }) {
   </div>
 }
 
+// Лестница (HEAD 11.11: «Саппорт → Художник → Главный → Про → Партнёр»): вся ветка наверху «Моего пути», где ты — подсвечено.
+const LADDER = [
+  [['support', 'Саппорт'], ['artist', 'Художник'], ['lead_artist', 'Главный'], ['artist_pro', 'Про'], ['partner', 'Партнёр']],
+  [['print_operator', 'Оператор'], ['print_master', 'Мастер печати'], ['partner', 'Партнёр']],
+  [['designer_asst', 'Дизайнер'], ['lead_designer', 'Главный дизайнер'], ['partner', 'Своё направление']],
+  [['mop', 'МОП'], ['mop_vip', 'VIP МОП'], ['partner', 'Руководитель продаж']],
+]
+function Ladder({ code }) {
+  const l = LADDER.find(x => x.some(([c]) => c === code))
+  if (!l) return null
+  const i = l.findIndex(([c]) => c === code)
+  return <div className="ladder" style={{ gridTemplateColumns: `repeat(${l.length}, 1fr)` }}>{l.map(([c, t], k) =>
+    <span key={c} className={k === i ? 'now' : k === i + 1 ? 'next' : k < i ? 'done' : ''}><em />{t}</span>)}</div>
+}
+
 // «Мой путь» (HEAD 11.11): первая карточка «Кабинета» — куда расту, сколько готово, у «и.о.» — сколько дней до повышения.
-function MyPath({ g, me }) {
+function MyPath({ g, me, code }) {
   const [open, setOpen] = useState(false)
   const [part, setPart] = useState('check')
+  const segs = [['check', 'Чек-лист'], ['know', 'Что знать'], ['steps', 'Шаги'], ['app', 'В приложении']].filter(([k]) => k === 'check' || g[k])
   const key = `artgame.grow.${me?.id || 0}.${g.step}`
   const [done, setDone] = useState(() => { try { return me?._view_as ? 0 : JSON.parse(localStorage.getItem(key) || '[]').length } catch { return 0 } })
   const promo = me.acting && me.acting_promo ? new Date(me.acting_promo) : null
   const days = promo ? Math.ceil((promo - new Date()) / 864e5) : null
   return <div className="card mypath">
     <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
-      <div><span className="tag">Мой путь</span><h2>{g.title}</h2>
-        <p className="small muted">{g.step}{me?._view_as ? '' : ` · готово ${done} из ${g.check.length}`}</p>
+      <div><span className="tag">Мой путь</span>{g.draft && <span className="tag draft">черновик</span>}<h2>{g.title}</h2>
+        <p className="small muted">{me?._view_as ? 'Следующая ступень' : `Готово ${done} из ${g.check.length}`}</p>
         {promo && days > 0 && <p className="small"><b>До повышения {days} дн.</b> — {promo.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</p>}</div>
       <button className="ghost mini">{open ? 'Свернуть' : 'Открыть'}</button></div>
-    {open && <><div className="segf pathseg">{[['check', 'Чек-лист'], ['know', 'Что знать'], ['steps', 'Шаги'], ['app', 'В приложении']].filter(([k]) => k === 'check' || g[k === 'steps' ? 'steps' : k])
-      .map(([k, t]) => <button key={k} className={part === k ? 'on' : ''} onClick={() => setPart(k)}>{t}</button>)}</div>
+    <Ladder code={code} />
+    {open && <>{segs.length > 1 && <div className="segf pathseg">{segs.map(([k, t]) => <button key={k} className={part === k ? 'on' : ''} onClick={() => setPart(k)}>{t}</button>)}</div>}
       <Grow key={part} g={g} me={me} flat part={part} onCount={setDone} /></>}
   </div>
 }
