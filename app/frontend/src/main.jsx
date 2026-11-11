@@ -144,7 +144,11 @@ function Main({ me, onMe, web, logout }) {
     ...HEAD_MORE.map(k => tabs.find(x => x[0] === k)).filter(Boolean)] : tabs
   // в «Кабинете» — обе роли; у «и.о.» — исполняемая и основная; у каждой — «Как подняться» (HEAD 09.11)
   const dcodes = [...new Set([...(me.acting ? [role] : []), ...(me.roles?.length ? me.roles : [role])])].filter(r => DUTIES[r])
-  const folds = dcodes.map(r => <DutyFold key={r} d={DUTIES[r]} g={GROW[r]} me={me} />)
+  // «Мой путь» (HEAD 11.11): следующая ступень — первой карточкой «Кабинета», а не в конце «Правил игры».
+  // У «и.о.» путь — к исполняемой роли (от основной); путь от старшей роли — в её «Правилах игры».
+  const pathCode = me.acting ? me.role_main : role
+  const path = GROW[pathCode] && ART.has(pathCode) ? <MyPath g={GROW[pathCode]} me={me} /> : null
+  const folds = dcodes.map(r => <DutyFold key={r} d={DUTIES[r]} g={path && r === pathCode ? null : GROW[r]} me={me} />)
   if (tab === 'place' || tab === 'study') return <>
     {me.roles?.length > 1 && <div className="wrap"><RoleSwitch me={me} /></div>}
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, STUDY[p.code](role)]))}
@@ -167,8 +171,8 @@ function Main({ me, onMe, web, logout }) {
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
         tab === 'fin' ? <Finance /> : tab === 'pays' ? <PayDesk /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design key={designView || 'd'} me={me} initial={designView} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
-        tab === 'mine' && (mop || carp || !me.zones.length) ? <><MyData me={me} onMe={onMe} /><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><MyData me={me} onMe={onMe} /><Acting me={me} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
+        tab === 'mine' && (mop || carp || !me.zones.length) ? <><Acting me={me} />{path}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} />{path}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
     </div>
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={!isHead} />
   </>
@@ -195,22 +199,61 @@ function ExpenseTab({ done }) {
 
 // «Как подняться» (HEAD 09.11): у каждого игрока — что нужно для следующей ступени, самопроверка «есть / нет»
 // (отметки — только у себя на телефоне; подтверждает руководитель), экзамен, кто решает.
-function Grow({ g, me }) {
+// «Мой путь» (HEAD 11.11): ещё «что меняется», «что знать», «в приложении», шаги и предложения (черновик до «да» HEAD).
+// {ключ} в тексте — число из «Значений» (/work/dict → grow), в код не вшиваем.
+let growVals = null
+function useGrowVals() {
+  const [v, setV] = useState(growVals)
+  useEffect(() => { if (!growVals) api('/work/dict').then(d => { growVals = d.grow || {}; setV(growVals) }, () => setV({})) }, [])
+  return v || {}
+}
+const fill = (t, v) => String(t).replace(/\{([a-z0-9_.]+)\}/g, (_, k) => v[k] != null && v[k] !== '' ? String(v[k]).replace('.', ',') : 'по «Значениям»')
+function Grow({ g, me, flat, onCount, part }) {
+  const on = k => !part || part === k   // «Мой путь»: разделы вкладками, иначе — всё подряд
+  const v = useGrowVals()
+  const f = t => fill(t, v)
   const key = `artgame.grow.${me?.id || 0}.${g.step}`
   const [ok, setOk] = useState(() => { if (me?._view_as) return []; try { return JSON.parse(localStorage.getItem(key) || '[]') } catch { return [] } })
   const ro = !!me?._view_as   // HEAD смотрит как сотрудник: отметки — личные, тут их не ставим и не показываем свои
   const flip = i => { if (ro) return
-    const n = ok.includes(i) ? ok.filter(x => x !== i) : [...ok, i]; setOk(n); try { localStorage.setItem(key, JSON.stringify(n)) } catch { /* без памяти */ } }
-  return <div className="card duty grow">
-    <span className="tag">{g.step}</span>{g.draft && <span className="tag draft">черновик</span>}<h2>{g.title}</h2><p>{g.about}</p>
-    <h3>Что нужно для ступени{ro ? '' : ` · есть ${ok.length} из ${g.check.length}`}</h3>
+    const n = ok.includes(i) ? ok.filter(x => x !== i) : [...ok, i]; setOk(n); onCount?.(n.length); try { localStorage.setItem(key, JSON.stringify(n)) } catch { /* без памяти */ } }
+  return <div className={'card duty grow' + (flat ? ' flat' : '')}>
+    {!flat && <><span className="tag">{g.step}</span>{g.draft && <span className="tag draft">черновик</span>}<h2>{g.title}</h2></>}{on('check') && <p>{g.about}</p>}
+    {on('know') && g.change && <><h3>Что меняется</h3>{g.change.map(([was, now]) => <div key={was} className="growchange"><span className="small muted">Было: {was}</span><span>{now}</span></div>)}</>}
+    {on('know') && g.know && <><h3>Что знать</h3>{g.know.map(([t, where]) => <div key={t} className="growknow"><span>{f(t)}</span><em className="small">{where}</em></div>)}
+      <p className="small muted">Кн. 1 — Книга художника, Кн. 2 — Книга главного художника.</p></>}
+    {on('check') && <><h3>Что нужно для ступени{ro ? '' : ` · есть ${ok.length} из ${g.check.length}`}</h3>
     {ro && <p className="small muted">Отметки «есть / нет» сотрудник ставит у себя — в просмотре их не видно.</p>}
-    {g.check.map((x, i) => { const [t, how] = Array.isArray(x) ? x : [x]
+    {g.check.map((x, i) => { const [t, how, dev] = Array.isArray(x) ? x : [x]
       return <div key={i} className={'growrow' + (ok.includes(i) ? ' ok' : '')} onClick={() => flip(i)}>
-        <span>{ok.includes(i) ? '✓' : i + 1}</span><div>{t}{how && <p className="small muted">Как подтверждаем: {how}</p>}</div>
-        {!ro && <em className="small">{ok.includes(i) ? 'есть' : 'нет'}</em>}</div> })}
-    {g.exam && <><h3>Экзамен</h3>{g.exam.map(([t, how, ok]) => <div key={t} className="growexam"><b>{t}</b><span className="small">{how}</span><span className="small muted">Зачёт: {ok}</span></div>)}</>}
-    <p className="small muted">{g.who}</p><p className="small muted">Источник: {g.src}</p>
+        <span>{ok.includes(i) ? '✓' : i + 1}</span><div>{f(t)}{dev && <p className="small">Как развивать: {f(dev)}</p>}{how && <p className="small muted">Как подтверждаем: {how}</p>}</div>
+        {!ro && <em className="small">{ok.includes(i) ? 'есть' : 'нет'}</em>}</div> })}</>}
+    {on('app') && g.app && <><h3>В приложении — освоить</h3>{g.app.map(([t, x]) => <div key={t} className="growknow"><b>{t}</b><span className="small">{f(x)}</span></div>)}</>}
+    {on('steps') && g.steps && <><h3>Шаги</h3>{g.steps.map(([t, x], i) => <div key={t} className="growstep"><span>{i + 1}</span><div>{t}<p className="small muted">{f(x)}</p></div></div>)}</>}
+    {on('steps') && g.exam && <><h3>Экзамен</h3>{g.exam.map(([t, how, ok]) => <div key={t} className="growexam"><b>{t}</b><span className="small">{how}</span><span className="small muted">Зачёт: {ok}</span></div>)}</>}
+    {on('check') && g.offer && <><h3>Задачи на ближайший месяц <span className="tag draft">предложение</span></h3>
+      <ul>{g.offer.map(x => <li key={x} className="small">{x}</li>)}</ul><p className="small muted">Предложение — ждёт утверждения HEAD.</p></>}
+    {on('steps') && <p className="small muted">{g.who}</p>}<p className="small muted">Источник: {g.src}</p>
+  </div>
+}
+
+// «Мой путь» (HEAD 11.11): первая карточка «Кабинета» — куда расту, сколько готово, у «и.о.» — сколько дней до повышения.
+function MyPath({ g, me }) {
+  const [open, setOpen] = useState(false)
+  const [part, setPart] = useState('check')
+  const key = `artgame.grow.${me?.id || 0}.${g.step}`
+  const [done, setDone] = useState(() => { try { return me?._view_as ? 0 : JSON.parse(localStorage.getItem(key) || '[]').length } catch { return 0 } })
+  const promo = me.acting && me.acting_promo ? new Date(me.acting_promo) : null
+  const days = promo ? Math.ceil((promo - new Date()) / 864e5) : null
+  return <div className="card mypath">
+    <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
+      <div><span className="tag">Мой путь</span><h2>{g.title}</h2>
+        <p className="small muted">{g.step}{me?._view_as ? '' : ` · готово ${done} из ${g.check.length}`}</p>
+        {promo && days > 0 && <p className="small"><b>До повышения {days} дн.</b> — {promo.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</p>}</div>
+      <button className="ghost mini">{open ? 'Свернуть' : 'Открыть'}</button></div>
+    {open && <><div className="segf pathseg">{[['check', 'Чек-лист'], ['know', 'Что знать'], ['steps', 'Шаги'], ['app', 'В приложении']].filter(([k]) => k === 'check' || g[k === 'steps' ? 'steps' : k])
+      .map(([k, t]) => <button key={k} className={part === k ? 'on' : ''} onClick={() => setPart(k)}>{t}</button>)}</div>
+      <Grow key={part} g={g} me={me} flat part={part} onCount={setDone} /></>}
   </div>
 }
 

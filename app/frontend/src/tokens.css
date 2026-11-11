@@ -788,3 +788,18 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .curmark .stars { color: #f5b301; letter-spacing: 1px; }
 .curmark.why .stars { color: var(--hot); }
 .stagehd { margin: 12px 0 2px; font-weight: 600; }
+/* «Мой путь» (HEAD 11.11) */
+.card.mypath { border-left: 4px solid var(--accent); }
+.mypath .head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
+.mypath .head > div { min-width: 0; }
+.mypath h2 { margin: 6px 0 2px; }
+.mypath .head p { margin: 2px 0 0; }
+.card.duty.grow.flat { box-shadow: none; padding: 0; margin: 10px 0 0; background: none; border: 0; }
+.growchange { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-top: 1px solid var(--line2); font-size: 14px; }
+.growknow { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-top: 1px solid var(--line2); font-size: 14px; }
+.growknow em { font-style: normal; color: var(--muted); }
+.growstep { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line2); font-size: 14px; align-items: flex-start; }
+.growstep span { width: 24px; height: 24px; flex: none; border-radius: 50%; border: 1px solid var(--line2); color: var(--muted); font: 700 12px/22px Onest, Inter, system-ui; text-align: center; }
+.growstep p { margin: 2px 0 0; }
+.segf.pathseg { display: grid; grid-template-columns: 1fr 1fr; }
+.segf.pathseg button { white-space: normal; }
