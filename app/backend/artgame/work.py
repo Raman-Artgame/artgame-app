@@ -398,6 +398,22 @@ class PastIn(BaseModel):
     workshop: str | None = Field(default=None, max_length=60)   # мастерская без проекта (печать, HEAD 09.11)
 
 
+def overlap(conn, person_id: int, start: datetime, end: datetime) -> str | None:
+    """HEAD 11.11: в один день можно несколько смен (утром Игротека, вечером Вок Вок) — нельзя только пересекаться по времени.
+    Возвращает текст ошибки, если новая смена накладывается на уже внесённую (кроме отклонённых, отменённых и дороги)."""
+    r = conn.execute(f"""SELECT s.started_at, s.ended_at, {SHOP_SQL.format(s="s", pe="pe")} AS title FROM shifts s
+                         JOIN objects o ON o.id=s.object_id JOIN people pe ON pe.id=s.person_id
+                         WHERE s.person_id=%s AND s.status NOT IN ('rejected','cancelled') AND s.kind <> 'road'
+                           AND s.started_at < %s AND coalesce(s.ended_at, greatest(now(), s.started_at + interval '1 hour')) > %s
+                         ORDER BY s.started_at LIMIT 1""", (person_id, end, start)).fetchone()
+    if not r:
+        return None
+    a = r["started_at"].astimezone(TZ)
+    b = f"{r['ended_at'].astimezone(TZ):%H:%M}" if r["ended_at"] else "сейчас"
+    return (f"Это время уже занято сменой «{r['title']}» {a:%d.%m} {a:%H:%M}–{b}. Несколько смен в день можно, если они не пересекаются. "
+            "Если в той смене ошибка — «Кабинет» → «Мои смены» → «Ошибка? Обращение».")
+
+
 @router.post("/shifts/past")
 def past_shift(b: PastIn, p: dict = Depends(active)):
     """«Прошлая смена» (HEAD 09.11): внести смену задним числом с 1.11 — сразу на проверку, с пометкой backfill."""
@@ -422,9 +438,9 @@ def past_shift(b: PastIn, p: dict = Depends(active)):
         if start + timedelta(hours=b.hours) > datetime.now(TZ) + timedelta(minutes=10):
             raise HTTPException(400, "Эта смена ещё не закончилась. Начните её на вкладке «Смена», а когда закончите — нажмите «Закончить»")
         # день дороги не мешает рабочей смене в тот же день (HEAD 09.11: Ажар не могла внести 8.11 из-за дороги)
-        if conn.execute("""SELECT 1 FROM shifts WHERE person_id=%s AND status NOT IN ('rejected','cancelled') AND kind <> 'road'
-                           AND started_at >= %s AND started_at < %s + interval '1 day'""", (p["id"], start.replace(hour=0, minute=0), start.replace(hour=0, minute=0))).fetchone():
-            raise HTTPException(409, "В этот день смена уже есть. Если в ней ошибка (часы, объект) — «Кабинет» → «Мои смены» → «отменить» и внеси заново.")
+        busy = overlap(conn, p["id"], start, start + timedelta(hours=b.hours))
+        if busy:
+            raise HTTPException(409, busy)
         ph = _photo(conn, p, b.object_id, b.client_uid, "after", b.photo_after, "после (задним числом)") if b.photo_after and not shop else None
         row = conn.execute(
             """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status, area_m2, work_done, photo_after,

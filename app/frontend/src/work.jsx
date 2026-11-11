@@ -215,6 +215,7 @@ function PastShift({ d, done }) {
         <div><label className="muted">Закончили в</label><input type="time" value={v.end_time} onChange={e => set({ ...v, end_time: e.target.value })} /></div></div>
       <div className="segf">{['тот же день', 'следующий', 'через день'].map((t, i) => <button key={i} className={late === i ? 'on' : ''} onClick={() => set({ ...v, plus: String(i) })}>{t}</button>)}</div>
       <p className={'small ' + (tooLong || !hours ? 'why' : 'muted')}>{a == null || z == null ? 'Укажите время начала и конца, например 09:00 и 19:30.' : !hours ? 'Конец совпадает с началом — проверьте время.' : `Получается ${String(hours).replace('.', ',')} ч.${tooLong ? ' Одной записью — до 48 часов, дольше — внесите по дням.' : ''}`}</p>
+      <p className="small muted">Был на двух объектах за день — внеси каждую смену отдельно, со своим временем.</p>
       <p className="small muted">Сверх {d.shift_hours || 10} ч — по часовой ставке, ночные часы ({d.night || '22:00–6:00'}) — +{d.night_pct ?? 10}% к часу. Посчитается само.</p>
       {!shop && <><label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} /></>}
       <label className="muted">Что сделал</label><textarea value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Фон, контур, детали…" />
