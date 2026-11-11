@@ -1,11 +1,11 @@
-"""«Диалог с HEAD» (HEAD 09.11: «хочу всем сотрудникам написать прямо в приложении»).
+"""«Чат» (HEAD 09.11 «написать всем прямо в приложении»; 11.11 «грамотный блок чат: обращения общие к HEAD и личные»).
 
-- У каждого сотрудника вкладка «HEAD» — личный диалог: HEAD пишет, сотрудник отвечает.
-- HEAD в «Ещё → Сообщения»: список диалогов (непрочитанные сверху), личный ответ, «Написать всем» — всем или по ролям.
-- Бот (HEAD 10.11: «личные не должны засорять бот»): текстом в Telegram уходит ТОЛЬКО рассылка HEAD (всем или по ролям).
-  Личные сообщения сотрудник↔HEAD — только в приложении, в бот о них не уходит ничего (HEAD 11.11, даже уведомления).
-  Ответ сотрудника свайпом на рассылку или любой текст боту (кроме /start) попадает в его диалог в приложении.
-Ничего не удаляется. Диалог общий для всех HEAD (если их несколько): сотрудник пишет «HEAD», подпись — кто ответил.
+Подгруппы у сотрудника: 📣 «Объявления» (рассылки любого HEAD, только чтение), 🏢 «Руководство» (видят и отвечают
+ВСЕ HEAD, подпись — кто ответил), 👤 личный чат с КАЖДЫМ HEAD отдельно (видят только двое).
+У каждого HEAD одинаково: «Руководство» — всё от всех, личные чаты — только свои, «Написать всем» (всем или по ролям).
+Бот (HEAD 10–11.11): в Telegram уходят ТОЛЬКО объявления; о личном и «Руководстве» бот молчит. Текст сотрудника боту
+(кроме /start) попадает в «Руководство». Ничего не удаляется. В таблице dm: head_id — личный чат с этим HEAD,
+NULL (не рассылка) — «Руководство», broadcast_id — «Объявления».
 """
 import sys
 
@@ -55,10 +55,6 @@ def ping(ids: list[int]) -> None:
             print("dm notice delete:", e, file=sys.stderr)
 
 
-def _head_ids(conn) -> list[int]:
-    return [h["id"] for h in _heads(conn)]
-
-
 def _real(tg) -> bool:
     return bool(tg and tg > 0 and settings.bot_token)   # tg_id < 0 — тестовые сотрудники, в Telegram их нет
 
@@ -80,105 +76,146 @@ def _short(t: str, n: int = 700) -> str:
     return t if len(t) <= n else t[:n] + "…"
 
 
-def is_owner(p: dict) -> bool:
-    """HEAD 11.11 («Алина увидела сообщение Анны»): личные диалоги видит ТОЛЬКО владелец — HEAD с ARTGAME_HEAD_TG_ID.
-    Другие люди с ролью «HEAD» диалогов, счётчика и уведомлений не получают."""
-    return p.get("role_code") == "head" and (not settings.head_tg_id or p.get("tg_id") == settings.head_tg_id)
-
-
-def require_owner(p: dict = Depends(require_head)) -> dict:
-    if not is_owner(p):
-        raise HTTPException(403, "личные диалоги видит только HEAD-владелец")
-    return p
-
-
 def _heads(conn) -> list[dict]:
-    rows = conn.execute("SELECT id, tg_id, role_code FROM people WHERE role_code='head' AND status='active'").fetchall()
-    return [h for h in rows if is_owner(h)]
+    return conn.execute("""SELECT id, full_name, tg_id FROM people WHERE role_code='head' AND status='active'
+                           ORDER BY id""").fetchall()
 
 
-def _to_head(conn, p: dict, text: str, via: str = "app") -> tuple[dict, list]:
-    row = conn.execute("INSERT INTO dm (person_id, from_head, author_id, text, via) VALUES (%s, false, %s, %s, %s) RETURNING *",
-                       (p["id"], p["id"], text, via)).fetchone()
-    db.audit(conn, p["id"], "dm_add", "dm", row["id"], {"via": via})
-    return row, []   # HEAD 10.11: личные — только в приложении, в бот не дублируем
+def _room(conn, key: str) -> tuple[str, int | None]:
+    """'news' | 'group' | 'head:<id>' → (вид, id HEAD)."""
+    if key in ("news", "group"):
+        return key, None
+    if key.startswith("head:") and key[5:].isdigit():
+        h = conn.execute("SELECT id FROM people WHERE id=%s AND role_code='head' AND status='active'", (int(key[5:]),)).fetchone()
+        if h:
+            return "head", h["id"]
+    raise HTTPException(404, "нет такого чата")
 
 
-def _from_head(conn, head: dict, person: dict, text: str, via: str = "app", bid: int | None = None) -> tuple[dict, list]:
-    row = conn.execute("""INSERT INTO dm (person_id, from_head, author_id, text, via, broadcast_id)
-                          VALUES (%s, true, %s, %s, %s, %s) RETURNING *""", (person["id"], head["id"], text, via, bid)).fetchone()
-    if not bid:   # HEAD 10.11: в бот — только общая рассылка, личные остаются в приложении
-        return row, []
-    note = f"📣 HEAD:\n{_short(text)}\n\nОтветить — во вкладке «HEAD» в приложении."
-    return row, ([(row["id"], person["tg_id"], note)] if _real(person["tg_id"]) else [])
+def _where(kind: str, hid: int | None) -> tuple[str, tuple]:
+    if kind == "news":
+        return "d.broadcast_id IS NOT NULL", ()
+    if kind == "group":
+        return "d.broadcast_id IS NULL AND d.head_id IS NULL", ()
+    return "d.broadcast_id IS NULL AND d.head_id = %s", (hid,)
 
 
-def _items(conn, pid: int) -> list[dict]:
+def _items(conn, pid: int, kind: str, hid: int | None) -> list[dict]:
+    w, a = _where(kind, hid)
     return conn.execute(
-        """SELECT d.id, d.from_head, d.text, d.via, d.broadcast_id IS NOT NULL AS broadcast, d.read_at, d.created_at,
-                  a.full_name AS author
-           FROM dm d JOIN people a ON a.id=d.author_id WHERE d.person_id=%s ORDER BY d.created_at, d.id""", (pid,)).fetchall()
+        f"""SELECT d.id, d.from_head, d.text, d.via, d.broadcast_id IS NOT NULL AS broadcast, d.read_at, d.created_at,
+                   a.full_name AS author
+            FROM dm d JOIN people a ON a.id=d.author_id WHERE d.person_id=%s AND {w} ORDER BY d.created_at, d.id""", (pid, *a)).fetchall()
+
+
+def _read(conn, pid: int, kind: str, hid: int | None, by_head: bool) -> None:
+    w, a = _where(kind, hid)
+    conn.execute(f"UPDATE dm d SET read_at=now() WHERE d.person_id=%s AND {w} AND d.from_head=%s AND d.read_at IS NULL",
+                 (pid, *a, not by_head))
+
+
+def _add(conn, person_id: int, author: dict, from_head: bool, head_id: int | None, text: str, via: str = "app", bid=None) -> dict:
+    row = conn.execute("""INSERT INTO dm (person_id, from_head, author_id, head_id, text, via, broadcast_id)
+                          VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+                       (person_id, from_head, author["id"], head_id, text, via, bid)).fetchone()
+    if not bid:
+        db.audit(conn, author["id"], "dm_add", "dm", row["id"], {"to": person_id if from_head else ("head:" + str(head_id) if head_id else "group"), "via": via})
+    return row
+
+
+def _head_unread(conn, hid: int) -> dict:
+    """Непрочитанное у HEAD: «Руководство» (общее) + его личные чаты."""
+    return conn.execute("""SELECT count(*) FILTER (WHERE head_id IS NULL) AS group, count(*) FILTER (WHERE head_id = %s) AS mine,
+                                  count(DISTINCT person_id) AS people FROM dm
+                           WHERE NOT from_head AND read_at IS NULL AND broadcast_id IS NULL AND (head_id IS NULL OR head_id = %s)""",
+                        (hid, hid)).fetchone()
+
+
+def _as_head(p: dict) -> bool:
+    return p["role_code"] == "head" and not p.get("_view_as")
 
 
 class TextIn(BaseModel):
     text: str = Field(min_length=1, max_length=MAX)
 
 
-# ---------- сотрудник ----------
-
-@router.get("")
-def my_dialog(bg: BackgroundTasks, p: dict = Depends(active)):
-    with db.pool.connection() as conn:
-        items = _items(conn, p["id"])
-        if not ctx():   # HEAD «смотрит как» — прочтение не отмечаем за сотрудника
-            conn.execute("UPDATE dm SET read_at=now() WHERE person_id=%s AND from_head AND read_at IS NULL", (p["id"],))
-            bg.add_task(ping, [p["id"]])   # прочитал — уведомление из бота убрать
-    return {"items": items}
-
-
-@router.post("")
-def write_head(b: TextIn, bg: BackgroundTasks, p: dict = Depends(active)):
-    if p["role_code"] == "head" and not p.get("_view_as"):
-        raise HTTPException(400, "HEAD пишет сотрудникам в «Сообщениях»")
-    with db.pool.connection() as conn, conn.transaction():
-        row, jobs = _to_head(conn, p, b.text.strip())
-        heads = _head_ids(conn)
-    bg.add_task(ping, heads)
-    return row
-
-
 @router.get("/unread")
 def unread(p: dict = Depends(active)):
     with db.pool.connection() as conn:
-        if p["role_code"] == "head" and not p.get("_view_as"):
-            n = conn.execute("SELECT count(*) AS n FROM dm WHERE NOT from_head AND read_at IS NULL").fetchone()["n"] if is_owner(p) else 0
-        else:
-            n = conn.execute("SELECT count(*) AS n FROM dm WHERE person_id=%s AND from_head AND read_at IS NULL", (p["id"],)).fetchone()["n"]
-    return {"n": n}
+        if _as_head(p):
+            u = _head_unread(conn, p["id"])
+            return {"n": u["group"] + u["mine"]}
+        return {"n": conn.execute("SELECT count(*) AS n FROM dm WHERE person_id=%s AND from_head AND read_at IS NULL",
+                                  (p["id"],)).fetchone()["n"]}
 
 
-# ---------- HEAD ----------
+# ---------- сотрудник ----------
+
+@router.get("/rooms")
+def rooms(p: dict = Depends(active)):
+    """Подгруппы сотрудника: Объявления, Руководство, личный чат с каждым HEAD."""
+    with db.pool.connection() as conn:
+        def info(kind, hid):
+            w, a = _where(kind, hid)
+            return conn.execute(f"""SELECT count(*) FILTER (WHERE d.from_head AND d.read_at IS NULL) AS unread,
+                                           (array_agg(d.text ORDER BY d.created_at DESC, d.id DESC))[1] AS last_text,
+                                           max(d.created_at) AS last_at
+                                    FROM dm d WHERE d.person_id=%s AND {w}""", (p["id"], *a)).fetchone()
+        out = [{"key": "news", "kind": "news", "title": "Объявления", "about": "рассылки HEAD всем", **info("news", None)},
+               {"key": "group", "kind": "group", "title": "Руководство", "about": "видят и отвечают все HEAD", **info("group", None)}]
+        for h in _heads(conn):
+            if h["id"] != p["id"]:
+                out.append({"key": f"head:{h['id']}", "kind": "head", "title": h["full_name"], "about": "личный чат, видите только вы двое",
+                            **info("head", h["id"])})
+    return {"rooms": out}
+
+
+@router.get("/room/{key}")
+def room(key: str, p: dict = Depends(active)):
+    with db.pool.connection() as conn:
+        kind, hid = _room(conn, key)
+        items = _items(conn, p["id"], kind, hid)
+        if not ctx():   # HEAD «смотрит как» — прочтение не отмечаем за сотрудника
+            _read(conn, p["id"], kind, hid, by_head=False)
+    return {"items": items}
+
+
+@router.post("/room/{key}")
+def write_room(key: str, b: TextIn, p: dict = Depends(active)):
+    if _as_head(p):
+        raise HTTPException(400, "HEAD пишет сотрудникам в своём «Чате»")
+    with db.pool.connection() as conn, conn.transaction():
+        kind, hid = _room(conn, key)
+        if kind == "news":
+            raise HTTPException(400, "в «Объявления» пишет только HEAD — ответить можно в «Руководство» или лично")
+        return _add(conn, p["id"], p, False, hid, b.text.strip())
+
+
+# ---------- HEAD (любой HEAD, одинаково) ----------
 
 @router.get("/threads")
-def threads(p: dict = Depends(require_owner)):
-    """Все активные сотрудники: сначала с непрочитанным, потом по последнему сообщению, потом без переписки."""
+def threads(p: dict = Depends(require_head)):
+    """«Руководство» — все, кто писал руководству; «Личные» — все активные сотрудники и мой личный чат с каждым."""
     with db.pool.connection() as conn:
-        rows = conn.execute(
-            """SELECT pe.id, pe.full_name, pe.role_code, r.title AS role_title, pe.tg_id < 0 AS test,
-                      l.text AS last_text, l.from_head AS last_from_head, l.created_at AS last_at,
-                      (SELECT count(*) FROM dm u WHERE u.person_id=pe.id AND NOT u.from_head AND u.read_at IS NULL) AS unread
-               FROM people pe LEFT JOIN roles r ON r.code=pe.role_code
-               LEFT JOIN LATERAL (SELECT text, from_head, created_at FROM dm WHERE person_id=pe.id ORDER BY created_at DESC, id DESC LIMIT 1) l ON true
-               WHERE pe.status='active' AND pe.role_code<>'head'
-               ORDER BY (SELECT count(*) FROM dm u WHERE u.person_id=pe.id AND NOT u.from_head AND u.read_at IS NULL)>0 DESC,
-                        l.created_at DESC NULLS LAST, pe.full_name""").fetchall()
+        def lst(cond, a, only_with):
+            return conn.execute(
+                f"""SELECT * FROM (SELECT pe.id, pe.full_name, r.title AS role_title, l.text AS last_text, l.from_head AS last_from_head,
+                           l.author AS last_author, l.created_at AS last_at,
+                           (SELECT count(*) FROM dm u WHERE u.person_id=pe.id AND {cond.replace('d.', 'u.')} AND NOT u.from_head AND u.read_at IS NULL) AS unread
+                    FROM people pe LEFT JOIN roles r ON r.code=pe.role_code
+                    LEFT JOIN LATERAL (SELECT d.text, d.from_head, a.full_name AS author, d.created_at FROM dm d JOIN people a ON a.id=d.author_id
+                                       WHERE d.person_id=pe.id AND {cond} ORDER BY d.created_at DESC, d.id DESC LIMIT 1) l ON true
+                    WHERE pe.status='active' AND pe.role_code<>'head' {"AND l.created_at IS NOT NULL" if only_with else ""}) t
+                    ORDER BY unread > 0 DESC, last_at DESC NULLS LAST, full_name""", (*a, *a)).fetchall()
+        group = lst("d.broadcast_id IS NULL AND d.head_id IS NULL", (), True)
+        mine = lst("d.broadcast_id IS NULL AND d.head_id = %s", (p["id"],), False)
         roles = conn.execute(
             """SELECT r.code, r.title, count(pe.id) AS n FROM roles r JOIN people pe ON pe.role_code=r.code
                WHERE pe.status='active' AND pe.tg_id > 0 AND r.code<>'head' GROUP BY r.code ORDER BY r.level, r.title""").fetchall()
         casts = conn.execute(
             """SELECT b.id, b.text, b.roles, b.sent, b.created_at, a.full_name AS author FROM dm_broadcasts b
                JOIN people a ON a.id=b.author_id ORDER BY b.created_at DESC LIMIT 10""").fetchall()
-    return {"items": rows, "roles": roles, "broadcasts": casts}
+    return {"group": group, "items": mine, "roles": roles, "broadcasts": casts}
 
 
 def _person(conn, pid: int) -> dict:
@@ -189,27 +226,33 @@ def _person(conn, pid: int) -> dict:
     return who
 
 
+def _hroom(room: str, p: dict) -> tuple[str, int | None]:
+    if room == "group":
+        return "group", None
+    if room == "me":
+        return "head", p["id"]
+    raise HTTPException(400, "room: group или me")
+
+
 @router.get("/with/{pid}")
-def dialog(pid: int, bg: BackgroundTasks, p: dict = Depends(require_owner)):
+def dialog(pid: int, room: str = "me", p: dict = Depends(require_head)):
+    kind, hid = _hroom(room, p)
     with db.pool.connection() as conn:
         who = _person(conn, pid)
-        items = _items(conn, pid)
-        conn.execute("UPDATE dm SET read_at=now() WHERE person_id=%s AND NOT from_head AND read_at IS NULL", (pid,))
-        bg.add_task(ping, _head_ids(conn))
-    return {"person": {k: who[k] for k in ("id", "full_name", "role_title", "status")}, "items": items}
+        items = _items(conn, pid, kind, hid)
+        _read(conn, pid, kind, hid, by_head=True)
+    return {"person": {k: who[k] for k in ("id", "full_name", "role_title", "status")}, "room": room, "items": items}
 
 
 @router.post("/with/{pid}")
-def write_one(pid: int, b: TextIn, bg: BackgroundTasks, p: dict = Depends(require_owner)):
+def write_one(pid: int, b: TextIn, room: str = "me", p: dict = Depends(require_head)):
+    kind, hid = _hroom(room, p)
     with db.pool.connection() as conn, conn.transaction():
         who = _person(conn, pid)
         if who["status"] != "active":
             raise HTTPException(409, "у сотрудника закрыт вход")
-        row, jobs = _from_head(conn, p, who, b.text.strip())
-        conn.execute("UPDATE dm SET read_at=now() WHERE person_id=%s AND NOT from_head AND read_at IS NULL", (pid,))   # ответил — значит прочитал
-        db.audit(conn, p["id"], "dm_add", "dm", row["id"], {"to": pid})
-        heads = _head_ids(conn)
-    bg.add_task(ping, [pid, *heads])
+        row = _add(conn, pid, p, True, hid, b.text.strip())
+        _read(conn, pid, kind, hid, by_head=True)   # ответил — значит прочитал
     return row
 
 
@@ -218,8 +261,9 @@ class CastIn(TextIn):
 
 
 @router.post("/broadcast")
-def broadcast(b: CastIn, bg: BackgroundTasks, p: dict = Depends(require_owner)):
-    """Всем активным сотрудникам (или только этим ролям: основная, вторая или «и.о.»). Тестовых «Тест · роль» не трогаем."""
+def broadcast(b: CastIn, bg: BackgroundTasks, p: dict = Depends(require_head)):
+    """Объявление всем активным сотрудникам (или этим ролям: основная, вторая, «и.о.»); «Тест · роль» не получают.
+    Единственное, что уходит в бот текстом."""
     roles = [r for r in (b.roles or []) if r and r != "head"] or None
     text = b.text.strip()
     with db.pool.connection() as conn, conn.transaction():
@@ -231,9 +275,12 @@ def broadcast(b: CastIn, bg: BackgroundTasks, p: dict = Depends(require_owner)):
             raise HTTPException(409, "некому отправить: нет активных сотрудников с такими ролями")
         bid = conn.execute("INSERT INTO dm_broadcasts (author_id, text, roles, sent) VALUES (%s,%s,%s,%s) RETURNING id",
                            (p["id"], text, roles, len(people))).fetchone()["id"]
+        note = f"📣 {p['full_name']} · HEAD:\n{_short(text)}\n\nОтветить — в приложении: «Чат»."
         jobs = []
         for who in people:
-            jobs += _from_head(conn, p, who, text, bid=bid)[1]
+            row = _add(conn, who["id"], p, True, p["id"], text, bid=bid)
+            if _real(who["tg_id"]):
+                jobs.append((row["id"], who["tg_id"], note))
         db.audit(conn, p["id"], "dm_broadcast", "dm_broadcasts", bid, {"roles": roles, "sent": len(people)})
     bg.add_task(_deliver, jobs)
     return {"id": bid, "sent": len(people)}
@@ -242,34 +289,18 @@ def broadcast(b: CastIn, bg: BackgroundTasks, p: dict = Depends(require_owner)):
 # ---------- из Telegram (tgbot.tg_hook) ----------
 
 def from_telegram(tg_id: int, text: str, reply_to: int | None) -> str | None:
-    """Личное сообщение боту. Возвращает ответ бота человеку или None (тогда бот шлёт обычное приветствие).
-    Сотрудник: любое сообщение (кроме /start) → в его диалог с HEAD (без уведомления HEAD в бот).
-    HEAD: ответ свайпом на старое уведомление сотрудника (до 10.11) → в диалог; иначе — подсказка писать в приложении."""
+    """Личное сообщение боту → ответ бота или None (тогда обычное приветствие).
+    Сотрудник: любой текст (кроме /start), в том числе ответ свайпом на объявление, — в «Руководство», без уведомлений.
+    HEAD: подсказка писать в приложении."""
     text = (text or "").strip()
     if not text or text.startswith("/"):
         return None
-    text = text[:MAX]
     with db.pool.connection() as conn, conn.transaction():
         from .deps import load_person
         p = load_person(conn, tg_id)
         if not p or p["status"] != "active":
             return None
         if p["role_code"] == "head":
-            if not is_owner(p):
-                return "Личные диалоги с сотрудниками ведёт только HEAD-владелец."
-            src = reply_to and conn.execute("SELECT person_id FROM dm WHERE tg_msg_id=%s AND NOT from_head ORDER BY id DESC LIMIT 1",
-                                            (reply_to,)).fetchone()
-            if not src:
-                return "Сотрудникам пишите в приложении: «Ещё → Сообщения». Там же — «Написать всем»."
-            who = _person(conn, src["person_id"])
-            row, jobs = _from_head(conn, p, who, text, via="tg")
-            conn.execute("UPDATE dm SET read_at=now() WHERE person_id=%s AND NOT from_head AND read_at IS NULL", (who["id"],))
-            db.audit(conn, p["id"], "dm_add", "dm", row["id"], {"to": who["id"], "via": "tg"})
-            done = f"✓ Отправлено: {who['full_name']}"
-            notify = [who["id"], *_head_ids(conn)]
-        else:
-            row, jobs = _to_head(conn, p, text, via="tg")
-            done = "✓ Передал HEAD. Ответ — во вкладке «HEAD» в приложении."
-            notify = _head_ids(conn)
-    ping(notify)
-    return done
+            return "Сотрудникам пишите в приложении: «Ещё → Чат». Там «Руководство», личные чаты и «Написать всем»."
+        _add(conn, p["id"], p, False, None, text[:MAX], via="tg")
+    return "✓ Передал руководству. Ответ — в приложении: «Чат» → «Руководство»."

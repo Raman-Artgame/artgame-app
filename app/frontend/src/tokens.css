@@ -764,3 +764,11 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .pedit .check { display: block; position: relative; padding: 8px 0 8px 30px; }
 .pedit .check input { position: absolute; left: 0; top: 9px; }
 .pedit .check span { color: var(--muted); }
+/* «Чат» с подгруппами (HEAD 11.11) */
+.dm .dmic { background: var(--alt); font-size: 18px; }
+.dm .dmwho { color: var(--accent2); font-weight: 600; margin: 4px 0 6px; }
+.dm .dmseg { margin: 10px 0 6px; }
+.dm .dmseg button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap; font-size: 13px; padding: 9px 4px; }
+.dm .dmseg .dmcnt { margin-left: 2px; }
+.dm .dmrow:first-child, .dm h2 + .qrow { border-top: 0; }
+.dm .dmseg button { font-size: 12.5px; padding: 9px 2px; min-width: 0; }

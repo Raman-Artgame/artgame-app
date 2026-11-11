@@ -62,7 +62,7 @@ async function tab(p, name) {
 
   // 1. Меню по ролям (HEAD 08.11: «Объекты» влиты в «Проекты», склада у художника нет)
   const a = await open(b, 2000)
-  assert.deepStrictEqual(await navText(a), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Кабинет', 'HEAD'])
+  assert.deepStrictEqual(await navText(a), ['Смена', 'Расход', 'Проекты', 'Учёба', 'Кабинет', 'Чат'])
   await tab(a, 'Расход')
   await a.getByRole('button', { name: 'Отправить расход' }).waitFor()
   assert.strictEqual(await a.getByRole('button', { name: 'Закупка на склад' }).count(), 0)
@@ -73,7 +73,7 @@ async function tab(p, name) {
 
   // 2. Главный художник: «Сбор и сдача» по шагам — взяли (счётчики) → вернули → сдать
   const l = await open(b, 3000)
-  assert.deepStrictEqual(await navText(l), ['Сбор', 'Смена', 'Расход', 'Продакшн', 'Проверка', 'Проекты', 'Учёба', 'Кабинет', 'HEAD'])
+  assert.deepStrictEqual(await navText(l), ['Сбор', 'Смена', 'Расход', 'Продакшн', 'Проверка', 'Проекты', 'Учёба', 'Кабинет', 'Чат'])
   await tab(l, 'Сбор')
   await l.getByText(obj.title).waitFor()
   await l.locator('.kitobj', { hasText: obj.title }).getByRole('button', { name: /Роспись/ }).click()
@@ -116,7 +116,7 @@ async function tab(p, name) {
 
   // 4. Главный дизайнер: воронка «Дизайн РК», назначает помощника и размер XS, срок; запись в Битрикс
   const dz = await open(b, 7000)
-  assert.deepStrictEqual(await navText(dz), ['Дизайн', 'Проекты', 'Продакшн', 'Учёба', 'Кабинет', 'Расход', 'HEAD'])
+  assert.deepStrictEqual(await navText(dz), ['Дизайн', 'Проекты', 'Продакшн', 'Учёба', 'Кабинет', 'Расход', 'Чат'])
   // HEAD 09.11: «нет дизайнера» — не «Горит», а «Назначить»; стадии — своей вкладкой, подсказки по кнопке
   await dz.locator('.dztabs button', { hasText: 'Назначить' }).click()
   await dz.locator('.dztodo .dzcard', { hasText: 'Дизайн кафе' }).getByText('нет дизайнера').waitFor()
@@ -166,7 +166,7 @@ async function tab(p, name) {
   // 6. И.о. (HEAD 09.11): художник исполняет обязанности Главного — меню Главного, ставка художника, повышение 15.12
   await call(1000, `/people/${ids[2000]}`, { acting_role: 'lead_artist', acting_promo: '2026-12-15', acting_note: 'День рождения команды!' })
   const io = await open(b, 2000)
-  assert.deepStrictEqual(await navText(io), ['Сбор', 'Смена', 'Расход', 'Продакшн', 'Проверка', 'Проекты', 'Учёба', 'Кабинет', 'HEAD'])
+  assert.deepStrictEqual(await navText(io), ['Сбор', 'Смена', 'Расход', 'Продакшн', 'Проверка', 'Проекты', 'Учёба', 'Кабинет', 'Чат'])
   await tab(io, 'Кабинет')
   await io.getByText('Ты — и.о. Главного художника').waitFor()
   await io.getByText('Повышение — 15 декабря.').waitFor()
