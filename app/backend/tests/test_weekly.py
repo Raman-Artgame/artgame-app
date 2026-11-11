@@ -132,7 +132,10 @@ def test_kpi_tiles_detail(client, team, monkeypatch):
     from artgame import bx
     monkeypatch.setattr(bx, "read_all", lambda m, prm, fresh=False: [
         {"ID": "943", "TITLE": "943 · ФОК — АТЫРАУ", "STAGE_ID": "UC_BMKDS4", "OPPORTUNITY": "9787500", "UF_CRM_ARTGAME_FIN03_DEBT": "6597500|KZT",
-         "UF_CRM_ARTGAME_FIN03_RECEIVED": "3190000|KZT"}])
+         "UF_CRM_ARTGAME_FIN03_RECEIVED": "3190000|KZT"},
+        # тестовая сделка (HEAD 11.11, 1409) — ни в одной плитке
+        {"ID": "1409", "TITLE": "1409 · ТЕСТ ARTGAME — ДОКУМЕНТЫ — НЕ КЛИЕНТ — АЛМАТЫ", "STAGE_ID": "UC_BMKDS4", "OPPORTUNITY": "200000",
+         "UF_CRM_ARTGAME_FIN03_DEBT": "105000|KZT", "UF_CRM_ARTGAME_FIN03_LOST": "105000|KZT"}])
     e = client.post("/api/expenses", json={"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "category": "paint",
                                             "amount": 4500, "note": "краска"}, headers=hdr(5000)).json()
     client.post(f"/api/expense/{e['id']}/review", json={"approve": True}, headers=hdr(1000))
@@ -140,8 +143,11 @@ def test_kpi_tiles_detail(client, team, monkeypatch):
     assert ex["items"][0]["title"] == "P5000" and ex["items"][0]["lines"][0]["amount"] == 4500 and "краска" in ex["items"][0]["lines"][0]["t"]
     assert client.get("/api/fin/kpi/support", headers=hdr(1000)).json()["items"] == []
     d = client.get("/api/fin/kpi/debt", headers=hdr(1000)).json()["items"]
-    assert d[0]["amount"] == 6597500 and "ФОК" in d[0]["title"]
-    assert client.get("/api/fin/kpi/in_work", headers=hdr(1000)).json()["items"][0]["amount"] == 9787500
+    assert len(d) == 1 and d[0]["amount"] == 6597500 and "ФОК" in d[0]["title"]
+    assert [x["amount"] for x in client.get("/api/fin/kpi/in_work", headers=hdr(1000)).json()["items"]] == [9787500]
+    k = client.get("/api/fin/kpi", headers=hdr(1000)).json()
+    assert k["debt"] == {"sum": 6597500, "count": 1} and k["in_work"] == {"sum": 9787500, "count": 1}
+    assert [x["id"] for x in k["lost"]["items"]] == [943]   # мок отдаёт те же сделки на любой запрос: тестовой нет и в «Упущенной»
     assert client.get("/api/fin/kpi/cash_in", headers=hdr(1000)).json()["items"] == []
     assert client.get("/api/fin/kpi/nope", headers=hdr(1000)).status_code == 404
     assert client.get("/api/fin/kpi/debt", headers=hdr(5000)).status_code == 403

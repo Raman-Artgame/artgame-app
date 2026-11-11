@@ -4,6 +4,7 @@
 Связку человек ↔ пользователь Битрикса ставит HEAD во вкладке «Команда».
 Ответы кешируются на 2 минуты (кнопка «Обновить» — без кеша), справочники (стадии, города) — на час.
 """
+import re
 import threading
 import time
 
@@ -403,6 +404,15 @@ def _money(v) -> float:
     return _num(str(v or "").split("|")[0])
 
 
+_TEST = re.compile(r"\b(ТЕСТ|ТЕСТОВ\w*|TEST)\b")
+
+
+def is_test(d: dict) -> bool:
+    """Тестовая сделка — в названии слово «ТЕСТ» (1409 «ТЕСТ ARTGAME — ДОКУМЕНТЫ — НЕ КЛИЕНТ», HEAD 11.11): в деньги приложения
+    не идёт — оплаты не переносим и не вносим, итоги в неё не пишем, в Пульте, выручке и плане МОП её нет. «ТЕСТО» — не тест."""
+    return bool(_TEST.search(str(d.get("TITLE") or "").upper()))
+
+
 def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
     card = deal_card(p, deal_id, fresh)
     d = _deal(p, deal_id)
@@ -709,7 +719,8 @@ def month(p: dict, fresh: bool = False, ym: str | None = None) -> dict:
         rows = read_all("crm.deal.list", {"filter": flt, "select": ["ID", "TITLE", "OPPORTUNITY", "CLOSEDATE", "ASSIGNED_BY_ID", "CATEGORY_ID"],
                                           "order": {"CLOSEDATE": "DESC"}}, fresh=fresh)
         deals = [{"id": int(d["ID"]), "title": d.get("TITLE") or "", "sum": _num(d.get("OPPORTUNITY")), "closed": (d.get("CLOSEDATE") or "")[:10],
-                  "city": "", "manager_id": int(d.get("ASSIGNED_BY_ID") or 0), "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), "")} for d in rows]
+                  "city": "", "manager_id": int(d.get("ASSIGNED_BY_ID") or 0), "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), "")}
+                 for d in rows if not is_test(d)]
     deals.sort(key=lambda d: d["closed"], reverse=True)
     v = _vals()
     vat = float(v.get("vat") or 0)
