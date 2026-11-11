@@ -256,11 +256,31 @@ function Road({ obj, zone, done }) {
   </div>
 }
 
+// «Начал раньше?» / «Закончил раньше?» (HEAD 11.11): своё время вместо нажатия. Сдвиг больше 30 мин — пометка «время поправлено»
+// у куратора и HEAD. Время — сегодня; если оно позже «сейчас», значит вчера (смена через полночь). after — не раньше этого момента.
+const pickAt = (hhmm, after) => {
+  const [h, m] = hhmm.split(':').map(Number)
+  const t = new Date(); t.setHours(h, m, 0, 0)
+  if (t > new Date()) t.setDate(t.getDate() - 1)
+  return after && t <= new Date(after) ? null : t
+}
+function TimePick({ label, value, set, after }) {
+  if (value === null) return <p className="small"><a onClick={() => set(new Date().toTimeString().slice(0, 5))}>{label}</a></p>
+  const t = pickAt(value, after)
+  const mins = t ? Math.round((Date.now() - t) / 6e4) : 0
+  return <div className="fixbox">
+    <div className="pair"><div><label className="muted small">{label.replace(' раньше?', '')} в</label><input type="time" value={value} onChange={e => set(e.target.value)} /></div>
+      <div className="small muted" style={{ alignSelf: 'end' }}><a onClick={() => set(null)}>как нажал</a></div></div>
+    <p className={'small ' + (t ? 'muted' : 'why')}>{!t ? 'Раньше начала смены — так нельзя.' : mins > 30 ? `${t.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} — у смены будет пометка «время поправлено», её видят куратор и HEAD.` : 'Почти как нажатие — без пометки.'}</p>
+  </div>
+}
+
 // «Мастерская» без проекта (HEAD 09.11): печать — ТО принтера, ремонт, тест печати, обучение. Без фото, оплата по часам.
 // «Без объекта» у всех художников (HEAD 11.11): подготовка, картины, эскизы, сбор, обучение.
 const shopLabel = d => d.workshop_zone === 'mural' ? 'Без объекта' : 'Мастерская · без проекта'
 function Workshop({ d, onStarted, back }) {
   const [task, setTask] = useState(d.workshop[0])
+  const [own, setOwn] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const zone = d.workshop_zone || (d.zones.includes('print') ? 'print' : d.zones[0])
@@ -268,9 +288,10 @@ function Workshop({ d, onStarted, back }) {
   const start = async () => {
     setBusy(true); setErr('')
     try {
-      const o = { client_uid: uuid(), object_id: 0, object_title: t + ' · ' + task, zone_code: zone, started_at: new Date().toISOString(), workshop: task }
+      const pressed = new Date().toISOString()
+      const o = { client_uid: uuid(), object_id: 0, object_title: t + ' · ' + task, zone_code: zone, started_at: own ? pickAt(own).toISOString() : pressed, workshop: task }
       const was = failed().length
-      await enqueue('/shifts/start', { client_uid: o.client_uid, object_id: 0, zone_code: zone, started_at: o.started_at, workshop: task })
+      await enqueue('/shifts/start', { client_uid: o.client_uid, object_id: 0, zone_code: zone, started_at: o.started_at, pressed_at: pressed, workshop: task })
       const f = failed()
       if (f.length > was && f[0].path === '/shifts/start') { setErr(`Сервер не принял: ${f[0].error}`); return }
       onStarted(o)
@@ -282,6 +303,7 @@ function Workshop({ d, onStarted, back }) {
     <p className="small muted">Без проекта: оплачивается как смена по часам, без плана и бонуса. {zone === 'print' ? 'Оценивает Мастер печати' : 'Оценивает Главный художник'}, утверждает HEAD.</p>
     <label className="muted">Что делаешь</label>
     <div className="chips">{d.workshop.map(t => <button key={t} className={task === t ? 'on' : ''} onClick={() => setTask(t)}>{t}</button>)}</div>
+    <TimePick label="Начал раньше?" value={own} set={setOwn} />
     <button disabled={busy} onClick={start}>{busy ? 'Начинаю…' : zone === 'print' ? 'Начать смену в мастерской' : 'Начать смену без объекта'}</button>
     {err && <p className="small why">{err}</p>}
     {back && <p className="small"><a onClick={back}>← на объект</a></p>}
@@ -301,7 +323,7 @@ function StartShift(props) {
 
 function StartObject({ d, onStarted, onRoad }) {
   const objs = d.objects.filter(o => o.id)
-  const [v, set] = useState({ object_id: objs[0]?.id, zone_code: d.zones[0] })
+  const [v, set] = useState({ object_id: objs[0]?.id, zone_code: d.zones[0], own: null })
   const [photo, setPhoto] = useState('')
   const [busy, setBusy] = useState(false)
   const [cond, setCond] = useState({})
@@ -323,9 +345,10 @@ function StartObject({ d, onStarted, onRoad }) {
     setBusy(true); setErr('')
     try {
       const geo = await where()
-      const o = { client_uid: uuid(), object_id: obj.id, object_title: obj.title, zone_code: v.zone_code, started_at: new Date().toISOString(), before: photo, role }
+      const pressed = new Date().toISOString()
+      const o = { client_uid: uuid(), object_id: obj.id, object_title: obj.title, zone_code: v.zone_code, started_at: v.own ? pickAt(v.own).toISOString() : pressed, before: photo, role }
       const was = failed().length
-      await enqueue('/shifts/start', { client_uid: o.client_uid, object_id: o.object_id, zone_code: o.zone_code, started_at: o.started_at, photo_before: photo,
+      await enqueue('/shifts/start', { client_uid: o.client_uid, object_id: o.object_id, zone_code: o.zone_code, started_at: o.started_at, pressed_at: pressed, photo_before: photo,
         geo_lat: geo?.latitude ?? null, geo_lon: geo?.longitude ?? null, ...(roles.length > 1 ? { role } : {}) })
       const f = failed()
       if (f.length > was && f[0].path === '/shifts/start') { setErr(`Сервер не принял: ${f[0].error}`); return }   // 4xx — не делаем вид, что смена идёт
@@ -354,6 +377,7 @@ function StartObject({ d, onStarted, onRoad }) {
       <Snap value={photo} set={setPhoto} label="Сфотографировать стену" />
       {looking && <div className="warnbox">Вы смотрите как сотрудник — это только просмотр, смена не начнётся.
         {d.role && <button className="mini" style={{ marginTop: 8 }} onClick={() => startViewAs('test:' + d.role)}>Пройти как сотрудник · тест</button>}</div>}
+      <TimePick label="Начал раньше?" value={v.own} set={x => set({ ...v, own: x })} />
       <button disabled={!photo || busy} onClick={start}>{busy ? 'Начинаю…' : 'Начать смену'}</button>
       {err && <p className="small why">{err}</p>}
       {!photo && <p className="small muted">Без фото «до» смену не начать: по нему Главный художник видит, что сделано за день.</p>}
@@ -363,7 +387,7 @@ function StartObject({ d, onStarted, onRoad }) {
 
 function Running({ o, d, done }) {
   const [now, setNow] = useState(Date.now())
-  const [v, set] = useState({ area_m2: '', work_done: '', note: '', printer: d.printer || '', stage: '' })
+  const [v, set] = useState({ area_m2: '', work_done: '', note: '', printer: d.printer || '', stage: '', own: null })
   const [photo, setPhoto] = useState('')
   const [busy, setBusy] = useState(false)
   const [cond, setCond] = useState({})
@@ -371,11 +395,13 @@ function Running({ o, d, done }) {
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
   const print = o.zone_code === 'print'
   const shop = !!o.workshop
-  const ok = (photo || shop) && v.work_done.trim().length >= 3
+  const endAt = v.own ? pickAt(v.own, o.started_at) : null
+  const ok = (photo || shop) && v.work_done.trim().length >= 3 && (!v.own || endAt)
   const finish = async () => {
     setBusy(true)
     try {
-      const left = await enqueue('/shifts/finish', { client_uid: o.client_uid, ended_at: new Date().toISOString(), area_m2: v.area_m2 === '' ? null : +v.area_m2,
+      const pressed = new Date().toISOString()
+      const left = await enqueue('/shifts/finish', { client_uid: o.client_uid, ended_at: endAt ? endAt.toISOString() : pressed, pressed_at: pressed, area_m2: v.area_m2 === '' ? null : +v.area_m2,
         work_done: v.work_done.trim(), photo_after: photo || null, note: v.note || null, printer: print ? v.printer || null : null, stage: v.stage || null })
       done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Смена закончена и ушла на проверку.')
     } catch { setBusy(false) }
@@ -404,6 +430,7 @@ function Running({ o, d, done }) {
       {!shop && <><Hints step="finish" role={o.role || d.role} cond={{ ...cond, handover: v.stage === 'handover' }} v={d.safety || {}} uid={o.client_uid} />
       <h3>Фото в конце смены</h3>
       <Snap value={photo} set={setPhoto} label="Сфотографировать результат" /></>}
+      <TimePick label="Закончил раньше?" value={v.own} set={x => set({ ...v, own: x })} after={o.started_at} />
       <button disabled={!ok || busy} onClick={finish}>{busy ? 'Отправляю…' : 'Закончить и отправить на проверку'}</button>
       {!ok && <p className="small muted">{shop ? 'Напиши пару слов, что сделано.' : 'Нужно фото в конце смены и пара слов, что сделано.'}</p>}
       <p className="small"><a onClick={cancel}>Отменить смену</a></p>
@@ -493,7 +520,7 @@ export function Mine() {
     <Appeals reload={re} />
     <div className="card"><h2>Мои смены</h2>
       {m.shifts.length ? m.shifts.map(s => <div key={s.id} className="row">
-        <div><b>{s.object_title}</b><br /><span className="muted small">{when(s.started_at, s.ended_at)}{s.area_m2 ? ` · ${+s.area_m2} м²` : ''}{s.backfill ? ' · задним числом' : ''}</span>
+        <div><b>{s.object_title}</b><br /><span className="muted small">{when(s.started_at, s.ended_at)}{s.area_m2 ? ` · ${+s.area_m2} м²` : ''}{s.backfill ? ' · задним числом' : ''}{s.time_edited ? ' · время поправлено' : ''}</span>
           {s.plan_m2 && <div className="small">{s.zone_code === 'print' ? 'План' : 'Норма'} {m2(s.plan_m2)} м²{s.kpd != null && <> · КПД <b>{pct(s.kpd)}</b></>}{+s.bonus > 0 && <> · бонус <b>{money(s.bonus)}</b></>}</div>}
           {s.work_done && <div className="small">Сделал: {s.work_done}</div>}
           {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <img src={s.photo_before_url} alt="до" />}{s.photo_after_url && <img src={s.photo_after_url} alt="после" />}</div>}
@@ -714,7 +741,8 @@ export function Review() {
   const bulk = () => confirm(`Утвердить ${good} смен с оценкой куратора 4–5★?`) &&
     api('/review/bulk', { method: 'POST', body: { min_stars: 4 } }).then(load, e => alert(e.message))
   const Item = ({ k, x, children }) => <div className="row">
-    <div><b>{x.person_name}</b> · {x.object_title}{x.backfill && <span className="tag draft">задним числом</span>}<br /><span className="muted small">{children}</span>
+    <div><b>{x.person_name}</b> · {x.object_title}{x.backfill && <span className="tag draft">задним числом</span>}{x.time_edited && <span className="tag draft">время поправлено</span>}<br /><span className="muted small">{children}</span>
+      {x.time_note && <div className="small why">{x.time_note}</div>}
       {x.work_done && <div className="small">Сделал: {x.work_done}</div>}
       {(x.photo_before_url || x.photo_after_url) && <div className="pair">{x.photo_before_url && <a href={x.photo_before_full} target="_blank" rel="noreferrer"><img src={x.photo_before_url} alt="до" /></a>}
         {x.photo_after_url && <a href={x.photo_after_full} target="_blank" rel="noreferrer"><img src={x.photo_after_url} alt="после" /></a>}</div>}

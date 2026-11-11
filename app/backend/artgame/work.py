@@ -266,6 +266,7 @@ class StartIn(BaseModel):
     geo_lon: float | None = None
     role: str | None = None             # две роли (HEAD 08.11): в какой роли смена; по умолчанию — по зоне объекта
     workshop: str | None = Field(default=None, max_length=60)   # «Мастерская» без проекта (HEAD 09.11): ТО принтера и т. п.
+    pressed_at: datetime | None = None   # когда нажал «Начать» (время телефона); started_at — своё время, если «Начал раньше?» (HEAD 11.11)
 
 
 PRINT_ROLES = ("print_master", "print_operator")
@@ -313,6 +314,7 @@ class FinishIn(BaseModel):
     printer: str | None = Field(default=None, max_length=100)
     note: str | None = Field(default=None, max_length=1000)
     stage: str | None = None            # этап, который закрыла смена (promo.STAGES)
+    pressed_at: datetime | None = None  # когда нажал «Закончить»; ended_at — своё время, если «Закончил раньше?» (HEAD 11.11)
 
 
 def _photo(conn, p, object_id: int, uid: UUID, tag: str, data: str, note: str) -> int:
@@ -363,12 +365,19 @@ def start_shift(b: StartIn, p: dict = Depends(active)):
             raise HTTPException(422, "Нужно фото стены до начала")
         if conn.execute("SELECT 1 FROM shifts WHERE person_id=%s AND status='open'", (p["id"],)).fetchone():
             raise HTTPException(409, "Смена уже идёт — сначала закончи её")
+        note = time_edit("Начало", b.started_at, b.pressed_at)
+        if b.pressed_at and b.started_at < b.pressed_at - timedelta(hours=BACK_HOURS):
+            raise HTTPException(400, f"«Начал раньше» — не больше чем на {BACK_HOURS} ч. Раньше — через «Прошлую смену»")
+        busy = overlap(conn, p["id"], b.started_at, b.pressed_at or b.started_at + timedelta(minutes=1)) if note else None
+        if busy:
+            raise HTTPException(409, busy)
         ph = None if shop else _photo(conn, p, b.object_id, b.client_uid, "before", b.photo_before, "до смены")
         row = conn.execute(
-            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, geo_lat, geo_lon, status, photo_before, trip, role_code, kind, task)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,'open',%s,%s,%s,%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
+            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, geo_lat, geo_lon, status, photo_before, trip, role_code, kind, task,
+                                   time_edited, time_note)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
             (b.client_uid, p["id"], b.object_id, b.zone_code, b.started_at, b.geo_lat, b.geo_lon, ph, False if shop else is_trip(conn, p["id"], b.object_id),
-             shift_role(p, b.zone_code, b.role), "workshop" if shop else "work", b.workshop.strip() if shop else None)).fetchone()
+             shift_role(p, b.zone_code, b.role), "workshop" if shop else "work", b.workshop.strip() if shop else None, bool(note), note)).fetchone()
         if not row:
             row = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
         else:
@@ -418,14 +427,28 @@ class PastIn(BaseModel):
     workshop: str | None = Field(default=None, max_length=60)   # мастерская без проекта (печать, HEAD 09.11)
 
 
-def overlap(conn, person_id: int, start: datetime, end: datetime) -> str | None:
+EDIT_MIN = 30          # сдвиг времени от нажатия больше — пометка «время поправлено» (HEAD 11.11)
+BACK_HOURS = 12        # «Начал раньше?» — не больше чем на 12 ч назад
+
+
+def time_edit(what: str, at: datetime, pressed: datetime | None) -> str | None:
+    """Своё время вместо нажатия: в будущее нельзя; сдвиг больше 30 мин — текст пометки, иначе None."""
+    now = datetime.now(TZ)
+    if at > now + timedelta(minutes=10):
+        raise HTTPException(400, f"Время {what} — не позже, чем сейчас")
+    if not pressed or abs((pressed - at).total_seconds()) <= EDIT_MIN * 60:
+        return None
+    return f"{what}: нажал {pressed.astimezone(TZ):%d.%m %H:%M}, указал {at.astimezone(TZ):%d.%m %H:%M}"
+
+
+def overlap(conn, person_id: int, start: datetime, end: datetime, skip: int | None = None) -> str | None:
     """HEAD 11.11: в один день можно несколько смен (утром Игротека, вечером Вок Вок) — нельзя только пересекаться по времени.
     Возвращает текст ошибки, если новая смена накладывается на уже внесённую (кроме отклонённых, отменённых и дороги)."""
     r = conn.execute(f"""SELECT s.started_at, s.ended_at, {SHOP_SQL.format(s="s", pe="pe")} AS title FROM shifts s
                          JOIN objects o ON o.id=s.object_id JOIN people pe ON pe.id=s.person_id
-                         WHERE s.person_id=%s AND s.status NOT IN ('rejected','cancelled') AND s.kind <> 'road'
+                         WHERE s.person_id=%s AND s.status NOT IN ('rejected','cancelled') AND s.kind <> 'road' AND s.id <> %s
                            AND s.started_at < %s AND coalesce(s.ended_at, greatest(now(), s.started_at + interval '1 hour')) > %s
-                         ORDER BY s.started_at LIMIT 1""", (person_id, end, start)).fetchone()
+                         ORDER BY s.started_at LIMIT 1""", (person_id, skip or 0, end, start)).fetchone()
     if not r:
         return None
     a = r["started_at"].astimezone(TZ)
@@ -539,7 +562,14 @@ def finish_shift(b: FinishIn, p: dict = Depends(active)):
         if row["status"] != "open":   # повтор из офлайн-очереди
             return _shift_out(conn, row)
         if b.ended_at <= row["started_at"]:
-            raise HTTPException(400, "end before start")
+            raise HTTPException(400, "Конец смены — позже начала" if b.pressed_at else "end before start")
+        if b.ended_at - row["started_at"] > timedelta(hours=48):
+            raise HTTPException(400, "Одной сменой — до 48 часов. Поставь время конца или внеси по дням через «Прошлую смену»")
+        fnote = time_edit("Конец", b.ended_at, b.pressed_at)
+        busy = overlap(conn, p["id"], row["started_at"], b.ended_at, skip=row["id"]) if fnote else None
+        if busy:
+            raise HTTPException(409, busy)
+        tnote = "; ".join(x for x in (row.get("time_note"), fnote) if x) or None
         from .promo import STAGE_KEYS
         if b.stage and b.stage not in STAGE_KEYS:
             raise HTTPException(400, "bad stage")
@@ -553,10 +583,11 @@ def finish_shift(b: FinishIn, p: dict = Depends(active)):
         n = {"plan_m2": None, "kpd": None, "bonus": None} if shop else shift_norm(consts.latest(conn), s, p["role_code"])   # мастерская — без плана
         row = conn.execute(
             """UPDATE shifts SET status='submitted', submitted_at=now(), ended_at=%s, area_m2=%s, work_done=%s, note=%s, photo_after=%s, printer=%s,
-                   complexity=%s, at_height=%s, outdoor=%s, hard_surface=%s, plan_m2=%s, kpd=%s, bonus=%s, stage=%s
+                   complexity=%s, at_height=%s, outdoor=%s, hard_surface=%s, plan_m2=%s, kpd=%s, bonus=%s, stage=%s,
+                   time_edited=%s, time_note=%s
                WHERE id=%s RETURNING *""",
             (b.ended_at, b.area_m2, b.work_done.strip(), b.note, ph, s.printer, s.complexity, s.at_height, s.outdoor, s.hard_surface,
-             n["plan_m2"], n["kpd"], n["bonus"], b.stage, row["id"])).fetchone()
+             n["plan_m2"], n["kpd"], n["bonus"], b.stage, bool(tnote), tnote, row["id"])).fetchone()
         db.audit(conn, p["id"], "shift_finish", "shifts", row["id"])
         return _shift_out(conn, row)
 
