@@ -153,7 +153,9 @@ export function ShiftForm({ done }) {
     }, () => {}).finally(() => setChecked(true))
   }, [])
   if (!d) return <div className="card muted">Загрузка…</div>
-  if (open) return <Running o={open} d={d} done={t => { saveOpen(null); setOpen(null); done(t) }} />
+  // HEAD 11.11: «Прошлая смена» — и когда текущая идёт (Ажар не могла внести прошлый день); пересекаться по времени сервер не даст
+  if (open) return <><Running o={open} d={d} done={t => { saveOpen(null); setOpen(null); done(t) }} />
+    {d.backfill?.open && <PastShift d={d} done={done} />}</>
   return <><StartShift d={d} checked={checked} onStarted={o => { saveOpen(o); setOpen(o) }} onRoad={done} />
     {d.backfill?.open && <PastShift d={d} done={done} />}</>
 }
