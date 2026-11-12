@@ -8,6 +8,7 @@ import { shrink } from './work.jsx'
 import { CallOutcome, Contact, Feed, Skeleton, bxLink, cleanTitle, dt, money, strip, usePortal } from './crm.jsx'
 import { leftText } from './projects.jsx'
 import { FillBar, FillSheet, LOCK_DOCS, LOCK_KP, Locked, anketaKey, lockFor, missingFor } from './fill.jsx'
+import { ClosePanel, READY } from './closing.jsx'
 
 // Карточка сделки = единственное рабочее поле МОП (HEAD 06.11, вариант А). Тёмная шапка с шагами, нажатие на шаг открывает
 // его панель: Клиент → Расчёт → КП → Договор → Оплата → В работе. Расчёт считает сервер по «Значениям» и пишет в Битрикс;
@@ -22,11 +23,11 @@ const POSTPONED = 'UC_VCP4VO'
 const KP_ON = new Set(['PREPARATION', 'UC_VZFPUP', 'UC_YV66BV', 'UC_1EXUAC', 'FINAL_INVOICE', 'UC_AV00QK', 'UC_BMKDS4'])
 const DOG_ON = new Set(['FINAL_INVOICE', 'UC_AV00QK', 'UC_BMKDS4'])
 const WORK_ON = new Set(['UC_AV00QK', 'UC_BMKDS4', 'WON'])
-const STEPS = [['client', 'Клиент'], ['calc', 'Расчёт'], ['kp', 'КП'], ['docs', 'Договор'], ['pay', 'Оплата'], ['work', 'В работе']]
+const STEPS = [['client', 'Клиент'], ['calc', 'Расчёт'], ['kp', 'КП'], ['docs', 'Договор'], ['pay', 'Оплата'], ['work', 'В работе'], ['close', 'Закрытие']]
 // скрипты рабочего места по шагам алгоритма (rm_extra.js STEP_SCR) → панели карточки
 const STEP_SCR = { '01': ['С1', 'С2', 'С3', 'Ж1', 'Ж2'], '03': ['С4', 'С5', 'С8', 'Ж3', 'Ж4', 'Ж5'], '05': ['С6', 'С7', 'Д1', 'Д2', 'Д3'], '06': ['С8', 'С26', 'С13', 'Ж16'],
   '07': ['Д4', 'Д5', 'Д6', 'Д7'], '08': ['Д7', 'Д8'], '09': ['С17', 'С23', 'С24', 'Ж17', 'Ж18'], '12': ['С25'] }
-const PANEL_ALGO = { client: ['01', '03'], calc: ['05'], kp: ['06'], docs: ['09', '07'], pay: ['09'], work: ['12'], hist: ['12'] }
+const PANEL_ALGO = { client: ['01', '03'], calc: ['05'], kp: ['06'], docs: ['09', '07'], pay: ['09'], work: ['12'], close: ['12'], hist: ['12'] }
 const tomorrow = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10)
 const autoDesign = m2 => m2 < 30 ? 'S' : m2 < 200 ? 'M' : m2 < 1000 ? 'L' : 'XL'
 const MAT = [['ARTGAME_Price_2026_phone.pdf', 'Прайс 2026', 'для WhatsApp'], ['ARTGAME_Price_paintings_2026_phone.pdf', 'Прайс картин', 'для WhatsApp'],
@@ -36,7 +37,7 @@ const MAT = [['ARTGAME_Price_2026_phone.pdf', 'Прайс 2026', 'для WhatsAp
 function steps(d, calc) {
   const has = t => d.files.some(f => f.title.startsWith(t))
   return [['client', !!(d.client?.phone || d.client?.name)], ['calc', !!(calc?.out?.total) || !!d.norm.shifts], ['kp', KP_ON.has(d.stage) || has('КП')],
-    ['docs', DOG_ON.has(d.stage) || has('Договор')], ['pay', d.pay.received > 0], ['work', WORK_ON.has(d.stage)]]
+    ['docs', DOG_ON.has(d.stage) || has('Договор')], ['pay', d.pay.received > 0], ['work', WORK_ON.has(d.stage)], ['close', d.stage === 'WON']]
 }
 
 let scriptsCache = null
@@ -83,7 +84,8 @@ function StageSheet({ d, stages, onClose, onDone, onFill }) {
   const send = () => { setBusy(true); api(`/bx/deals/${d.id}/stage`, { method: 'POST', body: { stage, reason: reason || null, reason_code: fail ? code : null, until: stage === POSTPONED ? until : null } })
     .then(r => onDone(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Стадия записана в Битрикс.'), e => { setErr(e.message); setBusy(false) }) }
   return <Sheet title="Стадия сделки" onClose={onClose}>
-    <select value={stage} onChange={e => setStage(e.target.value)}>{stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+    <select value={stage} onChange={e => setStage(e.target.value)}>{stages.filter(s => s.id !== 'WON' || s.id === d.stage).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+    {d.stage === READY && <p className="small muted">«Оплата получена» — через шаг «Закрытие»: «На закрытие», дальше решает HEAD.</p>}
     {fail && <>
       <p className="small muted">Причина отказа — одна из списка, к ней строка комментария. «Прочее» нет нарочно: так отчёт покажет, что чинить.</p>
       <div className="chips">{reasons.map(r => <button key={r.code} className={code === r.code ? 'on' : ''} onClick={() => setCode(r.code)}>{r.name}</button>)}</div>
@@ -385,7 +387,8 @@ export function DealCard({ id, back, place }) {
   const nextI = st.findIndex(x => !x[1])
   const cur = panel || (nextI >= 0 ? st[nextI][0] : 'work')
   const name = k => STEPS.find(s => s[0] === k)?.[1] || 'История'
-  const NEXT = { client: 'Заполнить и позвонить', calc: 'Посчитать цену и срок', kp: 'Собрать КП', docs: 'Договор и счёт', pay: 'Оплата', work: 'Проект' }
+  const NEXT = { client: 'Заполнить и позвонить', calc: 'Посчитать цену и срок', kp: 'Собрать КП', docs: 'Договор и счёт', pay: 'Оплата', work: 'Проект',
+    close: d.stage === READY ? 'На закрытие' : 'Что нужно' }
   const say = () => setSheet({ kind: 'say' })
   const algo = PANEL_ALGO[cur] || ['01']
   const codes = [...new Set(algo.flatMap(n => STEP_SCR[n] || []))]
@@ -413,7 +416,7 @@ export function DealCard({ id, back, place }) {
       <FillBar fill={d.fill} onOpen={() => setSheet({ kind: 'fill' })} />
       <div className="nextstep">{nextI >= 0 ? <><div><span className="small muted">Следующий шаг</span><b>{name(st[nextI][0])}</b></div>
         <button className="mini" onClick={() => setPanel(st[nextI][0])}>{NEXT[st[nextI][0]]}</button></>
-        : <div><b>Все шаги пройдены</b><span className="small muted">проект в работе</span></div>}</div>
+        : <div><b>Все шаги пройдены</b><span className="small muted">{d.stage === 'WON' ? 'сделка закрыта · оплата получена' : 'проект в работе'}</span></div>}</div>
       <div className="dealbtns wrapbtns">
         <button className="ghost" onClick={() => setSheet({ kind: 'call' })}>Итог звонка</button>
         <button className="ghost" onClick={() => setSheet({ kind: 'wait' })}>Жду ответа</button>
@@ -474,6 +477,7 @@ export function DealCard({ id, back, place }) {
       <SalesSpend dealId={d.id} />
     </>}
     {cur === 'work' && <WorkPanel d={d} portal={portal} />}
+    {cur === 'close' && <ClosePanel d={d} onDone={said} />}
     {cur === 'hist' && <>
       {d.comments && <div className="card"><h3>Комментарий сделки</h3><p className="small">{strip(d.comments)}</p></div>}
       <Feed items={d.feed} />

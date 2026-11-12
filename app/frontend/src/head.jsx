@@ -4,6 +4,7 @@ import { api, setViewAs, viewAs } from './api.js'
 import { flush } from './queue.js'
 import { money } from './crm.jsx'
 import { Spark, mln } from './charts.jsx'
+import { closeAsks, useClosing } from './closing.jsx'
 
 // Кабинет HEAD — «Пульт» (HEAD 08.11): сверху то, что ждёт решения, дальше деньги месяца, кто сегодня на объектах,
 // команда и последние действия. Отсюда же — «Смотреть как сотрудник».
@@ -25,6 +26,7 @@ export function Pulse({ me, pulse, go }) {
   const [kpi, setKpi] = useState(null)
   const [open, setOpen] = useState(null)   // HEAD 10.11: каждая плитка «Деньги» раскрывает расшифровку
   const [det, setDet] = useState({})
+  const cl = useClosing(true)   // HEAD 12.11: сделки на закрытие и закрытые мимо паспорта — первыми
   const toggle = k => {
     setOpen(open === k ? null : k)
     if (open !== k && !['profit', 'lost'].includes(k) && !det[k])
@@ -35,7 +37,7 @@ export function Pulse({ me, pulse, go }) {
   if (p === null) return <div className="card muted">Загрузка…</div>
   if (p === false) return <div className="card muted">Пульт не загрузился. Обновите страницу.</div>
   const r = p.review
-  const asks = [
+  const asks = [...closeAsks(cl),
     r.shifts && { k: 'review', t: `Смены на утверждение: ${r.shifts}`, s: [r.rated_good ? `${r.rated_good} с оценкой 4–5★ — одним нажатием` : '',
       r.shifts_late ? `${r.shifts_late} дольше 2 суток` : ''].filter(Boolean).join(' · ') || 'в срок', hot: r.shifts_late },
     r.appeals && { k: 'review', t: `Обращения на правку: ${r.appeals}`, s: 'не внёс вовремя или ошибся — утвердить или отклонить' },
@@ -54,14 +56,14 @@ export function Pulse({ me, pulse, go }) {
       <span className="muted small">{new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
       <h1>{name ? `${name}, ` : ''}{asks.length ? 'ждёт решения' : 'всё решено'}</h1>
       <div className="pulse-kpi">
-        <button className={asks.length ? 'hot' : ''} onClick={() => go('review')}><b>{r.shifts + r.expenses + (r.appeals || 0) + (r.payments || 0)}</b><span>на проверке</span></button>
+        <button className={r.shifts + r.expenses + (r.appeals || 0) + (r.payments || 0) ? 'hot' : ''} onClick={() => go('review')}><b>{r.shifts + r.expenses + (r.appeals || 0) + (r.payments || 0)}</b><span>на проверке</span></button>
         <button className={p.pending.length ? 'hot' : ''} onClick={() => go('people')}><b>{p.pending.length}</b><span>новых людей</span></button>
         <button onClick={() => document.getElementById('pulse-today')?.scrollIntoView({ behavior: 'smooth' })}><b>{p.today.length}</b><span>смен сегодня</span></button>
       </div>
     </div>
 
     {asks.length > 0 && <div className="card"><h3>Ждёт вашего решения</h3>
-      {asks.map((a, i) => <div key={i} className="qrow" onClick={() => go(a.k)}>
+      {asks.map((a, i) => <div key={i} className={'qrow' + (a.red ? ' hot' : '')} onClick={() => go(a.k)}>
         <div className="qmain"><b>{a.t}</b><div className={'small ' + (a.hot ? 'why' : 'muted')}>{a.s}</div></div><span className="muted">›</span>
       </div>)}
       {curating && <p className="small muted">{curating}</p>}

@@ -4,6 +4,7 @@ import { api, uuid } from './api.js'
 import { Skeleton, cleanTitle, money } from './crm.jsx'
 import { Gallery } from './objects.jsx'
 import { More, shrink } from './work.jsx'
+import { DoneBox } from './closing.jsx'
 
 // «Проекты» — общая вкладка (HEAD 06.11): кто где находится и сколько дней осталось до сдачи. Данные — сделки в работе
 // из Битрикса (срок из расчёта или договора) и смены из приложения (сделано, кто был на объекте последние дни).
@@ -94,6 +95,7 @@ function ProjectCard({ x, me, back, openDeal }) {
     {me && ASSIGN.has(me.role_code) && <GipPick x={x} />}
     {me && x.id > 0 && <Crew id={x.id} />}
     {me && x.id > 0 && <TripBox id={x.id} />}
+    {me && x.id > 0 && (x.working || x.closing) && <DoneBox id={x.id} />}
     {me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} />}
     <Gallery obj={{ id: x.id, title: x.title }} me={me} />
   </>

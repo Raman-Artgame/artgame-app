@@ -833,3 +833,61 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 /* Каталог референсов: заметная кнопка «Посмотреть» (HEAD 11.11) */
 .catopen small { display: block; }
 .catopen small { color: var(--muted); font-weight: 400; font-size: 11px; }
+/* Закрытие сделки через HEAD (HEAD 12.11): шаг «Закрытие» у МОП, паспорт сделки и вкладка «Закрытие» у HEAD */
+.hero .steps > div { flex: 1 1 auto; min-width: 0; overflow-wrap: normal; }   /* 7 шагов на ширине iPhone: ширина по подписи, слова не рвём */
+.cklist { display: flex; flex-direction: column; margin: 8px 0; }
+.ck { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line2); }
+.ck:first-child { border-top: 0; }
+.ck > i { flex: none; width: 22px; height: 22px; border-radius: 50%; font: 700 12px/22px Onest, Inter, system-ui; font-style: normal; text-align: center; background: var(--hotbg); color: var(--hot); }
+.ck.ok > i { background: var(--okbg); color: var(--ok); }
+.ck.skip > i { background: var(--alt); color: var(--muted); }
+.ck > div { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.ck b { font-size: 14px; }
+.ck.ok b, .ck.skip b { font-weight: 600; }
+.ck.skip b { color: var(--muted); }
+.ck .small { color: var(--muted); }
+.ck .small.where { color: var(--warn); }
+.donerow { display: flex; gap: 8px; align-items: center; }
+.donerow input { flex: 1; min-width: 0; margin: 4px 0; }
+.closepanel > button { margin-top: 10px; }
+.cgroup { border-top: 1px solid var(--line2); }
+.cgroup > .row { border-top: 0; cursor: pointer; }
+.crows { padding: 0 0 8px; }
+.crows > a.small { display: inline-block; margin: 6px 0 2px; cursor: pointer; }
+.crow { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 7px 0; border-top: 1px dashed var(--line2); font-size: 14px; }
+.crow > div { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.crow > b { flex: none; text-align: right; white-space: nowrap; }
+.cval { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; white-space: nowrap; }
+.cval a { font-size: 12px; }
+.passhero a.back { display: block; margin-bottom: 6px; color: var(--dark-muted); font-size: 13px; cursor: pointer; }
+.passhero h2 { color: #fff; margin: 4px 0 8px; }
+.passnums { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 14px 0 4px; }
+.passnums > div { display: flex; flex-direction: column; min-width: 0; padding: 10px 12px; border-radius: 12px; background: var(--dark2); border: 1px solid var(--dark-line); }
+.passnums span { font-size: 11px; color: var(--dark-muted); text-transform: uppercase; letter-spacing: .05em; }
+.passnums b { font-size: 20px; color: #fff; white-space: nowrap; }
+.passnums b.neg { color: var(--hot); }
+.passnums b.pos { color: var(--ok); }
+.tag.okt, .card.dark .tag.okt { background: var(--okbg); color: var(--ok); border-color: transparent; }
+.tag.hott, .card.dark .tag.hott { background: var(--hotbg); color: var(--hot); border-color: transparent; }
+.card.flags { border-color: var(--hotbg); }
+.card.flags h3 { color: var(--hot); }
+.card.flags .flag { background: var(--hotbg); color: #FFD3DA; }
+.card.decide { border-color: var(--dark-line); }
+.docchips .tag { margin: 0; }
+.tag.none { background: transparent; color: var(--muted); border-style: dashed; font-weight: 500; }
+.passph { margin: 10px 0 6px; }
+.passph .ph { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.passph .ph button.mini { width: 100%; padding: 6px 4px; font-size: 11px; }
+.passph .ph .badge { margin: 0; text-align: center; }
+.card.bypass { border-color: var(--hot); }
+.card.bypass h3 { color: var(--hot); }
+.qrow.hot b { color: var(--hot); }
+.ck.ok, .ck.skip { color: var(--text); }   /* .ok красит весь текст в зелёный — в пунктах зелёная только галочка */
+.cklist button.ckmore { display: flex; gap: 10px; align-items: center; width: 100%; padding: 9px 0 2px; margin: 0; border: 0; border-top: 1px solid var(--line2); border-radius: 0;
+  background: none; color: var(--muted); font: 600 14px/1.3 Onest, Inter, system-ui; text-align: left; }
+.cklist button.ckmore:hover { background: none; color: var(--text); }
+.cklist button.ckmore i { flex: none; width: 22px; height: 22px; border-radius: 50%; font: 700 12px/22px Onest, Inter, system-ui; font-style: normal; text-align: center; background: var(--okbg); color: var(--ok); }
+.cklist > .ckmore:first-child { border-top: 0; }
+.passnums em { font-style: normal; font-size: 12px; color: var(--dark-muted); }
+.card.decide .dealbtns button { flex: 1 1 140px; padding: 13px 10px; font-size: 15px; }
+.qrow.hot .why { color: var(--hot); }

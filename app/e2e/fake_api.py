@@ -54,6 +54,9 @@ class FakeDrive:
         yield d
     def thumbnail(self, fid): return STORE[fid]["data"]
 
+    def pdf_from_html(self, parent, name, html):   # паспорт сделки (closing.save_pdf): PDF — в «ДОКУМЕНТЫ» сделки
+        return self.upload(parent, name, html.encode(), "application/pdf")
+
 
 drive.Drive = FakeDrive
 
@@ -62,7 +65,19 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend", "tests"))
 from artgame import bx  # noqa: E402
 from test_bx import fake as fake_bx  # noqa: E402
-bx.READ = fake_bx
+# стадии воронки 0 как в Битриксе: и «Оплата+закрывающие документы», и «Оплата получена» (закрытие сделки, zakrytie.cjs)
+CLOSE_STAGES = [{"STATUS_ID": "UC_BMKDS4", "NAME": "Оплата+закрывающие документы", "SORT": "120"},
+                {"STATUS_ID": "WON", "NAME": "Оплата получена", "SORT": "200", "EXTRA": {"SEMANTICS": "success"}}]
+
+
+def _read(method, params):
+    r = fake_bx(method, params)
+    if method == "crm.status.list" and params["filter"].get("ENTITY_ID") == "DEAL_STAGE":
+        r = {"result": sorted(r["result"] + CLOSE_STAGES, key=lambda x: int(x["SORT"]))}
+    return r
+
+
+bx.READ = _read
 
 # WhatsApp: клиентка лида 3001 (Дана) написала 2 ч назад и ждёт ответа
 from datetime import datetime, timedelta, timezone  # noqa: E402
@@ -116,8 +131,9 @@ def _bx_calls():
 
 @app.post("/api/_e2e/deal/{deal_id}")
 def _deal_fields(deal_id: str, fields: dict):
-    """Поля сделки в подменённом Битриксе: например, «Поступление 1» без даты, как вносили до 10.11 (oplaty.cjs)."""
-    DEALS[deal_id].update(fields)
+    """Поля сделки в подменённом Битриксе: например, «Поступление 1» без даты, как вносили до 10.11 (oplaty.cjs).
+    Сделки ещё нет — заводится (zakrytie.cjs)."""
+    DEALS.setdefault(deal_id, {"ID": deal_id, "CATEGORY_ID": "0", "CONTACT_ID": "0", "COMPANY_ID": "0"}).update(fields)
     bx._cache.clear()
     return DEALS[deal_id]
 

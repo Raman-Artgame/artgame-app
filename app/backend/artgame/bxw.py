@@ -26,7 +26,8 @@ F_ACTS = "UF_CRM_ARTGAME_DOC05_ACTS"   # «АВР» в блоке «Докуме
 F_ADV, F_DAYS, F_WARR = "UF_CRM_ARTGAME_ADVANCE_PERCENT", "UF_CRM_1753295493279", "UF_CRM_ARTGAME_WARRANTY_MONTHS"
 F_INV_SUM, F_INV_PURPOSE, F_REASON = "UF_CRM_ARTGAME_INVOICE_AMOUNT", "UF_CRM_ARTGAME_INVOICE_PURPOSE", "UF_CRM_1753381316974"
 F_START, F_END = "UF_CRM_ARTGAME_PROJECT_START_ACTUAL", "UF_CRM_ARTGAME_PROJECT_END_PLAN"
-WRITABLE = {"OPPORTUNITY", "STAGE_ID", F_START, F_END, bx.AREA, bx.SERVICE, bx.ADDR, bx.CITY, F_ADV, F_DAYS, F_WARR, F_INV_SUM, F_INV_PURPOSE, F_REASON,
+F_END_FACT = "UF_CRM_ARTGAME_PROJECT_END_ACTUAL"   # «Окончание факт»: пишет приложение при закрытии сделки HEAD (12.11)
+WRITABLE = {"OPPORTUNITY", "STAGE_ID", F_START, F_END, F_END_FACT, bx.AREA, bx.SERVICE, bx.ADDR, bx.CITY, F_ADV, F_DAYS, F_WARR, F_INV_SUM, F_INV_PURPOSE, F_REASON,
             F_KP, F_CONTRACT, F_INVOICES, F_ACTS, F_OTHER, bx.F_LEVEL, bx.F_SHIFTS, bx.F_CREW, bx.F_TERM, "TITLE", bx.OBJECT, *bx.PROJECT}
 KEEP_EMPTY = {k for k, (_, kind) in bx.PROJECT.items() if kind in ("bool", "users")}   # «нет» и пустой список — тоже значение
 MULTI_FILE = {F_KP, F_CONTRACT, F_INVOICES, F_ACTS, F_OTHER}
@@ -242,6 +243,9 @@ def postpone(p: dict, deal_id: int, until: date, reason: str | None) -> dict:
 
 @router.post("/bx/deals/{deal_id}/stage")
 def api_stage(deal_id: int, body: StageIn, p: dict = Depends(active)):
+    if body.stage == "WON":   # HEAD 12.11: в «Оплата получена» — только через паспорт сделки и «Закрыть» HEAD
+        raise HTTPException(409, "В «Оплата получена» сделку переводит HEAD: шаг «Закрытие» → "
+                                 + ("паспорт сделки → «Закрыть»" if p["role_code"] == "head" else "«На закрытие»"))
     st = bx.stages()
     if body.stage not in st:
         raise HTTPException(400, "нет такой стадии")

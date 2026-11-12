@@ -144,6 +144,24 @@ class Drive:
         r.raise_for_status()
         return r.json()["id"]
 
+    def pdf_from_html(self, parent: str, name: str, html: str) -> str:
+        """PDF из HTML (паспорт сделки, HEAD 12.11): HTML → временный Google Документ → PDF в папку → документ в корзину.
+        Своей библиотеки PDF на сервере нет — Google делает PDF сам."""
+        meta = {"name": name.rsplit(".", 1)[0], "parents": [parent], "mimeType": "application/vnd.google-apps.document"}
+        r = httpx.post(UPLOAD, headers=self.h, timeout=120, params={"uploadType": "multipart", "supportsAllDrives": "true", "fields": "id"},
+                       files={"metadata": ("metadata", json.dumps(meta), "application/json"), "file": ("passport.html", html.encode(), "text/html")})
+        r.raise_for_status()
+        doc = r.json()["id"]
+        try:
+            e = httpx.get(f"{API}/{doc}/export", headers=self.h, timeout=120, params={"mimeType": "application/pdf"})
+            e.raise_for_status()
+            return self.upload(parent, name, e.content, "application/pdf")
+        finally:
+            try:
+                httpx.patch(f"{API}/{doc}", headers=self.h, timeout=30, params={"supportsAllDrives": "true"}, json={"trashed": True})
+            except Exception:  # noqa: BLE001 — временный документ останется в папке, PDF уже есть
+                pass
+
     def thumbnail(self, file_id: str) -> bytes | None:
         link = self.meta(file_id).get("thumbnailLink")
         if not link:
