@@ -43,6 +43,8 @@ export function Pulse({ me, pulse, go }) {
     r.appeals && { k: 'review', t: `Обращения на правку: ${r.appeals}`, s: 'не внёс вовремя или ошибся — утвердить или отклонить' },
     r.expenses && { k: 'review', t: `Расходы на проверке: ${r.expenses}`, s: `на ${money(r.expenses_sum)}` + (r.over_cap ? ` · ${r.over_cap} выше потолка цены` : ''), hot: r.expenses_late || r.over_cap },
     r.payments && { k: 'review', t: `Оплаты клиентов на сверку: ${r.payments}`, s: `на ${money(r.payments_sum)} · сверить чек и выписку` },
+    p.bills?.length && { k: 'fin:cash', t: `Оплатить сегодня: ${p.bills.length}`, s: p.bills.map(b => b.title + (b.amount ? ' ' + money(b.amount) : '')).join(' · '),
+      hot: p.bills.some(b => b.status === 'overdue') },
     p.pending.length && { k: 'people', t: `Ждут роли: ${p.pending.length}`, s: p.pending.map(x => x.full_name).join(', '), hot: true },
     p.catalogs && { k: 'design:cat', t: `Каталоги дизайна на утверждение: ${p.catalogs}`, s: 'утвердить или вернуть' },
     p.dm?.unread && { k: 'chat', t: `Чат: новых ${p.dm.unread}`, s: `от ${p.dm.people} чел. · ответить`, hot: true },
