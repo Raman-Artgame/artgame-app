@@ -1,9 +1,10 @@
 // Сквозной тест «Закрытие сделки через HEAD» (HEAD 12.11 «Да, по рекомендациям»). ГИП отмечает «Работы сданы» в карточке проекта;
 // МОП со стадии «Оплата+закрывающие документы» видит 11 пунктов (их проверяет приложение, руками ничего не отмечают) и жмёт
 // «На закрытие» — только когда всё выполнено; в «Оплата получена» сам перевести не может. HEAD: заявка на Пульте и в боте,
-// паспорт сделки (деньги, затраты, прибыль и маржа рядом с моделью, флаги, документы и фото), «Вернуть» с причиной и «Закрыть»
+// паспорт сделки (деньги, затраты, прибыль и маржа рядом с нормой, флаги, документы и фото), «Вернуть» с причиной и «Закрыть»
 // (сделка → «Оплата получена» + «Окончание факт», паспорт снимком, PDF в «ДОКУМЕНТЫ»). Закрытый объект не принимает смены;
-// сделка, закрытая в Битриксе мимо паспорта, — красным на Пульте. API — e2e/fake_api.py на пустой базе. Экраны 390×800.
+// сделка, закрытая в Битриксе мимо паспорта, — красным на Пульте. Закрыть (и принять закрытую мимо паспорта) — только когда выполнены
+// все пункты (HEAD 12.11), иначе только «Вернуть». API — e2e/fake_api.py на пустой базе. Экраны 390×800.
 const { chromium } = require('playwright')
 const { execSync } = require('child_process')
 const crypto = require('crypto')
@@ -208,7 +209,7 @@ async function closeStep(p) {
   const nums = await hero.locator('.passnums').textContent()
   // без НДС 1 000 000; ФОТ: Ажар 3 смены по 10 ч, Ерлан 1 смена; докупка 45 000
   assert.match(nums, /Выручка без НДС1\s000\s000\s₸/)
-  assert.match(nums, /Маржа\d+(,\d)?%модель 70%/)
+  assert.match(nums, /Маржа\d+(,\d)?%норма 70%/)
   const flags = await h.locator('.card.flags').textContent()
   assert.match(flags, new RegExp(`Срок сорван: сдали ${dmy(day(-1))}, по плану ${dmy(day(-3))} \\(\\+2 дн\\.\\)`))
   assert.match(flags, /Затраты выше расчёта: смен 4 при расчёте 3/)
@@ -290,18 +291,49 @@ async function closeStep(p) {
   await fits(p, 'чат МОП')
   await shot(p, 'close-mop-chat')
 
-  // закрытая мимо паспорта: HEAD видит красным, может принять (Битрикс не трогаем) или вернуть
+  // как на test: нормы маржи в «Значениях» нет — маржа без сравнения, без пометки и без строки о ней
+  await e2e('/consts', { ...VALS, vat: 16, 'pay.trip_food': 3000 })
+  // закрытая мимо паспорта: HEAD видит красным; пункты не выполнены — принять нельзя, только вернуть на «Оплата+закрывающие» (HEAD 12.11)
   await h.locator('a.back').click()
   await h.locator('.card.bypass .qrow', { hasText: '№ 1720' }).click()
   await h.locator('.passhero .tag.hott', { hasText: 'закрыта в Битриксе мимо паспорта' }).waitFor()
-  await h.locator('.card.decide').getByRole('button', { name: 'Принять закрытие' }).waitFor()
-  await h.locator('.card.decide').getByRole('button', { name: 'Вернуть на «Оплата+закрывающие»' }).waitFor()
+  assert.ok(!/норм|модел/i.test(await h.locator('.passhero').textContent()), 'без нормы маржи — ни сравнения, ни пояснения')
+  const dc = h.locator('.card.decide')
+  await dc.locator('.lockbox').waitFor()
+  assert.match(await dc.locator('.lockbox').textContent(), /^🔒 «Принять закрытие» откроется, когда будут выполнены все пунктыНе выполнено \d+ из 11:.*Долг 0.*Фото объекта/)
+  assert.strictEqual(await dc.getByRole('button', { name: /Принять|Закрыть/ }).count(), 0, 'без всех пунктов кнопки закрытия нет')
+  const force = await req(1000, '/head/closing/1720/close', {})
+  assert.strictEqual(force.status, 409, 'сервер тоже не закрывает'); assert.match(force.body.detail, /только когда выполнены все пункты\. Не выполнено: Долг 0/)
   await fits(h, 'закрытая мимо паспорта')
   await shot(h, 'close-head-bypass')
-  await h.locator('.card.decide').getByRole('button', { name: 'Принять закрытие' }).click()
-  await h.locator('.toast', { hasText: 'Сделка закрыта' }).waitFor()
-  assert.ok(!(await e2e('/bx_calls')).some(x => x.params.id === 1720 && x.method === 'crm.deal.update'), 'принятую мимо паспорта в Битриксе не меняем')
-  assert.strictEqual(await h.locator('.card.bypass').count(), 0)
+  await dc.getByRole('button', { name: 'Вернуть на «Оплата+закрывающие»' }).click()
+  const rs = h.locator('.sheetbox')
+  assert.ok((await rs.locator('.chips button.on').allTextContents()).includes('Долг 0'), 'невыполненные пункты отмечены сами')
+  await rs.getByRole('button', { name: 'Вернуть МОП и ГИП' }).click()
+  await h.locator('.toast', { hasText: 'Вернули на доработку' }).waitFor()
+  assert.deepStrictEqual((await e2e('/bx_calls')).filter(x => x.params.id === 1720 && x.method === 'crm.deal.update').map(x => x.params.fields),
+    [{ STAGE_ID: 'UC_BMKDS4' }], 'вернули — сделка назад на «Оплата+закрывающие»')
+  await h.locator('.card.bypass').waitFor({ state: 'detached' })
+  assert.strictEqual(psql("SELECT count(*) FROM deal_close WHERE deal_id=1720 AND status='closed'"), '0')
+
+  // старая сделка на «Оплата+закрывающие» без фото и сдачи: HEAD открыл паспорт из карточки — «Закрыть» нет, замок со списком
+  await e2e('/deal/1730', { TITLE: '1730 · ОФИС КАСПИЙ — АЛМАТЫ', STAGE_ID: 'UC_BMKDS4', OPPORTUNITY: '300000.00', ASSIGNED_BY_ID: '4565', MYCOMPANY_ID: '1103',
+    DATE_MODIFY: new Date().toISOString(), UF_CRM_1753202415: FILE, UF_CRM_1753202391: FILE, UF_CRM_ARTGAME_DOC05_INVOICES: FILE })
+  await tab(h, 'Сделки')
+  await h.locator('.chips.scroll button', { hasText: 'Все' }).click()
+  await h.locator('.stage .qrow', { hasText: '№ 1730' }).click()
+  await h.locator('.hero .steps > div', { hasText: 'Закрытие' }).click()
+  await h.locator('.closepanel .cklist').waitFor()
+  await h.locator('.closepanel').getByRole('button', { name: 'Паспорт сделки', exact: true }).click()
+  await dc.locator('.lockbox').waitFor()
+  assert.match(await dc.locator('.lockbox').textContent(), /^🔒 «Закрыть» откроется, когда будут выполнены все пунктыНе выполнено \d+ из 11:.*Окончание работ \(факт\).*Фото объекта/)
+  assert.strictEqual(await dc.getByRole('button', { name: /Закрыть/ }).count(), 0, '«Закрыть всё равно» нет')
+  await dc.getByRole('button', { name: 'Вернуть', exact: true }).waitFor()
+  assert.strictEqual((await req(1000, '/head/closing/1730/close', {})).status, 409)
+  await fits(h, 'паспорт без всех пунктов')
+  await h.evaluate(() => document.querySelector('.passhero').scrollIntoView({ block: 'start' }))
+  await shot(h, 'close-head-locked')
+  assert.ok(!(await e2e('/bx_calls')).some(x => x.params.id === 1730), 'в Битрикс ничего не ушло')
 
   await b.close()
   console.log('zakrytie OK')

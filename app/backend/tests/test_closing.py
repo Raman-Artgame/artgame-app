@@ -1,7 +1,8 @@
 """Закрытие сделки через HEAD (HEAD 12.11 «Да, по рекомендациям»): 11 пунктов проверяет приложение, «На закрытие» — только
 когда всё выполнено; HEAD видит паспорт (прибыль и маржа — только у HEAD), «Вернуть» — сообщение МОП и ГИП, «Закрыть» —
 сделка в «Оплата получена» и «Окончание факт» в Битрикс, паспорт снимком, PDF в «ДОКУМЕНТЫ», объект закрыт для смен и трат.
-Сделку, перетащенную в «Оплата получена» прямо в Битриксе, Пульт показывает «мимо вас»; назад сама она не двигается."""
+Сделку, перетащенную в «Оплата получена» прямо в Битриксе, Пульт показывает «мимо вас»; назад сама она не двигается.
+HEAD 12.11: закрыть (и принять закрытую мимо паспорта) — только когда выполнены все пункты; «Закрыть всё равно» нет."""
 from psycopg.types.json import Jsonb
 
 from artgame import bx, bxw, closing, db, dm, drive
@@ -107,6 +108,8 @@ def test_close_flow(client, monkeypatch):
                                          "started_at": "2026-11-09T09:00:00+05:00", "ended_at": "2026-11-09T19:00:00+05:00"}, headers=hdr(2000)).json()
     st = client.get("/api/bx/deals/1700/close", headers=hdr(6000)).json()
     assert keys(st) == {"checked", "shifts"}
+    r = client.post("/api/head/closing/1700/close", headers=hdr(1000))   # HEAD 12.11: пока не все пункты — не закрыть и HEAD
+    assert r.status_code == 409 and r.json()["detail"].endswith("Не выполнено: Оплаты сверены, Смены") and not calls
     assert next(x for x in st["checks"] if x["key"] == "shifts")["detail"] == "на проверке 1"
     assert "profit" not in str(st) and "margin" not in str(st)   # МОП прибыль и маржу не видит (решение 3)
     pid = client.get("/api/fin/payments/check", headers=hdr(1000)).json()
@@ -124,7 +127,7 @@ def test_close_flow(client, monkeypatch):
     lst = client.get("/api/head/closing", headers=hdr(1000)).json()
     assert [x["deal_id"] for x in lst["sent"]] == [1700] and lst["bypass"] == []
 
-    # паспорт: деньги, ФОТ, прибыль и маржа рядом с моделью, флаг «срок сорван»
+    # паспорт: деньги, ФОТ, прибыль и маржа рядом с нормой, флаг «срок сорван»
     assert client.get("/api/head/closing/1700", headers=hdr(6000)).status_code == 403
     ps = client.get("/api/head/closing/1700", headers=hdr(1000)).json()
     assert ps["money"]["sum"] == 1160000 and ps["money"]["net"] == 1000000 and ps["money"]["debt"] == 0
@@ -201,9 +204,27 @@ def test_bypass_no_docs_and_test_deal(client, monkeypatch):
     assert [(x["deal_id"], x["moved_by"]) for x in by] == [(1800, "Тимур Жандосов")]
     ps = client.get("/api/head/closing/1800", headers=hdr(1000)).json()
     assert ps["bypass"] and not ps["frozen"]
-    # HEAD принял закрытие мимо паспорта: в Битрикс ничего не пишем, паспорт сохраняем
-    r = client.post("/api/head/closing/1800/close", headers=hdr(1000)).json()
-    assert r["via"] == "bitrix" and r["bx"] == "skip" and not calls
+    # пункты не выполнены — принять нельзя (HEAD 12.11), остаётся «мимо вас»
+    r = client.post("/api/head/closing/1800/close", headers=hdr(1000))
+    assert r.status_code == 409 and "Не выполнено: Долг 0, Окончание работ (факт), Фото объекта" in r.json()["detail"] and not calls
+    assert [x["deal_id"] for x in client.get("/api/head/closing", headers=hdr(1000)).json()["bypass"]] == [1800]
+    # МОП внёс оплату (HEAD сверил), ГИП сдал, фото есть — HEAD принял: в Битрикс ничего не пишем, паспорт сохраняем
+    DEALS["1800"][bxw.F_END_FACT] = "2026-11-11T03:00:00+03:00"
+    monkeypatch.setattr(drive, "save_income_receipt", lambda conn, name, data, deal_id: "drv-income")
+    pay = client.post("/api/bx/deals/1800/payment", json={"client_uid": uid(), "amount": 1160000, "op_date": "2026-11-10", "account": "kaspi",
+                                                          "receipt": JPG}, headers=hdr(6000))
+    assert pay.status_code == 200, pay.text
+    chk = client.get("/api/fin/payments/check", headers=hdr(1000)).json()
+    for x in (chk.get("items") if isinstance(chk, dict) else chk):
+        assert client.post(f"/api/fin/ledger/{x['id']}/check", headers=hdr(1000)).status_code == 200
+    with db.pool.connection() as conn:
+        conn.execute("""INSERT INTO objects (id, title, city, bitrix_stage, drive_folder, design_synced_at)
+                        VALUES (1800, 'Школа', 'Шымкент', 'WON', 'fold-1800', now())""")
+        conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, drive_id, status, uploaded_by)
+                        VALUES (gen_random_uuid(), 1800, 'photo', 'после.jpg', 'image/jpeg', 'drv-ph2', 'ready', %s)""", (ids[2000],))
+    r = client.post("/api/head/closing/1800/close", headers=hdr(1000))
+    assert r.status_code == 200, r.text
+    assert r.json()["via"] == "bitrix" and r.json()["bx"] == "skip" and not [c for c in calls if c[0] == "crm.deal.update"]
     assert client.get("/api/head/closing", headers=hdr(1000)).json()["bypass"] == []
     # ещё одна такая — HEAD вернул: сделка назад на «Оплата+закрывающие документы»
     monkeypatch.setitem(DEALS, "1802", deal(1802, stage="WON", MOVED_TIME="2026-11-12T11:00:00+05:00"))

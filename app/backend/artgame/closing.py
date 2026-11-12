@@ -30,7 +30,7 @@ NO_DOCS = "2071"                  # «Без документов (наличн�
 MYCO = {"1103": "ИП Яковлев", "2069": "ИП Артамонов", "2071": "Без документов (наличные/перевод)"}
 FROM = date(2026, 11, 12)         # с этого дня сделка в «Оплата получена» без паспорта — «закрыта мимо HEAD»
 F_LAYOUT = "UF_CRM_ARTGAME_APPROVED_LAYOUT"   # «Эскиз» (утверждённый макет) в сделке
-MODEL = "fin.margin.model"        # модель маржи сделки, % — лист «Значения»; нет ключа — маржа без сравнения
+MODEL = "fin.margin.model"        # норма маржи сделки, % — лист «Значения»; нет ключа — маржа без сравнения и без флага
 TRIP = ("lodging", "trip_road", "trip_local", "trip_other")
 EDIT_DONE = {"head", "mop", "mop_vip"}   # «Работы сданы» отмечают ГИП объекта, МОП и HEAD
 TEST_DEAL = "Тестовая сделка — её не закрываем через паспорт"
@@ -240,7 +240,7 @@ def passport(conn, p: dict, d: dict, money: dict, cks: list[dict], o: dict) -> d
     if end_plan and end_fact and end_fact > end_plan:
         flags.append(f"Срок сорван: сдали {_dmy(end_fact)}, по плану {_dmy(end_plan)} (+{(end_fact - end_plan).days} дн.)")
     if model is not None and margin is not None and margin < model:
-        flags.append(f"Маржа {margin:g}% ниже модели {model:g}%")
+        flags.append(f"Маржа {margin:g}% ниже нормы {model:g}%")
     cash = [x for x in money["items"] if x.get("account_code") == deal_money.CASH and not x.get("receipt_file_id") and x["amount"] > 0]
     if cash:
         flags.append(f"Наличные без фото чека: {len(cash)} на {_fmt(sum(x['amount'] for x in cash))}")
@@ -473,7 +473,8 @@ def _people_of(conn, d: dict, o: dict) -> list[int]:
 
 @router.post("/head/closing/{deal_id}/close")
 def closing_close(deal_id: int, bg: BackgroundTasks, p: dict = Depends(require_head)):
-    """«Закрыть»: сделка → «Оплата получена» (и «Окончание факт», если его нет), паспорт — снимком навсегда, PDF — в «ДОКУМЕНТЫ»,
+    """«Закрыть» — только когда выполнены все пункты (HEAD 12.11, и для закрытой мимо паспорта тоже: иначе только «Вернуть»):
+    сделка → «Оплата получена» (и «Окончание факт», если его нет), паспорт — снимком навсегда, PDF — в «ДОКУМЕНТЫ»,
     объект закрыт для смен и расходов, МОП и ГИП — сообщение. Закрытую мимо HEAD (уже в «Оплата получена») — только паспорт."""
     d = bx._deal(p, deal_id, fresh=True)
     if bx.is_test(d):
@@ -484,6 +485,9 @@ def closing_close(deal_id: int, bg: BackgroundTasks, p: dict = Depends(require_h
         if conn.execute("SELECT 1 FROM deal_close WHERE deal_id=%s AND status='closed'", (deal_id,)).fetchone():
             raise HTTPException(409, "сделка уже закрыта")
         s = _state(conn, p, d)
+        miss = [x["short"] for x in s["checks"] if not x["ok"]]
+        if miss:
+            raise HTTPException(409, "Закрыть можно, только когда выполнены все пункты. Не выполнено: " + ", ".join(miss))
         pas = passport(conn, p, d, s["money"], s["checks"], s["o"])
     o = s["o"]
     via = "bitrix" if d["STAGE_ID"] == WON else "app"
@@ -616,7 +620,7 @@ def pdf_html(pas: dict) -> str:
                           _fmt(x["sum"]) + (f" ({x['note']})" if x.get("note") else "")] for x in g["rows"]]))
     h += [f"<p><b>Итого затрат: {_fmt(pas['costs_total'])}</b></p>", "<h2>Итог</h2>",
           _t([["Выручка без НДС", _fmt(r["net"])], ["Затраты", _fmt(r["costs"])], ["Прибыль", _fmt(r["profit"])],
-              ["Маржа", (f"{r['margin']:g}%" if r["margin"] is not None else "—") + (f" (модель {r['model']:g}%)" if r["model"] is not None else "")],
+              ["Маржа", (f"{r['margin']:g}%" if r["margin"] is not None else "—") + (f" (норма {r['model']:g}%)" if r["model"] is not None else "")],
               ["Срок, дней: план / факт", f"{pl['term'] or '—'} / {pl['days'] or '—'}"],
               ["Смены: по расчёту / факт", f"{pl['shifts_plan'] if pl['shifts_plan'] is not None else '—'} / {pl['shifts_fact']}"]]),
           "<h2>Красные флаги</h2>", ("<ul>" + "".join(f"<li>{escape(f)}</li>" for f in pas["flags"]) + "</ul>") if pas["flags"] else "<p>нет</p>",

@@ -87,7 +87,7 @@ export function ClosePanel({ d, onDone }) {
       <div>{miss.map(x => <span key={x.key} className="miss">{x.short || x.title}</span>)}</div></div>
       : <button disabled={busy} onClick={send}>{busy ? 'Отправляю…' : 'На закрытие'}</button>)}
     {!s.head && !closed && !sent && <p className="small muted">В «Оплата получена» сделку переводит только HEAD — после проверки паспорта сделки.</p>}
-    {s.head && !s.test && <button className={closed ? 'ghost' : ''} onClick={() => setPass(true)}>{closed ? 'Паспорт сделки' : sent ? 'Открыть заявку · паспорт сделки' : 'Паспорт сделки · закрыть'}</button>}
+    {s.head && !s.test && <button className={closed ? 'ghost' : ''} onClick={() => setPass(true)}>{closed ? 'Паспорт сделки' : sent ? 'Открыть заявку · паспорт сделки' : miss.length ? 'Паспорт сделки' : 'Паспорт сделки · закрыть'}</button>}
     {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}
   </div>
 }
@@ -142,11 +142,10 @@ export function Passport({ id, back, onDecided }) {
       {p.bypass && !p.frozen && <span className="tag hott">закрыта в Битриксе мимо паспорта</span>}
       <div className="passnums">
         <div><span>Прибыль</span><b className={r.profit < 0 ? 'neg' : ''}>{tg(r.profit)}</b></div>
-        <div><span>Маржа</span><b className={low ? 'neg' : 'pos'}>{pct(r.margin)}</b>{r.model != null && <em>модель {pct(r.model)}</em>}</div>
+        <div><span>Маржа</span><b className={low ? 'neg' : 'pos'}>{pct(r.margin)}</b>{r.model != null && <em>норма {pct(r.model)}</em>}</div>
         <div><span>Выручка без НДС</span><b>{tg(r.net)}</b></div>
         <div><span>Затраты</span><b>{tg(r.costs)}</b></div>
       </div>
-      {r.model == null && <p className="small muted">Модели маржи нет в «Значениях» — сравнить не с чем.</p>}
     </div>
 
     {p.flags.length > 0 && <div className="card flags"><h3>Красные флаги · {p.flags.length}</h3>
@@ -155,14 +154,16 @@ export function Passport({ id, back, onDecided }) {
     {!p.frozen && <div className="card decide">
       {p.request?.status === 'sent' && <p className="small">На закрытие отправил {p.request.sent_by} · {dm(p.request.sent_at)}</p>}
       {p.request?.status === 'returned' && <p className="small muted">Последний раз вернули {dm(p.request.decided_at)}{p.request.reason ? `: ${p.request.reason}` : ''}</p>}
-      {bad.length > 0 && <p className="small why">Не выполнено {bad.length} из {p.checks.length}: {bad.map(x => x.short || x.title).join(', ')}.</p>}
       {!p.ready && !p.won && <p className="small muted">Сделка не на «Оплата+закрывающие документы» — закрыть пока нельзя.</p>}
+      {(p.ready || p.won) && bad.length > 0 && <div className="lockbox"><b>🔒 {p.bypass ? '«Принять закрытие»' : '«Закрыть»'} откроется, когда будут выполнены все пункты</b>
+        <div>Не выполнено {bad.length} из {p.checks.length}:</div><div>{bad.map(x => <span key={x.key} className="miss">{x.short || x.title}</span>)}</div></div>}
       <div className="dealbtns wrapbtns">
-        {(p.ready || p.won) && <button disabled={!!busy || p.test} onClick={close}>{busy === 'close' ? 'Закрываю…' : p.bypass ? 'Принять закрытие' : bad.length ? 'Закрыть всё равно' : 'Закрыть'}</button>}
-        <button className="ghost" disabled={!!busy} onClick={() => setRet(true)}>{p.bypass ? 'Вернуть на «Оплата+закрывающие»' : 'Вернуть'}</button>
+        {(p.ready || p.won) && !bad.length && <button disabled={!!busy || p.test} onClick={close}>{busy === 'close' ? 'Закрываю…' : p.bypass ? 'Принять закрытие' : 'Закрыть'}</button>}
+        <button className={bad.length ? '' : 'ghost'} disabled={!!busy} onClick={() => setRet(true)}>{p.bypass ? 'Вернуть на «Оплата+закрывающие»' : 'Вернуть'}</button>
       </div>
-      <p className="small muted">{p.bypass ? '«Принять» — паспорт сохранится, в Битриксе ничего не меняется. «Вернуть» — сделка назад на «Оплата+закрывающие документы», МОП доделает и отправит.'
-        : '«Закрыть» — сделка уйдёт в «Оплата получена», паспорт сохранится, PDF ляжет в «ДОКУМЕНТЫ». Прибыль и маржа в Битрикс не пишутся.'}</p>
+      <p className="small muted">{(p.bypass ? '«Вернуть» — сделка назад на «Оплата+закрывающие документы», МОП и ГИП получат список, что доделать.'
+        : '«Вернуть» — МОП и ГИП получат список, что доделать.') + (bad.length ? '' : p.bypass ? ' «Принять» — паспорт сохранится, в Битриксе ничего не меняется.'
+        : ' «Закрыть» — сделка уйдёт в «Оплата получена», паспорт сохранится, PDF ляжет в «ДОКУМЕНТЫ». Прибыль и маржа в Битрикс не пишутся.')}</p>
       {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}
     </div>}
     {p.frozen && <div className="card"><h3>Закрытие</h3>
@@ -247,13 +248,13 @@ export function Closing({ initial }) {
   return <>
     {toast && <div className="toast">{toast}</div>}
     <div className="card"><h2>Закрытие сделок</h2>
-      <p className="small muted">МОП отправляет сделку «На закрытие», когда выполнены все 11 пунктов. В «Оплата получена» её переводите вы — кнопкой «Закрыть» в паспорте.</p>
+      <p className="small muted">МОП отправляет сделку «На закрытие», когда выполнены все 11 пунктов. В «Оплата получена» её переводите вы — кнопкой «Закрыть» в паспорте. Пока хоть один пункт не выполнен, закрыть нельзя.</p>
       {d.error && <p className="small why">{d.error}</p>}</div>
     <div className="card"><h3>Ждут решения · {d.sent.length}</h3>
       {!d.sent.length && <p className="small muted">Заявок нет.</p>}
       {d.sent.map(x => row(x, 's', `${tg(x.amount)} · ${x.sent_by || 'МОП'} · ${dm(x.sent_at)}`))}</div>
     {d.bypass.length > 0 && <div className="card bypass"><h3>Закрыты мимо вас · {d.bypass.length}</h3>
-      <p className="small muted">Перевели в «Оплата получена» прямо в Битриксе. Назад сами не двигаются: откройте паспорт — примите или верните.</p>
+      <p className="small muted">Перевели в «Оплата получена» прямо в Битриксе. Назад сами не двигаются: откройте паспорт. Принять можно, только когда выполнены все пункты, иначе — вернуть.</p>
       {d.bypass.map(x => row(x, 'b', `${tg(x.amount)} · ${dm(x.moved)}${x.moved_by ? ' · перевёл ' + x.moved_by : ''}`, 'hot'))}</div>}
     <div className="card"><h3>Закрытые</h3>
       {!d.closed.length && <p className="small muted">Пока ни одной.</p>}
