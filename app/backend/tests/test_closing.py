@@ -2,7 +2,8 @@
 когда всё выполнено; HEAD видит паспорт (прибыль и маржа — только у HEAD), «Вернуть» — сообщение МОП и ГИП, «Закрыть» —
 сделка в «Оплата получена» и «Окончание факт» в Битрикс, паспорт снимком, PDF в «ДОКУМЕНТЫ», объект закрыт для смен и трат.
 Сделку, перетащенную в «Оплата получена» прямо в Битриксе, Пульт показывает «мимо вас»; назад сама она не двигается.
-HEAD 12.11: закрыть (и принять закрытую мимо паспорта) — только когда выполнены все пункты; «Закрыть всё равно» нет."""
+HEAD 12.11: закрыть (и принять закрытую мимо паспорта) — только когда выполнены все пункты; «Закрыть всё равно» нет;
+12-й пункт — Продакшн: хоть одно фото или видео объекта, утверждённое HEAD в приложении."""
 from psycopg.types.json import Jsonb
 
 from artgame import bx, bxw, closing, db, dm, drive
@@ -87,7 +88,8 @@ def keys(r):
 def test_close_flow(client, monkeypatch):
     ids, calls, sent, pdfs = setup(client, monkeypatch)
     st = client.get("/api/bx/deals/1700/close", headers=hdr(6000)).json()
-    assert st["ready"] and not st["ok"] and keys(st) == {"debt", "end", "photos"}
+    assert st["ready"] and not st["ok"] and keys(st) == {"debt", "end", "photos", "prod"} and len(st["checks"]) == 12
+    assert next(x for x in st["checks"] if x["key"] == "prod")["detail"] == "ничего не загружено"
     assert next(x for x in st["checks"] if x["key"] == "design")["skip"]   # дизайна не было — пункт не нужен
     r = client.post("/api/bx/deals/1700/close", headers=hdr(6000))
     assert r.status_code == 409 and "Долг 0" in r.json()["detail"]
@@ -107,9 +109,19 @@ def test_close_flow(client, monkeypatch):
     s = client.post("/api/shifts", json={"client_uid": uid(), "object_id": 1700, "zone_code": "mural",
                                          "started_at": "2026-11-09T09:00:00+05:00", "ended_at": "2026-11-09T19:00:00+05:00"}, headers=hdr(2000)).json()
     st = client.get("/api/bx/deals/1700/close", headers=hdr(6000)).json()
-    assert keys(st) == {"checked", "shifts"}
+    assert keys(st) == {"checked", "prod", "shifts"}
     r = client.post("/api/head/closing/1700/close", headers=hdr(1000))   # HEAD 12.11: пока не все пункты — не закрыть и HEAD
-    assert r.status_code == 409 and r.json()["detail"].endswith("Не выполнено: Оплаты сверены, Смены") and not calls
+    assert r.status_code == 409 and r.json()["detail"].endswith("Не выполнено: Оплаты сверены, Продакшн, Смены") and not calls
+    # Продакшн: Главный загрузил видео — ждёт HEAD; HEAD «Утверждаю» в «Продакшн» — пункт выполнен (по статусу в приложении)
+    with db.pool.connection() as conn:
+        vid = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, drive_id, status, uploaded_by, media_type, review)
+                              VALUES (gen_random_uuid(), 1700, 'media', 'процесс.mp4', 'video/mp4', 'drv-vid', 'ready', %s, 'video', 'pending')
+                              RETURNING id""", (ids[3000],)).fetchone()["id"]
+    st = client.get("/api/bx/deals/1700/close", headers=hdr(6000)).json()
+    assert next(x for x in st["checks"] if x["key"] == "prod")["detail"] == "ждут HEAD: 1" and "prod" in keys(st)
+    assert client.post(f"/api/media/{vid}/review", json={"approve": True}, headers=hdr(1000)).status_code == 200
+    st = client.get("/api/bx/deals/1700/close", headers=hdr(6000)).json()
+    assert keys(st) == {"checked", "shifts"} and next(x for x in st["checks"] if x["key"] == "prod")["detail"] == "в Продакшн: видео 1"
     assert next(x for x in st["checks"] if x["key"] == "shifts")["detail"] == "на проверке 1"
     assert "profit" not in str(st) and "margin" not in str(st)   # МОП прибыль и маржу не видит (решение 3)
     pid = client.get("/api/fin/payments/check", headers=hdr(1000)).json()
@@ -141,7 +153,7 @@ def test_close_flow(client, monkeypatch):
     assert ps["deal"]["myco"] == "ИП Яковлев" and ps["deal"]["gip"] == "P3000" and ps["photos"][0]["thumb"]
     # лучшее фото — «В Продакшн»: копия в «МЕДИА / Продакшн / Фото», оригинал на месте
     assert client.post(f"/api/head/closing/1700/prod/{ps['photos'][0]['id']}", headers=hdr(1000)).json()["prod"]
-    assert COPIES == [("drv-ph", "prod_photo-1700")]
+    assert COPIES == [("drv-vid", "prod_video-1700"), ("drv-ph", "prod_photo-1700")]
     assert client.get("/api/head/closing/1700", headers=hdr(1000)).json()["photos"][0]["prod"]
 
     # «Вернуть»: без причины нельзя; с пунктом — МОП и ГИП получают сообщение в чате «HEAD», стадия та же
@@ -206,9 +218,9 @@ def test_bypass_no_docs_and_test_deal(client, monkeypatch):
     assert ps["bypass"] and not ps["frozen"]
     # пункты не выполнены — принять нельзя (HEAD 12.11), остаётся «мимо вас»
     r = client.post("/api/head/closing/1800/close", headers=hdr(1000))
-    assert r.status_code == 409 and "Не выполнено: Долг 0, Окончание работ (факт), Фото объекта" in r.json()["detail"] and not calls
+    assert r.status_code == 409 and r.json()["detail"].endswith("Не выполнено: Долг 0, Окончание работ (факт), Фото объекта, Продакшн") and not calls
     assert [x["deal_id"] for x in client.get("/api/head/closing", headers=hdr(1000)).json()["bypass"]] == [1800]
-    # МОП внёс оплату (HEAD сверил), ГИП сдал, фото есть — HEAD принял: в Битрикс ничего не пишем, паспорт сохраняем
+    # МОП внёс оплату (HEAD сверил), ГИП сдал, фото есть и HEAD взял его в Продакшн — HEAD принял: в Битрикс ничего не пишем
     DEALS["1800"][bxw.F_END_FACT] = "2026-11-11T03:00:00+03:00"
     monkeypatch.setattr(drive, "save_income_receipt", lambda conn, name, data, deal_id: "drv-income")
     pay = client.post("/api/bx/deals/1800/payment", json={"client_uid": uid(), "amount": 1160000, "op_date": "2026-11-10", "account": "kaspi",
@@ -222,6 +234,12 @@ def test_bypass_no_docs_and_test_deal(client, monkeypatch):
                         VALUES (1800, 'Школа', 'Шымкент', 'WON', 'fold-1800', now())""")
         conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, drive_id, status, uploaded_by)
                         VALUES (gen_random_uuid(), 1800, 'photo', 'после.jpg', 'image/jpeg', 'drv-ph2', 'ready', %s)""", (ids[2000],))
+    st = client.get("/api/bx/deals/1800/close", headers=hdr(6000)).json()
+    assert keys(st) == {"prod"}   # фото есть, но в Продакшн его HEAD не брал — принять нельзя
+    assert client.post("/api/head/closing/1800/close", headers=hdr(1000)).status_code == 409
+    ph2 = next(x for x in client.get("/api/head/closing/1800", headers=hdr(1000)).json()["photos"])
+    assert client.post(f"/api/head/closing/1800/prod/{ph2['id']}", headers=hdr(1000)).json()["prod"]
+    assert client.get("/api/bx/deals/1800/close", headers=hdr(6000)).json()["ok"]
     r = client.post("/api/head/closing/1800/close", headers=hdr(1000))
     assert r.status_code == 200, r.text
     assert r.json()["via"] == "bitrix" and r.json()["bx"] == "skip" and not [c for c in calls if c[0] == "crm.deal.update"]
