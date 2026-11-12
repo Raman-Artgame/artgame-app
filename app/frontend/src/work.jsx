@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { StatusMark, Receipt } from './ui.jsx'
 import { api, testAs, uuid, viewAs } from './api.js'
 import { clearFailed, enqueue, failed, flush, pending } from './queue.js'
@@ -728,16 +728,31 @@ export function Review() {
   const [pays, setPays] = useState(null)   // оплаты клиентов, которые внесли МОП (HEAD 10.11) — только у HEAD
   const load = () => api('/review').then(setR, () => setR({ shifts: [], expenses: [], appeals: [] }))
   const loadPays = () => api('/fin/payments/check').then(setPays, () => setPays(null))
+  const [hs, setHs] = useState({})   // звёзды HEAD до ✓: { path: stars } — Главным и Про обязательно (HEAD 12.11)
+  const notes = useRef({})            // комментарий — без перерисовки, чтобы поле не теряло фокус
   useEffect(() => { load(); loadPays() }, [])
   if (!r) return <div className="card muted">Загрузка…</div>
   const cur = r.curator
   const apps = r.appeals || []
   const pay = (id, ok) => (ok || confirm('Отменить оплату? Она останется в журнале зачёркнутой, «Поступило» в сделке уменьшится.')) &&
     api(`/fin/ledger/${id}/${ok ? 'check' : 'cancel'}`, { method: 'POST' }).then(loadPays, e => alert(e.message))
-  const decide = (path, approve) => {
+  const decide = (path, approve, need) => {
     const reason = approve ? null : prompt('Причина отказа')
     if (!approve && !reason) return
-    api(path, { method: 'POST', body: { approve, reason } }).then(load, e => alert(e.message))
+    const h = { stars: hs[path], note: notes.current[path] }
+    if (approve && need && !h.stars) return alert('Сначала поставь оценку 1–5★')
+    if (approve && h.stars && h.stars <= 2 && !(h.note || '').trim()) return alert('Оценка 1–2 — напиши, что не так')
+    api(path, { method: 'POST', body: { approve, reason, ...(approve && h.stars ? { stars: h.stars, note: h.note } : {}) } }).then(load, e => alert(e.message))
+  }
+  const HeadStars = ({ path, need }) => {
+    const st = hs[path] || 0
+    return <div className="ratebox">
+      <div className="small muted">{need ? 'Оценка смены — обязательно' : 'Оценка смены — по желанию'}</div>
+      <div className="starpick" role="group" aria-label="Оценка смены">{[1, 2, 3, 4, 5].map(n =>
+        <button key={n} className={n <= st ? 'on' : ''} aria-label={`${n} из 5`} onClick={() => setHs(o => ({ ...o, [path]: n === st ? 0 : n }))}>★</button>)}</div>
+      {st > 0 && <textarea defaultValue={notes.current[path] || ''} rows={2} onChange={e => { notes.current[path] = e.target.value }}
+        placeholder={st <= 2 ? 'Обязательно: что не так' : 'Комментарий (по желанию)'} />}
+    </div>
   }
   const good = r.shifts.filter(x => x.cur_stars >= 4).length
   const bulk = () => confirm(`Утвердить ${good} смен с оценкой куратора 4–5★?`) &&
@@ -750,15 +765,17 @@ export function Review() {
         {x.photo_after_url && <a href={x.photo_after_full} target="_blank" rel="noreferrer"><img src={x.photo_after_url} alt="после" /></a>}</div>}
       <More x={x} />
       {cur ? null : <CurMark x={x} />}
+      {!cur && k === 'shift' && !x.cur_at && <HeadStars path={`/shift/${x.id}/review`} need={x.need_stars} />}
       {k === 'shift' && <FixShift x={x} done={load} />}
       {cur && <RateBox path={`/${k}/${x.id}/rate`} stars={k === 'shift'} done={load} />}</div>
-    {!cur && <div className="seg"><button onClick={() => decide(`/${k}/${x.id}/review`, true)}>✓</button><button className="ghost" onClick={() => decide(`/${k}/${x.id}/review`, false)}>✕</button></div>}
+    {!cur && <div className="seg"><button onClick={() => decide(`/${k}/${x.id}/review`, true, x.need_stars)}>✓</button><button className="ghost" onClick={() => decide(`/${k}/${x.id}/review`, false)}>✕</button></div>}
   </div>
   const Appeal = ({ a }) => <div className="row">
     <div><b>{a.person_name}</b><AppealView a={a} />
       {cur ? <RateBox path={`/appeals/${a.id}/rate`} stars={a.kind === 'shift_late'} done={load} /> : <CurMark x={a} />}
+      {!cur && a.kind === 'shift_late' && !a.cur_at && <HeadStars path={`/appeals/${a.id}/decide`} need={a.need_stars} />}
       {!cur && a.closed && <div className="small muted">Месяц закрыт — сумма пойдёт в ФОТ текущего месяца, прошлый не меняется.</div>}</div>
-    {!cur && <div className="seg"><button onClick={() => decide(`/appeals/${a.id}/decide`, true)}>✓</button><button className="ghost" onClick={() => decide(`/appeals/${a.id}/decide`, false)}>✕</button></div>}
+    {!cur && <div className="seg"><button onClick={() => decide(`/appeals/${a.id}/decide`, true, a.need_stars)}>✓</button><button className="ghost" onClick={() => decide(`/appeals/${a.id}/decide`, false)}>✕</button></div>}
   </div>
   const shiftLine = x => <>{when(x.started_at, x.ended_at)}{x.area_m2 ? ` · ${+x.area_m2} м²` : ''} · {ZONE[x.zone_code]}{x.plan_m2 ? ` · ${x.zone_code === 'print' ? 'план' : 'норма'} ${m2(x.plan_m2)} м²` : ''}{x.kpd != null ? ` · КПД ${pct(x.kpd)}` : ''}{x.printer ? ` · ${x.printer}` : ''}</>
   const expLine = x => <>{money(x.amount)}{x.category_title && !(x.object_title || '').includes(x.category_title) ? ' · ' + x.category_title : ''} · {x.paid_by === 'own' ? 'свои' : 'компании'}{x.note ? ' · ' + x.note : ''}{x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</>

@@ -43,7 +43,7 @@ def setup(client, monkeypatch):
 def shift(client, tg, start, end):
     s = client.post("/api/shifts", json={"client_uid": uid(), "object_id": 731, "zone_code": "mural",
                                           "started_at": start, "ended_at": end}, headers=hdr(tg)).json()
-    assert client.post(f"/api/shift/{s['id']}/review", json={"approve": True}, headers=hdr(1000)).json()["status"] == "approved"
+    assert client.post(f"/api/shift/{s['id']}/review", json={"approve": True, "stars": 5}, headers=hdr(1000)).json()["status"] == "approved"
 
 
 def test_finance_flow(client, monkeypatch):

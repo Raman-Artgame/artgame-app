@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from . import db, drive
 from .work import (DIRECT_SQL, HAS_CUR_SQL, SHOP, TZ, WORKSHOP_TITLE, check_workshop, Decision, RateIn, active, cats_for,
-                   check_rate, check_zone, is_trip, overlap, review_filter, shift_role, stage_of, _photo)
+                   STAR_ROLES, check_rate, check_zone, head_rate, is_trip, overlap, review_filter, shift_role, stage_of, _photo)
 
 router = APIRouter(prefix="/api")
 MAX_DAYS = 60
@@ -218,7 +218,7 @@ def review_appeals(conn, p: dict) -> list[dict]:
     """Обращения на проверке: куратору — ещё не оценённые у младших, HEAD — все (с этапом, как у смен)."""
     cond, args = review_filter(p)
     rows = conn.execute(f"""SELECT x.*, o.title AS object_title, pe.full_name AS person_name, pe.role_code AS person_role,
-                                   cb.full_name AS cur_name, {DIRECT_SQL} AS direct, {HAS_CUR_SQL} AS has_cur
+                                   coalesce(pe.acting_role, pe.role_code) AS eff_role, cb.full_name AS cur_name, {DIRECT_SQL} AS direct, {HAS_CUR_SQL} AS has_cur
                             FROM appeals x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id
                             LEFT JOIN people cb ON cb.id=x.cur_by
                             WHERE x.status='submitted' AND {cond} ORDER BY x.created_at""", args).fetchall()
@@ -227,6 +227,7 @@ def review_appeals(conn, p: dict) -> list[dict]:
         a = out(conn, a)
         a["stage"] = stage_of(a)
         a["closed"] = is_closed(a["day"])
+        a["need_stars"] = a["kind"] == "shift_late" and not a.get("cur_at") and a.get("eff_role") in STAR_ROLES
         res.append(a)
     return res
 
@@ -265,6 +266,9 @@ def decide(aid: int, d: Decision, p: dict = Depends(active)):
             conn.execute("UPDATE appeals SET status='rejected', reason=%s, checked_by=%s, checked_at=now() WHERE id=%s", (d.reason, p["id"], aid))
             db.audit(conn, p["id"], "appeal_rejected", "appeals", aid, {"reason": d.reason})
             return {"ok": True, "status": "rejected"}
+        if a["kind"] == "shift_late":   # смена Главного / Про — HEAD ставит звёзды (HEAD 12.11)
+            head_rate(conn, "appeals", aid, a["person_id"], d, p)
+            a = conn.execute("SELECT * FROM appeals WHERE id=%s", (aid,)).fetchone()
         x, closed, cur = a["data"] or {}, is_closed(a["day"]), now_ym()
         pay_ym = cur if closed else None
         note = f"по обращению № {aid}"

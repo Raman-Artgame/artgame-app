@@ -112,7 +112,22 @@ async function tab(p, name) {
   await tab(pr, 'Проверка')
   await pr.getByText('Ты ставишь оценку').waitFor()
   assert.strictEqual((await call(1000, '/review')).shifts.find(x => x.id === sh.id).stage, 'direct')
-  await call(1000, `/shift/${sh.id}/review`, { approve: true })
+  // HEAD 12.11: смену Главного HEAD утверждает только со звёздами
+  assert.strictEqual((await call(1000, '/review')).shifts.find(x => x.id === sh.id).need_stars, true)
+  const hd = await open(b, 1000)
+  await tab(hd, 'Проверка')
+  const row = hd.locator('.row', { hasText: 'Главный Ержан' }).first()
+  await row.getByText('Оценка смены — обязательно').waitFor()
+  await row.getByRole('button', { name: '✓', exact: true }).click()   // без звёзд — подсказка, смена остаётся
+  assert.strictEqual((await call(3000, '/my')).shifts.find(x => x.id === sh.id).status, 'submitted')
+  await row.getByRole('button', { name: '5 из 5' }).click()
+  await row.locator('textarea').fill('Чисто, в срок')
+  await hd.screenshot({ path: `${shots}/kab-head-zvezdy.png`, fullPage: true })
+  await row.getByRole('button', { name: '✓', exact: true }).click()
+  await hd.getByText('Главный Ержан').first().waitFor({ state: 'detached' }).catch(() => {})
+  for (let i = 0; i < 20 && (await call(3000, '/my')).shifts.find(x => x.id === sh.id).status !== 'approved'; i++) await hd.waitForTimeout(200)
+  const mine = (await call(3000, '/my')).shifts.find(x => x.id === sh.id)
+  assert.strictEqual(mine.cur_stars, 5); assert.strictEqual(mine.cur_note, 'Чисто, в срок')
   assert.strictEqual((await call(3000, '/my')).shifts.find(x => x.id === sh.id).status, 'approved')
 
   // 4. Главный дизайнер: воронка «Дизайн РК», назначает помощника и размер XS, срок; запись в Битрикс
