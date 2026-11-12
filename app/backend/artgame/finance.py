@@ -63,8 +63,11 @@ def now_ym() -> str:
     return ym_of(datetime.now(TZ))
 
 
+NIGHT_KEYS = ("pay.night.from", "pay.night.to")   # время «22:00» / «06:00» — строкой, иначе ночь не считалась (найдено 12.11)
+
+
 def vals(conn) -> dict:
-    return {k: v for k, v in consts.latest(conn).items() if isinstance(v, (int, float))}
+    return {k: v for k, v in consts.latest(conn).items() if isinstance(v, (int, float)) or k in NIGHT_KEYS}
 
 
 def _f(x) -> float:
@@ -104,7 +107,7 @@ def _receipt(conn, p: dict, name: str, data_url: str, deal_id: int | None = None
     try:
         drive_id = drive.save_receipt(conn, "office", name, data_url, deal_id=deal_id)
     except Exception as ex:  # Диск недоступен — повторить позже
-        raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+        raise drive.fail(ex)
     data, mime = drive.decode_data_url(data_url)
     return conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by)
                            VALUES (gen_random_uuid(), 0, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",

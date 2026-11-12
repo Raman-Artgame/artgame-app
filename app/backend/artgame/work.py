@@ -53,10 +53,15 @@ def active(p: dict = Depends(current_person)) -> dict:
     return p
 
 
+CLOSED = "Сделка закрыта HEAD: смены и расходы на этот объект больше не вносятся"
+
+
 def check_zone(conn, p: dict, zone: str, object_id: int, past: bool = False):
     if zone not in p["zones"]:
         raise HTTPException(400, "zone not assigned")
-    o = conn.execute("SELECT status FROM objects WHERE id=%s", (object_id,)).fetchone()
+    o = conn.execute("SELECT status, closed_at FROM objects WHERE id=%s", (object_id,)).fetchone()
+    if o and o["closed_at"]:   # HEAD 12.11: сделка закрыта через паспорт — цифры паспорта не должны поплыть
+        raise HTTPException(400, CLOSED)
     if not o or o["status"] not in (("active", "done") if past else ("active",)):
         raise HTTPException(400, "object closed or missing")
 
@@ -132,7 +137,7 @@ def work_dict(p: dict = Depends(active)):
             "stages": [{"key": k, "title": t} for k, t in __import__("artgame.promo", fromlist=["STAGES"]).STAGES],
             # задним числом с 1.11 (HEAD 09.11): объекты — и уже сданные
             "backfill": {**backfill_window(), "objects": conn.execute(
-                """SELECT id, title, city FROM objects WHERE status IN ('active','done') AND id<>0
+                """SELECT id, title, city FROM objects WHERE status IN ('active','done') AND id<>0 AND closed_at IS NULL
                      AND (bitrix_stage=%s OR left_work_at >= %s::date) ORDER BY id DESC""",
                 (sync_objects.WORK, backfill_window()["from"])).fetchall()},   # HEAD 10.11: и ушедшие с «Выполнения» после начала срока   # HEAD 09.11: только «Выполнение проекта» — завершённые HEAD сам возвращает туда
         }
@@ -653,7 +658,7 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
             try:
                 drive_id = drive.save_receipt(conn, e.zone_code, name, e.receipt, deal_id=e.object_id or None)
             except Exception as ex:  # Диск недоступен — телефон повторит позже
-                raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+                raise drive.fail(ex)
         row = conn.execute(
             """INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, paid_by, receipt_url, note, created_at, backfill)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,coalesce(%s, now()),%s)

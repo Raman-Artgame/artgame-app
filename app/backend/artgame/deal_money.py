@@ -226,7 +226,7 @@ def card(d: dict) -> dict:
         led = ledger(conn, [did]).get(did)
         rows = conn.execute(
             """SELECT l.id, l.op_date, l.direction, l.amount, l.article_code, l.source, l.source_ref, l.status, l.checked_at, l.note,
-                      l.receipt_file_id, ac.title AS account_title, pe.full_name AS author
+                      l.receipt_file_id, l.account_code, ac.title AS account_title, pe.full_name AS author
                FROM fin_ledger l JOIN fin_accounts ac ON ac.code = l.account_code LEFT JOIN people pe ON pe.id = l.created_by
                WHERE l.deal_id = %s AND l.article_code = ANY(%s) ORDER BY l.op_date DESC, l.id DESC""", (did, list(IN) + ["refund"])).fetchall()
         # valid_until: счёт только для оплат по эту дату (ИП Артамонов — до 31.12.2026, HEAD 11.11); окно фильтрует по дате оплаты
@@ -292,7 +292,7 @@ def _income_receipt(conn, p: dict, name: str, data_url: str, deal_id: int) -> in
     try:
         drive_id = drive.save_income_receipt(conn, name, data_url, deal_id)
     except Exception as ex:  # Диск недоступен — запись останется в очереди телефона и уйдёт позже
-        raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+        raise drive.fail(ex)
     data, mime = drive.decode_data_url(data_url)
     # object_id 0: чек оплаты клиента не попадает в файлы объекта, которые видит команда на площадке
     return conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by)

@@ -85,7 +85,7 @@ async function tab(p, name) {
   assert.strictEqual(await h.locator('.viewas-card').count(), 0, 'на Пульте нет дублей: «Смотреть как» — отдельной кнопкой (HEAD 09.11)')
   assert.deepStrictEqual((await navText(h)), ['Пульт', 'Проверка', 'Сделки', 'Проекты', 'Финансы', 'Ещё'], 'у HEAD внизу главное, остальное в «Ещё»')
   await h.locator('nav button').last().click()
-  assert.deepStrictEqual((await h.locator('.sheetbox button').allTextContents()).map(t => t.replace(/\d+$/, '')), ['Чат', 'Команда', 'Продакшн', 'Дизайн', 'Лиды', 'Учёба', 'Журнал'], 'в «Ещё» без Места, Месяца и «Смотреть как» (HEAD 09.11)')
+  assert.deepStrictEqual((await h.locator('.sheetbox button').allTextContents()).map(t => t.replace(/\d+$/, '')), ['Чат', 'Закрытие', 'Команда', 'Продакшн', 'Дизайн', 'Лиды', 'Учёба', 'Журнал'], 'в «Ещё» без Места, Месяца и «Смотреть как» (HEAD 09.11); «Закрытие» сделок — HEAD 12.11')
   await h.mouse.click(5, 5)
   await h.screenshot({ path: `${shots}/pult.png`, fullPage: true })
 

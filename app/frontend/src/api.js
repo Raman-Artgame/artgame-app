@@ -47,7 +47,10 @@ function errText(d) {
   }).join('. ')
 }
 
-export async function api(path, opts = {}) {
+// Сбой связи с Google Диском (12.11, «drive: TransportError» у Владимира): сервер отвечает retry — повторяем сами,
+// с тем же телом (client_uid тот же, дубля не будет). Человек видит ошибку, только если не вышло и с третьего раза.
+const RETRY_WAIT = [3000, 8000]
+export async function api(path, opts = {}, tries = 0) {
   const auth = initData() ? { 'X-Telegram-Init-Data': initData() } : webToken() ? { Authorization: `Bearer ${webToken()}` } : {}
   const va = !opts.noView && viewAs() ? { 'X-View-As': viewAs() } : actRole() ? { 'X-Act-Role': actRole() } : {}
   const r = await fetch(`/api${path}`, {
@@ -58,6 +61,10 @@ export async function api(path, opts = {}) {
   const data = await r.json().catch(() => ({}))
   if (r.status === 401 && !initData() && webToken()) { setWebToken(''); window.dispatchEvent(new Event('artgame:logout')) }
   if (r.status === 403 && data.view_as) readOnlyHit(data.detail)
+  if (r.status === 502 && data.detail?.retry && tries < RETRY_WAIT.length) {
+    await new Promise(ok => setTimeout(ok, RETRY_WAIT[tries]))
+    return api(path, opts, tries + 1)
+  }
   if (!r.ok) throw Object.assign(new Error(errText(data.detail) || r.status), { status: r.status })
   return data
 }

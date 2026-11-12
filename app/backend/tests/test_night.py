@@ -28,3 +28,21 @@ def test_shift_pay_overtime_and_night():
 
 def test_no_night_keys_no_night():
     assert night_hours({"pay.night": 10}, t(7, 18), t(8, 4)) == 0
+
+
+def test_night_from_constants_into_payroll(client, monkeypatch):
+    """12.11: время ночи в «Значениях» — строкой («22:00»); раньше vals() его отбрасывал и ночь в ФОТ не начислялась."""
+    from psycopg.types.json import Jsonb
+
+    from artgame import db
+    from test_appeals import approved_shift, piece
+    from test_finance import setup
+    ids = setup(client, monkeypatch)
+    with db.pool.connection() as c:
+        row = c.execute("SELECT id, values FROM constants_versions ORDER BY id DESC LIMIT 1").fetchone()
+        v = dict(row["values"])
+        for k, x in {"pay.night": "10", "pay.night.from": "22:00", "pay.night.to": "06:00"}.items():
+            v[k] = {"value": x, "status": "Утверждено", "who": "head"}
+        c.execute("UPDATE constants_versions SET values=%s WHERE id=%s", (Jsonb(v), row["id"]))
+    approved_shift(client, 2000, "2026-11-04T14:00:00+05:00", "2026-11-05T00:00:00+05:00")   # 10 ч, из них 2 ночных
+    assert piece(client, "2026-11", ids[2000])["piece"][0] == 15000 + 2 * 150

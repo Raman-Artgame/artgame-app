@@ -7,7 +7,7 @@ from datetime import date
 from pydantic import BaseModel, Field
 
 from . import constants as consts
-from . import appeals, dm, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips
+from . import appeals, closing, dm, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips
 from . import bx, bxw, db, deal_money, design, files, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
@@ -50,6 +50,7 @@ app.include_router(feedback.router)
 app.include_router(dm.router)   # «Диалог с HEAD» (09.11)
 app.include_router(tgbot.router)   # бот: ответ на «Старт» (HEAD 08.11)
 app.include_router(gip.router)
+app.include_router(closing.router)   # закрытие сделки через HEAD: паспорт, «Закрыть» и «Вернуть» (HEAD 12.11)
 viewas.install(app)
 
 

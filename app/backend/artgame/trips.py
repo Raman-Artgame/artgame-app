@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from . import constants as consts
 from . import db, drive
 from .gip import can_crew
-from .work import TZ, active, is_trip, self_approve, with_receipt
+from .work import CLOSED, TZ, active, is_trip, self_approve, with_receipt
 
 router = APIRouter(prefix="/api")
 ITEMS = [("lodging", "Проживание"), ("trip_road", "Дорога (билеты, бензин)"), ("trip_local", "Транспорт на месте"), ("trip_other", "Прочее")]
@@ -77,6 +77,8 @@ def trip_set(oid: int, b: TripSetIn, p: dict = Depends(active)):
     with db.pool.connection() as conn, conn.transaction():
         if not can_trip(conn, p, oid):
             raise HTTPException(403, "командировку отмечают ГИП, главные, МОП и HEAD")
+        if (conn.execute("SELECT closed_at FROM objects WHERE id=%s", (oid,)).fetchone() or {}).get("closed_at"):
+            raise HTTPException(400, CLOSED)
         if not conn.execute("UPDATE objects SET trip=%s WHERE id=%s AND id<>0 RETURNING id", (b.trip, oid)).fetchone():
             raise HTTPException(404, "объекта ещё нет в приложении")
         n = retrip(conn, oid)
@@ -103,8 +105,11 @@ def trip_cost_add(oid: int, b: CostIn, p: dict = Depends(active)):
             return summary(conn, oid, p)
         if not can_trip(conn, p, oid):
             raise HTTPException(403, "расходы командировки вносят ГИП, главные, МОП и HEAD")
-        if not conn.execute("SELECT 1 FROM objects WHERE id=%s AND id<>0", (oid,)).fetchone():
+        o = conn.execute("SELECT closed_at FROM objects WHERE id=%s AND id<>0", (oid,)).fetchone()
+        if not o:
             raise HTTPException(404, "объекта ещё нет в приложении")
+        if o["closed_at"]:
+            raise HTTPException(400, CLOSED)
         fid = None
         if b.receipt:
             if not b.receipt.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
@@ -113,7 +118,7 @@ def trip_cost_add(oid: int, b: CostIn, p: dict = Depends(active)):
             try:
                 drive_id = drive.save_receipt(conn, "mural", name, b.receipt, deal_id=oid)
             except Exception as ex:  # Диск недоступен
-                raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+                raise drive.fail(ex)
             data, mime = drive.decode_data_url(b.receipt)
             fid = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by)
                                   VALUES (gen_random_uuid(), %s, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",
