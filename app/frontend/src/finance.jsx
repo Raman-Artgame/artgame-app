@@ -57,11 +57,12 @@ function Summary({ m }) {
   </>
 }
 
-function LedgerForm({ d, done, cancel }) {
-  const [v, set] = useState({ op_date: today(), account: d.accounts[0]?.code, article: 'client_payment', amount: '', to_account: '', deal_id: '', note: '', period: '', receipt: '' })
+// spend — «+ Расход» с Пульта (HEAD 12.11: «где мне вносить расходы … не особо удобно»): только расходные статьи
+export function LedgerForm({ d, done, cancel, spend }) {
+  const [v, set] = useState({ op_date: today(), account: d.accounts[0]?.code, article: spend ? 'other_expense' : 'client_payment', amount: '', to_account: '', deal_id: '', note: '', period: '', receipt: '' })
   const [busy, setBusy] = useState(false)
   const [e, setE] = useState('')
-  const arts = d.articles.filter(a => a.kind !== 'payroll')
+  const arts = d.articles.filter(a => a.kind !== 'payroll' && (!spend || ['fixed', 'variable', 'tax'].includes(a.kind)))
   const kind = arts.find(a => a.code === v.article)?.kind
   const send = () => {
     setBusy(true); setE('')
@@ -74,11 +75,13 @@ function LedgerForm({ d, done, cancel }) {
       {Object.entries(KIND).filter(([k]) => arts.some(a => a.kind === k)).map(([k, t]) => <optgroup key={k} label={t}>
         {arts.filter(a => a.kind === k).map(a => <option key={a.code} value={a.code}>{a.title}</option>)}</optgroup>)}</select>
     <input inputMode="numeric" value={v.amount} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder="Сумма, ₸" />
-    <div className="segf">{d.accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>
+    {spend || d.accounts.length > 3 ? <select value={v.account} onChange={e => set({ ...v, account: e.target.value })}>
+      {d.accounts.map(a => <option key={a.code} value={a.code}>Откуда: {a.title}</option>)}</select>
+      : <div className="segf">{d.accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>}
     {kind === 'transfer' && <select value={v.to_account} onChange={e => set({ ...v, to_account: e.target.value })}>
       <option value="">Куда перевести…</option>{d.accounts.filter(a => a.code !== v.account).map(a => <option key={a.code} value={a.code}>{a.title}</option>)}</select>}
     <input type="date" value={v.op_date} onChange={e => set({ ...v, op_date: e.target.value })} />
-    {['fixed', 'variable', 'tax'].includes(kind) && <input type="month" value={v.period} onChange={e => set({ ...v, period: e.target.value })} title="За какой месяц (если не месяц даты)" />}
+    {!spend && ['fixed', 'variable', 'tax'].includes(kind) && <input type="month" value={v.period} onChange={e => set({ ...v, period: e.target.value })} title="За какой месяц (если не месяц даты)" />}
     {kind === 'income' && <input inputMode="numeric" value={v.deal_id} onChange={e => set({ ...v, deal_id: e.target.value.replace(/\D/g, '') })} placeholder="№ сделки в Битриксе" />}
     <input value={v.note} onChange={e => set({ ...v, note: e.target.value })} placeholder="Комментарий" />
     <label className="photo">{v.receipt ? <img src={v.receipt} alt="чек" /> : <span>📷 Чек / квитанция (по желанию)</span>}
