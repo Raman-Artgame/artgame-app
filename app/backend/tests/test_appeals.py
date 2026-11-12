@@ -147,3 +147,28 @@ def test_fix_expense_open_month_and_reject(client, monkeypatch):
     st = {x["id"]: (x["status"], x["reason"]) for x in client.get("/api/appeals/my", headers=hdr(2000)).json()}
     assert st[b["id"]] == ("rejected", "нет чека") and st[c2["id"]][0] == "cancelled"
     assert uuid and D5 and appeals
+
+
+def test_head_stars_for_lead_and_pro(client, monkeypatch):
+    """HEAD 12.11: смены Главного и Про HEAD утверждает только со звёздами (1–2 — с комментарием); остальным — по желанию."""
+    setup(client, monkeypatch)
+    mk = lambda tg, day: client.post("/api/shifts", json={"client_uid": uid(), "object_id": 731, "zone_code": "mural",  # noqa: E731
+                                                          "started_at": f"2026-11-{day}T09:00:00+05:00", "ended_at": f"2026-11-{day}T19:00:00+05:00"},
+                                     headers=hdr(tg)).json()["id"]
+    lead, art = mk(3000, "04"), mk(2000, "05")
+    rv = {x["id"]: x["need_stars"] for x in client.get("/api/review", headers=hdr(1000)).json()["shifts"]}
+    assert rv == {lead: True, art: False}
+    go = lambda sid, **kw: client.post(f"/api/shift/{sid}/review", json={"approve": True, **kw}, headers=hdr(1000))  # noqa: E731
+    assert go(lead).status_code == 400
+    assert go(lead, stars=2).status_code == 400
+    assert go(lead, stars=2, note="грязно у стен").json()["status"] == "approved"
+    assert go(art).json()["status"] == "approved"                             # младшему — без звёзд можно
+    my = {x["id"]: x for x in client.get("/api/my", headers=hdr(3000)).json()["shifts"]}
+    assert my[lead]["cur_stars"] == 2 and my[lead]["cur_note"] == "грязно у стен" and my[lead]["cur_name"] == "HEAD"
+    # обращение «не внёс смену» от Главного — тоже со звёздами
+    a = late_shift(client, 3000, day="2026-11-06").json()
+    assert client.get("/api/review", headers=hdr(1000)).json()["appeals"][0]["need_stars"]
+    assert client.post(f"/api/appeals/{a['id']}/decide", json={"approve": True}, headers=hdr(1000)).status_code == 400
+    r = client.post(f"/api/appeals/{a['id']}/decide", json={"approve": True, "stars": 4}, headers=hdr(1000)).json()
+    s = [x for x in client.get("/api/my", headers=hdr(3000)).json()["shifts"] if x["id"] == r["result_id"]][0]
+    assert s["cur_stars"] == 4
