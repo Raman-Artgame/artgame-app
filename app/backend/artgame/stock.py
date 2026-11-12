@@ -91,7 +91,7 @@ def add(e: StockIn, p: dict = Depends(active)):
         try:
             drive_id = drive.save_receipt(conn, "stock", name, e.receipt, deal_id=e.deal_id)
         except Exception as ex:  # Диск недоступен — телефон повторит позже
-            raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+            raise drive.fail(ex)
         data, mime = drive.decode_data_url(e.receipt)
         # HEAD 09.11: покупка с № сделки — это расход проекта, а не склад (такси — «Такси / доставка», прочее — «Докупка на объект»)
         oid, cat = 0, e.category
@@ -278,7 +278,7 @@ def purchase(e: PurchaseIn, p: dict = Depends(active)):
         try:
             drive_id = drive.save_receipt(conn, "stock", name, e.receipt, deal_id=e.deal_id)
         except Exception as ex:  # Диск недоступен — телефон повторит позже
-            raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+            raise drive.fail(ex)
         data, mime = drive.decode_data_url(e.receipt)
         # HEAD 09.11: покупка с № сделки — это расход проекта, а не склад (такси — «Такси / доставка», прочее — «Докупка на объект»)
         oid, cat = 0, d["category"]

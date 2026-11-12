@@ -658,7 +658,7 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
             try:
                 drive_id = drive.save_receipt(conn, e.zone_code, name, e.receipt, deal_id=e.object_id or None)
             except Exception as ex:  # Диск недоступен — телефон повторит позже
-                raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+                raise drive.fail(ex)
         row = conn.execute(
             """INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, paid_by, receipt_url, note, created_at, backfill)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,coalesce(%s, now()),%s)

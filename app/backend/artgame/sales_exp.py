@@ -83,7 +83,7 @@ def add(e: SalesExpenseIn, p: dict = Depends(active)):
         try:
             drive_id = drive.save_receipt(conn, "sales", name, e.receipt, deal_id=e.deal_id)
         except Exception as ex:  # Диск недоступен — телефон повторит позже
-            raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+            raise drive.fail(ex)
         data, mime = drive.decode_data_url(e.receipt)
         f = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by)
                             VALUES (gen_random_uuid(), 0, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",

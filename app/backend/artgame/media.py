@@ -87,7 +87,7 @@ def media_review(file_id: int, b: ReviewIn, p: dict = Depends(active)):
                 d = drive.Drive()
                 prod_id = d.copy(f["drive_id"], drive.folder_of(conn, obj, "prod", d, f["media_type"]), f["name"])
             except Exception as ex:
-                raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+                raise drive.fail(ex)
         conn.execute("""UPDATE files SET review=%s, reviewed_by=%s, reviewed_at=now(), review_note=%s, prod_drive_id=%s WHERE id=%s""",
                      ("approved" if b.approve else "rejected", p["id"], b.note, prod_id, file_id))
         db.audit(conn, p["id"], "media_review", "files", file_id, {"approve": b.approve, "type": f["media_type"], "note": b.note})

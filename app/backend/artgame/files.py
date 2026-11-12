@@ -128,7 +128,7 @@ def store_photo(conn, p: dict, obj: dict, client_uid, data_url: str, note: str |
     try:
         drive_id = drive.save_photo(conn, obj, name, data_url, kind="photo")
     except Exception as ex:
-        raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+        raise drive.fail(ex)
     f = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, note, uploaded_by)
                         VALUES (%s,%s,'photo',%s,%s,%s,%s,%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
                      (client_uid, obj["id"], name, mime, len(data), drive_id, note, p["id"])).fetchone()
@@ -179,7 +179,7 @@ def start_upload(object_id: int, body: UploadIn, request: Request, p: dict = Dep
             d = drive.Drive()
             url = d.resumable(drive.folder_of(conn, obj, body.kind, d, body.media_type), body.name, body.mime, body.size, origin)
         except Exception as ex:
-            raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+            raise drive.fail(ex)
         return {"file_id": f["id"], "upload_url": url}
 
 
@@ -202,7 +202,7 @@ def finish_upload(file_id: int, body: DoneIn, p: dict = Depends(active)):
             m = d.meta(body.drive_id)
             folder = drive.folder_of(conn, obj, f["kind"], d, f.get("media_type"))
         except Exception as ex:
-            raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+            raise drive.fail(ex)
         if folder not in m.get("parents", []) or int(m.get("size", -1)) != f["size"]:
             raise HTTPException(400, "file mismatch")
         f = conn.execute("UPDATE files SET drive_id=%s, status='ready', mime=%s WHERE id=%s RETURNING *",

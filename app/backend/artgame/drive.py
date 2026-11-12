@@ -8,11 +8,15 @@ ID папок запоминаются в objects.drive_folder и objects.folder
 """
 import base64
 import json
+import logging
+import time
 from datetime import datetime
 
 import httpx
 
 from .config import settings
+
+log = logging.getLogger("artgame.drive")
 
 PROJECTS_ROOT_ID = "1_33LDppwOu02ToP4c3uUS-mPux5mPIJf"
 # Папка сделки (утверждено HEAD 10.11, названия буква в букву с тредом Диска):
@@ -49,13 +53,45 @@ ALL = {"supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
 FOLDER = "application/vnd.google-apps.folder"
 
 
+# 12.11 (Владимир, «drive: TransportError»): токен брали заново на каждый файл, и разовый сбой связи с Google
+# валил отправку смены. Теперь токен живёт до истечения, а сбой связи повторяем 3 раза.
+_TOK: dict = {}
+TRIES = 3
+
+
+def _retry(fn, *a, **kw):
+    """Сбой связи (запрос не дошёл / токен не обновился) — пауза и ещё раз; ответ Google с ошибкой не повторяем."""
+    from google.auth.exceptions import TransportError
+    for i in range(TRIES):
+        try:
+            return fn(*a, **kw)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError, TransportError):
+            if i == TRIES - 1:
+                raise
+            time.sleep(1 + 2 * i)
+
+
 def _token() -> str:
     from google.auth.transport.requests import Request
     from google.oauth2 import service_account
+    c = _TOK.get("creds")
+    if c and c.valid and c.expiry and (c.expiry - datetime.utcnow()).total_seconds() > 300:
+        return c.token
     creds = service_account.Credentials.from_service_account_file(
         settings.google_sa_file, scopes=["https://www.googleapis.com/auth/drive"])
-    creds.refresh(Request())
+    _retry(creds.refresh, Request())
+    _TOK["creds"] = creds
     return creds.token
+
+
+FAIL_MSG = "Не получилось сохранить фото на Google Диск: пропала связь с Google. Приложение уже пробовало ещё раз. Ничего не потеряно: нажми «Отправить» снова через минуту."
+
+
+def fail(ex: Exception):
+    """Понятная ошибка вместо «drive: TransportError»; retry — телефон сам повторит отправку."""
+    from fastapi import HTTPException
+    log.warning("drive: %s: %s", ex.__class__.__name__, ex)
+    return HTTPException(502, {"message": FAIL_MSG, "retry": True, "code": f"drive: {ex.__class__.__name__}"})
 
 
 def _q(s: str) -> str:
@@ -67,7 +103,7 @@ class Drive:
         self.h = {"Authorization": f"Bearer {_token()}"}
 
     def find(self, q: str) -> list[dict]:
-        r = httpx.get(API, headers=self.h, timeout=30, params={**ALL, "corpora": "allDrives", "q": q + " and trashed = false",
+        r = _retry(httpx.get, API, headers=self.h, timeout=30, params={**ALL, "corpora": "allDrives", "q": q + " and trashed = false",
                                                                "fields": "files(id,name,parents)", "pageSize": 50})
         r.raise_for_status()
         return r.json()["files"]
@@ -76,7 +112,7 @@ class Drive:
         """Содержимое папки (папки и файлы) с типом и размером."""
         out, token = [], None
         while True:
-            r = httpx.get(API, headers=self.h, timeout=30, params={**ALL, "corpora": "allDrives", "pageSize": 200,
+            r = _retry(httpx.get, API, headers=self.h, timeout=30, params={**ALL, "corpora": "allDrives", "pageSize": 200,
                           "q": f"'{parent}' in parents and trashed = false", "fields": "nextPageToken,files(id,name,mimeType,size)",
                           **({"pageToken": token} if token else {})})
             r.raise_for_status()
@@ -92,7 +128,7 @@ class Drive:
         found.sort(key=lambda f: f["name"] != name)   # точное имя (утверждённое) — первым, «Дизайн» рядом с «ДИЗАЙН» не берём
         if found:
             return found[0]["id"]
-        r = httpx.post(API, headers=self.h, timeout=30, params={"supportsAllDrives": "true"},
+        r = _retry(httpx.post, API, headers=self.h, timeout=30, params={"supportsAllDrives": "true"},
                        json={"name": name, "mimeType": FOLDER, "parents": [parent]})
         r.raise_for_status()
         return r.json()["id"]
@@ -110,7 +146,7 @@ class Drive:
 
     def upload(self, parent: str, name: str, data: bytes, mime: str) -> str:
         meta = {"name": name, "parents": [parent]}
-        r = httpx.post(UPLOAD, headers=self.h, timeout=120,
+        r = _retry(httpx.post, UPLOAD, headers=self.h, timeout=120,
                        params={"uploadType": "multipart", "supportsAllDrives": "true", "fields": "id"},
                        files={"metadata": ("metadata", json.dumps(meta), "application/json"), "file": (name, data, mime)})
         r.raise_for_status()
@@ -118,14 +154,14 @@ class Drive:
 
     def resumable(self, parent: str, name: str, mime: str, size: int, origin: str) -> str:
         """Ссылка для загрузки большого файла прямо из браузера в Google (сервер файл не пропускает)."""
-        r = httpx.post(UPLOAD, timeout=30, params={"uploadType": "resumable", "supportsAllDrives": "true", "fields": "id,size"},
+        r = _retry(httpx.post, UPLOAD, timeout=30, params={"uploadType": "resumable", "supportsAllDrives": "true", "fields": "id,size"},
                        headers={**self.h, "X-Upload-Content-Type": mime, "X-Upload-Content-Length": str(size), "Origin": origin},
                        json={"name": name, "parents": [parent]})
         r.raise_for_status()
         return r.headers["Location"]
 
     def meta(self, file_id: str) -> dict:
-        r = httpx.get(f"{API}/{file_id}", headers=self.h, timeout=30,
+        r = _retry(httpx.get, f"{API}/{file_id}", headers=self.h, timeout=30,
                       params={"supportsAllDrives": "true", "fields": "id,name,size,mimeType,parents,thumbnailLink"})
         r.raise_for_status()
         return r.json()
@@ -139,7 +175,7 @@ class Drive:
 
     def copy(self, file_id: str, parent: str, name: str | None = None) -> str:
         """Копия файла в другую папку (утверждённый материал → «Продакшн»). Оригинал остаётся в «Отчётах»."""
-        r = httpx.post(f"{API}/{file_id}/copy", headers=self.h, timeout=120, params={"supportsAllDrives": "true", "fields": "id"},
+        r = _retry(httpx.post, f"{API}/{file_id}/copy", headers=self.h, timeout=120, params={"supportsAllDrives": "true", "fields": "id"},
                        json={"parents": [parent], **({"name": name} if name else {})})
         r.raise_for_status()
         return r.json()["id"]
@@ -148,17 +184,17 @@ class Drive:
         """PDF из HTML (паспорт сделки, HEAD 12.11): HTML → временный Google Документ → PDF в папку → документ в корзину.
         Своей библиотеки PDF на сервере нет — Google делает PDF сам."""
         meta = {"name": name.rsplit(".", 1)[0], "parents": [parent], "mimeType": "application/vnd.google-apps.document"}
-        r = httpx.post(UPLOAD, headers=self.h, timeout=120, params={"uploadType": "multipart", "supportsAllDrives": "true", "fields": "id"},
+        r = _retry(httpx.post, UPLOAD, headers=self.h, timeout=120, params={"uploadType": "multipart", "supportsAllDrives": "true", "fields": "id"},
                        files={"metadata": ("metadata", json.dumps(meta), "application/json"), "file": ("passport.html", html.encode(), "text/html")})
         r.raise_for_status()
         doc = r.json()["id"]
         try:
-            e = httpx.get(f"{API}/{doc}/export", headers=self.h, timeout=120, params={"mimeType": "application/pdf"})
+            e = _retry(httpx.get, f"{API}/{doc}/export", headers=self.h, timeout=120, params={"mimeType": "application/pdf"})
             e.raise_for_status()
             return self.upload(parent, name, e.content, "application/pdf")
         finally:
             try:
-                httpx.patch(f"{API}/{doc}", headers=self.h, timeout=30, params={"supportsAllDrives": "true"}, json={"trashed": True})
+                _retry(httpx.patch, f"{API}/{doc}", headers=self.h, timeout=30, params={"supportsAllDrives": "true"}, json={"trashed": True})
             except Exception:  # noqa: BLE001 — временный документ останется в папке, PDF уже есть
                 pass
 
@@ -166,7 +202,7 @@ class Drive:
         link = self.meta(file_id).get("thumbnailLink")
         if not link:
             return None
-        r = httpx.get(link.replace("=s220", "=s480"), headers=self.h, timeout=30)
+        r = _retry(httpx.get, link.replace("=s220", "=s480"), headers=self.h, timeout=30)
         return r.content if r.status_code == 200 else None
 
 

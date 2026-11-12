@@ -118,7 +118,7 @@ def trip_cost_add(oid: int, b: CostIn, p: dict = Depends(active)):
             try:
                 drive_id = drive.save_receipt(conn, "mural", name, b.receipt, deal_id=oid)
             except Exception as ex:  # Диск недоступен
-                raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+                raise drive.fail(ex)
             data, mime = drive.decode_data_url(b.receipt)
             fid = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by)
                                   VALUES (gen_random_uuid(), %s, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",
