@@ -107,10 +107,16 @@ def test_production_review_and_reels_pay(client, team):
     for g in got[:3]:
         assert client.post(f"/api/media/{g['id']}/review", json={"approve": True}, headers=hdr(1000)).json()["ok"]
     client.post(f"/api/media/{got[3]['id']}/review", json={"approve": False, "note": "темно"}, headers=hdr(1000))
-    assert sum(v["parents"] == ["deal-731/МЕДИА/Продакшн"] for v in FakeDrive.store.values()) == 3
+    # рилс уже в «МЕДИА / Рилс» — в «Продакшн» вторую копию не кладём; фото и видео — в «Продакшн / Фото» и «/ Видео» (HEAD 12.11)
+    assert not any(v["parents"][0].startswith("deal-731/МЕДИА/Продакшн") for v in FakeDrive.store.values())
+    ph, vd = upload(client, 3000, "photo").json(), upload(client, 3000, "video").json()
+    for g in (ph, vd):
+        assert client.post(f"/api/media/{g['id']}/review", json={"approve": True}, headers=hdr(1000)).json()["ok"]
+    assert sum(v["parents"] == ["deal-731/МЕДИА/Продакшн/Фото"] for v in FakeDrive.store.values()) == 1
+    assert sum(v["parents"] == ["deal-731/МЕДИА/Продакшн/Видео"] for v in FakeDrive.store.values()) == 1
     mine = client.get("/api/media?scope=mine", headers=hdr(3000)).json()
     assert mine["reels"] == {"rate": 5000, "max": 2} and {x["review"] for x in mine["items"]} == {"approved", "rejected"}
-    assert len(client.get("/api/media?scope=object&object_id=731", headers=hdr(2000)).json()["items"]) == 3
+    assert len(client.get("/api/media?scope=object&object_id=731", headers=hdr(2000)).json()["items"]) == 5   # 3 рилс + фото + видео
     # ФОТ месяца: 3 утверждённых рилс, в месяц оплачиваются до 2
     ym = date.today().strftime("%Y-%m")
     out = client.post(f"/api/fin/payroll/{ym}/compute", headers=hdr(1000)).json()

@@ -79,11 +79,13 @@ def media_review(file_id: int, b: ReviewIn, p: dict = Depends(active)):
         if f["review"] != "pending":
             raise HTTPException(409, "уже решено")
         prod_id = None
-        if b.approve:
+        if b.approve and f["media_type"] == "reels":
+            prod_id = f["drive_id"]   # рилс уже лежит в «МЕДИА / Рилс» — второй копии не делаем
+        elif b.approve:
             obj = conn.execute("SELECT * FROM objects WHERE id=%s", (f["object_id"],)).fetchone()
             try:
                 d = drive.Drive()
-                prod_id = d.copy(f["drive_id"], drive.folder_of(conn, obj, "prod", d), f["name"])
+                prod_id = d.copy(f["drive_id"], drive.folder_of(conn, obj, "prod", d, f["media_type"]), f["name"])
             except Exception as ex:
                 raise HTTPException(502, f"drive: {ex.__class__.__name__}")
         conn.execute("""UPDATE files SET review=%s, reviewed_by=%s, reviewed_at=now(), review_note=%s, prod_drive_id=%s WHERE id=%s""",
