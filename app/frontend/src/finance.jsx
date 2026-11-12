@@ -62,7 +62,7 @@ export function LedgerForm({ d, done, cancel, spend }) {
   const [v, set] = useState({ op_date: today(), account: d.accounts[0]?.code, article: spend ? 'other_expense' : 'client_payment', amount: '', to_account: '', deal_id: '', note: '', period: '', receipt: '' })
   const [busy, setBusy] = useState(false)
   const [e, setE] = useState('')
-  const arts = d.articles.filter(a => a.kind !== 'payroll' && (!spend || ['fixed', 'variable', 'tax'].includes(a.kind)))
+  const arts = d.articles.filter(a => a.kind !== 'payroll' && (!spend || (['fixed', 'variable', 'tax'].includes(a.kind) && !a.auto)))
   const kind = arts.find(a => a.code === v.article)?.kind
   const send = () => {
     setBusy(true); setE('')
