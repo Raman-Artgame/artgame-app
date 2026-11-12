@@ -106,10 +106,12 @@ function Main({ me, onMe, web, logout }) {
   const openDeal = id => { setDealId(id); setTab('deals') }
   const openLead = id => { setLeadId(id); setTab('leads') }
   const openMonth = () => setTab('month')
+  const [finView, setFinView] = useState(null)   // «Оплатить сегодня» с Пульта — сразу в «Финансы → Деньги» (HEAD 12.11)
   const [designView, setDesignView] = useState(null)   // «Каталоги на утверждение» с Пульта — сразу во вкладку «Каталоги» (HEAD 11.11)
   useEffect(() => { if (tab !== 'design') setDesignView(null) }, [tab])
   const go = t => { if (t === 'deals') setDealId(null); if (t === 'leads') setLeadId(null)
-    if (t === 'design:cat') { setDesignView('cat'); setTab('design'); return } if (t === 'design') setDesignView(null); setTab(t) }
+    if (t === 'design:cat') { setDesignView('cat'); setTab('design'); return }
+    if (t === 'fin:cash') { setFinView('cash'); setTab('fin'); return } if (t === 'fin') setFinView(null); if (t === 'design') setDesignView(null); setTab(t) }
   const [toast, setToast] = useState('')
   const done = t => { setToast(t); setTab('mine'); setTimeout(() => setToast(''), 4000) }
   useEffect(() => {   // офлайн-очередь: сервер не принял запись — сказать сразу, а не терять молча
@@ -179,7 +181,7 @@ function Main({ me, onMe, web, logout }) {
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
         tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> :
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
-        tab === 'fin' ? <Finance /> : tab === 'pays' ? <PayDesk /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design key={designView || 'd'} me={me} initial={designView} /> :
+        tab === 'fin' ? <Finance key={finView || 'f'} initial={finView} /> : tab === 'pays' ? <PayDesk /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design key={designView || 'd'} me={me} initial={designView} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
         tab === 'mine' && (mop || carp || !me.zones.length) ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
         tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}

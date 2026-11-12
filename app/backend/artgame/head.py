@@ -60,9 +60,11 @@ def pulse(p: dict = Depends(require_head)):
             """SELECT a.at, a.action, a.entity_id, a.data, pe.full_name, pe.role_code
                FROM audit_log a JOIN people pe ON pe.id=a.person_id
                WHERE a.person_id<>%s AND a.action = ANY(%s) ORDER BY a.at DESC LIMIT 15""", (p["id"], list(FEED))).fetchall()
+        from .recurring import due_now   # постоянные оплаты на сегодня и просроченные (HEAD 12.11)
+        bills = [{k: x[k] for k in ("id", "title", "amount", "due", "status")} for x in due_now(conn)]
         week = one("""SELECT count(*) FILTER (WHERE status='approved') AS approved, count(*) FILTER (WHERE status='rejected') AS rejected,
                              count(DISTINCT person_id) AS people
                       FROM shifts WHERE started_at > now() - interval '7 days' AND status<>'cancelled'""")
     return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"]), "payments_sum": float(rv["payments_sum"])},
             "catalogs": catalogs, "media": media, "feedback": feedback, "dm": dm,
-            "today": today, "team": team, "feed": feed, "week": week}
+            "bills": bills, "today": today, "team": team, "feed": feed, "week": week}

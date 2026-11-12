@@ -833,3 +833,7 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 /* Каталог референсов: заметная кнопка «Посмотреть» (HEAD 11.11) */
 .catopen small { display: block; }
 .catopen small { color: var(--muted); font-weight: 400; font-size: 11px; }
+/* Постоянные оплаты (HEAD 12.11) */
+.row.bill { flex-wrap: wrap; }
+.row.bill .billmain { flex: 1; min-width: 0; cursor: pointer; }
+.row.bill .billmain b { overflow-wrap: anywhere; }
