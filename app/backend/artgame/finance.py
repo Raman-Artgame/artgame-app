@@ -63,8 +63,11 @@ def now_ym() -> str:
     return ym_of(datetime.now(TZ))
 
 
+NIGHT_KEYS = ("pay.night.from", "pay.night.to")   # время «22:00» / «06:00» — строкой, иначе ночь не считалась (найдено 12.11)
+
+
 def vals(conn) -> dict:
-    return {k: v for k, v in consts.latest(conn).items() if isinstance(v, (int, float))}
+    return {k: v for k, v in consts.latest(conn).items() if isinstance(v, (int, float)) or k in NIGHT_KEYS}
 
 
 def _f(x) -> float:
