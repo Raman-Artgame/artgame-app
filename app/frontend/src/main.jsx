@@ -23,6 +23,7 @@ import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
 import './tokens.css'
 import { MyData, ProfileForm } from './profile.jsx'
 import { FileLinks } from './objects.jsx'
+import { Closing } from './closing.jsx'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
   print_operator: 'Оператор настенного принтера', print_master: 'Мастер настенной печати', mop: 'МОП', mop_vip: 'VIP МОП',
@@ -142,12 +143,12 @@ function Main({ me, onMe, web, logout }) {
     ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []),
     ...(CHECKERS.has(me.role_code) ? [['review', 'Проверка']] : []),
     ...(KIT.has(role) ? [['kit', 'Сбор']] : []),
-    ...(role === 'head' ? [['design', 'Дизайн'], ['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда'], ['chat', 'Чат']] : [['chat', 'Чат']])]
+    ...(role === 'head' ? [['design', 'Дизайн'], ['fin', 'Финансы'], ['journal', 'Журнал'], ['people', 'Команда'], ['closing', 'Закрытие'], ['chat', 'Чат']] : [['chat', 'Чат']])]
   // Кабинет HEAD (08.11): Пульт · Проверка · Сделки · Финансы · Команда, остальное — в «Ещё», там же «Смотреть как».
   // HEAD 09.11 («кабинет — хаос, много дублей»): внизу 5 главных + «Ещё». Без Смены, Расхода, Кабинета, Места, Сбора и «Сегодня» —
   // у HEAD это дубли Пульта и Сделок. В «Ещё» — по важности.
   const HEAD_FIRST = ['review', 'deals', 'projects', 'fin']   // HEAD 09.11: проекты — на главную, команда — в «Ещё»
-  const HEAD_MORE = ['chat', 'people', 'prod', 'design', 'leads', 'study', 'journal']   // склад — в «Финансы → Закупки»; «Месяц» — в Пульте; «Место» и «Смотреть как» убраны (HEAD 09.11)
+  const HEAD_MORE = ['chat', 'closing', 'people', 'prod', 'design', 'leads', 'study', 'journal']   // склад — в «Финансы → Закупки»; «Месяц» — в Пульте; «Место» и «Смотреть как» убраны (HEAD 09.11)
   const menu = isHead ? [['home', 'Пульт'], ...HEAD_FIRST.map(k => tabs.find(x => x[0] === k)).filter(Boolean),
     ...HEAD_MORE.map(k => tabs.find(x => x[0] === k)).filter(Boolean)] : tabs
   // в «Кабинете» — обе роли; у «и.о.» — исполняемая и основная; у каждой — «Как подняться» (HEAD 09.11)
@@ -179,7 +180,7 @@ function Main({ me, onMe, web, logout }) {
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
         tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> :
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> :
-        tab === 'fin' ? <Finance /> : tab === 'pays' ? <PayDesk /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design key={designView || 'd'} me={me} initial={designView} /> :
+        tab === 'fin' ? <Finance /> : tab === 'closing' && isHead ? <Closing /> : tab === 'pays' ? <PayDesk /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design key={designView || 'd'} me={me} initial={designView} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
         tab === 'mine' && (mop || carp || !me.zones.length) ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
         tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
@@ -386,6 +387,7 @@ const ICON = {
   chat: 'M4 5h16v11H9l-5 4zM8 9h8M8 12h5',   // «Диалог с HEAD» (09.11)
   viewas: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   pays: 'M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5-2 1.5zM9 7.5h6M9 10.5h6M12 10.5v6',   // «Оплаты» (HEAD 10.11): чек со знаком ₸
+  closing: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4M9 16l2 2 4-4',   // «Закрытие» (HEAD 12.11): замок с галочкой
   more: 'M5 12h.01M12 12h.01M19 12h.01' }
 const Icon = ({ k }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[k] || ICON.more} /></svg>
 const MAX = 6   // кнопок в меню без листа «Ещё»
