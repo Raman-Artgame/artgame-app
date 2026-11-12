@@ -143,7 +143,7 @@ def _bx_kpi(ym: str) -> dict:
         names = {}
     items = []
     for d in lost:   # HEAD 10.11: по нажатию — список проигранных с причиной
-        if "ТЕСТ" in str(d.get("TITLE") or "").upper():
+        if bx.is_test(d):
             continue
         amt, by_deal = money(d.get(F_LOST)), False
         if not amt and money(d.get("OPPORTUNITY")):
@@ -152,8 +152,11 @@ def _bx_kpi(ym: str) -> dict:
                       "by_deal": by_deal, "reason": (d.get(F_REASON) or "").strip() or None,
                       "stage": names.get(d.get("STAGE_ID"), d.get("STAGE_ID")), "day": str(d.get("MOVED_TIME") or "")[:10]})
     items.sort(key=lambda x: -x["amount"])
-    done = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": list(DONE)}, "select": ["ID", F_DEBT]})
-    work = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": ["UC_AV00QK"]}, "select": ["ID", "OPPORTUNITY"]})
+    # тестовые сделки (1409, HEAD 11.11) не считаем ни в одной плитке
+    done = [d for d in bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": list(DONE)}, "select": ["ID", "TITLE", F_DEBT]})
+            if not bx.is_test(d)]
+    work = [d for d in bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": ["UC_AV00QK"]}, "select": ["ID", "TITLE", "OPPORTUNITY"]})
+            if not bx.is_test(d)]
     debt = [money(d.get(F_DEBT)) for d in done]
     return {"lost": {"sum": round(sum(x["amount"] for x in items)), "count": sum(1 for x in items if x["amount"] > 0), "items": items},
             "debt": {"sum": round(sum(debt)), "count": sum(1 for x in debt if x > 0)},
@@ -229,15 +232,17 @@ def kpi_detail(k: str, ym: str | None = None, p: dict = Depends(require_head)):
                              "Одобренные чеки «свои деньги», ещё не выплаченные.") + " Выплатить — «Финансы → ФОТ → К выплате в понедельник»."}
     if k == "debt":
         sel = ["ID", "TITLE", "STAGE_ID", "OPPORTUNITY", F_DEBT, "UF_CRM_ARTGAME_FIN03_RECEIVED"]
-        rows = [d for d in bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": list(DONE)}, "select": sel}) if money(d.get(F_DEBT)) > 0]
+        rows = [d for d in bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": list(DONE)}, "select": sel})
+                if money(d.get(F_DEBT)) > 0 and not bx.is_test(d)]
         rows.sort(key=lambda d: -money(d.get(F_DEBT)))
         return {"items": [{"title": f"№{d['ID']} " + str(d.get("TITLE") or "").split("·", 1)[-1].strip(), "amount": money(d.get(F_DEBT)),
                            "sub": f"сумма {money(d.get('OPPORTUNITY')):,.0f} · пришло {money(d.get('UF_CRM_ARTGAME_FIN03_RECEIVED')):,.0f}".replace(",", " ")
                                   + (" · работы сданы" if d.get("STAGE_ID") == "UC_BMKDS4" else " · «Успешно»")} for d in rows],
                 "note": "Сданные проекты, где в сделке есть долг (поле «Долг»). Ждём список долгов от HEAD — сверим."}
     if k == "in_work":
-        rows = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": ["UC_AV00QK"]},
-                                             "select": ["ID", "TITLE", "OPPORTUNITY", "UF_CRM_ARTGAME_FIN03_RECEIVED", F_DEBT]})
+        rows = [d for d in bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": ["UC_AV00QK"]},
+                                                         "select": ["ID", "TITLE", "OPPORTUNITY", "UF_CRM_ARTGAME_FIN03_RECEIVED", F_DEBT]})
+                if not bx.is_test(d)]
         rows.sort(key=lambda d: -money(d.get("OPPORTUNITY")))
         return {"items": [{"title": f"№{d['ID']} " + str(d.get("TITLE") or "").split("·", 1)[-1].strip(), "amount": money(d.get("OPPORTUNITY")),
                            "sub": f"пришло {money(d.get('UF_CRM_ARTGAME_FIN03_RECEIVED')):,.0f} · осталось {money(d.get(F_DEBT)):,.0f}".replace(",", " ")} for d in rows],

@@ -39,6 +39,7 @@ PAUSE = 0.5      # между записями в Битрикс: не боль�
 COUNT_UNCHECKED = True
 TZ = ZoneInfo("Asia/Almaty")
 CASH = "cash"                  # счёт «Наличные»: оплату можно внести без фото (HEAD 10.11)
+TEST_DEAL = "Тестовая сделка — оплаты в неё не вносим, в деньгах приложения её нет"
 HIST_FROM = date(2025, 1, 1)   # оплату задним числом вносим с 2025 года; до 01.11.2026 — в счёт «История»: в долг сделки, не в деньги ноября
 
 
@@ -169,8 +170,8 @@ def plan(conn, ids: list[int] | None = None) -> list[dict]:
     vat, out = _vat(), []
     for did in sorted(deals):
         d = deals[did]
-        if int(d.get("CATEGORY_ID") or 0) not in bx.CATEGORIES or not managed(d, led.get(did)):
-            continue
+        if int(d.get("CATEGORY_ID") or 0) not in bx.CATEGORIES or bx.is_test(d) or not managed(d, led.get(did)):
+            continue   # тестовую сделку (1409, HEAD 11.11) не считаем и итоги в неё не пишем
         tgt = target(d, led.get(did), vat)
         diff = changes(d, tgt)
         if diff:
@@ -309,6 +310,8 @@ def add_payment(deal_id: int, b: PaymentIn, bg: BackgroundTasks, p: dict = Depen
     cat = int(d.get("CATEGORY_ID") or 0)
     if cat not in bx.CATEGORIES:
         raise HTTPException(400, "оплату вносим по сделкам «Продажи РК» и «Дизайн РК»")
+    if bx.is_test(d):
+        raise HTTPException(400, TEST_DEAL)
     today = datetime.now(TZ).date()
     if not HIST_FROM <= b.op_date <= today:
         raise HTTPException(400, f"дата оплаты — с {HIST_FROM:%d.%m.%Y} по сегодня")
@@ -375,7 +378,7 @@ def pay_find(q: str = "", p: dict = Depends(active)):
     rows = bx._rows(bx.read("crm.deal.list", {"filter": flt, "order": {"ID": "DESC"},
                                               "select": ["ID", "TITLE", "STAGE_ID", "OPPORTUNITY", "ASSIGNED_BY_ID", "CATEGORY_ID"]}, fresh=True))
     st, names = bx.stages(), {u["id"]: u["name"] for u in bx.users()}
-    return [_brief(d, st, names) for d in rows[:12]]
+    return [_brief(d, st, names) for d in rows if not bx.is_test(d)][:12]
 
 
 @router.get("/pay/deals/{deal_id}")
@@ -385,6 +388,8 @@ def pay_deal(deal_id: int, p: dict = Depends(active)):
     d = _deal_for_pay(p, deal_id)
     if int(d.get("CATEGORY_ID") or 0) not in bx.CATEGORIES:
         raise HTTPException(400, "оплату вносим по сделкам «Продажи РК» и «Дизайн РК»")
+    if bx.is_test(d):
+        raise HTTPException(400, TEST_DEAL)
     return {**_brief(d), "pay": card(d)}
 
 
