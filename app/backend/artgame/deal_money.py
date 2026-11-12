@@ -292,7 +292,7 @@ def _income_receipt(conn, p: dict, name: str, data_url: str, deal_id: int) -> in
     try:
         drive_id = drive.save_income_receipt(conn, name, data_url, deal_id)
     except Exception as ex:  # Диск недоступен — запись останется в очереди телефона и уйдёт позже
-        raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+        raise drive.fail(ex)
     data, mime = drive.decode_data_url(data_url)
     # object_id 0: чек оплаты клиента не попадает в файлы объекта, которые видит команда на площадке
     return conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by)

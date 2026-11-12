@@ -90,7 +90,7 @@ def _save_receipt(conn, p: dict, zone: str, object_id: int, amount: float, data_
     try:
         drive_id = drive.save_receipt(conn, zone, name, data_url, deal_id=object_id or None)
     except Exception as ex:  # noqa: BLE001 — Диск недоступен: телефон повторит
-        raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+        raise drive.fail(ex)
     data, mime = drive.decode_data_url(data_url)
     return conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by)
                            VALUES (gen_random_uuid(), %s, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",

@@ -566,7 +566,7 @@ def closing_prod(deal_id: int, file_id: int, p: dict = Depends(require_head)):
             dr = drive.Drive()
             prod = dr.copy(f["drive_id"], drive.folder_of(conn, obj, "prod", dr, "photo"), f["name"])
         except Exception as ex:  # noqa: BLE001
-            raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+            raise drive.fail(ex)
         conn.execute("UPDATE files SET review='approved', reviewed_by=%s, reviewed_at=now(), prod_drive_id=%s WHERE id=%s", (p["id"], prod, file_id))
         db.audit(conn, p["id"], "media_review", "files", file_id, {"approve": True, "via": "closing", "deal": deal_id})
     return {"ok": True, "prod": True}
