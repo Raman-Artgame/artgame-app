@@ -1,5 +1,6 @@
 // Сквозной тест «Закрытие сделки через HEAD» (HEAD 12.11 «Да, по рекомендациям»). ГИП отмечает «Работы сданы» в карточке проекта;
-// МОП со стадии «Оплата+закрывающие документы» видит 11 пунктов (их проверяет приложение, руками ничего не отмечают) и жмёт
+// МОП со стадии «Оплата+закрывающие документы» видит 12 пунктов (их проверяет приложение, руками ничего не отмечают; 12-й —
+// Продакшн: фото или видео, утверждённые HEAD, HEAD 12.11) и жмёт
 // «На закрытие» — только когда всё выполнено; в «Оплата получена» сам перевести не может. HEAD: заявка на Пульте и в боте,
 // паспорт сделки (деньги, затраты, прибыль и маржа рядом с нормой, флаги, документы и фото), «Вернуть» с причиной и «Закрыть»
 // (сделка → «Оплата получена» + «Окончание факт», паспорт снимком, PDF в «ДОКУМЕНТЫ»). Закрытый объект не принимает смены;
@@ -126,17 +127,22 @@ async function closeStep(p) {
   await shot(g, 'close-gip-done')
   assert.strictEqual((await req(2000, '/objects/1710/done', { day: day(-1) })).status, 403, 'художник сдачу не отмечает')
 
-  // МОП переводит на «Оплата+закрывающие документы»: «На закрытие» закрыт — долг, АВР, смена на проверке
+  // Продакшн: ГИП загрузил видео с объекта («Продакшн» → «Загрузить») — ждёт «Утверждаю» HEAD (файл на фейковом Диске — от фото с объекта)
+  const vid = psql(`INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by, status, media_type, review)
+                    SELECT gen_random_uuid(), 1710, 'media', 'Процесс школа.mp4', 'video/mp4', 9000000, drive_id, ${people[3000]}, 'ready', 'video', 'pending'
+                    FROM files WHERE object_id=1710 AND kind='photo' ORDER BY id LIMIT 1 RETURNING id`)
+  // МОП переводит на «Оплата+закрывающие документы»: «На закрытие» закрыт — долг, АВР, Продакшн не утверждён, смена на проверке
   await e2e('/deal/1710', { STAGE_ID: 'UC_BMKDS4' })
   psql("UPDATE objects SET bitrix_stage='UC_BMKDS4' WHERE id=1710")
   const p = await open(b, 6000)
   let c = await closeStep(p)
   assert.strictEqual(await p.locator('.hero .steps > div').count(), 7)
   assert.match(await p.locator('.nextstep').textContent(), /Следующий шагЗакрытие.*На закрытие/)
-  assert.match(await c.locator('.panelhead .badge').textContent(), /^8 из 11$/)
-  assert.deepStrictEqual(await c.locator('.lockbox .miss').allTextContents(), ['Долг 0', 'АВР', 'Смены'])
+  assert.match(await c.locator('.panelhead .badge').textContent(), /^8 из 12$/)
+  assert.deepStrictEqual(await c.locator('.lockbox .miss').allTextContents(), ['Долг 0', 'АВР', 'Продакшн', 'Смены'])
   assert.deepStrictEqual(await c.locator('.ck.bad b').allTextContents(), ['Долг 0: поступило = сумме сделки', 'Подписанный акт (АВР)',
-    'Ни одной открытой или непроверенной смены'], 'сверху — что не выполнено')
+    'Продакшн: фото или видео, утверждённые HEAD', 'Ни одной открытой или непроверенной смены'], 'сверху — что не выполнено')
+  assert.match(await c.locator('.ck', { hasText: 'Продакшн:' }).textContent(), /ждут HEAD: 1«Продакшн» → «Загрузить» фото или видео с объекта, HEAD — «Утверждаю» · ГИП или Главный дизайнер$/)
   assert.strictEqual(await c.getByRole('button', { name: 'На закрытие' }).count(), 0, 'пока не всё — кнопки нет')
   assert.match(await c.locator('.ck', { hasText: 'Долг 0' }).textContent(), /долг 580\s000\s₸шаг «Оплата»/)
   assert.strictEqual(await c.locator('.cklist').getByRole('button', { name: 'Выполнено: 8 · показать' }).count(), 1)
@@ -159,16 +165,17 @@ async function closeStep(p) {
   assert.strictEqual(won.status, 409); assert.match(won.body.detail, /«На закрытие»/)
   assert.strictEqual((await req(6000, '/bx/deals/1710/close', {})).status, 409, 'с невыполненными пунктами заявку не отправить')
 
-  // доплата сверена, АВР в сделке, смена утверждена → все 11 пунктов, «На закрытие»
+  // доплата сверена, АВР в сделке, смена утверждена, HEAD утвердил видео в Продакшн → все 12 пунктов, «На закрытие»
+  await call(1000, `/media/${vid}/review`, { approve: true })
   await call(6000, '/bx/deals/1710/payment', { client_uid: uid(), amount: 580000, op_date: day(0), account: 'kaspi', receipt: CHEK, note: 'остаток' })
   await checkAll()
   await call(1000, `/shift/${s4.id}/review`, { approve: true })
   await e2e('/deal/1710', { UF_CRM_ARTGAME_DOC05_ACTS: FILE })
   await p.reload()
   c = await closeStep(p)
-  assert.match(await c.locator('.panelhead .badge').textContent(), /^11 из 11$/)
+  assert.match(await c.locator('.panelhead .badge').textContent(), /^12 из 12$/)
   assert.strictEqual(await c.locator('.lockbox').count(), 0)
-  assert.strictEqual(await c.locator('.ck').count(), 0); await c.getByRole('button', { name: 'Все 11 пунктов выполнены · показать' }).waitFor()
+  assert.strictEqual(await c.locator('.ck').count(), 0); await c.getByRole('button', { name: 'Все 12 пунктов выполнены · показать' }).waitFor()
   await fits(p, 'всё готово')
   await shot(p, 'close-mop-ready', c)
   await c.getByRole('button', { name: 'На закрытие' }).click()
@@ -214,7 +221,7 @@ async function closeStep(p) {
   assert.match(flags, new RegExp(`Срок сорван: сдали ${dmy(day(-1))}, по плану ${dmy(day(-3))} \\(\\+2 дн\\.\\)`))
   assert.match(flags, /Затраты выше расчёта: смен 4 при расчёте 3/)
   assert.ok(!flags.includes('Не выполнено'), 'пункты — в «Пунктах закрытия», не во флагах')
-  await h.locator('.card', { has: h.locator('h3', { hasText: 'Пункты закрытия' }) }).getByRole('button', { name: 'Все 11 пунктов выполнены · показать' }).waitFor()
+  await h.locator('.card', { has: h.locator('h3', { hasText: 'Пункты закрытия' }) }).getByRole('button', { name: 'Все 12 пунктов выполнены · показать' }).waitFor()
   assert.match(await h.locator('.card.decide').textContent(), new RegExp('На закрытие отправил Ануар · ' + dmy(day(0))))
   const fot = h.locator('.cgroup', { hasText: 'ФОТ' })
   await fot.locator('.row').click()
@@ -300,7 +307,7 @@ async function closeStep(p) {
   assert.ok(!/норм|модел/i.test(await h.locator('.passhero').textContent()), 'без нормы маржи — ни сравнения, ни пояснения')
   const dc = h.locator('.card.decide')
   await dc.locator('.lockbox').waitFor()
-  assert.match(await dc.locator('.lockbox').textContent(), /^🔒 «Принять закрытие» откроется, когда будут выполнены все пунктыНе выполнено \d+ из 11:.*Долг 0.*Фото объекта/)
+  assert.match(await dc.locator('.lockbox').textContent(), /^🔒 «Принять закрытие» откроется, когда будут выполнены все пунктыНе выполнено \d+ из 12:.*Долг 0.*Фото объекта.*Продакшн/)
   assert.strictEqual(await dc.getByRole('button', { name: /Принять|Закрыть/ }).count(), 0, 'без всех пунктов кнопки закрытия нет')
   const force = await req(1000, '/head/closing/1720/close', {})
   assert.strictEqual(force.status, 409, 'сервер тоже не закрывает'); assert.match(force.body.detail, /только когда выполнены все пункты\. Не выполнено: Долг 0/)
@@ -326,7 +333,7 @@ async function closeStep(p) {
   await h.locator('.closepanel .cklist').waitFor()
   await h.locator('.closepanel').getByRole('button', { name: 'Паспорт сделки', exact: true }).click()
   await dc.locator('.lockbox').waitFor()
-  assert.match(await dc.locator('.lockbox').textContent(), /^🔒 «Закрыть» откроется, когда будут выполнены все пунктыНе выполнено \d+ из 11:.*Окончание работ \(факт\).*Фото объекта/)
+  assert.match(await dc.locator('.lockbox').textContent(), /^🔒 «Закрыть» откроется, когда будут выполнены все пунктыНе выполнено \d+ из 12:.*Окончание работ \(факт\).*Фото объекта.*Продакшн/)
   assert.strictEqual(await dc.getByRole('button', { name: /Закрыть/ }).count(), 0, '«Закрыть всё равно» нет')
   await dc.getByRole('button', { name: 'Вернуть', exact: true }).waitFor()
   assert.strictEqual((await req(1000, '/head/closing/1730/close', {})).status, 409)

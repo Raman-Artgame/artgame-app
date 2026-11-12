@@ -3,7 +3,7 @@ import { api } from './api.js'
 import { Sheet } from './ui.jsx'
 import { Skeleton, cleanTitle } from './crm.jsx'
 
-// Закрытие сделки через HEAD (HEAD 12.11 «Да, по рекомендациям»). МОП: шаг «Закрытие» в карточке сделки — 11 пунктов
+// Закрытие сделки через HEAD (HEAD 12.11 «Да, по рекомендациям»). МОП: шаг «Закрытие» в карточке сделки — 12 пунктов (12-й — Продакшн, HEAD 12.11)
 // (их проверяет приложение) и кнопка «На закрытие». HEAD: заявки на Пульте, паспорт сделки, «Закрыть» или «Вернуть».
 const tg = n => Math.round(n || 0).toLocaleString('ru-RU') + ' ₸'
 const dm = s => s ? s.slice(0, 10).split('-').reverse().join('.') : '—'
@@ -248,7 +248,7 @@ export function Closing({ initial }) {
   return <>
     {toast && <div className="toast">{toast}</div>}
     <div className="card"><h2>Закрытие сделок</h2>
-      <p className="small muted">МОП отправляет сделку «На закрытие», когда выполнены все 11 пунктов. В «Оплата получена» её переводите вы — кнопкой «Закрыть» в паспорте. Пока хоть один пункт не выполнен, закрыть нельзя.</p>
+      <p className="small muted">МОП отправляет сделку «На закрытие», когда выполнены все пункты, в том числе Продакшн. В «Оплата получена» её переводите вы — кнопкой «Закрыть» в паспорте. Пока хоть один пункт не выполнен, закрыть нельзя.</p>
       {d.error && <p className="small why">{d.error}</p>}</div>
     <div className="card"><h3>Ждут решения · {d.sent.length}</h3>
       {!d.sent.length && <p className="small muted">Заявок нет.</p>}
