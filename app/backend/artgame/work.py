@@ -775,11 +775,13 @@ def review_list(p: dict = Depends(active)):
         for kind, t in TABLE.items():
             out[t] = conn.execute(
                 f"""SELECT x.*, o.title AS object_title, pe.full_name AS person_name, pe.role_code AS person_role,
+                           coalesce(pe.acting_role, pe.role_code) AS eff_role,
                            cb.full_name AS cur_name, {DIRECT_SQL} AS direct, {HAS_CUR_SQL} AS has_cur
                     FROM {t} x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id LEFT JOIN people cb ON cb.id=x.cur_by
                     WHERE x.status='submitted' AND {cond} ORDER BY x.created_at""", args).fetchall()
             for x in out[t]:
                 x["stage"] = stage_of(x)
+                x["need_stars"] = t == "shifts" and not x.get("cur_at") and x.get("eff_role") in STAR_ROLES
             if t == "shifts":
                 for x in out[t]:
                     if x["object_id"] == 0 and (x.get("kind") == "workshop" or x["person_role"] in PRINT_ROLES):
@@ -847,6 +849,30 @@ def fix_shift(item_id: int, b: FixIn, p: dict = Depends(active)):
 class Decision(BaseModel):
     approve: bool
     reason: str | None = None
+    stars: int | None = Field(default=None, ge=1, le=5)   # оценка HEAD (смены Главных и Про — обязательно)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+# HEAD 12.11: смены Главного художника и Художника-Про HEAD утверждает только со звёздами; остальным — по желанию
+STAR_ROLES = ("lead_artist", "artist_pro")
+
+
+def head_rate(conn, table: str, item_id: int, person_id: int, d: Decision, p: dict) -> None:
+    """Оценка HEAD при утверждении смены: 1–5★ + комментарий (1–2 — обязательно). Уже оценённую куратором не трогаем."""
+    if not d.approve:
+        return
+    row = conn.execute(f"SELECT cur_at FROM {table} WHERE id=%s", (item_id,)).fetchone()
+    if row and row["cur_at"]:
+        return
+    role = conn.execute("SELECT coalesce(acting_role, role_code) AS r FROM people WHERE id=%s", (person_id,)).fetchone()["r"]
+    if not d.stars:
+        if role in STAR_ROLES:
+            raise HTTPException(400, "Поставь оценку смене 1–5★")
+        return
+    note = (d.note or "").strip() or None
+    if d.stars <= 2 and not note:
+        raise HTTPException(400, "Оценка 1–2 — напиши, что не так")
+    conn.execute(f"UPDATE {table} SET cur_by=%s, cur_at=now(), cur_stars=%s, cur_note=%s WHERE id=%s", (p["id"], d.stars, note, item_id))
 
 
 @router.post("/{kind}/{item_id}/review")
@@ -860,10 +886,12 @@ def review(kind: str, item_id: int, d: Decision, p: dict = Depends(active)):
         raise HTTPException(403, "Куратор ставит оценку, утверждает HEAD")
     cond, args = review_filter(p)
     with db.pool.connection() as conn, conn.transaction():
-        ok = conn.execute(f"SELECT x.id FROM {t} x JOIN objects o ON o.id=x.object_id WHERE x.id=%s AND x.status='submitted' AND {cond}",
+        ok = conn.execute(f"SELECT x.id, x.person_id FROM {t} x JOIN objects o ON o.id=x.object_id WHERE x.id=%s AND x.status='submitted' AND {cond}",
                           [item_id, *args]).fetchone()
         if not ok:
             raise HTTPException(403, "cannot review")
+        if t == "shifts":
+            head_rate(conn, t, item_id, ok["person_id"], d, p)
         status = "approved" if d.approve else "rejected"
         extra = ", payout_status = CASE WHEN paid_by='own' THEN 'to_pay' ELSE payout_status END" if t == "expenses" and d.approve else ""
         conn.execute(f"UPDATE {t} SET status=%s, reason=%s, checked_by=%s, checked_at=now(){extra} WHERE id=%s",
