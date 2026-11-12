@@ -3,6 +3,7 @@ import { FeedbackInbox } from './feedback.jsx'
 import { api, setViewAs, viewAs } from './api.js'
 import { flush } from './queue.js'
 import { money } from './crm.jsx'
+import { LedgerForm } from './finance.jsx'
 import { Spark, mln } from './charts.jsx'
 import { closeAsks, useClosing } from './closing.jsx'
 
@@ -27,6 +28,9 @@ export function Pulse({ me, pulse, go }) {
   const [open, setOpen] = useState(null)   // HEAD 10.11: каждая плитка «Деньги» раскрывает расшифровку
   const [det, setDet] = useState({})
   const cl = useClosing(true)   // HEAD 12.11: сделки на закрытие и закрытые мимо паспорта — первыми
+  const [spend, setSpend] = useState(null)   // «+ Расход» (HEAD 12.11): форма журнала денег прямо на Пульте
+  const [spent, setSpent] = useState('')
+  const openSpend = () => { setSpent(''); api('/fin/dict').then(setSpend, e => setSpent(e.message)) }
   const toggle = k => {
     setOpen(open === k ? null : k)
     if (open !== k && !['profit', 'lost'].includes(k) && !det[k])
@@ -64,6 +68,9 @@ export function Pulse({ me, pulse, go }) {
       </div>
     </div>
 
+    <div className="card spendcard">{spend ? <><h3>Расход</h3>
+      <LedgerForm d={spend} spend cancel={() => setSpend(null)} done={() => { setSpend(null); setSpent('Записано в «Деньги».') }} /></>
+      : <><button onClick={openSpend}>+ Расход</button><p className="small muted">{spent || 'Аренда, коммуналка, покупка, своя трата — сумма, статья и чек. Чек ляжет в «06 РАСХОДЫ HEAD».'}</p></>}</div>
     {asks.length > 0 && <div className="card"><h3>Ждёт вашего решения</h3>
       {asks.map((a, i) => <div key={i} className={'qrow' + (a.red ? ' hot' : '')} onClick={() => go(a.k)}>
         <div className="qmain"><b>{a.t}</b><div className={'small ' + (a.hot ? 'why' : 'muted')}>{a.s}</div></div><span className="muted">›</span>
