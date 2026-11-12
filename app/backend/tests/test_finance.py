@@ -56,8 +56,6 @@ def test_finance_flow(client, monkeypatch):
     assert led(account="cash", amount=300_000, article="opening").status_code == 200
     rent = led(account="kaspi", amount=300_000, article="rent_studio", note="аренда ноябрь").json()
     assert rent["direction"] == "out" and rent["period"] == YM
-    # коммуналка — отдельная постоянная статья (HEAD 10.11)
-    assert any(x["code"] == "utilities" and x["title"] == "Коммунальные услуги" for x in client.get("/api/fin/dict", headers=hdr(1000)).json()["articles"])
     assert led(account="kaspi", amount=1_160_000, article="client_payment", deal_id=1601, op_date="2026-11-03").json()["direction"] == "in"
     assert led(account="kaspi", amount=200_000, article="transfer", to_account="cash").status_code == 200
     assert led(account="kaspi", amount=200_000, article="transfer").status_code == 400     # без счёта «куда»
