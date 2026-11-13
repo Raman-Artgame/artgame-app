@@ -64,3 +64,22 @@ def test_print_exam_rate(client, team):  # noqa: F811
     rate = {x["label"]: x["amount"] for x in client.get("/api/fin/my", headers=hdr(6200)).json()["rate"]}
     assert rate["Оператор настенного принтера · Смена 10 ч"] == 15000 and rate["Саппорт · Смена 10 ч"] == 10000, rate
     assert client.post(f"/api/people/{pid}", json={"no_print_exam": True}, headers=hdr(1000)).json()["print_exam_on"] is None
+
+
+def test_exam_is_grow_item(client, team):  # noqa: F811
+    """HEAD 13.11: пункт 1 пути «Оператор → Мастер» и дата экзамена в «Команде» — одно и то же."""
+    pid = client.post("/api/register", json={"full_name": "Оператор Путь"}, headers=hdr(6300)).json()["id"]
+    client.post(f"/api/people/{pid}", json={"role_code": "print_operator", "zones": ["print"]}, headers=hdr(1000))
+    # HEAD подтверждает пункт, который сотрудник сам не отмечал, и ставит дату
+    marks = client.post("/api/grow/confirm", json={"person_id": pid, "path": "print_operator", "idx": 0, "ok": True, "exam_on": "2026-11-01"},
+                        headers=hdr(1000)).json()["marks"]
+    assert marks[0]["confirmed_at"]
+    x = next(p for p in client.get("/api/grow/team", headers=hdr(1000)).json()["people"] if p["id"] == pid)
+    assert x["print_exam_on"] == "2026-11-01"
+    # снять в «Команде» — пункт тоже снимается; поставить дату в «Команде» — пункт подтверждён
+    client.post(f"/api/people/{pid}", json={"no_print_exam": True}, headers=hdr(1000))
+    x = next(p for p in client.get("/api/grow/team", headers=hdr(1000)).json()["people"] if p["id"] == pid)
+    assert x["print_exam_on"] is None and not x["marks"][0]["confirmed_at"]
+    client.post(f"/api/people/{pid}", json={"print_exam_on": "2026-11-03"}, headers=hdr(1000))
+    x = next(p for p in client.get("/api/grow/team", headers=hdr(1000)).json()["people"] if p["id"] == pid)
+    assert x["print_exam_on"] == "2026-11-03" and x["marks"][0]["confirmed_at"]
