@@ -104,12 +104,63 @@ def run(now: datetime | None = None) -> int:
     return sent
 
 
+def _fmt(x: float | None) -> str:
+    return f"{x:,.0f} ₸".replace(",", " ") if x else "сумма при оплате"
+
+
+def head_recurring(now: datetime | None = None) -> int:
+    """Постоянные оплаты HEAD (12.11): с 9:00 одно сообщение в день, пока есть что оплатить сегодня или просроченное."""
+    from .recurring import due_now
+    now = (now or datetime.now(timezone.utc)).astimezone(TZ)
+    if not DIGEST_HOUR <= now.hour < HOURS[1]:
+        return 0
+    today = now.date()
+    key = f"recurring:{today.isoformat()}"
+    sent = 0
+    with db.pool.connection() as conn:
+        bills = due_now(conn, today)   # заодно записывает автосписания
+        auto = conn.execute("""SELECT l.amount, r.title FROM fin_ledger l JOIN fin_recurring r ON split_part(l.source_ref, ':', 2) = r.id::text
+                               WHERE l.source='app' AND l.status='active' AND l.note LIKE 'Автосписание:%%'
+                                 AND (l.op_date = %s OR (l.created_at AT TIME ZONE 'Asia/Almaty')::date = %s) ORDER BY l.id""", (today, today)).fetchall()
+        if not bills and not auto:
+            return 0
+        heads = conn.execute("SELECT id, tg_id FROM people WHERE status='active' AND role_code='head' AND tg_id IS NOT NULL").fetchall()
+        for h in heads:
+            if conn.execute("SELECT 1 FROM notices WHERE person_id=%s AND key=%s", (h["id"], key)).fetchone():
+                continue
+            now_b = [b for b in bills if b["status"] == "today"]
+            late = [b for b in bills if b["status"] == "overdue"]
+            lines = ["💳 <b>Постоянные оплаты</b>"]
+            if now_b:
+                lines += ["Сегодня:"] + [f"• {b['title']} — {_fmt(b['amount'])}" for b in now_b]
+            if late:
+                lines += ["Просрочено:"] + [f"• {b['title']} — {_fmt(b['amount'])}, с {b['due'][8:10]}.{b['due'][5:7]}" for b in late]
+            if bills:
+                lines.append("Оплатите и нажмите «Оплачено» с чеком: Финансы → Деньги.")
+            if auto:
+                lines += ["Списано автоматически:"] + [f"• {a['title']} — {_fmt(float(a['amount']))}" for a in auto]
+                lines.append("Не та сумма — отмените строку в «Деньгах» и внесите верную.")
+            try:
+                SEND(h["tg_id"], "\n".join(lines))
+            except Exception as ex:
+                print(f"head {h['id']}: telegram {ex}")
+                continue
+            conn.execute("INSERT INTO notices (person_id, key) VALUES (%s, %s) ON CONFLICT DO NOTHING", (h["id"], key))
+            db.audit(conn, h["id"], "notify", data={"keys": [key], "bills": [b["id"] for b in bills]})
+            sent += 1
+    return sent
+
+
 def main():
     if not settings.bot_token:
         print("ARTGAME_BOT_TOKEN не задан — пропуск")
         return
     db.open_pool()
     print(f"sent={run()}")
+    try:
+        print(f"recurring={head_recurring()}")
+    except Exception as ex:  # noqa: BLE001 — не мешаем уведомлениям МОП
+        print(f"recurring: {ex}")
 
 
 if __name__ == "__main__":

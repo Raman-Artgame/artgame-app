@@ -16,7 +16,8 @@ DONE = ("WON",)
 WORK = "UC_AV00QK"   # «Выполнение проекта»: только такие сделки можно выбрать для смен, трат и сборов (HEAD 08.11)
 FOLDER_FIELD = "UF_CRM_ARTGAME_PROJECT_FOLDER_ID"
 # Условия объекта для смены (HEAD 08.11 — заполняет МОП, команда видит без выбора): сложность, площадь, адрес
-F_LEVEL, F_AREA, F_ADDR = "UF_CRM_ARTGAME_COMPLEXITY", "UF_CRM_ARTGAME_AREA_M2", "UF_CRM_1755520919823"  # папку сделки уже создаёт DRIVE01 — берём её, не плодим вторую
+F_LEVEL, F_AREA, F_ADDR = "UF_CRM_ARTGAME_COMPLEXITY", "UF_CRM_ARTGAME_AREA_M2", "UF_CRM_1755520919823"
+F_CITY, F_OBJECT = "UF_CRM_6881101914D8D", "UF_CRM_ARTGAME_OBJECT"  # папку сделки уже создаёт DRIVE01 — берём её, не плодим вторую
 
 
 class Gateway:
@@ -75,7 +76,7 @@ def fetch_deals() -> list[dict]:
     while start is not None:
         j = rd("crm.deal.list", {
             "filter": {"CATEGORY_ID": CATEGORY, "STAGE_ID": list(ACTIVE + DONE)},
-            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD, F_LEVEL, F_AREA, F_ADDR, "OPPORTUNITY"], "start": start})
+            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD, F_LEVEL, F_AREA, F_ADDR, F_CITY, F_OBJECT, "OPPORTUNITY"], "start": start})
         if isinstance(j, list):  # шлюз может вернуть сразу список
             out += j
             break
@@ -102,6 +103,41 @@ def _area(v) -> float | None:
         return None
 
 
+def _city(v) -> str | None:
+    if not v:
+        return None
+    try:
+        from .bx import city_name
+        return (city_name(v) or "").split(" (")[0].strip().upper() or None
+    except Exception:
+        return None
+
+
+def number_titles(deals: list[dict]) -> list[int]:
+    """Сделка в работе без номера в названии (заведена прямо в Битриксе, не через приложение) → «№ · ОБЪЕКТ — ГОРОД»,
+    как у всех (HEAD 13.11: «ШКОЛА КОСШЫ» 1711 без номера). Только этапы объекта (не WON), не больше 5 за проход."""
+    if not settings.bitrix_webhook:
+        return []
+    from . import bx, bxw
+    done = []
+    for d in deals:
+        if d["STAGE_ID"] not in ACTIVE or str(d.get("TITLE") or "").strip().startswith(f"{d['ID']} ·") or len(done) >= 5:
+            continue
+        name, city = split_title(d["ID"], d.get("TITLE") or "")
+        obj = (d.get(F_OBJECT) or "").strip() or name
+        if not obj:
+            continue
+        title = bx.make_title(int(d["ID"]), obj, city or _city(d.get(F_CITY)) or "")
+        try:
+            bxw.CALL("crm.deal.update", {"id": int(d["ID"]), "fields": {"TITLE": title}})
+        except Exception as ex:
+            print(f"title {d['ID']}: {ex}")
+            continue
+        d["TITLE"] = title
+        done.append(int(d["ID"]))
+    return done
+
+
 def upsert(conn, deals: list[dict]) -> list[int]:
     """Возвращает ID новых объектов. Сумма сделки не хранится: только оценка сложности по ней (promo.guess_level)."""
     from . import constants as consts
@@ -111,9 +147,12 @@ def upsert(conn, deals: list[dict]) -> list[int]:
     for d in deals:
         status = "done" if d["STAGE_ID"] in DONE else "active"
         title, city = split_title(d["ID"], d["TITLE"])
+        city = city or _city(d.get(F_CITY))   # в названии нет «— ГОРОД» (сделку завели прямо в Битриксе) — город из поля
         addr = d.get(F_ADDR)
         geo = parse_geo(addr)
         addr = (addr.split("|")[0].strip() or None) if isinstance(addr, str) else None
+        if addr and addr.lower().startswith("http"):
+            addr = None   # вместо адреса вставлена ссылка на карту — точку берём из неё, ссылку адресом не показываем
         guess = guess_level(v, _area(d.get(F_AREA)), d.get("OPPORTUNITY"))
         row = conn.execute(
             """INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at, level, area_m2, address, geo, level_guess)
@@ -138,7 +177,10 @@ def main():
         return
     p = db.open_pool()
     deals = fetch_deals()
+    titled = number_titles(deals)
     with p.connection() as conn:
+        if titled:
+            db.audit(conn, None, "deal_title_number", data={"deals": titled})
         new = upsert(conn, deals)
         made = 0
         for o in conn.execute("SELECT * FROM objects WHERE status='active' AND id<>0 AND folders='{}'").fetchall():

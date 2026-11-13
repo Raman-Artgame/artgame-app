@@ -1,7 +1,7 @@
 """Закрытие сделки через HEAD (HEAD 12.11 «Да, по рекомендациям»; документ «Закрытие сделки через HEAD»).
 
 В «Оплата получена» сделку переводит только HEAD. МОП со стадии «Оплата+закрывающие документы» жмёт «На закрытие» —
-кнопка работает, когда выполнены все 11 пунктов (их проверяет приложение, галочек руками нет). HEAD получает заявку
+кнопка работает, когда выполнены все 12 пунктов (их проверяет приложение, галочек руками нет). HEAD получает заявку
 на Пульт и в бот, открывает паспорт сделки: деньги, затраты, прибыль и маржа, план и факт, документы и фото, красные
 флаги. «Закрыть» — приложение само переводит сделку в «Оплата получена» и пишет «Окончание факт»; паспорт сохраняется
 навсегда (снимок), PDF — в папку сделки «ДОКУМЕНТЫ»; смены и расходы на объект больше не вносятся, даже задним числом.
@@ -9,6 +9,7 @@
 Решения HEAD 12.11: 1) отказы закрываются без HEAD, как раньше; 2) «Без документов (наличные/перевод)» — без договора,
 счёта и АВР; 3) прибыль и маржа — только у HEAD в приложении, в Битрикс не пишем; 4) сделку, которую перетащили
 в «Оплата получена» прямо в Битриксе, Пульт показывает красным — назад сама она не двигается.
+HEAD 12.11: закрыть — только когда выполнены все пункты; без Продакшн (фото или видео, утверждённые HEAD) — нельзя.
 """
 import sys
 from datetime import date, datetime
@@ -58,7 +59,7 @@ def _myco(d: dict) -> str:
     return MYCO.get(str(d.get("MYCOMPANY_ID") or ""), "не указано")
 
 
-# ---------- 11 пунктов ----------
+# ---------- 12 пунктов ----------
 
 def _obj(conn, did: int) -> dict:
     return conn.execute("""SELECT o.id, o.title, o.city, o.drive_folder, o.folders, o.gip_person_id, o.done_on, o.closed_at, o.status,
@@ -101,6 +102,16 @@ def checks(conn, d: dict, money: dict, o: dict | None = None) -> list[dict]:
                          AND coalesce(mime,'') LIKE 'image/%%'""", (did,)).fetchone()["n"] if o else 0
     add("photos", "Фото готового объекта", ph > 0, f"фото: {ph}" if ph else "фото нет",
         "фото «после» в смене или «Продакшн» → загрузить (ляжет в «МЕДИА / Отчёты»)", "ГИП")
+    # HEAD 12.11: «без продакшн нельзя было закрыть сделку» — считаем то, что HEAD утвердил в приложении (поштучно), а не папку Диска
+    pr = conn.execute("""SELECT count(*) FILTER (WHERE review='approved' AND coalesce(media_type, 'photo')='photo') AS photo,
+                                count(*) FILTER (WHERE review='approved' AND media_type='video') AS video,
+                                count(*) FILTER (WHERE review='approved' AND media_type='reels') AS reels,
+                                count(*) FILTER (WHERE kind='media' AND review='pending') AS wait
+                         FROM files WHERE object_id=%s AND status='ready' AND kind IN ('photo','media')""", (did,)).fetchone() if o else {}
+    got = [f"{t} {pr[k]}" for k, t in (("photo", "фото"), ("video", "видео"), ("reels", "рилс")) if pr.get(k)]
+    add("prod", "Продакшн: фото или видео, утверждённые HEAD", bool(got),
+        "в Продакшн: " + ", ".join(got) if got else f"ждут HEAD: {pr['wait']}" if pr.get("wait") else "ничего не загружено",
+        "«Продакшн» → «Загрузить» фото или видео с объекта, HEAD — «Утверждаю»", "ГИП или Главный дизайнер")
     ds = conn.execute("""SELECT count(*) AS n, count(*) FILTER (WHERE note ILIKE '%%утвержд%%') AS ok FROM files
                          WHERE object_id=%s AND status='ready' AND kind='design'""", (did,)).fetchone() if o else {"n": 0, "ok": 0}
     layout = bool(d.get(F_LAYOUT))
@@ -122,7 +133,7 @@ def checks(conn, d: dict, money: dict, o: dict | None = None) -> list[dict]:
 
 
 TITLES = {"debt": "Долг 0", "checked": "Оплаты сверены", "overpaid": "Переплата", "contract": "Подписанный договор", "invoice": "Счёт",
-          "act": "АВР", "end": "Окончание работ (факт)", "photos": "Фото объекта", "design": "Утверждённый дизайн",
+          "act": "АВР", "end": "Окончание работ (факт)", "photos": "Фото объекта", "prod": "Продакшн", "design": "Утверждённый дизайн",
           "shifts": "Смены", "expenses": "Расходы и командировка"}
 
 
@@ -454,7 +465,7 @@ def closing_one(deal_id: int, p: dict = Depends(require_head)):
 
 class DecideIn(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
-    points: list[str] = Field(default_factory=list, max_length=11)
+    points: list[str] = Field(default_factory=list, max_length=len(TITLES))
 
 
 def _people_of(conn, d: dict, o: dict) -> list[int]:

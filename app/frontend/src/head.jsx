@@ -3,6 +3,7 @@ import { FeedbackInbox } from './feedback.jsx'
 import { api, setViewAs, viewAs } from './api.js'
 import { flush } from './queue.js'
 import { money } from './crm.jsx'
+import { LedgerForm } from './finance.jsx'
 import { Spark, mln } from './charts.jsx'
 import { closeAsks, useClosing } from './closing.jsx'
 
@@ -27,6 +28,9 @@ export function Pulse({ me, pulse, go }) {
   const [open, setOpen] = useState(null)   // HEAD 10.11: каждая плитка «Деньги» раскрывает расшифровку
   const [det, setDet] = useState({})
   const cl = useClosing(true)   // HEAD 12.11: сделки на закрытие и закрытые мимо паспорта — первыми
+  const [spend, setSpend] = useState(null)   // «+ Расход» (HEAD 12.11): форма журнала денег прямо на Пульте
+  const [spent, setSpent] = useState('')
+  const openSpend = () => { setSpent(''); api('/fin/dict').then(setSpend, e => setSpent(e.message)) }
   const toggle = k => {
     setOpen(open === k ? null : k)
     if (open !== k && !['profit', 'lost'].includes(k) && !det[k])
@@ -43,6 +47,8 @@ export function Pulse({ me, pulse, go }) {
     r.appeals && { k: 'review', t: `Обращения на правку: ${r.appeals}`, s: 'не внёс вовремя или ошибся — утвердить или отклонить' },
     r.expenses && { k: 'review', t: `Расходы на проверке: ${r.expenses}`, s: `на ${money(r.expenses_sum)}` + (r.over_cap ? ` · ${r.over_cap} выше потолка цены` : ''), hot: r.expenses_late || r.over_cap },
     r.payments && { k: 'review', t: `Оплаты клиентов на сверку: ${r.payments}`, s: `на ${money(r.payments_sum)} · сверить чек и выписку` },
+    p.bills?.length && { k: 'fin:cash', t: `Оплатить сегодня: ${p.bills.length}`, s: p.bills.map(b => b.title + (b.amount ? ' ' + money(b.amount) : '')).join(' · '),
+      hot: p.bills.some(b => b.status === 'overdue') },
     p.pending.length && { k: 'people', t: `Ждут роли: ${p.pending.length}`, s: p.pending.map(x => x.full_name).join(', '), hot: true },
     p.catalogs && { k: 'design:cat', t: `Каталоги дизайна на утверждение: ${p.catalogs}`, s: 'утвердить или вернуть' },
     p.dm?.unread && { k: 'chat', t: `Чат: новых ${p.dm.unread}`, s: `от ${p.dm.people} чел. · ответить`, hot: true },
@@ -62,6 +68,9 @@ export function Pulse({ me, pulse, go }) {
       </div>
     </div>
 
+    <div className="card spendcard">{spend ? <><h3>Расход</h3>
+      <LedgerForm d={spend} spend cancel={() => setSpend(null)} done={() => { setSpend(null); setSpent('Записано в «Деньги».') }} /></>
+      : <><button onClick={openSpend}>+ Расход</button><p className="small muted">{spent || 'Аренда, коммуналка, покупка, своя трата — сумма, статья и чек. Чек ляжет в «06 РАСХОДЫ HEAD».'}</p></>}</div>
     {asks.length > 0 && <div className="card"><h3>Ждёт вашего решения</h3>
       {asks.map((a, i) => <div key={i} className={'qrow' + (a.red ? ' hot' : '')} onClick={() => go(a.k)}>
         <div className="qmain"><b>{a.t}</b><div className={'small ' + (a.hot ? 'why' : 'muted')}>{a.s}</div></div><span className="muted">›</span>

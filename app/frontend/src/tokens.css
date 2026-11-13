@@ -891,3 +891,7 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .passnums em { font-style: normal; font-size: 12px; color: var(--dark-muted); }
 .card.decide .dealbtns button { flex: 1 1 140px; padding: 13px 10px; font-size: 15px; }
 .qrow.hot .why { color: var(--hot); }
+/* Постоянные оплаты (HEAD 12.11) */
+.row.bill { flex-wrap: wrap; }
+.row.bill .billmain { flex: 1; min-width: 0; cursor: pointer; }
+.row.bill .billmain b { overflow-wrap: anywhere; }

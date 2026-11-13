@@ -80,7 +80,10 @@ def _f(x) -> float:
 def fin_dict(_: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         return {"accounts": conn.execute("SELECT code, title FROM fin_accounts WHERE active ORDER BY sort").fetchall(),
-                "articles": conn.execute("SELECT code, title, kind, plan_key FROM fin_articles WHERE active ORDER BY sort").fetchall(),
+                "articles": conn.execute("""SELECT code, title, kind, plan_key,
+                                            -- автосписание (HEAD 12.11): пишется само, в «+ Расход» не предлагаем
+                                            EXISTS (SELECT 1 FROM fin_recurring r WHERE r.article_code=fin_articles.code AND r.active AND r.auto) AS auto
+                                     FROM fin_articles WHERE active ORDER BY sort""").fetchall(),
                 "payees": conn.execute("SELECT id, name, grp FROM fin_payees WHERE status='active' ORDER BY grp, name").fetchall(),
                 "groups": GROUP_TITLE}
 

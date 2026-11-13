@@ -57,11 +57,12 @@ function Summary({ m }) {
   </>
 }
 
-function LedgerForm({ d, done, cancel }) {
-  const [v, set] = useState({ op_date: today(), account: d.accounts[0]?.code, article: 'client_payment', amount: '', to_account: '', deal_id: '', note: '', period: '', receipt: '' })
+// spend — «+ Расход» с Пульта (HEAD 12.11: «где мне вносить расходы … не особо удобно»): только расходные статьи
+export function LedgerForm({ d, done, cancel, spend }) {
+  const [v, set] = useState({ op_date: today(), account: d.accounts[0]?.code, article: spend ? 'other_expense' : 'client_payment', amount: '', to_account: '', deal_id: '', note: '', period: '', receipt: '' })
   const [busy, setBusy] = useState(false)
   const [e, setE] = useState('')
-  const arts = d.articles.filter(a => a.kind !== 'payroll')
+  const arts = d.articles.filter(a => a.kind !== 'payroll' && (!spend || (['fixed', 'variable', 'tax'].includes(a.kind) && !a.auto)))
   const kind = arts.find(a => a.code === v.article)?.kind
   const send = () => {
     setBusy(true); setE('')
@@ -74,11 +75,13 @@ function LedgerForm({ d, done, cancel }) {
       {Object.entries(KIND).filter(([k]) => arts.some(a => a.kind === k)).map(([k, t]) => <optgroup key={k} label={t}>
         {arts.filter(a => a.kind === k).map(a => <option key={a.code} value={a.code}>{a.title}</option>)}</optgroup>)}</select>
     <input inputMode="numeric" value={v.amount} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder="Сумма, ₸" />
-    <div className="segf">{d.accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>
+    {spend || d.accounts.length > 3 ? <select value={v.account} onChange={e => set({ ...v, account: e.target.value })}>
+      {d.accounts.map(a => <option key={a.code} value={a.code}>Откуда: {a.title}</option>)}</select>
+      : <div className="segf">{d.accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>}
     {kind === 'transfer' && <select value={v.to_account} onChange={e => set({ ...v, to_account: e.target.value })}>
       <option value="">Куда перевести…</option>{d.accounts.filter(a => a.code !== v.account).map(a => <option key={a.code} value={a.code}>{a.title}</option>)}</select>}
     <input type="date" value={v.op_date} onChange={e => set({ ...v, op_date: e.target.value })} />
-    {['fixed', 'variable', 'tax'].includes(kind) && <input type="month" value={v.period} onChange={e => set({ ...v, period: e.target.value })} title="За какой месяц (если не месяц даты)" />}
+    {!spend && ['fixed', 'variable', 'tax'].includes(kind) && <input type="month" value={v.period} onChange={e => set({ ...v, period: e.target.value })} title="За какой месяц (если не месяц даты)" />}
     {kind === 'income' && <input inputMode="numeric" value={v.deal_id} onChange={e => set({ ...v, deal_id: e.target.value.replace(/\D/g, '') })} placeholder="№ сделки в Битриксе" />}
     <input value={v.note} onChange={e => set({ ...v, note: e.target.value })} placeholder="Комментарий" />
     <label className="photo">{v.receipt ? <img src={v.receipt} alt="чек" /> : <span>📷 Чек / квитанция (по желанию)</span>}
@@ -92,14 +95,96 @@ function LedgerForm({ d, done, cancel }) {
 // оплата клиента, которую внёс МОП в сделке (HEAD 10.11), и HEAD её ещё не сверил
 const unchecked = x => x.source === 'app' && x.status === 'active' && !x.checked_at && ['client_payment', 'design_prepay'].includes(x.article_code)
 
+// График постоянных оплат (HEAD 12.11): в день оплаты — «Оплатить сегодня» здесь, на Пульте и в боте.
+// Аренды и счета — переводом с чеком (обязателен) или наличными; подписки — автосписание, пишутся сами.
+const RST = { overdue: ['просрочено', 'why'], today: ['сегодня', 'why'], soon: ['скоро', ''], later: ['', ''], paid: ['оплачено', 'ok'], off: ['в архиве', ''] }
+const MON = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+const dm = s => s ? new Date(s + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : ''
+const when = x => x.every === 'year' ? 'раз в год' : 'каждый месяц'
+const ORD = { overdue: 0, today: 1, soon: 2, later: 3, paid: 4, off: 5 }
+const bySoon = (a, b) => ORD[a.status] - ORD[b.status] || (a.due || '').localeCompare(b.due || '')
+export function Bills({ d, onPaid }) {
+  const [r, setR] = useState(null)
+  const [e, setE] = useState('')
+  const [pay, setPay] = useState(null)    // {id, amount, cash, receipt}
+  const [edit, setEdit] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const bank = d.accounts.filter(a => a.code !== 'cash')
+  const hasCash = d.accounts.some(a => a.code === 'cash')
+  const [acc, setAcc] = useState((bank[0] || d.accounts[0])?.code)
+  const load = () => api('/fin/recurring').then(setR, err(setE))
+  useEffect(() => { load() }, [])
+  const send = x => {
+    setBusy(true); setE('')
+    api(`/fin/recurring/${x.id}/pay`, { method: 'POST', body: { client_uid: uuid(), cycle: x.cycle, account: pay.cash ? 'cash' : acc, op_date: today(),
+      amount: +pay.amount, receipt: pay.receipt || null } })
+      .then(() => { setPay(null); load(); onPaid && onPaid() }, err(setE)).finally(() => setBusy(false))
+  }
+  const save = () => api(edit.id ? `/fin/recurring/${edit.id}` : '/fin/recurring', { method: 'POST',
+    body: { title: edit.title, article: edit.article, every: edit.every, day: +edit.day, month: edit.every === 'year' ? +edit.month : null,
+      auto: edit.auto, account: edit.account || 'kaspi', active: edit.active } }).then(() => { setEdit(null); load() }, err(setE))
+  if (!r) return <div className="card"><h3>Постоянные оплаты</h3><p className="small muted">{e || 'Загрузка…'}</p></div>
+  const open = x => pay?.id === x.id
+  const row = x => {
+    const [st, cls] = RST[x.status] || ['', '']
+    const can = ['overdue', 'today', 'soon'].includes(x.status)
+    return <div key={x.id} className="row bill" style={x.active ? null : { opacity: .5 }}>
+      <div className="billmain" onClick={() => setEdit({ ...x, month: x.month || 1 })} role="button">
+        <b>{x.title}</b> · {x.amount ? <span className="nowrap">{money(x.amount)}</span> : <span className="muted">сумма при оплате</span>}
+        <div className="small muted">{x.status === 'paid' && x.last_paid ? <><span className="ok">{x.auto ? 'списано' : 'оплачено'} {dm(x.last_paid.date)}</span> · дальше {dm(x.due)}</>
+          : <>{dm(x.due)}{st && <> · <span className={cls}>{st}</span></>}</>} · {when(x)}</div></div>
+      {can && !open(x) && <button className={'mini' + (['overdue', 'today'].includes(x.status) ? '' : ' ghost')}
+        onClick={() => setPay({ id: x.id, amount: x.amount ? String(x.amount) : '', cash: false, receipt: '' })}>Оплачено</button>}
+      {open(x) && <div className="dealedit" style={{ flexBasis: '100%' }}>
+        <input inputMode="numeric" value={pay.amount} onChange={v => setPay({ ...pay, amount: v.target.value.replace(/\D/g, '') })} placeholder="Сумма, ₸" />
+        <div className="seg"><button className={pay.cash ? 'ghost' : ''} onClick={() => setPay({ ...pay, cash: false })}>Переводом</button>
+          {hasCash && <button className={pay.cash ? '' : 'ghost'} onClick={() => setPay({ ...pay, cash: true })}>Наличными</button>}</div>
+        {!pay.cash && bank.length > 1 && <select value={acc} onChange={v => setAcc(v.target.value)}>{bank.map(a => <option key={a.code} value={a.code}>Со счёта: {a.title}</option>)}</select>}
+        <Receipt value={pay.receipt} pick={async f => setPay({ ...pay, receipt: await shrink(f) })} />
+        <p className="small muted">{pay.cash ? 'Наличными — чек по желанию.' : x.auto ? 'Автосписание — чек по желанию.' : 'Переводом — приложите чек, без него не сохранится.'}</p>
+        <div className="seg"><button disabled={busy || !(+pay.amount > 0) || (!pay.cash && !x.auto && !pay.receipt)} onClick={() => send(x)}>
+          Оплачено {+pay.amount > 0 ? money(+pay.amount) : ''}</button><button className="ghost" onClick={() => setPay(null)}>Отмена</button></div></div>}
+    </div>
+  }
+  const manual = r.items.filter(x => !x.auto && x.active).sort(bySoon), auto = r.items.filter(x => x.auto && x.active).sort(bySoon), off = r.items.filter(x => !x.active)
+  return <div className="card">
+    <div className="head"><h3>Постоянные оплаты</h3><b className="nowrap">{money(r.month_total)}<span className="small muted"> /мес</span></b></div>
+    {r.due.length > 0 ? <p className="small why">Оплатить сейчас: {r.due.length} на {money(r.due_total)}</p>
+      : <p className="small muted">Сегодня оплачивать нечего. В день оплаты напомню здесь, на Пульте и в боте.</p>}
+    {e && <p className="small why">{e}</p>}
+    {edit && <div className="dealedit">
+      <input value={edit.title} onChange={v => setEdit({ ...edit, title: v.target.value })} placeholder="Что оплачиваем" />
+      <select value={edit.article} onChange={v => setEdit({ ...edit, article: v.target.value })}>
+        <option value="">Статья расходов…</option>{r.articles.map(a => <option key={a.code} value={a.code}>{a.title}</option>)}</select>
+      <div className="segf"><button className={edit.every === 'month' ? 'on' : ''} onClick={() => setEdit({ ...edit, every: 'month' })}>Каждый месяц</button>
+        <button className={edit.every === 'year' ? 'on' : ''} onClick={() => setEdit({ ...edit, every: 'year' })}>Раз в год</button></div>
+      <div className="seg"><input inputMode="numeric" value={edit.day} onChange={v => setEdit({ ...edit, day: v.target.value.replace(/\D/g, '').slice(0, 2) })} placeholder="Число" />
+        {edit.every === 'year' && <select value={edit.month} onChange={v => setEdit({ ...edit, month: +v.target.value })}>{MON.map((n, i) => <option key={i} value={i + 1}>{n}</option>)}</select>}</div>
+      <div className="segf"><button className={edit.auto ? '' : 'on'} onClick={() => setEdit({ ...edit, auto: false })}>Плачу сам</button>
+        <button className={edit.auto ? 'on' : ''} onClick={() => setEdit({ ...edit, auto: true })}>Автосписание</button></div>
+      <p className="small muted">Сумма — из «Значений» по статье, здесь её не меняем. Нет суммы в «Значениях» — вводите при оплате.</p>
+      <div className="dealbtns"><button disabled={edit.title.trim().length < 2 || !edit.article || !(+edit.day >= 1 && +edit.day <= 31)} onClick={save}>Сохранить</button>
+        {edit.id && <button className="ghost" onClick={() => setEdit({ ...edit, active: !edit.active })}>{edit.active ? 'В архив' : 'Вернуть'}</button>}
+        <button className="ghost" onClick={() => setEdit(null)}>Отмена</button></div></div>}
+    {manual.map(row)}
+    {auto.length > 0 && <><p className="small muted sub">Автосписание: записывается само в день списания, в бот — «Списано». Не та сумма — отмените строку ниже в «Движении денег», платёж снова появится здесь.</p>{auto.map(row)}</>}
+    {!edit && <button className="ghost" onClick={() => setEdit({ title: '', article: '', every: 'month', day: '', month: 1, auto: false, account: 'kaspi', active: true })}>+ Постоянная оплата</button>}
+    {off.length > 0 && <details className="paidlog"><summary className="small">В архиве: {off.length}</summary>{off.map(row)}</details>}
+    {r.paid.length > 0 && <details className="paidlog"><summary className="small">Оплачено за 60 дней: {r.paid.length}</summary>
+      {r.paid.map(x => <div key={x.id} className="row"><div><b>{x.title}</b> · {money(+x.amount)}
+        <div className="small muted">{dm(x.op_date)} · {x.account}{x.auto ? ' · автосписание' : x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</div></div></div>)}</details>}
+  </div>
+}
+
 function Ledger({ m, d }) {
   const [rows, setRows] = useState(null)
   const [form, setForm] = useState(false)
   const [e, setE] = useState('')
   const load = () => api('/fin/ledger?ym=' + m).then(setRows, err(setE))
   useEffect(() => { setRows(null); load() }, [m])
-  const cancel = id => confirm('Отменить операцию? Она останется в журнале зачёркнутой.') && api(`/fin/ledger/${id}/cancel`, { method: 'POST' }).then(load, err(setE))
-  return <div className="card">
+  const cancel = id => confirm('Отменить операцию? Она останется в журнале зачёркнутой.') && api(`/fin/ledger/${id}/cancel`, { method: 'POST' }).then(() => { load(); setBk(k => k + 1) }, err(setE))
+  const [bk, setBk] = useState(0)   // «Постоянные оплаты» — заново после отмены строки
+  return <><Bills key={bk} d={d} onPaid={load} /><div className="card">
     <div className="head"><h3>Движение денег</h3>{!form && <button className="mini" onClick={() => setForm(true)}>+ Операция</button>}</div>
     {form && <LedgerForm d={d} cancel={() => setForm(false)} done={() => { setForm(false); load() }} />}
     {e && <p className="small why">{e}</p>}
@@ -116,7 +201,7 @@ function Ledger({ m, d }) {
       {x.status === 'active' && <button className="ghost mini" onClick={() => cancel(x.id)}>✕</button>}
     </div>)}
     {rows && !rows.length && !form && <p className="small muted">Операций за месяц нет. Начните с «Остаток на начало» по каждому счёту.</p>}
-  </div>
+  </div></>
 }
 
 function PayRow({ r, m, d, reload }) {
@@ -287,9 +372,9 @@ export function Overview({ openMonth }) {
   </>
 }
 
-export function Finance() {
+export function Finance({ initial }) {
   const [m, setM] = useState(ym())
-  const [t, setT] = useState('over')
+  const [t, setT] = useState(initial || 'over')
   const [d, setD] = useState(null)
   const [e, setE] = useState('')
   useEffect(() => { api('/fin/dict').then(setD, err(setE)) }, [])
