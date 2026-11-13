@@ -149,13 +149,13 @@ def costs(conn, did: int) -> dict:
     """Затраты по объекту: ФОТ по сменам (кто, часы, деньги), материалы и расходы по чекам, командировка, дизайн, продажи."""
     v = _vals(conn)
     rows = conn.execute("""SELECT s.id, s.person_id, s.started_at, s.ended_at, s.kind, s.trip, s.bonus, s.zone_code,
-                                  coalesce(s.role_code, pe.role_code) AS role, pe.full_name, r.title AS role_title
+                                  coalesce(s.role_code, pe.role_code) AS role, pe.print_exam_on, pe.full_name, r.title AS role_title
                            FROM shifts s JOIN people pe ON pe.id=s.person_id LEFT JOIN roles r ON r.code=coalesce(s.role_code, pe.role_code)
                            WHERE s.object_id=%s AND s.status='approved' ORDER BY s.started_at""", (did,)).fetchall()
     people: dict = {}
     warn: set = set()
     for s in rows:
-        pay, miss = finance.one_shift_pay(v, s["role"], s["kind"], s["started_at"], s["ended_at"])
+        pay, miss = finance.one_shift_pay(v, finance.rate_role(s["role"], s["print_exam_on"], s["started_at"]), s["kind"], s["started_at"], s["ended_at"])
         salary = s["role"] in finance.SALARY_ROLE
         if miss and not salary:
             warn.add(miss)

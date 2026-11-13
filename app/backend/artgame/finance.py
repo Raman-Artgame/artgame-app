@@ -30,9 +30,18 @@ TZ = ZoneInfo("Asia/Almaty")
 RATE = {"support": ("pay.support.shift", "pay.support.hour"), "artist": ("pay.artist.shift", "pay.artist.hour"),
         "artist_pro": ("pay.pro.shift", "pay.pro.hour"), "lead_artist": ("pay.chief.shift", "pay.chief.hour"),
         "print_operator": ("pay.print.operator", None), "print_master": ("pay.print.master", None),
+        "print_operator_exam": ("pay.print.operator_exam", None),   # оператор после экзамена (people.print_exam_on, HEAD 13.11)
         "carpenter": ("pay.carpenter.shift", "pay.carpenter.hour")}
 # «Мастерская» без проекта (HEAD 09.11): печать — своя ставка в час из «Значений»; нет ключа — как обычная смена (с предупреждением)
-WORKSHOP_RATE = {"print_master": "pay.print.master.workshop_hour", "print_operator": "pay.print.operator.workshop_hour"}
+WORKSHOP_RATE = {"print_master": "pay.print.master.workshop_hour", "print_operator": "pay.print.operator.workshop_hour",
+                 "print_operator_exam": "pay.print.operator.workshop_hour"}
+
+
+def rate_role(role: str | None, exam_on, started_at) -> str | None:
+    """Роль для ставки: оператор печати со сдачи экзамена (день в «Команде») — по pay.print.operator_exam (HEAD 13.11)."""
+    if role == "print_operator" and exam_on and started_at and started_at.astimezone(TZ).date() >= exam_on:
+        return "print_operator_exam"
+    return role
 # Роли на окладе (HEAD 06–07.11): плотник, дизайнер и главный дизайнер — сумма из «Значений».
 SALARY_ROLE = {"carpenter": "pay.carpenter.month", "designer_asst": "pay.design_assistant.month",
                "lead_designer": "pay.design.lead.month"}
@@ -388,7 +397,7 @@ def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
     one = "" if only_person is None else " AND payee_id IN (SELECT id FROM fin_payees WHERE person_id=%s)"
     conn.execute("UPDATE fin_accruals SET status='cancelled' WHERE period=%s AND status='active' AND kind <> 'manual'" + one,
                  (ym,) if only_person is None else (ym, only_person))
-    payees_ = conn.execute("""SELECT f.*, pe.role_code FROM fin_payees f LEFT JOIN people pe ON pe.id=f.person_id
+    payees_ = conn.execute("""SELECT f.*, pe.role_code, pe.print_exam_on FROM fin_payees f LEFT JOIN people pe ON pe.id=f.person_id
                               WHERE f.status='active'""" + ("" if only_person is None else " AND f.person_id=%s"),
                            () if only_person is None else (only_person,)).fetchall()
     revenue, rev_warn = (None, "")
@@ -420,7 +429,7 @@ def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
             by_role: dict[str, int] = {}
             for s in shifts:   # две роли (HEAD 08.11): каждая смена — по ставке своей роли
                 r = s["role_code"] or role
-                pay, miss = one_shift_pay(v, r, s["kind"], s["started_at"], s["ended_at"])
+                pay, miss = one_shift_pay(v, rate_role(r, f["print_exam_on"], s["started_at"]), s["kind"], s["started_at"], s["ended_at"])
                 missing = miss or missing
                 piece += pay
                 bonus += _f(s["bonus"])
@@ -598,13 +607,14 @@ def my_pay(ym: str | None = None, p: dict = Depends(active)):
         f = conn.execute("SELECT * FROM fin_payees WHERE person_id=%s", (p["id"],)).fetchone()
         v = vals(conn)
         roles = p.get("roles") or [p["role_code"]]
-        rate = my_rate(v, roles[0], f)
+        rroles = [rate_role(r, p.get("print_exam_on"), datetime.now(TZ)) for r in roles]   # оператор после экзамена — своя ставка
+        rate = my_rate(v, rroles[0], f)
         if p.get("reels") and v.get("pay.reels") and not any(x["label"].startswith("Рилс") for x in rate):   # «Оплачиваемые рилс» (HEAD 09.11)
             rate.append({"label": "Рилс после утверждения HEAD" + (f" (до {v['pay.reels.max']:g} в месяц)" if v.get("pay.reels.max") else ""),
                          "amount": v["pay.reels"]})
         for r in roles[1:]:   # вторая роль (HEAD 08.11): её ставки — отдельными строками с названием роли
             t = role_title(conn, r)
-            rate += [{**x, "label": f"{t} · {x['label']}"} for x in my_rate(v, r, None) if "Минимум" not in x["label"] and "Суточные" not in x["label"]]
+            rate += [{**x, "label": f"{t} · {x['label']}"} for x in my_rate(v, rate_role(r, p.get("print_exam_on"), datetime.now(TZ)), None) if "Минимум" not in x["label"] and "Суточные" not in x["label"]]
         if len(roles) > 1:
             t0 = role_title(conn, roles[0])
             rate = [x if " · " in x["label"] else {**x, "label": f"{t0} · {x['label']}"} for x in rate]

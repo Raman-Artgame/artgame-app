@@ -257,7 +257,7 @@ def decide(aid: int, d: Decision, p: dict = Depends(active)):
         raise HTTPException(403, "утверждает HEAD")
     if not d.approve and not (d.reason or "").strip():
         raise HTTPException(400, "reason required")
-    from .finance import now_ym, one_shift_pay, vals
+    from .finance import now_ym, one_shift_pay, rate_role, vals
     with db.pool.connection() as conn, conn.transaction():
         a = conn.execute("SELECT * FROM appeals WHERE id=%s AND status='submitted' FOR UPDATE", (aid,)).fetchone()
         if not a:
@@ -311,7 +311,9 @@ def decide(aid: int, d: Decision, p: dict = Depends(active)):
                              (start, end, x.get("area_m2", s["area_m2"]), x.get("work_done") or s["work_done"], p["id"], note, aid,
                               s["status"] != "approved" and closed, cur, a["cur_by"], a["cur_at"], a["cur_note"], s["id"]))
             else:   # принятая смена закрытого месяца: смену не трогаем, разница — строкой ФОТ текущего месяца
-                v, role = vals(conn), s["role_code"] or (conn.execute("SELECT role_code FROM people WHERE id=%s", (s["person_id"],)).fetchone()["role_code"])
+                pe = conn.execute("SELECT role_code, print_exam_on FROM people WHERE id=%s", (s["person_id"],)).fetchone()
+                v = vals(conn)
+                role = rate_role(s["role_code"] or pe["role_code"], pe["print_exam_on"], s["started_at"])
                 delta = round(one_shift_pay(v, role, s["kind"], start, end)[0] - one_shift_pay(v, role, s["kind"], s["started_at"], s["ended_at"])[0], 2)
         else:   # expense_fix
             e = conn.execute("SELECT * FROM expenses WHERE id=%s FOR UPDATE", (a["target_id"],)).fetchone()
