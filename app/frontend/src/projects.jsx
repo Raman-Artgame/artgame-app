@@ -5,6 +5,7 @@ import { Skeleton, cleanTitle, money } from './crm.jsx'
 import { Gallery } from './objects.jsx'
 import { More, shrink } from './work.jsx'
 import { DoneBox } from './closing.jsx'
+import { ProjChat } from './dm.jsx'
 
 // «Проекты» — общая вкладка (HEAD 06.11): кто где находится и сколько дней осталось до сдачи. Данные — сделки в работе
 // из Битрикса (срок из расчёта или договора) и смены из приложения (сделано, кто был на объекте последние дни).
@@ -71,17 +72,22 @@ function PCard({ x, onOpen }) {
 }
 
 function ProjectCard({ x, me, back, openDeal }) {
+  const [chat, setChat] = useState(false)
   const [st, cls] = STATE[x.state]
   const c = x.cond || {}
   const kv = [['Город', x.city], ['Адрес', x.address], ['Площадь', x.area ? `${x.area} м²` : ''], ['Сложность', x.level || 'МОП ещё не указал'],
     ['Старт', x.start ? dmy(x.start) : ''], ['Сдача', x.due ? dmy(x.due) : ''], ['Смены', x.norm.shifts ? `${x.done.shifts} из ${x.norm.shifts}` : x.done.shifts ? String(x.done.shifts) : ''],
     ['Состав по норме', x.norm.crew ? `${x.norm.crew} чел.` : ''], ['Сделано', x.done.m2 ? `${x.done.m2} м²` : ''], ['МОП', x.manager], ['ГИП', x.gip?.name || ''], ['Сумма', x.sum ? money(x.sum) : '']].filter(([, v]) => v)
+  if (chat) return <ProjChat id={x.id} back={() => { setChat(false); if (x.chat) x.chat.unread = 0 }} backText={'← ' + cleanTitle(x.title, x.id)} />
   return <>
     <div className="phero" style={x.cover ? { backgroundImage: `linear-gradient(180deg, rgba(11,11,13,.15), rgba(11,11,13,.85)), url(${x.cover})` } : undefined}>
       <button className="ghost mini back" onClick={back}>← Проекты</button>
       <div><span className={'badge ' + cls}>{st}</span><h1>{cleanTitle(x.title, x.id)}</h1>
         <p className="small">№ {x.id} · {leftText(x)}</p></div>
     </div>
+    {x.chat && <button className="pchatbtn" onClick={() => setChat(true)}>
+      <b>💬 Чат проекта{+x.chat.unread > 0 && <i className="cnt dmcnt">{x.chat.unread}</i>}</b>
+      <span>{x.chat.open ? 'бригада, ГИП, МОП и HEAD' : 'только чтение'} ›</span></button>}
     <div className="card">
       {x.working && <div className={'prog ' + (x.state === 'late' ? 'late' : x.progress >= 100 ? 'ok' : '')}><i style={{ width: pct(x) + '%' }} /></div>}
       <div className="conds light">{COND.map(([k, t]) => <span key={k} className={c[k] ? 'on' : ''}>{c[k] ? '● ' : ''}{t}</span>)}</div>

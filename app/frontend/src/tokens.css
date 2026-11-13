@@ -895,3 +895,13 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .row.bill { flex-wrap: wrap; }
 .row.bill .billmain { flex: 1; min-width: 0; cursor: pointer; }
 .row.bill .billmain b { overflow-wrap: anywhere; }
+/* чат проекта (HEAD 13.11) */
+button.pchatbtn { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; margin: 0 0 12px; padding: 14px; border-radius: var(--r2); background: var(--hotbg); color: var(--text); border: 1px solid var(--accent); font-weight: 700; text-align: left; }
+button.pchatbtn b { white-space: nowrap; font-size: 16px; }
+button.pchatbtn span { color: var(--accent2); font-weight: 600; font-size: 13px; text-align: right; }
+button.pchatbtn .cnt { margin-left: 6px; }
+button.pchatbtn:hover { background: var(--hotbg); }
+.dmav.proj { font-size: 15px; }
+.dmpic { display: block; max-width: 100%; max-height: 240px; border-radius: 10px; margin-bottom: 4px; }
+.dmwhobtn { margin: 4px 0 8px; }
+.dmmembers { margin-bottom: 10px; }

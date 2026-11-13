@@ -93,6 +93,11 @@ def projects(p: dict, fresh: bool = False) -> dict:
                                      WHERE s.object_id = ANY(%s) AND s.status <> 'rejected' AND s.started_at > now() - interval '4 days'
                                      ORDER BY s.object_id, pe.full_name""", (ids,)).fetchall():
                 who.setdefault(r["object_id"], []).append(r["full_name"])
+    chat = {}
+    if ids:
+        from .projchat import chats
+        with db.pool.connection() as conn:
+            chat = {c["id"]: c for c in chats(conn, p)}   # чат проекта (HEAD 13.11): кнопка в карточке — участникам и HEAD
     today, out = date.today(), []
     for d in rows:
         did = int(d["ID"])
@@ -125,7 +130,8 @@ def projects(p: dict, fresh: bool = False) -> dict:
                     "done": {"shifts": shifts_done, "m2": float(dn["m2"]) if dn else 0, "last": dn["last"].isoformat() if dn and dn["last"] else None},
                     "progress": progress, "people": who.get(did, []), "state": state,
                     "cond": cond.get(did, {}), "cover": cover.get(did), "files": nfiles.get(did, {"design": 0, "media": 0}),
-                    "now": now.get(did, []), "gip": gip.get(did)})
+                    "now": now.get(did, []), "gip": gip.get(did),
+                    "chat": {"unread": chat[did]["unread"], "open": chat[did]["open"]} if did in chat else None})
     order = {"late": 0, "today": 1, "quiet": 2, "idle": 3, "ok": 4, "soon": 5, "closing": 6}
     out.sort(key=lambda x: (order[x["state"]], x["left"] if x["left"] is not None else 999))
     return {"projects": out, "today": today.isoformat(),
