@@ -6,6 +6,7 @@
   «Утверждённые дизайны» — первыми и обложкой (sync_designs; таймер объектов и первый показ карточки).
 - Ход работ: сделано м² по сменам, этапы, лента фото «до / после» из смен, карта по адресу сделки.
 """
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
@@ -45,14 +46,21 @@ def guess_level(v: dict, area, amount) -> str | None:
 
 def parse_geo(addr) -> str | None:
     """Адрес сделки «улица|широта;долгота|…» → «широта;долгота»."""
-    if not isinstance(addr, str) or "|" not in addr:
+    if not isinstance(addr, str):
         return None
-    part = addr.split("|")[1].strip()
+    parts = addr.split("|")
     try:
-        lat, lon = (float(x) for x in part.split(";"))
-    except ValueError:
-        return None
-    return f"{lat};{lon}"
+        lat, lon = (float(x) for x in parts[1].strip().split(";"))
+        if lat or lon:
+            return f"{lat};{lon}"
+    except (ValueError, IndexError):
+        pass
+    # точка «0;0», а в адрес вставлена ссылка 2ГИС «…/geo/<id>/<долгота>,<широта>» (сделка 1711, 13.11) — берём из ссылки
+    m = _GIS.search(parts[0])
+    return f"{float(m.group(2))};{float(m.group(1))}" if m else None
+
+
+_GIS = re.compile(r"2gis\.[a-z]+/.*?(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)")
 
 
 def map_url(city, address, geo) -> str | None:

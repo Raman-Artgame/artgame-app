@@ -174,3 +174,21 @@ def test_office_has_no_files(client, fake):
     assert 0 not in [o["id"] for o in client.get("/api/objects", headers=hdr(2000)).json()]
     body = {"client_uid": str(uuid.uuid4()), "data": "data:image/jpeg;base64,/9j/AA=="}
     assert client.post("/api/objects/0/photos", json=body, headers=hdr(2000)).status_code == 400
+
+
+def test_deal_from_bitrix_city_geo(client, fake, monkeypatch):
+    """HEAD 13.11: «ШКОЛА КОСШЫ» (1711) заведена прямо в Битриксе — без номера, без города в названии, вместо адреса ссылка 2ГИС."""
+    from artgame import bx, sync_objects
+    from artgame.promo import parse_geo
+    monkeypatch.setattr(bx, "city_name", lambda v: "Астана (Нур-Султан)" if str(v) == "12077" else "")
+    url = "https://2gis.kz/astana/geo/70030077198628630/71.376512,50.990932|0;0|1975"
+    deals = [{"ID": "1711", "TITLE": "ШКОЛА КОСШЫ", "STAGE_ID": "UC_AV00QK", "CATEGORY_ID": "0", "UF_CRM_6881101914D8D": "12077",
+              "UF_CRM_ARTGAME_OBJECT": "Школа Косшы", "UF_CRM_1755520919823": url},
+             {"ID": "1693", "TITLE": "1693 · АКАДЕМИЯ БОЛАШАК — КАРАГАНДА", "STAGE_ID": "UC_AV00QK", "CATEGORY_ID": "0"},
+             {"ID": "640", "TITLE": "Школа", "STAGE_ID": "WON", "CATEGORY_ID": "0"}]
+    with db.pool.connection() as c:
+        sync_objects.upsert(c, deals)
+        o = c.execute("SELECT title, city, address, geo FROM objects WHERE id=1711").fetchone()
+    assert (o["title"], o["city"], o["address"], o["geo"]) == ("ШКОЛА КОСШЫ", "АСТАНА", None, "50.990932;71.376512")
+    assert parse_geo("Караганда Ерубаева 16/6|;|1969") is None and parse_geo("x|0;0|1") is None
+    assert parse_geo("ул|42.31;69.58|1") == "42.31;69.58"

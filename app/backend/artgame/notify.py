@@ -121,7 +121,7 @@ def head_recurring(now: datetime | None = None) -> int:
         bills = due_now(conn, today)   # заодно записывает автосписания
         auto = conn.execute("""SELECT l.amount, r.title FROM fin_ledger l JOIN fin_recurring r ON split_part(l.source_ref, ':', 2) = r.id::text
                                WHERE l.source='app' AND l.status='active' AND l.note LIKE 'Автосписание:%%'
-                                 AND (l.created_at AT TIME ZONE 'Asia/Almaty')::date = %s ORDER BY l.id""", (today,)).fetchall()
+                                 AND (l.op_date = %s OR (l.created_at AT TIME ZONE 'Asia/Almaty')::date = %s) ORDER BY l.id""", (today, today)).fetchall()
         if not bills and not auto:
             return 0
         heads = conn.execute("SELECT id, tg_id FROM people WHERE status='active' AND role_code='head' AND tg_id IS NOT NULL").fetchall()
