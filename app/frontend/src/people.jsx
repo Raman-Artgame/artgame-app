@@ -96,6 +96,9 @@ function PersonRow({ p, open, flip, ROLE, ZONE, bx, save, setRole }) {
           <option value={0}>— не связан —</option>
           {(bx || []).map(u => <option key={u.id} value={u.id}>{u.name}{u.position ? ` · ${u.position}` : ''}</option>)}
         </select></label>}
+      {(p.role_code === 'print_operator' || (p.extra_roles || []).includes('print_operator')) && <label className="small muted">Сдал экзамен оператора <span>· с этого дня принтерные смены — по ставке после экзамена из «Значений»; саппортом — по-прежнему</span>
+        <div className="pair"><input type="date" defaultValue={p.print_exam_on || ''} onBlur={e => e.target.value && e.target.value !== p.print_exam_on && save(p.id, { print_exam_on: e.target.value })} />
+          {p.print_exam_on && <button className="ghost mini" onClick={() => confirm('Снять отметку экзамена?') && save(p.id, { no_print_exam: true })}>Снять</button>}</div></label>}
       <label className="small muted">Город сотрудника <span>· объект в другом городе — командировка: дорога как смена и суточные</span>
         <input defaultValue={p.city || ''} placeholder="Астана" onBlur={e => e.target.value.trim() !== (p.city || '') && save(p.id, { city: e.target.value })} /></label>
       <IssuedEdit person={p} />

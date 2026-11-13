@@ -43,3 +43,24 @@ def test_dual_role(client, team):  # noqa: F811
     assert float(piece["amount"]) == 10000 + 15000 * 2 and "Саппорт 1" in piece["detail"]
     rate = client.get("/api/fin/my", headers=hdr(6100)).json()["rate"]
     assert {x["label"] for x in rate} >= {"Оператор настенного принтера · Смена 10 ч", "Саппорт · Смена 10 ч"}
+
+
+def test_print_exam_rate(client, team):  # noqa: F811
+    """HEAD 13.11 (Арслан): оператор после экзамена — pay.print.operator_exam с дня экзамена, саппортом — по-прежнему ставка саппорта."""
+    pid = client.post("/api/register", json={"full_name": "Арслан Оператор"}, headers=hdr(6200)).json()["id"]
+    client.post(f"/api/people/{pid}", json={"role_code": "print_operator", "zones": ["print", "mural"], "extra_roles": ["support"]}, headers=hdr(1000))
+    with db.pool.connection() as c:
+        c.execute("""UPDATE constants_versions SET values = values || '{"pay.print.operator": {"value": "10000", "status": "Утверждено", "who": "head"},
+                     "pay.print.operator_exam": {"value": "15000", "status": "Утверждено", "who": "head"}}'::jsonb""")
+    assert client.post(f"/api/people/{pid}", json={"print_exam_on": "2026-11-04"}, headers=hdr(1000)).json()["print_exam_on"] == "2026-11-04"
+    _shift(client, 6200, "print", 3)    # до экзамена — 10 000
+    _shift(client, 6200, "print", 4)    # с дня экзамена — 15 000
+    _shift(client, 6200, "mural", 5)    # саппорт — 10 000
+    with db.pool.connection() as c:
+        c.execute("UPDATE shifts SET status='approved' WHERE person_id=%s", (pid,))
+    out = client.post("/api/fin/payroll/2026-11/compute", headers=hdr(1000)).json()
+    row = next(r for r in out["rows"] if r["name"] == "Арслан Оператор")
+    assert float(next(l for l in row["lines"] if l["kind"] == "piece")["amount"]) == 10000 + 15000 + 10000
+    rate = {x["label"]: x["amount"] for x in client.get("/api/fin/my", headers=hdr(6200)).json()["rate"]}
+    assert rate["Оператор настенного принтера · Смена 10 ч"] == 15000 and rate["Саппорт · Смена 10 ч"] == 10000, rate
+    assert client.post(f"/api/people/{pid}", json={"no_print_exam": True}, headers=hdr(1000)).json()["print_exam_on"] is None
