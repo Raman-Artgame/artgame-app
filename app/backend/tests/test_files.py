@@ -176,16 +176,21 @@ def test_office_has_no_files(client, fake):
     assert client.post("/api/objects/0/photos", json=body, headers=hdr(2000)).status_code == 400
 
 
-def test_deal_from_bitrix_city_geo(client, fake, monkeypatch):
+def test_deal_without_number_gets_title_city_geo(client, fake, monkeypatch):
     """HEAD 13.11: «ШКОЛА КОСШЫ» (1711) заведена прямо в Битриксе — без номера, без города в названии, вместо адреса ссылка 2ГИС."""
-    from artgame import bx, sync_objects
+    from artgame import bx, bxw, sync_objects
     from artgame.promo import parse_geo
+    calls = []
+    monkeypatch.setattr(sync_objects.settings, "bitrix_webhook", "https://example/rest/1/x/")
+    monkeypatch.setattr(bxw, "CALL", lambda m, p: calls.append((m, p)) or {"result": True})
     monkeypatch.setattr(bx, "city_name", lambda v: "Астана (Нур-Султан)" if str(v) == "12077" else "")
     url = "https://2gis.kz/astana/geo/70030077198628630/71.376512,50.990932|0;0|1975"
     deals = [{"ID": "1711", "TITLE": "ШКОЛА КОСШЫ", "STAGE_ID": "UC_AV00QK", "CATEGORY_ID": "0", "UF_CRM_6881101914D8D": "12077",
               "UF_CRM_ARTGAME_OBJECT": "Школа Косшы", "UF_CRM_1755520919823": url},
              {"ID": "1693", "TITLE": "1693 · АКАДЕМИЯ БОЛАШАК — КАРАГАНДА", "STAGE_ID": "UC_AV00QK", "CATEGORY_ID": "0"},
              {"ID": "640", "TITLE": "Школа", "STAGE_ID": "WON", "CATEGORY_ID": "0"}]
+    assert sync_objects.number_titles(deals) == [1711]   # с номером и закрытые не трогаем
+    assert calls == [("crm.deal.update", {"id": 1711, "fields": {"TITLE": "1711 · ШКОЛА КОСШЫ — АСТАНА"}})]
     with db.pool.connection() as c:
         sync_objects.upsert(c, deals)
         o = c.execute("SELECT title, city, address, geo FROM objects WHERE id=1711").fetchone()

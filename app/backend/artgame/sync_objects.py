@@ -17,7 +17,7 @@ WORK = "UC_AV00QK"   # «Выполнение проекта»: только т�
 FOLDER_FIELD = "UF_CRM_ARTGAME_PROJECT_FOLDER_ID"
 # Условия объекта для смены (HEAD 08.11 — заполняет МОП, команда видит без выбора): сложность, площадь, адрес
 F_LEVEL, F_AREA, F_ADDR = "UF_CRM_ARTGAME_COMPLEXITY", "UF_CRM_ARTGAME_AREA_M2", "UF_CRM_1755520919823"
-F_CITY, F_OBJECT = "UF_CRM_6881101914D8D", "UF_CRM_ARTGAME_OBJECT"
+F_CITY, F_OBJECT = "UF_CRM_6881101914D8D", "UF_CRM_ARTGAME_OBJECT"  # папку сделки уже создаёт DRIVE01 — берём её, не плодим вторую
 
 
 class Gateway:
@@ -113,6 +113,31 @@ def _city(v) -> str | None:
         return None
 
 
+def number_titles(deals: list[dict]) -> list[int]:
+    """Сделка в работе без номера в названии (заведена прямо в Битриксе, не через приложение) → «№ · ОБЪЕКТ — ГОРОД»,
+    как у всех (HEAD 13.11: «ШКОЛА КОСШЫ» 1711 без номера). Только этапы объекта (не WON), не больше 5 за проход."""
+    if not settings.bitrix_webhook:
+        return []
+    from . import bx, bxw
+    done = []
+    for d in deals:
+        if d["STAGE_ID"] not in ACTIVE or str(d.get("TITLE") or "").strip().startswith(f"{d['ID']} ·") or len(done) >= 5:
+            continue
+        name, city = split_title(d["ID"], d.get("TITLE") or "")
+        obj = (d.get(F_OBJECT) or "").strip() or name
+        if not obj:
+            continue
+        title = bx.make_title(int(d["ID"]), obj, city or _city(d.get(F_CITY)) or "")
+        try:
+            bxw.CALL("crm.deal.update", {"id": int(d["ID"]), "fields": {"TITLE": title}})
+        except Exception as ex:
+            print(f"title {d['ID']}: {ex}")
+            continue
+        d["TITLE"] = title
+        done.append(int(d["ID"]))
+    return done
+
+
 def upsert(conn, deals: list[dict]) -> list[int]:
     """Возвращает ID новых объектов. Сумма сделки не хранится: только оценка сложности по ней (promo.guess_level)."""
     from . import constants as consts
@@ -152,7 +177,10 @@ def main():
         return
     p = db.open_pool()
     deals = fetch_deals()
+    titled = number_titles(deals)
     with p.connection() as conn:
+        if titled:
+            db.audit(conn, None, "deal_title_number", data={"deals": titled})
         new = upsert(conn, deals)
         made = 0
         for o in conn.execute("SELECT * FROM objects WHERE status='active' AND id<>0 AND folders='{}'").fetchall():
