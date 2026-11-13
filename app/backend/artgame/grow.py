@@ -6,6 +6,8 @@
   Мастер печати — операторов, Главный дизайнер — дизайнеров; остальное — HEAD.
 - Путь считается от основной роли (у и.о. — от неё же: путь к роли, которую он исполняет).
 """
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -16,6 +18,7 @@ router = APIRouter(prefix="/api/grow")
 
 MENTORS = {"support": {"lead_artist", "artist_pro"}, "artist": {"lead_artist", "artist_pro"}, "lead_artist": {"artist_pro"},
            "print_operator": {"print_master"}, "designer_asst": {"lead_designer"}}
+EXAM = ("print_operator", 0)   # пункт «Экзамен оператора сдан Мастеру» = people.print_exam_on (ставка после экзамена, HEAD 13.11)
 PATHS = {"support", "artist", "lead_artist", "artist_pro", "print_operator", "print_master", "designer_asst", "lead_designer", "mop", "mop_vip"}
 
 
@@ -89,7 +92,7 @@ def team(p: dict = Depends(active)):
     if not paths:
         return {"people": []}
     with db.pool.connection() as conn:
-        people = conn.execute("""SELECT pe.id, pe.full_name, pe.role_code AS path, r.title AS role_title, pe.acting_role
+        people = conn.execute("""SELECT pe.id, pe.full_name, pe.role_code AS path, r.title AS role_title, pe.acting_role, pe.print_exam_on
                                    FROM people pe JOIN roles r ON r.code = pe.role_code
                                   WHERE pe.status = 'active' AND pe.role_code = ANY(%s) AND pe.id <> %s ORDER BY pe.full_name""",
                               (paths, p["id"])).fetchall()
@@ -104,6 +107,20 @@ class Confirm(BaseModel):
     idx: int = Field(ge=0, lt=100)
     ok: bool
     note: str | None = Field(default=None, max_length=500)
+    exam_on: date | None = None   # для пункта экзамена оператора: с какого дня ставка после экзамена
+
+
+def set_exam(conn, person_id: int, by: int, on: date | None):
+    """Экзамен оператора: дата в «Команде» и пункт 1 пути «Оператор → Мастер» — одно и то же (HEAD 13.11)."""
+    conn.execute("UPDATE people SET print_exam_on=%s, updated_at=now() WHERE id=%s", (on, person_id))
+    if on:
+        conn.execute("""INSERT INTO grow_marks (person_id, path, idx, marked_at, confirmed_by, confirmed_at) VALUES (%s, %s, %s, now(), %s, now())
+                        ON CONFLICT (person_id, path, idx) DO UPDATE SET marked_at = coalesce(grow_marks.marked_at, now()), confirmed_by = %s,
+                               confirmed_at = coalesce(grow_marks.confirmed_at, now()), returned_by = NULL, returned_at = NULL, updated_at = now()""",
+                     (person_id, *EXAM, by, by))
+    else:
+        conn.execute("""UPDATE grow_marks SET marked_at = NULL, confirmed_by = NULL, confirmed_at = NULL, updated_at = now()
+                        WHERE person_id=%s AND path=%s AND idx=%s""", (person_id, *EXAM))
 
 
 @router.post("/confirm")
@@ -128,5 +145,7 @@ def confirm(b: Confirm, p: dict = Depends(active)):
                             ON CONFLICT (person_id, path, idx) DO UPDATE SET marked_at = NULL, confirmed_by = NULL, confirmed_at = NULL,
                                    returned_by = %s, returned_at = now(), note = %s, updated_at = now()""",
                          (b.person_id, b.path, b.idx, p["id"], b.note, p["id"], b.note))
+        if (b.path, b.idx) == EXAM:
+            set_exam(conn, b.person_id, p["id"], (b.exam_on or date.today()) if b.ok else None)
         db.audit(conn, p["id"], "grow_confirm" if b.ok else "grow_return", "person", b.person_id, {"path": b.path, "idx": b.idx, "note": b.note})
         return {"marks": _rows(conn, b.person_id, b.path)}

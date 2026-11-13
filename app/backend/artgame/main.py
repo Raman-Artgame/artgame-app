@@ -218,7 +218,8 @@ def assign(person_id: int, body: AssignIn, head: dict = Depends(require_head)):
         if body.acting_promo is not None:
             conn.execute("UPDATE people SET acting_promo=%s, updated_at=now() WHERE id=%s", (body.acting_promo, person_id))
         if body.print_exam_on is not None or body.no_print_exam:
-            conn.execute("UPDATE people SET print_exam_on=%s, updated_at=now() WHERE id=%s", (None if body.no_print_exam else body.print_exam_on, person_id))
+            from .grow import set_exam   # дата экзамена = пункт 1 пути «Оператор → Мастер печати»
+            set_exam(conn, person_id, head["id"], None if body.no_print_exam else body.print_exam_on)
         if body.acting_note is not None:
             conn.execute("UPDATE people SET acting_note=%s, updated_at=now() WHERE id=%s", (body.acting_note.strip() or None, person_id))
         if body.zones is not None:

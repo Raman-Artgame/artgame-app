@@ -43,11 +43,21 @@ export function TeamPath({ head }) {
   useEffect(() => { api('/grow/team').then(d => setList(d.people), () => setList([])); api('/work/dict').then(d => setV(d.grow || {}), () => {}) }, [])
   if (!list || (!list.length && !head)) return null
   const wait = list.reduce((s, x) => s + x.marks.filter(m => m.marked_at && !m.confirmed_at).length, 0)
+  const exam = (x, i) => x.path === 'print_operator' && i === 0   // экзамен оператора = дата ставки после экзамена (HEAD 13.11)
   const act = async (x, idx, ok) => {
+    let exam_on = null
+    if (ok && exam(x, idx)) {
+      const t = window.prompt('С какого дня ставка после экзамена? Например: 01.11', new Date().toLocaleDateString('ru-RU').slice(0, 5))
+      if (t === null) return
+      const m = t.trim().match(/^(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?$/)
+      if (!m) { window.alert('Дата вида 01.11'); return }
+      const y = m[3] ? (m[3].length === 2 ? '20' + m[3] : m[3]) : String(new Date().getFullYear())
+      exam_on = `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+    }
     const note = ok ? null : window.prompt('Что доделать? Сотрудник увидит это у себя.')
     if (!ok && note === null) return
-    const d = await api('/grow/confirm', { method: 'POST', body: { person_id: x.id, path: x.path, idx, ok, note } })
-    setList(list.map(y => y.id === x.id ? { ...y, marks: d.marks } : y))
+    const d = await api('/grow/confirm', { method: 'POST', body: { person_id: x.id, path: x.path, idx, ok, note, exam_on } })
+    setList(list.map(y => y.id === x.id ? { ...y, marks: d.marks, print_exam_on: exam(x, idx) ? (ok ? exam_on : null) : y.print_exam_on } : y))
   }
   return <div className="card teampath">
     <span className="tag">Мой путь</span><h2>Путь команды</h2>
@@ -63,7 +73,9 @@ export function TeamPath({ head }) {
           return <div key={i} className={'tpitem ' + cls}><span>{i + 1}</span><div>{t.replace(/\{([a-z0-9_.]+)\}/g, (_, k) => v[k] != null && v[k] !== '' ? String(v[k]).replace('.', ',') : '…')}
             {Array.isArray(it) && it[1] && <p className="small muted">Как подтверждаем: {it[1]}</p>}
             {m.returned_at && m.note && <p className="small">Вернули: {m.note}</p>}
-            {m.marked_at && !m.confirmed_at && <div className="row"><button className="mini" onClick={() => act(x, i, true)}>Подтвердить</button><button className="ghost mini" onClick={() => act(x, i, false)}>Вернуть</button></div>}
+            {exam(x, i) && x.print_exam_on && <p className="small">Сдан: с {new Date(x.print_exam_on).toLocaleDateString('ru-RU')} принтерные смены по ставке после экзамена</p>}
+            {m.marked_at && !m.confirmed_at && <div className="row"><button className="mini" onClick={() => act(x, i, true)}>{exam(x, i) ? 'Сдал — указать дату' : 'Подтвердить'}</button><button className="ghost mini" onClick={() => act(x, i, false)}>Вернуть</button></div>}
+            {!m.marked_at && !m.confirmed_at && <button className="ghost mini" onClick={() => act(x, i, true)}>{exam(x, i) ? 'Сдал — указать дату' : 'Подтвердить'}</button>}
             {m.confirmed_at && <button className="ghost mini" onClick={() => act(x, i, false)}>Снять</button>}
           </div><em className="small">{lab}</em></div> })}
       </div> })}
