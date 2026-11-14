@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api, uuid, webToken } from './api.js'
 import { Viewer, download, uploadBig } from './objects.jsx'
 import { Sheet } from './ui.jsx'
-import { Kit, StoryEditor, loadKit } from './mktkit.jsx'
+import { Kit, StoryHome } from './mktkit.jsx'
 
 // Рабочее место маркетинга (HEAD 14.11): «План» — контент-план месяца, «Медиа» — материал с объектов,
 // HEAD — «На утверждение». Каждую публикацию утверждает HEAD: черновик → «Отправить HEAD» → «Утверждаю» / «Вернуть»
@@ -16,10 +16,10 @@ const day = s => s ? new Date(s + 'T00:00').toLocaleDateString('ru-RU', { weekda
 
 // Задача в отделе (HEAD 14.11): руководитель видит всё и проверяет первой; остальные — свои вкладки и свои действия.
 const JOB = { lead: 'Руководитель отдела', smm: 'Контент и публикации', stories: 'Сторис и баннеры', target: 'Таргет', video: 'Съёмка' }
-const TABS = { stories: ['plan', 'media', 'brand'], target: ['ads', 'plan', 'brand'], video: ['shoots', 'ideas', 'media', 'plan', 'brand'] }
+const TABS = { stories: ['plan', 'story', 'media', 'brand'], target: ['ads', 'plan', 'brand'], video: ['shoots', 'ideas', 'media', 'plan', 'brand'] }
 const ABOUT = { lead: 'Ты видишь всё. Публикации коллег сначала приходят тебе в «Проверку», после твоего «Проверено» уходят HEAD.',
   smm: 'Поставь публикацию в план: где, когда, текст и материал. Отправь на утверждение, после «Утверждаю» выкладывай и отметь «Вышло» со ссылкой.',
-  stories: 'Собери сторис в редакторе из рамок и элементов бренда или загрузи готовую, поставь в публикацию и отправь на утверждение. Выкладывать можно только утверждённое.',
+  stories: 'Собери сторис во вкладке «Сторис» из рамок и элементов бренда или загрузи готовую, поставь в публикацию и отправь на утверждение. Выкладывать можно только утверждённое.',
   target: 'В «Рекламе» — расход и заявки по площадкам. Новую рекламу ставь в план форматом «Реклама»: запускать можно только после «Утверждаю».',
   video: 'В «Съёмках» — что, где и когда снимать. В «Идеях» — сценарии. Материал с объектов — в «Медиа».' }
 
@@ -28,7 +28,7 @@ export function Marketing({ me, pending }) {
   const job = head ? 'head' : (me.mkt_job || null)
   const can = { post: head || [null, 'lead', 'smm', 'stories', 'target'].includes(job), onlyAd: job === 'target', all: head || [null, 'lead', 'smm'].includes(job),
     idea: job !== 'target', shoot: head || [null, 'lead', 'smm', 'video'].includes(job), result: head || [null, 'lead', 'smm', 'target'].includes(job) }
-  const tabs = [['plan', 'План'], ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа'], ['ads', 'Реклама'], ['brand', 'Бренд']].filter(([k]) => !TABS[job] || TABS[job].includes(k))
+  const tabs = [['plan', 'План'], ...(can.post && !can.onlyAd ? [['story', 'Сторис']] : []), ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа'], ['ads', 'Реклама'], ['brand', 'Бренд']].filter(([k]) => !TABS[job] || TABS[job].includes(k))
     .sort((a, b) => TABS[job] ? TABS[job].indexOf(a[0]) - TABS[job].indexOf(b[0]) : 0)
   const [toCheck, setToCheck] = useState(0)
   const [view, setView] = useState(head && pending ? 'review' : tabs[0][0])
@@ -36,7 +36,6 @@ export function Marketing({ me, pending }) {
   const [open, setOpen] = useState(null)
   const [tick, setTick] = useState(0)
   const reload = () => setTick(t => t + 1)
-  const [story, setStory] = useState(null)   // пак элементов для редактора сторис, открытого прямо из плана
   // Сторис из редактора: файл уходит в «Готовые публикации»; дальше — в новую публикацию или просто скачать
   const publishStory = async (file, how) => { const f = await uploadReady(file, () => {}); how === 'post' ? setEdit({ kind: 'stories', files: [f] }) : download(f) }
   useEffect(() => { if (job === 'lead') api('/mkt/posts?status=check').then(d => setToCheck(d.items.length), () => {}) }, [tick, view])
@@ -50,9 +49,8 @@ export function Marketing({ me, pending }) {
       {job === 'lead' && <button className={view === 'check' ? 'on' : ''} onClick={() => setView('check')}>Проверка{toCheck ? <span>{toCheck}</span> : null}</button>}
       {tabs.map(([k, t]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}
     </div>
-    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} /> : view === 'brand' ? <Brand canPost={can.post && !can.onlyAd} onPublish={publishStory} /> : view === 'ads' ? <Ads /> :
-      view === 'shoots' ? <Shoots can={can.shoot} /> : view === 'ideas' ? <Ideas can={can.idea} /> : <Plan key={view + tick} can={can.post} onOpen={setOpen} onNew={() => setEdit({})} onStory={can.post && !can.onlyAd ? () => loadKit().then(setStory, () => setView('brand')) : null} />}
-    {story && <StoryEditor kit={story} start={{}} canPost onPublish={publishStory} onClose={() => setStory(null)} />}
+    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} /> : view === 'brand' ? <Brand canPost={can.post && !can.onlyAd} onPublish={publishStory} /> : view === 'ads' ? <Ads /> : view === 'story' ? <StoryHome canPost onPublish={publishStory} /> :
+      view === 'shoots' ? <Shoots can={can.shoot} /> : view === 'ideas' ? <Ideas can={can.idea} /> : <Plan key={view + tick} can={can.post} onOpen={setOpen} onNew={() => setEdit({})} />}
     {edit && <Editor post={edit} onlyAd={can.onlyAd} onClose={() => setEdit(null)} onSaved={x => { setEdit(null); setOpen(x); reload() }} />}
     {open && !edit && <PostSheet post={open} head={head} mine={can.post && (can.all || open.author_id === me.id)} canResult={can.result} onClose={() => setOpen(null)} onEdit={() => setEdit(open)}
       onChanged={x => { setOpen(x.status === 'cancelled' ? null : x); reload() }} />}
@@ -77,7 +75,7 @@ export function Brand({ canPost, onPublish }) {
     const i = root.book.findIndex(x => x.key === ch), c = root.book[i]
     return <div className="card bbook">
       <div className="mktcrumbs"><button className="ghost mini" onClick={() => { setCh(null); top() }}>‹ Книга бренда</button><span>Глава {c.n} из {root.book.length}</span></div>
-      <h2>{c.title}</h2>
+      <div className="bbcover"><span className="bbnum">{String(c.n).padStart(2, '0')}</span><h2>{c.title}</h2><em>{c.word}</em><img src={'/kit/' + c.art} alt="" /></div>
       <p className="bblead">{c.lead}</p>
       {c.blocks.map((b, j) => <Block key={j} b={b} />)}
       <div className="bbrules"><b>Из этого следует</b>{c.rules.map((r, j) => <div key={j}><i>{j + 1}</i><span>{r}</span></div>)}</div>
@@ -89,15 +87,16 @@ export function Brand({ canPost, onPublish }) {
   }
   return <>
     {root.err && <div className="card"><p className="small why">{root.err}</p></div>}
-    <div className="card">
-      <h3>Книга бренда</h3>
+    <div className="card bbhome">
+      <div className="bbhero"><img className="bblogo" src="/kit/t_logo/logo_pill_outline_white.png" alt="ARTGAME" /><h2>Книга <span>бренда</span></h2><em>искусство, которое живёт на стенах</em>
+        <img className="bbst a" src="/kit/t_stickers/star_3d_crimson.png" alt="" /><img className="bbst b" src="/kit/t_stickers/cloud_white_1.png" alt="" /></div>
       <p className="small muted">Восемь коротких глав. По ней строится каждая публикация и каждая реклама.</p>
-      {root.book.map(c => <div key={c.key} className="bbch" onClick={() => { setCh(c.key); top() }}><i>{c.n}</i><div><b>{c.title}</b><span className="small muted">{c.lead}</span></div><em>›</em></div>)}
+      <div className="bbchs">{root.book.map(c => <button key={c.key} className="bbch" onClick={() => { setCh(c.key); top() }}><i>{String(c.n).padStart(2, '0')}</i><img src={'/kit/' + c.art.replace('t_stickers/', 't/t_stickers/').replace('.png', '.webp')} alt="" /><b>{c.title}</b></button>)}</div>
     </div>
     <div className="card">
       <h3>Пак элементов</h3>
-      <p className="small muted">Стикеры, плашки, логотипы в плашке, рамки сторис, фоны, элементы для видео. Каждый можно скачать отдельно или собрать сторис прямо здесь.</p>
-      <button onClick={() => { setKit(true); top() }}>Открыть пак и редактор сторис</button>
+      <p className="small muted">Стикеры, плашки, логотипы в плашке, рамки сторис, фоны, элементы для видео. Каждый можно скачать отдельно{canPost ? '. Сторис собирается во вкладке «Сторис».' : ' или собрать сторис прямо здесь.'}</p>
+      <button onClick={() => { setKit(true); top() }}>Открыть пак элементов</button>
     </div>
     <div className="card">
       <h3>Скачать для работы</h3>
@@ -112,6 +111,7 @@ export function Brand({ canPost, onPublish }) {
 function Block({ b }) {
   if (b.t === 'h') return <h4>{b.x}</h4>
   if (b.t === 'ok' || b.t === 'no') return <div className={'bbsay ' + b.t}><u>{b.t === 'ok' ? 'Так' : 'Не так'}</u><span>{b.x}</span>{b.why && <em>{b.why}</em>}</div>
+  if (b.t === 'imgs') return <div className={'bbimgs' + (b.tall ? ' tall' : '')}>{b.x.map(([f, t]) => <figure key={f}><img src={'/kit/' + f} alt="" loading="lazy" /><figcaption>{t}</figcaption></figure>)}</div>
   if (b.t === 'colors') return <div className="bbcolors">{b.x.map(([n, hex, use]) => <div key={hex}><i style={{ background: hex }} /><b>{n}</b><span className="small muted">{hex} · {use}</span></div>)}</div>
   if (b.t === 'steps') return <ol className="bbsteps">{b.x.map((x, i) => <li key={i}>{x}</li>)}</ol>
   if (b.t === 'zone') return <div className={'bbzone ' + b.c}><b>{b.title}</b><ul>{b.x.map((x, i) => <li key={i}>{x}</li>)}</ul></div>
@@ -272,7 +272,7 @@ function Review({ onOpen, lead }) {
   </div>
 }
 
-function Plan({ can, onOpen, onNew, onStory }) {
+function Plan({ can, onOpen, onNew }) {
   const review = false
   const [ym, setYm] = useState(ymNow())
   const [d, setD] = useState(null)
@@ -287,7 +287,7 @@ function Plan({ can, onOpen, onNew, onStory }) {
     {d?.norms?.length > 0 && <div className="mktnorms"><span className="small muted">Объём месяца по договору</span>
       {d.norms.map(n => <div key={n.kind} className="mktnorm"><div><b>{n.title}</b><span className="small muted">в плане {n.planned} из {n.per_month} · вышло {n.done}</span></div>
         <i><em className={n.planned >= n.per_month ? 'ok' : ''} style={{ width: Math.min(100, n.per_month ? n.planned / n.per_month * 100 : 0) + '%' }} /><u style={{ width: Math.min(100, n.per_month ? n.done / n.per_month * 100 : 0) + '%' }} /></i></div>)}</div>}
-    <div className="seg">{can && <button onClick={onNew}>+ Публикация</button>}{onStory && <button className="ghost" onClick={onStory}>Собрать сторис</button>}<button className="ghost" onClick={() => exportCsv(ym)}>⬇ Выгрузить</button></div>
+    <div className="seg">{can && <button onClick={onNew}>+ Публикация</button>}<button className="ghost" onClick={() => exportCsv(ym)}>⬇ Выгрузить</button></div>
     {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> :
       !d.items.length ? <p className="muted small">{review ? 'Всё утверждено.' : 'В этом месяце пока пусто.'}</p> :
       groups.map(([dt, list]) => <div key={dt} className="mktday"><h3>{day(dt)}</h3>
