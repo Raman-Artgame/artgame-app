@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api, uuid, webToken } from './api.js'
 import { Viewer, download, uploadBig } from './objects.jsx'
 import { Sheet } from './ui.jsx'
-import { Kit } from './mktkit.jsx'
+import { Kit, StoryEditor, loadKit } from './mktkit.jsx'
 
 // Рабочее место маркетинга (HEAD 14.11): «План» — контент-план месяца, «Медиа» — материал с объектов,
 // HEAD — «На утверждение». Каждую публикацию утверждает HEAD: черновик → «Отправить HEAD» → «Утверждаю» / «Вернуть»
@@ -19,7 +19,7 @@ const JOB = { lead: 'Руководитель отдела', smm: 'Контен�
 const TABS = { stories: ['plan', 'media', 'brand'], target: ['ads', 'plan', 'brand'], video: ['shoots', 'ideas', 'media', 'plan', 'brand'] }
 const ABOUT = { lead: 'Ты видишь всё. Публикации коллег сначала приходят тебе в «Проверку», после твоего «Проверено» уходят HEAD.',
   smm: 'Поставь публикацию в план: где, когда, текст и материал. Отправь на утверждение, после «Утверждаю» выкладывай и отметь «Вышло» со ссылкой.',
-  stories: 'Загрузи готовую сторис или баннер в публикацию и отправь на утверждение. Выкладывать можно только утверждённое.',
+  stories: 'Собери сторис в редакторе из рамок и элементов бренда или загрузи готовую, поставь в публикацию и отправь на утверждение. Выкладывать можно только утверждённое.',
   target: 'В «Рекламе» — расход и заявки по площадкам. Новую рекламу ставь в план форматом «Реклама»: запускать можно только после «Утверждаю».',
   video: 'В «Съёмках» — что, где и когда снимать. В «Идеях» — сценарии. Материал с объектов — в «Медиа».' }
 
@@ -36,6 +36,7 @@ export function Marketing({ me, pending }) {
   const [open, setOpen] = useState(null)
   const [tick, setTick] = useState(0)
   const reload = () => setTick(t => t + 1)
+  const [story, setStory] = useState(null)   // пак элементов для редактора сторис, открытого прямо из плана
   // Сторис из редактора: файл уходит в «Готовые публикации»; дальше — в новую публикацию или просто скачать
   const publishStory = async (file, how) => { const f = await uploadReady(file, () => {}); how === 'post' ? setEdit({ kind: 'stories', files: [f] }) : download(f) }
   useEffect(() => { if (job === 'lead') api('/mkt/posts?status=check').then(d => setToCheck(d.items.length), () => {}) }, [tick, view])
@@ -50,7 +51,8 @@ export function Marketing({ me, pending }) {
       {tabs.map(([k, t]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}
     </div>
     {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} /> : view === 'brand' ? <Brand canPost={can.post && !can.onlyAd} onPublish={publishStory} /> : view === 'ads' ? <Ads /> :
-      view === 'shoots' ? <Shoots can={can.shoot} /> : view === 'ideas' ? <Ideas can={can.idea} /> : <Plan key={view + tick} can={can.post} onOpen={setOpen} onNew={() => setEdit({})} />}
+      view === 'shoots' ? <Shoots can={can.shoot} /> : view === 'ideas' ? <Ideas can={can.idea} /> : <Plan key={view + tick} can={can.post} onOpen={setOpen} onNew={() => setEdit({})} onStory={can.post && !can.onlyAd ? () => loadKit().then(setStory, () => setView('brand')) : null} />}
+    {story && <StoryEditor kit={story} start={{}} canPost onPublish={publishStory} onClose={() => setStory(null)} />}
     {edit && <Editor post={edit} onlyAd={can.onlyAd} onClose={() => setEdit(null)} onSaved={x => { setEdit(null); setOpen(x); reload() }} />}
     {open && !edit && <PostSheet post={open} head={head} mine={can.post && (can.all || open.author_id === me.id)} canResult={can.result} onClose={() => setOpen(null)} onEdit={() => setEdit(open)}
       onChanged={x => { setOpen(x.status === 'cancelled' ? null : x); reload() }} />}
@@ -270,7 +272,7 @@ function Review({ onOpen, lead }) {
   </div>
 }
 
-function Plan({ can, onOpen, onNew }) {
+function Plan({ can, onOpen, onNew, onStory }) {
   const review = false
   const [ym, setYm] = useState(ymNow())
   const [d, setD] = useState(null)
@@ -285,7 +287,7 @@ function Plan({ can, onOpen, onNew }) {
     {d?.norms?.length > 0 && <div className="mktnorms"><span className="small muted">Объём месяца по договору</span>
       {d.norms.map(n => <div key={n.kind} className="mktnorm"><div><b>{n.title}</b><span className="small muted">в плане {n.planned} из {n.per_month} · вышло {n.done}</span></div>
         <i><em className={n.planned >= n.per_month ? 'ok' : ''} style={{ width: Math.min(100, n.per_month ? n.planned / n.per_month * 100 : 0) + '%' }} /><u style={{ width: Math.min(100, n.per_month ? n.done / n.per_month * 100 : 0) + '%' }} /></i></div>)}</div>}
-    <div className="seg">{can && <button onClick={onNew}>+ Публикация</button>}<button className="ghost" onClick={() => exportCsv(ym)}>⬇ Выгрузить</button></div>
+    <div className="seg">{can && <button onClick={onNew}>+ Публикация</button>}{onStory && <button className="ghost" onClick={onStory}>Собрать сторис</button>}<button className="ghost" onClick={() => exportCsv(ym)}>⬇ Выгрузить</button></div>
     {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> :
       !d.items.length ? <p className="muted small">{review ? 'Всё утверждено.' : 'В этом месяце пока пусто.'}</p> :
       groups.map(([dt, list]) => <div key={dt} className="mktday"><h3>{day(dt)}</h3>

@@ -275,6 +275,10 @@ const noScroll = async p => assert.ok(await p.evaluate(() => document.documentEl
   await e.unroute('https://upload.example/**')
   await e.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000093' }) }))
   await e.reload()
+  await e.getByRole('button', { name: 'Собрать сторис' }).click()   // редактор открывается прямо из плана
+  await e.locator('.storybar').waitFor()
+  await e.locator('.storytop').getByRole('button', { name: '‹ Закрыть' }).click()
+  await noScroll(e); await shot(e, 'mkt-38-plan-story')
   await e.locator('.mktnav').getByRole('button', { name: 'Бренд' }).click()
   await e.getByRole('button', { name: 'Открыть пак и редактор сторис' }).click()
   await e.locator('.kittile').first().waitFor()
