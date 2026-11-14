@@ -56,20 +56,81 @@ export function Marketing({ me, pending }) {
 
 // «Бренд»: книга бренда и паки из папки Диска «06 МАРКЕТИНГ / 01 Бренд» — смотреть и скачивать, без доступа к Диску.
 const fsize = b => !b ? '' : b > 1e6 ? (b / 1e6).toFixed(1) + ' МБ' : Math.ceil(b / 1e3) + ' КБ'
+// «Бренд» (HEAD 14.11): книга как история по главам + полки по задачам. Из главы — сразу к нужной полке и скачать.
 export function Brand() {
+  const [root, setRoot] = useState(null)
+  const [ch, setCh] = useState(null)        // открытая глава
+  const [shelf, setShelf] = useState('')
+  useEffect(() => { api('/mkt/brand').then(setRoot, e => setRoot({ err: e.message, shelves: [], book: [] })) }, [])
+  const top = () => window.scrollTo(0, 0)
+  if (!root) return <div className="card"><p className="muted">Загрузка…</p></div>
+  if (shelf) return <Shelf k={shelf} sources={root.sources} onBack={() => { setShelf(''); top() }} />
+  const names = Object.fromEntries(root.shelves.map(x => [x.key, x]))
+  if (ch) {
+    const i = root.book.findIndex(x => x.key === ch), c = root.book[i]
+    return <div className="card bbook">
+      <div className="mktcrumbs"><button className="ghost mini" onClick={() => { setCh(null); top() }}>‹ Книга бренда</button><span>Глава {c.n} из {root.book.length}</span></div>
+      <h2>{c.title}</h2>
+      <p className="bblead">{c.lead}</p>
+      {c.blocks.map((b, j) => <Block key={j} b={b} />)}
+      <div className="bbrules"><b>Из этого следует</b>{c.rules.map((r, j) => <div key={j}><i>{j + 1}</i><span>{r}</span></div>)}</div>
+      {c.shelves.length > 0 && <div className="bbget"><b>Что скачать к этой главе</b>
+        {c.shelves.map(k => <div key={k} className="mktfolder" onClick={() => { setShelf(k); top() }}><span className="bbico">{names[k].icon}</span><b>{names[k].title}</b><i>⬇</i></div>)}</div>}
+      <div className="seg">{i > 0 && <button className="ghost" onClick={() => { setCh(root.book[i - 1].key); top() }}>‹ Назад</button>}
+        {i < root.book.length - 1 ? <button onClick={() => { setCh(root.book[i + 1].key); top() }}>Дальше ›</button> : <button onClick={() => { setCh(null); top() }}>К полкам</button>}</div>
+    </div>
+  }
+  return <>
+    {root.err && <div className="card"><p className="small why">{root.err}</p></div>}
+    <div className="card">
+      <h3>Книга бренда</h3>
+      <p className="small muted">Восемь коротких глав. По ней строится каждая публикация и каждая реклама.</p>
+      {root.book.map(c => <div key={c.key} className="bbch" onClick={() => { setCh(c.key); top() }}><i>{c.n}</i><div><b>{c.title}</b><span className="small muted">{c.lead}</span></div><em>›</em></div>)}
+    </div>
+    <div className="card">
+      <h3>Скачать для работы</h3>
+      <p className="small muted">{root.sources ? 'Готовые файлы и исходники. Берём только отсюда.' : 'Готовые файлы для работы. Берём только отсюда, ничего не рисуем заново.'}</p>
+      <div className="bbshelves">{root.shelves.map(x => <button key={x.key} className="bbshelf" onClick={() => { setShelf(x.key); top() }}>
+        <span className="bbico">{x.icon}</span><b>{x.title}</b><span className="small muted">{x.hint}</span>
+        {x.who !== 'all' && <span className="badge">{x.who === 'head' ? 'только HEAD' : 'дизайн и HEAD'}</span>}</button>)}</div>
+    </div>
+  </>
+}
+
+function Block({ b }) {
+  if (b.t === 'h') return <h4>{b.x}</h4>
+  if (b.t === 'ok' || b.t === 'no') return <div className={'bbsay ' + b.t}><u>{b.t === 'ok' ? 'Так' : 'Не так'}</u><span>{b.x}</span>{b.why && <em>{b.why}</em>}</div>
+  if (b.t === 'colors') return <div className="bbcolors">{b.x.map(([n, hex, use]) => <div key={hex}><i style={{ background: hex }} /><b>{n}</b><span className="small muted">{hex} · {use}</span></div>)}</div>
+  if (b.t === 'steps') return <ol className="bbsteps">{b.x.map((x, i) => <li key={i}>{x}</li>)}</ol>
+  if (b.t === 'zone') return <div className={'bbzone ' + b.c}><b>{b.title}</b><ul>{b.x.map((x, i) => <li key={i}>{x}</li>)}</ul></div>
+  if (b.t === 'test') return <Test items={b.x} />
+  return <p>{b.x}</p>
+}
+
+function Test({ items }) {
+  const [on, setOn] = useState({})
+  const n = items.filter((_, i) => on[i]).length
+  return <div className="bbtest">{items.map((x, i) => <label key={i} className="check"><input type="checkbox" checked={!!on[i]} onChange={e => setOn({ ...on, [i]: e.target.checked })} /> <span>{x}</span></label>)}
+    <div className={'bbverdict ' + (n === items.length ? 'ok' : '')}>{n === items.length ? 'Все семь на месте. Можно отправлять на утверждение.' : `Отмечено ${n} из ${items.length}. Не публикуем.`}</div></div>
+}
+
+function Shelf({ k, sources, onBack }) {
   const [folder, setFolder] = useState('')
   const [d, setD] = useState(null)
   const [view, setView] = useState(null)
-  useEffect(() => { setD(null); api('/mkt/brand' + (folder ? `?folder=${encodeURIComponent(folder)}` : '')).then(setD, e => setD({ err: e.message, path: [], folders: [], files: [] })) }, [folder])
+  useEffect(() => { setD(null); api(`/mkt/brand?shelf=${k}` + (folder ? `&folder=${encodeURIComponent(folder)}` : '')).then(setD, e => setD({ err: e.message, path: [], folders: [], files: [] })) }, [k, folder])
   return <div className="card">
-    <div className="mktcrumbs"><button className={'ghost mini' + (!folder ? ' on' : '')} onClick={() => setFolder('')}>Бренд</button>
+    <div className="mktcrumbs"><button className="ghost mini" onClick={onBack}>‹ Бренд</button>
+      {d?.shelf && <><span>›</span><button className={'ghost mini' + (!folder ? ' on' : '')} onClick={() => setFolder('')}>{d.shelf.title}</button></>}
       {d?.path.map(x => <React.Fragment key={x.id}><span>›</span><button className={'ghost mini' + (x.id === folder ? ' on' : '')} onClick={() => setFolder(x.id)}>{x.name}</button></React.Fragment>)}</div>
-    {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> : !d.folders.length && !d.files.length ? <p className="muted small">В этой папке пусто.</p> : <>
+    {d?.shelf && !folder && <p className="small muted">{d.shelf.hint}</p>}
+    {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> : !d.folders.length && !d.files.length ? <p className="muted small">{d.hidden ? 'Здесь только исходники. Они у дизайнеров.' : 'Здесь пока пусто.'}</p> : <>
       {d.folders.map(x => <div key={x.id} className="mktfolder" onClick={() => setFolder(x.id)}><span>📁</span><b>{x.name}</b><i>›</i></div>)}
       {d.files.length > 0 && <div className="mktgrid">{d.files.map(f => <div key={f.id} className="mktfile">
         <button className="mthumb" onClick={() => setView(f)}>{f.thumb ? <img src={f.thumb} alt="" loading="lazy" onError={e => { e.target.style.display = 'none' }} /> : null}<span>{(f.name.split('.').pop() || '').slice(0, 4).toUpperCase()}</span></button>
-        <div className="small">{f.name}</div><div className="small muted">{fsize(f.size)}</div>
-        <button className="ghost mini" onClick={() => download(f)}>⬇ Скачать</button></div>)}</div>}</>}
+        <div className="small">{f.name}</div><div className="small muted">{fsize(f.size)}{f.source ? ' · исходник' : ''}</div>
+        <button className="ghost mini" onClick={() => download(f)}>⬇ Скачать</button></div>)}</div>}
+      {d.hidden > 0 && <p className="small muted">Исходники ({d.hidden}) лежат у дизайнеров. Нужен исходник: напиши в чат HEAD.</p>}</>}
     <Viewer f={view} onClose={() => setView(null)} />
   </div>
 }
