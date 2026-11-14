@@ -183,13 +183,26 @@ function DealSheet({ x, d, team, onClose, onDone }) {
   </Sheet>
 }
 
+const unitsOf = (u, size) => (u.sizes || {})[size] ?? ''
 function Units() {
   const [m, setM] = useState(new Date().toISOString().slice(0, 7))
   const [u, setU] = useState(null)
   const load = () => api('/design/units?ym=' + m).then(setU, () => setU({ rows: [], mine: 0 }))
   useEffect(() => { setU(null); load() }, [m])
   const cancel = r => { const why = prompt('Почему снимаем единицу? (проект в работу не пошёл…)'); if (why && why.trim().length >= 3) api(`/design/units/${r.deal_id}/cancel`, { method: 'POST', body: { reason: why.trim() } }).then(load, ex => alert(ex.message)) }
-  return <div className="card">
+  const decide = (x, approve) => { const reason = approve ? null : prompt('Что не так? Главный дизайнер увидит это в карточке проекта.')
+    if (!approve && !(reason || '').trim()) return
+    api(`/design/extra/${x.id}/decide`, { method: 'POST', body: { approve, reason } }).then(load, ex => alert(ex.message)) }
+  return <>{u?.wait?.length > 0 && <div className="card"><h3>Дизайн с объектов на утверждение · {u.wait.length}</h3>
+    <p className="small muted">Из карточки проекта: дизайн проекта или правка/докидка на объекте. После «Утверждаю» — единицы дизайнеру в этом месяце.</p>
+    {u.wait.map(x => <div key={x.id} className="row">
+      <div><b>№{x.object_id} · {x.object_title}</b>
+        <div className="small muted">{[x.kind === 'fix' ? 'правка / докидка' : 'дизайн проекта', x.person_name, `${x.size.toUpperCase()} · ${String(unitsOf(u, x.size)).replace('.', ',')} ед.`].join(' · ')}</div>
+        <div className="small">{x.note}</div>
+        {x.url && <button className="ghost mini catopen" onClick={() => openUrl(x.url)}>Посмотреть ↗</button>}</div>
+      {u.can_cancel && <div className="qbtns"><button className="mini" onClick={() => decide(x, true)}>Утверждаю</button><button className="ghost mini" onClick={() => decide(x, false)}>Вернуть</button></div>}
+    </div>)}</div>}
+  <div className="card">
     <div className="head"><h2>Единицы</h2><input type="month" value={m} onChange={e => setM(e.target.value)} style={{ width: 'auto' }} /></div>
     {u && <><div className="kv"><div><span className="muted small">Мои за месяц</span><b>{String(u.mine).replace('.', ',')}</b></div>
       <div><span className="muted small">Норма</span><b>{u.norm != null ? u.norm : 'ждёт решения HEAD'}</b></div></div>
@@ -201,8 +214,13 @@ function Units() {
         <div className="qbtns"><b className={r.status === 'cancelled' ? 'muted' : ''}>{String(+r.units).replace('.', ',')}</b>
           {u.can_cancel && r.status === 'active' && <button className="ghost mini" onClick={() => cancel(r)}>Снять</button>}</div>
       </div>)}
-      {!u.rows.length && <p className="small muted">Утверждённых макетов за месяц нет.</p>}</>}
-  </div>
+      {(u.extras || []).map(x => <div key={'x' + x.id} className="row">
+        <div><b>№{x.object_id} · {x.object_title}</b>
+          <div className="small muted">{[x.kind === 'fix' ? 'правка / докидка' : 'дизайн проекта', x.person_name, x.size.toUpperCase(), dmy(x.decided_at), x.note].filter(Boolean).join(' · ')}</div></div>
+        <div className="qbtns"><b>{String(+x.units).replace('.', ',')}</b></div>
+      </div>)}
+      {!u.rows.length && !(u.extras || []).length && <p className="small muted">Утверждённых макетов за месяц нет.</p>}</>}
+  </div></>
 }
 
 function Catalogs({ me }) {

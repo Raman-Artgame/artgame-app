@@ -101,10 +101,51 @@ function ProjectCard({ x, me, back, openDeal }) {
     {me && ASSIGN.has(me.role_code) && <GipPick x={x} />}
     {me && x.id > 0 && <Crew id={x.id} />}
     {me && x.id > 0 && <TripBox id={x.id} />}
+    {me && x.id > 0 && DZ_SEE.has(me.role_code) && <DesignBox id={x.id} />}
     {me && x.id > 0 && (x.working || x.closing) && <DoneBox id={x.id} />}
     {me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} />}
     <Gallery obj={{ id: x.id, title: x.title }} me={me} />
   </>
+}
+
+// Дизайн проекта на любой стадии (HEAD 14.11): сложность XS–XL и «+ Дизайн / правка / докидка» → HEAD утверждает → единицы дизайнеру.
+const DZ_SEE = new Set(['head', 'lead_designer', 'designer_asst'])
+const KIND = { design: 'Дизайн проекта', fix: 'Правка / докидка' }
+const DST = { sent: 'у HEAD', approved: 'утверждено', returned: 'вернул' }
+function DesignBox({ id }) {
+  const [d, setD] = useState(null)
+  const [f, setF] = useState(null)
+  const [msg, setMsg] = useState('')
+  const load = () => api(`/design/object/${id}`).then(setD, e => setMsg(e.message))
+  useEffect(() => { load() }, [id])
+  if (!d) return msg ? <div className="card"><p className="small why">{msg}</p></div> : null
+  const units = z => String((d.sizes.find(s => s.code === z) || {}).units ?? '').replace('.', ',')
+  const size = z => api(`/design/object/${id}/size`, { method: 'POST', body: { size: z } }).then(r => { setMsg(r.bx.startsWith('error') ? 'В Битрикс не записалось, попробуйте ещё раз' : ''); load() }, e => setMsg(e.message))
+  const send = () => api(`/design/object/${id}/extra`, { method: 'POST', body: { ...f, person_id: +f.person_id } }).then(() => { setF(null); setMsg(''); load() }, e => setMsg(e.message))
+  return <div className="card dzbox">
+    <div className="head"><h3>Дизайн</h3>{d.can_edit && !f && <button className="mini" onClick={() => setF({ kind: d.rows.some(r => r.kind === 'design') ? 'fix' : 'design', size: 'xs', person_id: d.team[0]?.id || '', note: '', url: '' })}>+ Добавить</button>}</div>
+    <label className="muted">Сложность дизайна</label>
+    <div className="chips">{d.sizes.map(s => <button key={s.code} disabled={!d.can_edit} className={d.size === s.code ? 'on' : 'ghost'} onClick={() => size(s.code)}>{s.code.toUpperCase()}</button>)}</div>
+    {!d.size && <p className="small muted">{d.can_edit ? 'Не указана — выберите размер.' : 'Главный дизайнер ещё не указал.'}</p>}
+    {f && <div className="warnbox">
+      <div className="segf">{Object.entries(KIND).map(([k, t]) => <button key={k} className={f.kind === k ? 'on' : ''} onClick={() => setF({ ...f, kind: k })}>{t}</button>)}</div>
+      <label className="muted">Кто делал</label>
+      <select value={f.person_id} onChange={e => setF({ ...f, person_id: e.target.value })}>{d.team.map(t => <option key={t.id} value={t.id}>{t.full_name}</option>)}</select>
+      <label className="muted">Размер работы</label>
+      <div className="chips">{d.sizes.map(s => <button key={s.code} className={f.size === s.code ? 'on' : 'ghost'} onClick={() => setF({ ...f, size: s.code })}>{s.code.toUpperCase()} · {units(s.code)}</button>)}</div>
+      <textarea rows="2" placeholder={f.kind === 'fix' ? 'Что поправили или докинули на объекте' : 'Что сделали: эскиз, файлы в печать…'} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} />
+      <input placeholder="Ссылка на файл или папку (по желанию)" value={f.url} onChange={e => setF({ ...f, url: e.target.value })} />
+      <div className="seg"><button className="ghost" onClick={() => setF(null)}>Отмена</button><button disabled={f.note.trim().length < 3 || !f.person_id} onClick={send}>На утверждение HEAD</button></div>
+    </div>}
+    {msg && <p className="small why">{msg}</p>}
+    {d.rows.map(r => <div key={r.id} className="row">
+      <div><b>{KIND[r.kind]} · {r.size.toUpperCase()}</b>
+        <div className="small muted">{[r.person_name, r.note].join(' · ')}</div>
+        {r.reason && <div className="small why">HEAD: {r.reason}</div>}</div>
+      <div className="qbtns"><span className={'small ' + (r.status === 'approved' ? 'ok' : r.status === 'returned' ? 'why' : 'muted')}>{DST[r.status]}{r.status === 'approved' ? ` · ${String(+r.units).replace('.', ',')} ед.` : ''}</span></div>
+    </div>)}
+    {d.can_edit && <p className="small muted">Правки и докидки на объекте вносите здесь. Единицы дизайнеру — после «утверждаю» HEAD.</p>}
+  </div>
 }
 
 // ГИП проекта (HEAD 09.11): назначают HEAD и МОП; ГИП — Главный художник, Про или Мастер печати (и «и.о.» этих ролей).

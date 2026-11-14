@@ -113,7 +113,7 @@ function Main({ me, onMe, web, logout }) {
   const [designView, setDesignView] = useState(null)   // «Каталоги на утверждение» с Пульта — сразу во вкладку «Каталоги» (HEAD 11.11)
   useEffect(() => { if (tab !== 'design') setDesignView(null) }, [tab])
   const go = t => { if (t === 'deals') setDealId(null); if (t === 'leads') setLeadId(null)
-    if (t === 'design:cat') { setDesignView('cat'); setTab('design'); return }
+    if (t.startsWith('design:')) { setDesignView(t.slice(7)); setTab('design'); return }
     if (t === 'fin:cash') { setFinView('cash'); setTab('fin'); return } if (t === 'fin') setFinView(null); if (t === 'design') setDesignView(null); setTab(t) }
   const [toast, setToast] = useState('')
   const done = t => { setToast(t); setTab('mine'); setTimeout(() => setToast(''), 4000) }

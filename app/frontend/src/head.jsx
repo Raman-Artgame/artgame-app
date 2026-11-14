@@ -51,6 +51,7 @@ export function Pulse({ me, pulse, go }) {
       hot: p.bills.some(b => b.status === 'overdue') },
     p.pending.length && { k: 'people', t: `Ждут роли: ${p.pending.length}`, s: p.pending.map(x => x.full_name).join(', '), hot: true },
     p.catalogs && { k: 'design:cat', t: `Каталоги дизайна на утверждение: ${p.catalogs}`, s: 'утвердить или вернуть' },
+    p.design_wait && { k: 'design:units', t: `Дизайн с объектов на утверждение: ${p.design_wait}`, s: 'правки и докидки → единицы дизайнеру' },
     p.dm?.unread && { k: 'chat', t: `Чат: новых ${p.dm.unread}`, s: `от ${p.dm.people} чел. · ответить`, hot: true },
     p.media && { k: 'prod', t: `Материал с объектов на утверждение: ${p.media}`, s: 'в «Продакшн» и рилс к оплате' },
     p.posts && { k: 'mkt', t: `Публикации на утверждение: ${p.posts}`, s: 'контент-план маркетинга — «Утверждаю» или «Вернуть»' },
