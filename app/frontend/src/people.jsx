@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { startViewAs } from './head.jsx'
 
+const MKT_JOB = { lead: 'руководитель отдела', smm: 'контент и публикации', stories: 'сторис и баннеры', target: 'таргет', video: 'съёмка' }
 const ROLE_ZONE = { support: 'mural', artist: 'mural', artist_pro: 'mural', lead_artist: 'mural', print_operator: 'print', print_master: 'print',
   mop: 'sales', mop_vip: 'sales', lead_designer: 'design', designer_asst: 'design', marketer: 'marketing' }
 const DZ_ROLES = new Set(['lead_designer', 'designer_asst'])
@@ -56,7 +57,7 @@ function Dept({ title, list, open, flip, warn, closed, children }) {
 function PersonRow({ p, open, flip, ROLE, ZONE, bx, save, setRole }) {
   return <div className="person">
     <div className="prow" onClick={flip}><div><b>{p.full_name}</b> {p.status === 'pending' && <span className="tag st-rejected">ждёт роли</span>}
-      <div className="small muted">{[p.acting_role ? `${ROLE[p.role_code] || '—'} · и.о. ${ROLE[p.acting_role]}` : ROLE[p.role_code] || 'роль не назначена',
+      <div className="small muted">{[p.acting_role ? `${ROLE[p.role_code] || '—'} · и.о. ${ROLE[p.acting_role]}` : (ROLE[p.role_code] || 'роль не назначена') + (p.role_code === 'marketer' && MKT_JOB[p.mkt_job] ? ` · ${MKT_JOB[p.mkt_job]}` : ''),
         (p.extra_roles || [])[0] && `+ ${ROLE[p.extra_roles[0]]}`, p.city].filter(Boolean).join(' · ')}{!p.profile_at && <span className="why"> · анкета не заполнена</span>}</div></div>
       <span className="muted">{open ? '▴' : '›'}</span></div>
     {open && <div className="pedit">
@@ -75,6 +76,11 @@ function PersonRow({ p, open, flip, ROLE, ZONE, bx, save, setRole }) {
           save(p.id, { extra_roles: r ? [r] : [], ...(r && ROLE_ZONE[r] && !p.zones.includes(ROLE_ZONE[r]) ? { zones: [...p.zones, ROLE_ZONE[r]] } : {}) }) }}>
           <option value="">— нет —</option>
           {Object.entries(ROLE).filter(([k]) => k !== 'head' && k !== p.role_code).map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+        </select></label>}
+      {p.role_code === 'marketer' && <label className="small muted">Задача в отделе маркетинга <span>· руководитель видит всё и проверяет публикации первой; остальные — только своё</span>
+        <select value={p.mkt_job || ''} onChange={e => save(p.id, { mkt_job: e.target.value })}>
+          <option value="">— всё, без первой проверки —</option><option value="lead">Руководитель отдела</option><option value="smm">Контент и публикации</option>
+          <option value="stories">Сторис и баннеры</option><option value="target">Таргет</option><option value="video">Съёмка</option>
         </select></label>}
       {p.role_code && p.role_code !== 'head' && <label className="small muted check"><input type="checkbox" checked={!!p.reels} onChange={e => save(p.id, { reels: e.target.checked })} /> Оплачиваемые рилс <span>· «Продакшн», рилс после вашего утверждения — в оплату по «Значениям»</span></label>}
       {p.role_code && p.role_code !== 'head' && <label className="small muted check"><input type="checkbox" checked={!!p.pays} onChange={e => save(p.id, { pays: e.target.checked })} /> Вносит оплаты клиентов <span>· вкладка «Оплаты»: любая сделка по номеру или названию, с фото чека; вы сверяете в «Проверке»</span></label>}

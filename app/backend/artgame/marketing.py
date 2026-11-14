@@ -20,6 +20,25 @@ MKT = {"marketer", "head"}
 CHANNELS = {"instagram": "Instagram", "tiktok": "TikTok", "youtube": "YouTube", "2gis": "2ГИС", "site": "Сайт", "other": "Другое"}
 KINDS = {"reels": "Рилс", "post": "Пост", "carousel": "Карусель", "stories": "Сторис"}
 EDITABLE = ("draft", "rejected")
+# Задача человека в отделе (HEAD 14.11): руководитель видит всё и проверяет первой; остальные делают своё.
+JOBS = {"lead": "Руководитель", "smm": "Контент и публикации", "stories": "Сторис и баннеры", "target": "Таргет", "video": "Съёмка"}
+POST_JOBS = {None, "lead", "smm", "stories"}        # кто ставит публикации в план
+ALL_POSTS = {None, "lead", "smm"}                   # кто правит и чужие публикации; сторис-мейкер — только свои
+IDEA_JOBS = {None, "lead", "smm", "stories", "video"}
+SHOOT_JOBS = {None, "lead", "smm", "video"}
+
+
+def _job(p: dict, allowed: set, what: str):
+    """HEAD можно всё; маркетологу — по его задаче в отделе."""
+    _mkt(p)
+    if p["role_code"] != "head" and p.get("mkt_job") not in allowed:
+        raise HTTPException(403, f"{what} — не твоя задача в отделе")
+    return p
+
+
+def _own(p: dict, r: dict):
+    if p["role_code"] != "head" and p.get("mkt_job") not in ALL_POSTS and r["author_id"] != p["id"]:
+        raise HTTPException(403, "это публикация коллеги")
 
 
 def _mkt(p: dict) -> dict:
@@ -40,12 +59,14 @@ def _files(conn, ids: list[int]) -> list[dict]:
 def _out(conn, r: dict) -> dict:
     return {**{k: r[k] for k in ("id", "title", "channel", "kind", "plan_date", "caption", "object_id", "status", "author_id",
                                  "submitted_at", "reviewed_at", "review_note", "url", "published_at", "created_at",
-                                 "result", "result_note", "views", "leads")},
-            "author": r.get("author"), "object_title": r.get("object_title"), "files": _files(conn, list(r["file_ids"] or []))}
+                                 "result", "result_note", "views", "leads", "checked_at")},
+            "author": r.get("author"), "checked": r.get("checked"), "reviewer": r.get("reviewer"), "object_title": r.get("object_title"), "files": _files(conn, list(r["file_ids"] or []))}
 
 
-SQL = """SELECT m.*, pe.full_name AS author, o.title AS object_title FROM mkt_posts m
-         JOIN people pe ON pe.id=m.author_id LEFT JOIN objects o ON o.id=m.object_id"""
+SQL = """SELECT m.*, pe.full_name AS author, o.title AS object_title, ck.full_name AS checked,
+                CASE WHEN rv.role_code='head' THEN 'HEAD' ELSE rv.full_name END AS reviewer
+         FROM mkt_posts m JOIN people pe ON pe.id=m.author_id LEFT JOIN objects o ON o.id=m.object_id
+         LEFT JOIN people ck ON ck.id=m.checked_by LEFT JOIN people rv ON rv.id=m.reviewed_by"""
 
 
 def _get(conn, post_id: int, lock: bool = False) -> dict:
@@ -58,13 +79,43 @@ def _get(conn, post_id: int, lock: bool = False) -> dict:
 @router.get("/mkt/dict")
 def mkt_dict(p: dict = Depends(active)):
     _mkt(p)
-    return {"channels": CHANNELS, "kinds": KINDS}
+    return {"channels": CHANNELS, "kinds": KINDS, "jobs": JOBS}
+
+
+def _norms(conn, t0: date, t1: date) -> list[dict]:
+    """Объём месяца по договору: сколько положено, сколько в плане и сколько вышло. Карусель считается постом."""
+    got = {r["k"]: r for r in conn.execute(
+        """SELECT CASE WHEN kind='carousel' THEN 'post' ELSE kind END AS k, count(*) AS planned,
+                  count(*) FILTER (WHERE status='published') AS done
+           FROM mkt_posts WHERE status<>'cancelled' AND plan_date >= %s AND plan_date < %s GROUP BY 1""", (t0, t1)).fetchall()}
+    return [{"kind": n["kind"], "title": n["title"], "per_month": n["per_month"],
+             "planned": got.get(n["kind"], {}).get("planned", 0), "done": got.get(n["kind"], {}).get("done", 0)}
+            for n in conn.execute("SELECT * FROM mkt_norms WHERE per_month > 0 ORDER BY sort").fetchall()]
+
+
+class NormIn(BaseModel):
+    kind: str
+    per_month: int = Field(ge=0, le=1000)
+
+
+@router.post("/mkt/norms")
+def norm_set(b: NormIn, p: dict = Depends(active)):
+    if p["role_code"] != "head":
+        raise HTTPException(403, "объём по договору правит HEAD")
+    with db.pool.connection() as conn, conn.transaction():
+        r = conn.execute("UPDATE mkt_norms SET per_month=%s, updated_by=%s, updated_at=now() WHERE kind=%s RETURNING kind",
+                         (b.per_month, p["id"], b.kind)).fetchone()
+        if not r:
+            raise HTTPException(404)
+        db.audit(conn, p["id"], "mkt_norm", "mkt_norms", None, b.model_dump())
+    return {"ok": True}
 
 
 @router.get("/mkt/posts")
 def posts(ym: str | None = None, status: str | None = None, p: dict = Depends(active)):
     """Месяц плана (ym=ГГГГ-ММ) — плюс без даты; status=pending — всё, что ждёт HEAD, за любой месяц."""
     _mkt(p)
+    norms = []
     with db.pool.connection() as conn:
         if status:
             rows = conn.execute(SQL + " WHERE m.status=%s ORDER BY m.plan_date NULLS LAST, m.id", (status,)).fetchall()
@@ -73,9 +124,11 @@ def posts(ym: str | None = None, status: str | None = None, p: dict = Depends(ac
             t0, t1 = date(y, mo, 1), date(y + mo // 12, mo % 12 + 1, 1)
             rows = conn.execute(SQL + """ WHERE m.status<>'cancelled' AND (m.plan_date IS NULL OR (m.plan_date >= %s AND m.plan_date < %s))
                                           ORDER BY m.plan_date NULLS FIRST, m.id""", (t0, t1)).fetchall()
+            norms = _norms(conn, t0, t1)
         items = [_out(conn, r) for r in rows]
-    n = {s: sum(1 for x in items if x["status"] == s) for s in ("draft", "pending", "approved", "rejected", "published")}
-    return {"items": items, "counts": n, "channels": CHANNELS, "kinds": KINDS}
+        to_check = conn.execute("SELECT count(*) AS n FROM mkt_posts WHERE status='check'").fetchone()["n"]
+    n = {s: sum(1 for x in items if x["status"] == s) for s in ("draft", "check", "pending", "approved", "rejected", "published")}
+    return {"items": items, "counts": n, "channels": CHANNELS, "kinds": KINDS, "norms": norms, "to_check": to_check}
 
 
 class PostIn(BaseModel):
@@ -99,7 +152,7 @@ def _check(conn, b: PostIn):
 
 @router.post("/mkt/posts")
 def post_add(b: PostIn, p: dict = Depends(active)):
-    _mkt(p)
+    _job(p, POST_JOBS, "публикации")
     with db.pool.connection() as conn, conn.transaction():
         _check(conn, b)
         r = conn.execute("""INSERT INTO mkt_posts (title, channel, kind, plan_date, caption, file_ids, object_id, author_id)
@@ -112,9 +165,10 @@ def post_add(b: PostIn, p: dict = Depends(active)):
 @router.post("/mkt/posts/{post_id}")
 def post_edit(post_id: int, b: PostIn, p: dict = Depends(active)):
     """Править можно черновик и возвращённое; возвращённое после правки снова черновик."""
-    _mkt(p)
+    _job(p, POST_JOBS, "публикации")
     with db.pool.connection() as conn, conn.transaction():
         r = _get(conn, post_id, lock=True)
+        _own(p, r)
         if r["status"] not in EDITABLE:
             raise HTTPException(409, "править можно черновик или возвращённое")
         _check(conn, b)
@@ -124,9 +178,11 @@ def post_edit(post_id: int, b: PostIn, p: dict = Depends(active)):
         return _out(conn, _get(conn, post_id))
 
 
-def _move(post_id: int, p: dict, frm: tuple, to: str, sets: str = "", args: tuple = (), action: str = "", data: dict | None = None):
+def _move(post_id: int, p: dict, frm: tuple, to: str, sets: str = "", args: tuple = (), action: str = "", data: dict | None = None, own: bool = False):
     with db.pool.connection() as conn, conn.transaction():
         r = _get(conn, post_id, lock=True)
+        if own:
+            _own(p, r)
         if r["status"] not in frm:
             raise HTTPException(409, "уже не на этом шаге")
         conn.execute(f"UPDATE mkt_posts SET status=%s, updated_at=now(){sets} WHERE id=%s", (to, *args, post_id))
@@ -136,19 +192,36 @@ def _move(post_id: int, p: dict, frm: tuple, to: str, sets: str = "", args: tupl
 
 @router.post("/mkt/posts/{post_id}/submit")
 def post_submit(post_id: int, p: dict = Depends(active)):
-    _mkt(p)
+    """Исполнитель отправляет руководителю отдела; руководитель и HEAD (или когда руководителя нет) — сразу HEAD."""
+    _job(p, POST_JOBS, "публикации")
     with db.pool.connection() as conn:
         r = _get(conn, post_id)
+        _own(p, r)
+        lead = conn.execute("SELECT 1 FROM people WHERE status='active' AND role_code='marketer' AND mkt_job='lead' LIMIT 1").fetchone()
     if not r["plan_date"]:
         raise HTTPException(400, "поставь дату выхода")
     if not r["file_ids"] and not (r["caption"] or "").strip():
         raise HTTPException(400, "добавь материал или текст — HEAD должен видеть, что выйдет")
-    return _move(post_id, p, EDITABLE, "pending", ", submitted_at=now(), review_note=NULL")
+    if p["role_code"] == "head" or p.get("mkt_job") == "lead" or not lead:
+        return _move(post_id, p, EDITABLE, "pending", ", submitted_at=now(), review_note=NULL, checked_by=NULL, checked_at=NULL", own=True)
+    return _move(post_id, p, EDITABLE, "check", ", submitted_at=now(), review_note=NULL, checked_by=NULL, checked_at=NULL", own=True)
 
 
 class ReviewIn(BaseModel):
     approve: bool
     note: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/mkt/posts/{post_id}/check")
+def post_check(post_id: int, b: ReviewIn, p: dict = Depends(active)):
+    """Первая проверка руководителем отдела: «Проверено» — уходит HEAD, «Вернуть» — автору с причиной."""
+    _job(p, {"lead"}, "первая проверка")
+    if not b.approve and not (b.note or "").strip():
+        raise HTTPException(400, "reason required")
+    if b.approve:
+        return _move(post_id, p, ("check",), "pending", ", checked_by=%s, checked_at=now()", (p["id"],), "mkt_post_check", {"approve": True})
+    return _move(post_id, p, ("check",), "rejected", ", reviewed_by=%s, reviewed_at=now(), review_note=%s", (p["id"], b.note),
+                 "mkt_post_check", {"approve": False, "note": b.note})
 
 
 @router.post("/mkt/posts/{post_id}/review")
@@ -167,7 +240,7 @@ class PublishedIn(BaseModel):
 
 @router.post("/mkt/posts/{post_id}/published")
 def post_published(post_id: int, b: PublishedIn, p: dict = Depends(active)):
-    _mkt(p)
+    _job(p, POST_JOBS, "публикации")
     url = (b.url or "").strip() or None
     if url and not url.startswith(("http://", "https://")):
         raise HTTPException(400, "ссылка должна начинаться с https://")
@@ -176,8 +249,8 @@ def post_published(post_id: int, b: PublishedIn, p: dict = Depends(active)):
 
 @router.post("/mkt/posts/{post_id}/cancel")
 def post_cancel(post_id: int, p: dict = Depends(active)):
-    _mkt(p)
-    return _move(post_id, p, ("draft", "pending", "approved", "rejected"), "cancelled")
+    _job(p, POST_JOBS, "публикации")
+    return _move(post_id, p, ("draft", "check", "pending", "approved", "rejected"), "cancelled", own=True)
 
 
 class DayIn(BaseModel):
@@ -214,7 +287,7 @@ class UpIn(BaseModel):
 @router.post("/mkt/uploads")
 def upload_start(b: UpIn, request: Request, p: dict = Depends(active)):
     """Телефон грузит файл прямо в Google; сервер выдаёт ссылку. Только видео и картинки."""
-    _mkt(p)
+    _job(p, POST_JOBS, "публикации")
     if not b.mime.startswith(("video/", "image/")):
         raise HTTPException(400, "нужно видео или картинка")
     origin = request.headers.get("origin") or settings.public_origin
@@ -274,7 +347,7 @@ class ResultIn(BaseModel):
 
 @router.post("/mkt/posts/{post_id}/result")
 def post_result(post_id: int, b: ResultIn, p: dict = Depends(active)):
-    _mkt(p)
+    _job(p, ALL_POSTS | {"target"}, "итог публикации")
     with db.pool.connection() as conn, conn.transaction():
         r = _get(conn, post_id, lock=True)
         if r["status"] != "published":
@@ -285,7 +358,7 @@ def post_result(post_id: int, b: ResultIn, p: dict = Depends(active)):
         return _out(conn, _get(conn, post_id))
 
 
-STATUS_RU = {"draft": "черновик", "pending": "у HEAD", "approved": "утверждено", "rejected": "вернул", "published": "вышло"}
+STATUS_RU = {"draft": "черновик", "check": "на проверке", "pending": "у HEAD", "approved": "утверждено", "rejected": "вернул", "published": "вышло"}
 
 
 @router.get("/mkt/posts.csv")
@@ -333,7 +406,7 @@ def ideas(p: dict = Depends(active)):
 @router.post("/mkt/ideas")
 @router.post("/mkt/ideas/{idea_id}")
 def idea_save(b: IdeaIn, idea_id: int | None = None, p: dict = Depends(active)):
-    _mkt(p)
+    _job(p, IDEA_JOBS, "идеи")
     if b.kind not in KINDS:
         raise HTTPException(400, "bad kind")
     with db.pool.connection() as conn, conn.transaction():
@@ -382,7 +455,7 @@ def shoots(ym: str | None = None, p: dict = Depends(active)):
 @router.post("/mkt/shoots")
 @router.post("/mkt/shoots/{shoot_id}")
 def shoot_save(b: ShootIn, shoot_id: int | None = None, p: dict = Depends(active)):
-    _mkt(p)
+    _job(p, SHOOT_JOBS, "съёмки")
     vals = (b.title.strip(), b.shoot_date, b.at_time, b.object_id, b.place, b.crew, b.idea_id, b.note, b.status)
     with db.pool.connection() as conn, conn.transaction():
         if shoot_id:

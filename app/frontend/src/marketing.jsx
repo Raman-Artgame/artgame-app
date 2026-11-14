@@ -6,34 +6,50 @@ import { Sheet } from './ui.jsx'
 // Рабочее место маркетинга (HEAD 14.11): «План» — контент-план месяца, «Медиа» — материал с объектов,
 // HEAD — «На утверждение». Каждую публикацию утверждает HEAD: черновик → «Отправить HEAD» → «Утверждаю» / «Вернуть»
 // → после выхода «Опубликовано» со ссылкой. Неутверждённое отметить вышедшим нельзя (проверяет сервер).
-const ST = { draft: ['черновик', ''], pending: ['у HEAD', 'warn'], approved: ['утверждено', 'ok'], rejected: ['вернул', 'hot'], published: ['вышло', 'ok'] }
+const ST = { draft: ['черновик', ''], check: ['на проверке', 'warn'], pending: ['у HEAD', 'warn'], approved: ['утверждено', 'ok'], rejected: ['вернул', 'hot'], published: ['вышло', 'ok'] }
 const MTYPES = [['reels', 'Рилс'], ['video', 'Видео'], ['photo', 'Фото']]
 const ymNow = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Almaty' }).slice(0, 7)
 const shift = (ym, d) => { const [y, m] = ym.split('-').map(Number); const t = new Date(y, m - 1 + d, 1); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}` }
 const monthName = ym => { const [y, m] = ym.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('ru-RU', { month: 'long' }) + ' ' + y }
 const day = s => s ? new Date(s + 'T00:00').toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' }) : 'Без даты'
 
+// Задача в отделе (HEAD 14.11): руководитель видит всё и проверяет первой; остальные — свои вкладки и свои действия.
+const JOB = { lead: 'Руководитель отдела', smm: 'Контент и публикации', stories: 'Сторис и баннеры', target: 'Таргет', video: 'Съёмка' }
+const TABS = { stories: ['plan', 'media'], target: ['plan'], video: ['shoots', 'ideas', 'media', 'plan'] }
+const ABOUT = { lead: 'Ты видишь всё. Публикации коллег сначала приходят тебе в «Проверку», после твоего «Проверено» уходят HEAD.',
+  smm: 'Поставь публикацию в план: где, когда, текст и материал. Отправь на утверждение, после «Утверждаю» выкладывай и отметь «Вышло» со ссылкой.',
+  stories: 'Загрузи готовую сторис или баннер в публикацию и отправь на утверждение. Выкладывать можно только утверждённое.',
+  target: 'План публикаций — чтобы знать, что выходит. Реклама и её цифры появятся здесь же.',
+  video: 'В «Съёмках» — что, где и когда снимать. В «Идеях» — сценарии. Материал с объектов — в «Медиа».' }
+
 export function Marketing({ me, pending }) {
   const head = me.role_code === 'head'
-  const [view, setView] = useState(head && pending ? 'review' : 'plan')
+  const job = head ? 'head' : (me.mkt_job || null)
+  const can = { post: head || [null, 'lead', 'smm', 'stories'].includes(job), all: head || [null, 'lead', 'smm'].includes(job),
+    idea: job !== 'target', shoot: head || [null, 'lead', 'smm', 'video'].includes(job), result: head || [null, 'lead', 'smm', 'target'].includes(job) }
+  const tabs = [['plan', 'План'], ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа']].filter(([k]) => !TABS[job] || TABS[job].includes(k))
+    .sort((a, b) => TABS[job] ? TABS[job].indexOf(a[0]) - TABS[job].indexOf(b[0]) : 0)
+  const [toCheck, setToCheck] = useState(0)
+  const [view, setView] = useState(head && pending ? 'review' : tabs[0][0])
   const [edit, setEdit] = useState(null)   // {} — новая, {…post} — правка
   const [open, setOpen] = useState(null)
   const [tick, setTick] = useState(0)
   const reload = () => setTick(t => t + 1)
+  useEffect(() => { if (job === 'lead') api('/mkt/posts?status=check').then(d => setToCheck(d.items.length), () => {}) }, [tick, view])
   return <>
-    <div className="card dark prodhead"><span className="kick">Маркетинг</span>
-      <h2>{head ? 'Публикации и материал' : 'Контент-план'}</h2>
-      <p className="small muted">{head ? 'Каждая публикация выходит только после твоего «Утверждаю». Ниже — что ждёт решения и план месяца.'
-        : 'Поставь публикацию в план: где, когда, текст и материал из «Медиа». Отправь HEAD — после «Утверждаю» выкладывай и отметь «Вышло» со ссылкой.'}</p>
+    <div className="card dark prodhead"><span className="kick">Маркетинг{JOB[job] ? ` · ${JOB[job]}` : ''}</span>
+      <h2>{head ? 'Публикации и материал' : job === 'video' ? 'Что и где снимать' : 'Контент-план'}</h2>
+      <p className="small muted">{head ? 'Каждая публикация выходит только после твоего «Утверждаю». Ниже — что ждёт решения и план месяца.' : ABOUT[job] || ABOUT.smm}</p>
     </div>
     <div className="segf mktnav">
       {head && <button className={view === 'review' ? 'on' : ''} onClick={() => setView('review')}>На утверждение{pending ? <span>{pending}</span> : null}</button>}
-      {[['plan', 'План'], ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа']].map(([k, t]) =>
-        <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}
+      {job === 'lead' && <button className={view === 'check' ? 'on' : ''} onClick={() => setView('check')}>Проверка{toCheck ? <span>{toCheck}</span> : null}</button>}
+      {tabs.map(([k, t]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}
     </div>
-    {view === 'review' ? <Review key={tick} onOpen={setOpen} /> : view === 'media' ? <Media /> : view === 'shoots' ? <Shoots /> : view === 'ideas' ? <Ideas /> : <Plan key={view + tick} review={view === 'review'} onOpen={setOpen} onNew={() => setEdit({})} />}
+    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media /> :
+      view === 'shoots' ? <Shoots can={can.shoot} /> : view === 'ideas' ? <Ideas can={can.idea} /> : <Plan key={view + tick} can={can.post} onOpen={setOpen} onNew={() => setEdit({})} />}
     {edit && <Editor post={edit} onClose={() => setEdit(null)} onSaved={x => { setEdit(null); setOpen(x); reload() }} />}
-    {open && !edit && <PostSheet post={open} head={head} onClose={() => setOpen(null)} onEdit={() => setEdit(open)}
+    {open && !edit && <PostSheet post={open} head={head} mine={can.post && (can.all || open.author_id === me.id)} canResult={can.result} onClose={() => setOpen(null)} onEdit={() => setEdit(open)}
       onChanged={x => { setOpen(x.status === 'cancelled' ? null : x); reload() }} />}
   </>
 }
@@ -55,23 +71,23 @@ function uploadReady(file, onProgress) {
 }
 
 // HEAD: лента «На утверждение» вместо WhatsApp — публикация на весь экран, «Утверждаю» / «Вернуть», следующая сама.
-function Review({ onOpen }) {
+function Review({ onOpen, lead }) {
   const [d, setD] = useState(null)
   const [i, setI] = useState(0)
   const [fi, setFi] = useState(0)
   const [back, setBack] = useState(false)
   const [note, setNote] = useState('')
   const [msg, setMsg] = useState('')
-  const load = () => api('/mkt/posts?status=pending').then(setD, e => setD({ items: [], err: e.message }))
+  const load = () => api(`/mkt/posts?status=${lead ? 'check' : 'pending'}`).then(setD, e => setD({ items: [], err: e.message }))
   useEffect(() => { load() }, [])
   if (!d) return <div className="card"><p className="muted">Загрузка…</p></div>
   if (d.err) return <div className="card"><p className="small why">{d.err}</p></div>
-  if (!d.items.length) return <div className="card"><p className="muted small">Всё утверждено. Новое появится здесь.</p></div>
+  if (!d.items.length) return <div className="card"><p className="muted small">{lead ? 'Всё проверено. Новое от коллег появится здесь.' : 'Всё утверждено. Новое появится здесь.'}</p></div>
   const n = d.items.length, x = d.items[Math.min(i, n - 1)], f = x.files[Math.min(fi, x.files.length - 1)]
   const sameDay = d.items.filter(y => y.plan_date === x.plan_date).length
   const go = k => { setI(Math.max(0, Math.min(n - 1, k))); setFi(0); setBack(false); setNote(''); setMsg('') }
   const drop = ids => { const items = d.items.filter(y => !ids.includes(y.id)); setD({ ...d, items }); setI(v => Math.max(0, Math.min(v, items.length - 1))); setFi(0); setBack(false); setNote(''); setMsg(''); window.dispatchEvent(new Event('artgame:pulse')) }
-  const review = body => api(`/mkt/posts/${x.id}/review`, { method: 'POST', body }).then(() => drop([x.id]), e => setMsg(e.message))
+  const review = body => api(`/mkt/posts/${x.id}/${lead ? 'check' : 'review'}`, { method: 'POST', body }).then(() => drop([x.id]), e => setMsg(e.message))
   const all = () => api('/mkt/review_day', { method: 'POST', body: { plan_date: x.plan_date } })
     .then(() => drop(d.items.filter(y => y.plan_date === x.plan_date).map(y => y.id)), e => setMsg(e.message))
   return <div className="card mktfeed">
@@ -90,13 +106,14 @@ function Review({ onOpen }) {
     {back ? <><input autoFocus placeholder="Что не так — увидит автор" value={note} onChange={e => setNote(e.target.value)} />
       <div className="seg"><button onClick={() => note.trim() ? review({ approve: false, note }) : setMsg('Напиши, что поправить.')}>Вернуть на доработку</button>
         <button className="ghost" onClick={() => { setBack(false); setMsg('') }}>Отмена</button></div></> :
-      <div className="seg"><button onClick={() => review({ approve: true })}>Утверждаю</button><button className="ghost" onClick={() => setBack(true)}>Вернуть</button></div>}
-    {!back && sameDay > 1 && <button className="ghost" onClick={all}>Утвердить все {sameDay} на {day(x.plan_date)}</button>}
-    <p className="small muted mktcount">{Math.min(i, n - 1) + 1} из {n}</p>
+      <div className="seg"><button onClick={() => review({ approve: true })}>{lead ? 'Проверено' : 'Утверждаю'}</button><button className="ghost" onClick={() => setBack(true)}>Вернуть</button></div>}
+    {!back && !lead && sameDay > 1 && <button className="ghost" onClick={all}>Утвердить все {sameDay} на {day(x.plan_date)}</button>}
+    <p className="small muted mktcount">{Math.min(i, n - 1) + 1} из {n}{x.checked ? ` · проверено: ${x.checked}` : ''}</p>
   </div>
 }
 
-function Plan({ review, onOpen, onNew }) {
+function Plan({ can, onOpen, onNew }) {
+  const review = false
   const [ym, setYm] = useState(ymNow())
   const [d, setD] = useState(null)
   useEffect(() => { setD(null); api(review ? '/mkt/posts?status=pending' : `/mkt/posts?ym=${ym}`).then(setD, e => setD({ items: [], err: e.message })) }, [ym, review])
@@ -105,9 +122,12 @@ function Plan({ review, onOpen, onNew }) {
     {!review && <div className="mktmonth"><button className="ghost mini" aria-label="Прошлый месяц" onClick={() => setYm(shift(ym, -1))}>‹</button>
       <b>{monthName(ym)}</b><button className="ghost mini" aria-label="Следующий месяц" onClick={() => setYm(shift(ym, 1))}>›</button></div>}
     {d && !review && <div className="mstats mkt4">
-      <div><b>{d.counts.draft + d.counts.rejected}</b><span>черновики</span></div><div><b>{d.counts.pending}</b><span>у HEAD</span></div>
+      <div><b>{d.counts.draft + d.counts.rejected}</b><span>черновики</span></div><div><b>{d.counts.pending + (d.counts.check || 0)}</b><span>на утверждении</span></div>
       <div><b>{d.counts.approved}</b><span>к выходу</span></div><div><b>{d.counts.published}</b><span>вышло</span></div></div>}
-    {!review && <div className="seg"><button onClick={onNew}>+ Публикация</button><button className="ghost" onClick={() => exportCsv(ym)}>⬇ Выгрузить</button></div>}
+    {d?.norms?.length > 0 && <div className="mktnorms"><span className="small muted">Объём месяца по договору</span>
+      {d.norms.map(n => <div key={n.kind} className="mktnorm"><div><b>{n.title}</b><span className="small muted">в плане {n.planned} из {n.per_month} · вышло {n.done}</span></div>
+        <i><em className={n.planned >= n.per_month ? 'ok' : ''} style={{ width: Math.min(100, n.per_month ? n.planned / n.per_month * 100 : 0) + '%' }} /><u style={{ width: Math.min(100, n.per_month ? n.done / n.per_month * 100 : 0) + '%' }} /></i></div>)}</div>}
+    <div className="seg">{can && <button onClick={onNew}>+ Публикация</button>}<button className="ghost" onClick={() => exportCsv(ym)}>⬇ Выгрузить</button></div>
     {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> :
       !d.items.length ? <p className="muted small">{review ? 'Всё утверждено.' : 'В этом месяце пока пусто.'}</p> :
       groups.map(([dt, list]) => <div key={dt} className="mktday"><h3>{day(dt)}</h3>
@@ -123,12 +143,12 @@ function PostRow({ x, d, onOpen }) {
       <div className="small muted">{d.channels[x.channel]} · {d.kinds[x.kind]}{x.object_title ? ` · №${x.object_id} ${x.object_title}` : ''}</div>
       <span className={'badge ' + ST[x.status][1]} style={{ marginLeft: 0 }}>{ST[x.status][0]}</span>
       {x.result && <span className={'badge ' + (x.result === 'good' ? 'ok' : 'hot')}>{x.result === 'good' ? 'дала результат' : 'без результата'}</span>}
-      {x.status === 'rejected' && x.review_note && <div className="small why">HEAD: {x.review_note}</div>}
+      {x.status === 'rejected' && x.review_note && <div className="small why">{x.reviewer || 'HEAD'}: {x.review_note}</div>}
     </div>
   </div>
 }
 
-function PostSheet({ post, head, onClose, onEdit, onChanged }) {
+function PostSheet({ post, head, mine, canResult, onClose, onEdit, onChanged }) {
   const [d, setD] = useState(null)
   const [msg, setMsg] = useState('')
   const [url, setUrl] = useState('')
@@ -143,21 +163,22 @@ function PostSheet({ post, head, onClose, onEdit, onChanged }) {
     {x.caption && <p className="mktcap">{x.caption}</p>}
     {x.files.length > 0 && <div className="mktfiles">{x.files.map(f => <button key={f.id} className="mthumb" onClick={() => setView(f)}>
       {f.thumb ? <img src={f.thumb} alt="" loading="lazy" /> : <span>▶</span>}</button>)}</div>}
-    {x.review_note && <p className="small why">HEAD: {x.review_note}</p>}
+    {x.review_note && <p className="small why">{x.reviewer || 'HEAD'}: {x.review_note}</p>}
+    {x.checked && <p className="small muted">Проверено: {x.checked}</p>}
     {x.url && <p className="small"><a href={x.url} target="_blank" rel="noreferrer">Открыть публикацию ›</a></p>}
     {msg && <p className="small why">{msg}</p>}
     {head && x.status === 'pending' && <>
       <div className="seg"><button onClick={() => act('review', { approve: true })}>Утверждаю</button>
         <button className="ghost" onClick={() => note.trim() ? act('review', { approve: false, note }) : setMsg('Напиши, что не так, — увидит автор.')}>Вернуть</button></div>
       <input placeholder="Что не так (для «Вернуть»)" value={note} onChange={e => setNote(e.target.value)} /></>}
-    {['draft', 'rejected'].includes(x.status) && <div className="seg"><button onClick={() => act('submit')}>Отправить HEAD</button><button className="ghost" onClick={onEdit}>Править</button></div>}
-    {x.status === 'approved' && <><label className="muted small">Ссылка на вышедшую публикацию</label>
+    {mine && ['draft', 'rejected'].includes(x.status) && <div className="seg"><button onClick={() => act('submit')}>Отправить на утверждение</button><button className="ghost" onClick={onEdit}>Править</button></div>}
+    {mine && x.status === 'approved' && <><label className="muted small">Ссылка на вышедшую публикацию</label>
       <input placeholder="https://instagram.com/…" value={url} onChange={e => setUrl(e.target.value)} />
       <button onClick={() => act('published', { url })}>Вышло</button></>}
     {['approved', 'published'].includes(x.status) && x.files.some(isVid) && <button className="ghost" onClick={() => {
       download(x.files.find(isVid)); copyText(x.caption || '').then(ok => setMsg(ok ? 'Видео скачивается, текст скопирован. Открой TikTok и вставь.' : 'Видео скачивается. Текст скопируй из блока выше.')) }}>♪ Для TikTok: видео и текст</button>}
-    {x.status === 'published' && <Result x={x} act={act} />}
-    {x.status !== 'published' && <button className="ghost mini" onClick={() => act('cancel')}>Отменить публикацию</button>}
+    {canResult && x.status === 'published' && <Result x={x} act={act} />}
+    {mine && x.status !== 'published' && <button className="ghost mini" onClick={() => act('cancel')}>Отменить публикацию</button>}
     <Viewer f={view} onClose={() => setView(null)} />
   </Sheet>
 }
@@ -212,7 +233,7 @@ function Editor({ post, onClose, onSaved }) {
     <button className="ghost" onClick={() => setPick(true)}>🎬 Выбрать из «Медиа»</button>
     {msg && <p className="small why">{msg}</p>}
     <button onClick={save}>Сохранить</button>
-    <p className="small muted">Сохранится черновиком. HEAD увидит, когда нажмёшь «Отправить HEAD».</p>
+    <p className="small muted">Сохранится черновиком. На утверждение уйдёт, когда нажмёшь «Отправить на утверждение».</p>
   </Sheet>
 }
 
@@ -275,16 +296,16 @@ async function exportCsv(ym) {
 
 // «Идеи»: сценарии и задумки (по проекту и вне). Взяли в съёмку — «в работе», сняли — «снято».
 const IST = { new: ['новая', 'warn'], work: ['в работе', ''], done: ['снято', 'ok'], dropped: ['отложено', 'hot'] }
-function Ideas() {
+function Ideas({ can }) {
   const [d, setD] = useState(null)
   const [edit, setEdit] = useState(null)
   const load = () => api('/mkt/ideas').then(setD, e => setD({ items: [], err: e.message }))
   useEffect(() => { load() }, [])
   return <div className="card">
     <p className="small muted">Сценарии, задумки, раскадровки. Из идеи потом ставится съёмка и публикация.</p>
-    <button onClick={() => setEdit({})}>+ Идея</button>
+    {can && <button onClick={() => setEdit({})}>+ Идея</button>}
     {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> : !d.items.length ? <p className="muted small">Идей пока нет.</p> :
-      d.items.map(x => <div key={x.id} className="mktidea" onClick={() => setEdit(x)}>
+      d.items.map(x => <div key={x.id} className="mktidea" onClick={() => can && setEdit(x)}>
         <b>{x.title}</b><span className={'badge ' + IST[x.status][1]}>{IST[x.status][0]}</span>
         <div className="small muted">{d.kinds[x.kind]}{x.object_title ? ` · №${x.object_id} ${x.object_title}` : ' · вне проектов'} · {x.author}</div>
         {x.text && <p className="small mktclip">{x.text}</p>}</div>)}
@@ -313,7 +334,7 @@ function IdeaEditor({ x, kinds, onClose, onSaved }) {
 }
 
 // «Съёмки»: график на месяц — что, когда, где, кто снимает; по проекту или вне проектов (студия, интервью).
-function Shoots() {
+function Shoots({ can }) {
   const [ym, setYm] = useState(ymNow())
   const [d, setD] = useState(null)
   const [edit, setEdit] = useState(null)
@@ -323,10 +344,10 @@ function Shoots() {
   return <div className="card">
     <div className="mktmonth"><button className="ghost mini" aria-label="Прошлый месяц" onClick={() => setYm(shift(ym, -1))}>‹</button>
       <b>{monthName(ym)}</b><button className="ghost mini" aria-label="Следующий месяц" onClick={() => setYm(shift(ym, 1))}>›</button></div>
-    <button onClick={() => setEdit({})}>+ Съёмка</button>
+    {can && <button onClick={() => setEdit({})}>+ Съёмка</button>}
     {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> : !d.items.length ? <p className="muted small">Съёмок в этом месяце нет.</p> :
       groups.map(([dt, list]) => <div key={dt} className="mktday"><h3>{day(dt)}</h3>
-        {list.map(x => <div key={x.id} className="mktidea" onClick={() => setEdit(x)}>
+        {list.map(x => <div key={x.id} className="mktidea" onClick={() => can && setEdit(x)}>
           <b>{x.at_time ? `${x.at_time} · ` : ''}{x.title}</b>{x.status === 'done' && <span className="badge ok">снято</span>}{x.status === 'proposed' && <span className="badge warn">{x.alt_date ? 'ГИП предлагает ' + x.alt_date.slice(8, 10) + '.' + x.alt_date.slice(5, 7) : 'ждёт ГИП'}</span>}
           <div className="small muted">{x.object_title ? `№${x.object_id} ${x.object_title}` : 'вне проектов'}{x.place ? ` · ${x.place}` : ''}</div>
           {x.crew_names && <div className="small">🎥 {x.crew_names.join(', ')}</div>}

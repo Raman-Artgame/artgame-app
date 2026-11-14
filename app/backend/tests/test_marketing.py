@@ -112,3 +112,43 @@ def test_ready_upload_and_review_day(client, team, monkeypatch):
     assert client.post("/api/mkt/review_day", json={"plan_date": "2026-11-21"}, headers=hdr(2000)).status_code == 403
     assert client.post("/api/mkt/review_day", json={"plan_date": "2026-11-21"}, headers=hdr(1000)).json() == {"approved": 2}
     assert [x["id"] for x in client.get("/api/mkt/posts?status=pending", headers=hdr(1000)).json()["items"]] == [ids[2]]
+
+
+def test_jobs_lead_checks_first_and_norms(client, team):
+    """Отдел: исполнитель → руководитель («Проверено») → HEAD; сторис-мейкер правит только своё; таргетолог план не трогает."""
+    ids = {}
+    for tg, job in [(2100, "lead"), (2200, "stories"), (2300, "target"), (2400, "video")]:
+        pid = client.post("/api/register", json={"full_name": f"M{tg}"}, headers=hdr(tg)).json()["id"]
+        r = client.post(f"/api/people/{pid}", json={"role_code": "marketer", "zones": ["marketing"], "mkt_job": job}, headers=hdr(1000))
+        assert r.status_code == 200 and r.json()["mkt_job"] == job
+        ids[tg] = pid
+    assert client.post(f"/api/people/{ids[2400]}", json={"mkt_job": "boss"}, headers=hdr(1000)).status_code == 400
+    assert client.get("/api/me", headers=hdr(2100)).json()["mkt_job"] == "lead"
+    body = {"title": "Сторис утро", "kind": "stories", "plan_date": "2026-11-20", "caption": "т"}
+    assert client.post("/api/mkt/posts", json=body, headers=hdr(2300)).status_code == 403      # таргетолог
+    assert client.post("/api/mkt/posts", json=body, headers=hdr(2400)).status_code == 403      # видеограф
+    assert client.post("/api/mkt/shoots", json={"title": "Объект", "shoot_date": "2026-11-18"}, headers=hdr(2400)).status_code == 200
+    assert client.post("/api/mkt/shoots", json={"title": "Объект", "shoot_date": "2026-11-18"}, headers=hdr(2200)).status_code == 403
+    p = client.post("/api/mkt/posts", json=body, headers=hdr(2200)).json()
+    other = client.post("/api/mkt/posts", json={**body, "title": "Рилс"}, headers=hdr(2000)).json()
+    assert client.post(f"/api/mkt/posts/{other['id']}", json=body, headers=hdr(2200)).status_code == 403   # чужое
+    assert client.post(f"/api/mkt/posts/{p['id']}/submit", headers=hdr(2200)).json()["status"] == "check"
+    assert client.get("/api/head/pulse", headers=hdr(1000)).json()["posts"] == 0                # до HEAD ещё не дошло
+    assert client.post(f"/api/mkt/posts/{p['id']}/review", json={"approve": True}, headers=hdr(1000)).status_code == 409
+    assert client.post(f"/api/mkt/posts/{p['id']}/check", json={"approve": True}, headers=hdr(2200)).status_code == 403
+    r = client.post(f"/api/mkt/posts/{p['id']}/check", json={"approve": False, "note": "логотип мелко"}, headers=hdr(2100)).json()
+    assert r["status"] == "rejected" and r["reviewer"] == "M2100"
+    client.post(f"/api/mkt/posts/{p['id']}/submit", headers=hdr(2200))
+    assert client.get("/api/mkt/posts?ym=2026-11", headers=hdr(2100)).json()["to_check"] == 1
+    r = client.post(f"/api/mkt/posts/{p['id']}/check", json={"approve": True}, headers=hdr(2100)).json()
+    assert r["status"] == "pending" and r["checked"] == "M2100"
+    assert client.post(f"/api/mkt/posts/{p['id']}/review", json={"approve": True}, headers=hdr(1000)).json()["status"] == "approved"
+    lead_post = client.post("/api/mkt/posts", json={**body, "title": "От руководителя"}, headers=hdr(2100)).json()
+    assert client.post(f"/api/mkt/posts/{lead_post['id']}/submit", headers=hdr(2100)).json()["status"] == "pending"   # руководитель — сразу HEAD
+    client.post(f"/api/mkt/posts/{p['id']}/published", json={}, headers=hdr(2200))
+    norms = {n["kind"]: n for n in client.get("/api/mkt/posts?ym=2026-11", headers=hdr(2300)).json()["norms"]}
+    assert norms["stories"] == {"kind": "stories", "title": "Сторис", "per_month": 70, "planned": 3, "done": 1}
+    assert norms["reels"]["per_month"] == 8 and norms["reels"]["planned"] == 0
+    assert client.post("/api/mkt/norms", json={"kind": "stories", "per_month": 60}, headers=hdr(2100)).status_code == 403
+    assert client.post("/api/mkt/norms", json={"kind": "stories", "per_month": 60}, headers=hdr(1000)).status_code == 200
+    assert client.get("/api/mkt/posts?ym=2026-11", headers=hdr(1000)).json()["norms"][2]["per_month"] == 60
