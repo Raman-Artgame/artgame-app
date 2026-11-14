@@ -60,3 +60,24 @@ def test_bad_media_and_cancel(client, team):
     p = client.post("/api/mkt/posts", json={"title": "Сторис", "kind": "stories", "channel": "tiktok"}, headers=hdr(1000)).json()
     assert client.post(f"/api/mkt/posts/{p['id']}/cancel", headers=hdr(2000)).json()["status"] == "cancelled"
     assert client.get("/api/mkt/posts", headers=hdr(2000)).json()["items"] == []
+
+
+def test_result_csv_ideas_shoots(client, team):
+    p = client.post("/api/mkt/posts", json={"title": "Рилс", "plan_date": "2026-11-20", "caption": "т"}, headers=hdr(2000)).json()
+    assert client.post(f"/api/mkt/posts/{p['id']}/result", json={"result": "good"}, headers=hdr(2000)).status_code == 409   # не вышла
+    client.post(f"/api/mkt/posts/{p['id']}/submit", headers=hdr(2000))
+    client.post(f"/api/mkt/posts/{p['id']}/review", json={"approve": True}, headers=hdr(1000))
+    client.post(f"/api/mkt/posts/{p['id']}/published", json={}, headers=hdr(2000))
+    r = client.post(f"/api/mkt/posts/{p['id']}/result", json={"result": "good", "views": 12000, "leads": 3}, headers=hdr(2000)).json()
+    assert r["result"] == "good" and r["leads"] == 3
+    csv = client.get("/api/mkt/posts.csv?ym=2026-11", headers=hdr(2000))
+    assert csv.status_code == 200 and "дала результат" in csv.text and "12000" in csv.text
+    i = client.post("/api/mkt/ideas", json={"title": "Говорящая голова: HEAD о бренде", "text": "1. Крупно…"}, headers=hdr(2000)).json()["id"]
+    s = client.post("/api/mkt/shoots", json={"title": "Интервью", "shoot_date": "2026-11-18", "at_time": "11:00", "place": "Студия",
+                                             "crew": [team[2000]], "idea_id": i}, headers=hdr(2000)).json()["id"]
+    assert client.get("/api/mkt/ideas", headers=hdr(2000)).json()["items"][0]["status"] == "work"
+    sh = client.get("/api/mkt/shoots?ym=2026-11", headers=hdr(1000)).json()
+    assert sh["items"][0]["crew_names"] == ["P2000"] and sh["items"][0]["idea_title"].startswith("Говорящая")
+    client.post(f"/api/mkt/shoots/{s}", json={"title": "Интервью", "shoot_date": "2026-11-18", "idea_id": i, "status": "done"}, headers=hdr(2000))
+    assert client.get("/api/mkt/ideas", headers=hdr(2000)).json()["items"][0]["status"] == "done"
+    assert client.get("/api/mkt/shoots", headers=hdr(3000)).status_code == 403
