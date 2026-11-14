@@ -1084,6 +1084,8 @@ button.kittile { display: flex; flex-direction: column; align-items: stretch; ga
 .kittile img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 8px; } .kittile.tall img { aspect-ratio: 9 / 16; }
 .kittile.light img, .kitbig.light { background: #ECE7E8; } .kittile.dark img, .kitbig.dark { background: #211C1D; }
 .kittile span { overflow-wrap: anywhere; }
+/* три в ряд на iPhone: длинное название (стикербомбинг) — в одну строку с многоточием, а не по буквам */
+.kitgrid.three .kittile span { overflow-wrap: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 .kitbig { border-radius: var(--r2); padding: 14px; margin-bottom: 10px; display: grid; place-items: center; } .kitbig img { max-width: 100%; max-height: 46vh; object-fit: contain; }
 .storyed { position: fixed; inset: 0; z-index: 60; background: #050506; display: flex; flex-direction: column; align-items: center; padding: max(8px, env(safe-area-inset-top, 0px)) 12px max(8px, env(safe-area-inset-bottom, 0px)); touch-action: none; }
 .storytop { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; } .storytop button { width: auto; }
