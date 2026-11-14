@@ -75,44 +75,51 @@ export function Chat({ head }) {
   if (open) return <Pm who={open} back={back} />
   if (!d) return <div className="card muted">Загрузка…</div>
   if (d.err) return <div className="card muted">{d.err}</div>
+  // HEAD 14.11: как в Telegram — где пришло новое или идёт переписка, тот чат наверху; чат проекта поднимается,
+  // только когда в нём пишут (пустые чаты проектов — ниже, отдельным блоком).
   const ql = q.trim().toLowerCase()
-  const people = d.people.filter(x => !ql || x.full_name.toLowerCase().includes(ql) || (x.role_title || '').toLowerCase().includes(ql))
-  const talk = people.filter(x => x.last_at), rest = people.filter(x => !x.last_at)
-  const row = x => <div key={x.id} className="qrow dmrow" onClick={() => setOpen(x)}>
+  const hit = (...t) => !ql || t.some(v => (v || '').toLowerCase().includes(ql))
+  const hqRow = { key: 'hq', at: d.hq.last_at, unread: +d.hq.unread || 0, el: <div key="hq" className="qrow dmrow dmhq" onClick={() => setOpen('hq')}>
+    <span className="ic dmav hq">HEAD</span>
+    <div className="qmain"><b>HEAD</b>{cnt(d.hq.unread)}
+      <div className="small muted">{head ? 'вопросы команды и объявления · видят все HEAD' : 'объявления и вопросы руководству'}{d.hq.last_at ? ' · ' + when(d.hq.last_at) : ''}</div>
+      {d.hq.last_text && <div className={'small dmlast' + (+d.hq.unread ? ' new' : '')}>{d.hq.last_text}</div>}
+    </div><span className="muted">›</span></div> }
+  const projRow = x => ({ key: 'p' + x.id, at: x.last_at, unread: +x.unread || 0, el: <div key={'p' + x.id} className="qrow dmrow dmproj" onClick={() => setOpen({ proj: x.id })}>
+    <span className="ic dmav proj">№</span>
+    <div className="qmain"><b>{cleanName(x.title, x.id)}</b>{cnt(x.unread)}
+      <div className="small muted">Чат проекта · № {x.id}{x.open ? '' : ' · только чтение'}{x.last_at ? ' · ' + when(x.last_at) : ''}</div>
+      {x.last_at && <div className={'small dmlast' + (+x.unread ? ' new' : '')}>{x.last_name?.split(' ')[0]}: {x.last_text || '📷 фото'}</div>}
+    </div><span className="muted">›</span></div> })
+  const pmRow = x => ({ key: 'u' + x.id, at: x.last_at, unread: +x.unread || 0, el: <div key={'u' + x.id} className="qrow dmrow" onClick={() => setOpen(x)}>
     <span className={'ic dmav' + (x.role_code === 'head' ? ' head' : '')}>{initials(x.full_name)}</span>
     <div className="qmain"><b>{x.full_name}</b>{cnt(x.unread)}
       <div className="small muted">{x.role_title}{x.last_at ? ' · ' + when(x.last_at) : ''}</div>
       {x.last_text && <div className={'small dmlast' + (+x.unread ? ' new' : '')}>{x.last_mine ? 'Вы: ' : ''}{x.last_text}</div>}
-    </div><span className="muted">›</span></div>
+    </div><span className="muted">›</span></div> })
+  const projs = (d.projects || []).filter(x => hit(x.title, String(x.id)))
+  const people = d.people.filter(x => hit(x.full_name, x.role_title))
+  const live = [...(hit('HEAD', 'руководство') ? [hqRow] : []), ...projs.filter(x => x.last_at || +x.unread).map(projRow),
+    ...people.filter(x => x.last_at || +x.unread).map(pmRow)]
+    .sort((a, b) => (b.unread > 0) - (a.unread > 0) || (b.at ? new Date(b.at) : 0) - (a.at ? new Date(a.at) : 0))
+  const quiet = projs.filter(x => !x.last_at && !+x.unread && x.open), rest = people.filter(x => !x.last_at && !+x.unread)
   return <>
     <div className="card dm">
       <h2>Чат</h2>
-      <div className="qrow dmrow dmhq" onClick={() => setOpen('hq')}>
-        <span className="ic dmav hq">HEAD</span>
-        <div className="qmain"><b>HEAD</b>{cnt(d.hq.unread)}
-          <div className="small muted">{head ? 'вопросы команды и объявления · видят все HEAD' : 'объявления и вопросы руководству'}{d.hq.last_at ? ' · ' + when(d.hq.last_at) : ''}</div>
-          {d.hq.last_text && <div className={'small dmlast' + (+d.hq.unread ? ' new' : '')}>{d.hq.last_text}</div>}
-        </div><span className="muted">›</span></div>
+      <input className="dmsearch" placeholder="Найти чат, человека или проект" value={q} onChange={e => setQ(e.target.value)} />
+      {live.map(x => x.el)}
+      {!live.length && !quiet.length && !rest.length && <p className="small muted">Ничего не нашлось.</p>}
     </div>
-    {d.projects?.length > 0 && <div className="card dm">
-      <h3>Проекты</h3>
-      {d.projects.map(x => <div key={x.id} className="qrow dmrow dmproj" onClick={() => setOpen({ proj: x.id })}>
-        <span className="ic dmav proj">№</span>
-        <div className="qmain"><b>{cleanName(x.title, x.id)}</b>{cnt(x.unread)}
-          <div className="small muted">№ {x.id}{x.open ? '' : ' · только чтение'}{x.last_at ? ' · ' + when(x.last_at) : ''}</div>
-          {x.last_at && <div className={'small dmlast' + (+x.unread ? ' new' : '')}>{x.last_name?.split(' ')[0]}: {x.last_text || '📷 фото'}</div>}
-        </div><span className="muted">›</span></div>)}
-      <p className="small muted dmsub">Чат проекта видят: кто на объекте, ГИП, МОП и HEAD.</p>
+    {quiet.length > 0 && <div className="card dm">
+      <h3>Чаты проектов</h3>
+      <p className="small muted dmsub">Здесь ещё не писали. Как только напишут — чат поднимется наверх. Видят: кто на объекте, ГИП, МОП и HEAD.</p>
+      {quiet.map(x => projRow(x).el)}
     </div>}
-    <div className="card dm">
-      <h3>Личные</h3>
-      <input className="dmsearch" placeholder="Найти по имени или роли" value={q} onChange={e => setQ(e.target.value)} />
-      {talk.map(row)}
-      {talk.length > 0 && rest.length > 0 && <p className="small muted dmsub">Написать</p>}
-      {rest.map(row)}
-      {!people.length && <p className="small muted">Никого не нашлось.</p>}
+    {rest.length > 0 && <div className="card dm">
+      <h3>Написать</h3>
+      {rest.map(x => pmRow(x).el)}
       <p className="small muted dmsub">Личный чат видите только вы двое.</p>
-    </div>
+    </div>}
   </>
 }
 

@@ -1017,6 +1017,10 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .contact .callnote { flex: 1 1 100%; margin: 0; }
 .dealbtns .morebtn.on { background: var(--dark-line); }
 .moreacts { margin-top: 8px; }
+.movelink { display: inline-block; margin-top: 4px; color: var(--accent); cursor: pointer; }
+.moveshift { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.viewer .vextra { width: min(92vw, 420px); margin: 8px auto 0; }
+.viewer .vextra .check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 
 /* «Бренд»: книга по главам и полки */
 .bbch { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line2); cursor: pointer; }

@@ -215,6 +215,9 @@ async function tab(p, name) {
     await io.locator('.card.past').getByRole('button', { name: 'Внести' }).click()
     const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
     await io.locator('.card.past input[type=date]').fill(y)
+    // HEAD 14.11: объект сам не подставляется — без выбора не отправить
+    assert.ok(await io.locator('.card.past').getByRole('button', { name: 'Отправить на проверку' }).isDisabled())
+    await io.locator('.card.past select').selectOption({ index: 1 })
     await io.locator('.card.past textarea').fill('Фон и контур')
     await io.locator('.card.past').getByText('Был на двух объектах за день').waitFor()
     await io.locator('.card.past').screenshot({ path: `${shots}/kab-proshlaya-smena.png` })

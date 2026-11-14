@@ -35,6 +35,7 @@ const noScroll = async pg => assert.ok(await pg.evaluate(() => document.document
   }
   sql(`INSERT INTO objects (id, title, city, bitrix_stage, mop_bx_id) VALUES (1700, '1700 · ШКОЛА — ШЫМКЕНТ', 'ШЫМКЕНТ', 'UC_AV00QK', 4693) ON CONFLICT (id) DO UPDATE SET mop_bx_id=4693`)
   sql(`UPDATE people SET bitrix_user_id=4693 WHERE id=${ids[7804]}`)
+  sql(`INSERT INTO objects (id, title, city, bitrix_stage) VALUES (1701, '1701 · КАФЕ — АСТАНА', 'АСТАНА', 'UC_AV00QK') ON CONFLICT (id) DO NOTHING`)
   await call(1000, '/objects/1700/gip', { person_id: ids[7801] })
   await call(1000, '/objects/1700/crew', { person_id: ids[7802] })
   const b = await chromium.launch()
@@ -58,11 +59,14 @@ const noScroll = async pg => assert.ok(await pg.evaluate(() => document.document
   const head = await open(b, 1000)
   await head.locator('nav button', { hasText: 'Ещё' }).click()
   await head.locator('button', { hasText: 'Чат' }).first().click()
-  await head.locator('.dmproj').waitFor()
-  assert.ok((await head.locator('.dmproj .dmcnt').innerText()) === '3')
+  await head.locator('.dmproj').first().waitFor()
+  assert.ok((await head.locator('.dmproj .dmcnt').first().innerText()) === '3')
+  // HEAD 14.11: где пишут — наверху; пустой чат проекта не поднимается
+  assert.ok(await head.locator('.card.dm').first().locator('.dmrow').first().evaluate(e => e.classList.contains('dmproj')), 'чат с новыми — не первый')
+  assert.strictEqual(await head.locator('.card.dm', { hasText: 'Чаты проектов' }).locator('.dmproj').count(), 1)   // 1701 — ниже, в «Чатах проектов»
   await noScroll(head)
   await head.screenshot({ path: `${shots}/pchat-head-list.png`, fullPage: true })
-  await head.locator('.dmproj').click()
+  await head.locator('.dmproj').first().click()
   await head.locator('.dmb').nth(2).waitFor()
   await head.getByRole('button', { name: /Участники: 4/ }).click()
   await noScroll(head)

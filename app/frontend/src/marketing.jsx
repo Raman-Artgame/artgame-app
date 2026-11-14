@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api, uuid, webToken } from './api.js'
 import { Viewer, download, uploadBig } from './objects.jsx'
 import { Sheet } from './ui.jsx'
-import { Kit } from './kit.jsx'
+import { Kit } from './mktkit.jsx'
 
 // Рабочее место маркетинга (HEAD 14.11): «План» — контент-план месяца, «Медиа» — материал с объектов,
 // HEAD — «На утверждение». Каждую публикацию утверждает HEAD: черновик → «Отправить HEAD» → «Утверждаю» / «Вернуть»
