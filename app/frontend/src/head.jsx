@@ -59,6 +59,8 @@ export function Pulse({ me, pulse, go }) {
   const curating = r.curating ? `Ещё ${r.curating} ждут оценки куратора (до 24 ч), потом придут сюда` : ''
   const name = (me.full_name || '').split(' ')[0]
   const active = p.team.reduce((n, t) => n + +t.active, 0)
+  const td = fin?.today   // HEAD 14.11: месяц идёт — ФОТ и прибыль «на сегодня» (оклады по дням)
+  const profit = td ? td.profit : fin?.profit
   return <>
     <div className="card dark pulse-hero">
       <span className="muted small">{new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
@@ -90,7 +92,7 @@ export function Pulse({ me, pulse, go }) {
       {!fin ? <p className="small muted">Считаю…</p> : fin.err ? <p className="small muted">{fin.err}</p> : <>
         <div className="kpis">
           {[['revenue', 'Выручка с НДС', mln(fin.revenue?.gross), '', 'сдано в этом месяце'],
-            ['profit', 'Прибыль до ИПН', mln(fin.profit), fin.profit < 0 ? 'neg' : 'pos', 'как посчитано'],
+            ['profit', 'Прибыль до ИПН', mln(profit), profit < 0 ? 'neg' : 'pos', td ? 'на сегодня' : 'как посчитано'],
             ['cash_in', 'Пришло', mln(fin.cash?.in), '', fin.cash?.in_undated > 0 ? `без даты в сделке ${mln(fin.cash.in_undated)}` : 'оплаты клиентов'],
             ['lost', 'Упущенная выручка', kpi?.lost ? mln(kpi.lost.sum) : kpi?.bx_error ? '—' : '…', kpi?.lost?.sum ? 'neg' : '', kpi?.lost ? `проиграно: ${kpi.lost.count}` : ''],
             ['support', 'Ждут оплаты: саппорт', kpi ? mln(kpi.due_support) : '…', '', 'в понедельник'],
@@ -104,9 +106,12 @@ export function Pulse({ me, pulse, go }) {
           <div className="row"><span>Выручка без НДС</span><b>{mln(fin.revenue?.net)}</b></div>
           {[['payroll', 'ФОТ (смены, оклады, % МОП)'], ['fixed', 'Постоянные (аренда, подписки)'], ['variable', 'Переменные (реклама и пр.)'], ['project', 'Расходы проектов (чеки)'],
             ['stock', 'Закупки склада'], ['canvas', 'Мастерская холстов'], ['sales', 'Отдел продаж'], ['materials', 'Материалы (история)']]
-            .filter(([k]) => fin.costs?.[k]).map(([k, t]) => <div key={k} className="row"><span>− {t}</span><b>{mln(fin.costs[k])}</b></div>)}
-          <div className="row"><span>= Прибыль до ИПН</span><b>{mln(fin.profit)}</b></div>
-          <p className="muted">Месяц идёт: выручка — только сданные проекты, расходы — всё, что уже начислено и одобрено.</p></div>}
+            .filter(([k]) => fin.costs?.[k]).map(([k, t]) => <div key={k} className="row"><span>− {t}{k === 'payroll' && td ? ' на сегодня' : ''}</span>
+              <b>{mln(k === 'payroll' && td ? td.payroll : fin.costs[k])}</b></div>)}
+          <div className="row"><span>= Прибыль до ИПН</span><b>{mln(profit)}</b></div>
+          {td ? <p className="muted">Месяц идёт: выручка — только сданные проекты. Оклады и доплаты до минимума — за {td.days} из {td.days_month} дн.,
+            смены и чеки — по факту. ФОТ за весь месяц будет ≈ {mln(td.payroll_month)} (если смен больше не будет).</p>
+            : <p className="muted">Выручка — сданные проекты, расходы — всё начисленное и одобренное.</p>}</div>}
         {open === 'lost' && kpi?.lost && <div className="profitwhy lostlist small">
           <b>Проиграно в этом месяце</b>
           {!kpi.lost.items?.length ? <p className="muted">Проигранных сделок нет.</p> : kpi.lost.items.map(x => <div key={x.id} className="row">

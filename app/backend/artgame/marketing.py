@@ -37,7 +37,8 @@ def _files(conn, ids: list[int]) -> list[dict]:
 
 def _out(conn, r: dict) -> dict:
     return {**{k: r[k] for k in ("id", "title", "channel", "kind", "plan_date", "caption", "object_id", "status", "author_id",
-                                 "submitted_at", "reviewed_at", "review_note", "url", "published_at", "created_at")},
+                                 "submitted_at", "reviewed_at", "review_note", "url", "published_at", "created_at",
+                                 "result", "result_note", "views", "leads")},
             "author": r.get("author"), "object_title": r.get("object_title"), "files": _files(conn, list(r["file_ids"] or []))}
 
 
@@ -175,3 +176,140 @@ def post_published(post_id: int, b: PublishedIn, p: dict = Depends(active)):
 def post_cancel(post_id: int, p: dict = Depends(active)):
     _mkt(p)
     return _move(post_id, p, ("draft", "pending", "approved", "rejected"), "cancelled")
+
+
+# ---------- итог публикации, выгрузка плана (HEAD 14.11: «что выполнено, что даёт результат, а что нет») ----------
+
+class ResultIn(BaseModel):
+    result: str = Field(pattern="^(good|weak)$")
+    views: int | None = Field(default=None, ge=0)
+    leads: int | None = Field(default=None, ge=0)
+    note: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/mkt/posts/{post_id}/result")
+def post_result(post_id: int, b: ResultIn, p: dict = Depends(active)):
+    _mkt(p)
+    with db.pool.connection() as conn, conn.transaction():
+        r = _get(conn, post_id, lock=True)
+        if r["status"] != "published":
+            raise HTTPException(409, "итог — после выхода")
+        conn.execute("UPDATE mkt_posts SET result=%s, views=%s, leads=%s, result_note=%s, updated_at=now() WHERE id=%s",
+                     (b.result, b.views, b.leads, b.note, post_id))
+        db.audit(conn, p["id"], "mkt_post_result", "mkt_posts", post_id, b.model_dump())
+        return _out(conn, _get(conn, post_id))
+
+
+STATUS_RU = {"draft": "черновик", "pending": "у HEAD", "approved": "утверждено", "rejected": "вернул", "published": "вышло"}
+
+
+@router.get("/mkt/posts.csv")
+def posts_csv(ym: str, p: dict = Depends(active)):
+    """Выгрузка контент-плана месяца (откроется в Excel / Google Таблицах)."""
+    import csv
+    import io
+    from fastapi.responses import Response
+    d = posts(ym=ym, p=p)
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["Дата", "Где", "Формат", "Что", "Проект", "Статус", "Ссылка", "Итог", "Просмотры", "Заявки", "Текст", "Автор"])
+    for x in d["items"]:
+        w.writerow([x["plan_date"] or "", CHANNELS[x["channel"]], KINDS[x["kind"]], x["title"], x["object_title"] or "",
+                    STATUS_RU.get(x["status"], x["status"]), x["url"] or "",
+                    {"good": "дала результат", "weak": "без результата"}.get(x["result"] or "", ""), x["views"] or "", x["leads"] or "",
+                    x["caption"] or "", x["author"]])
+    return Response("﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=content-plan-{ym}.csv"})
+
+
+# ---------- идеи и сценарии ----------
+
+IDEA_ST = {"new": "новая", "work": "в работе", "done": "снято", "dropped": "отложено"}
+
+
+class IdeaIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    text: str | None = Field(default=None, max_length=8000)
+    kind: str = "reels"
+    object_id: int | None = None
+    status: str = Field(default="new", pattern="^(new|work|done|dropped)$")
+
+
+@router.get("/mkt/ideas")
+def ideas(p: dict = Depends(active)):
+    _mkt(p)
+    with db.pool.connection() as conn:
+        rows = conn.execute("""SELECT i.*, pe.full_name AS author, o.title AS object_title FROM mkt_ideas i
+                               JOIN people pe ON pe.id=i.author_id LEFT JOIN objects o ON o.id=i.object_id
+                               ORDER BY i.status IN ('done','dropped'), i.updated_at DESC LIMIT 300""").fetchall()
+    return {"items": rows, "statuses": IDEA_ST, "kinds": KINDS}
+
+
+@router.post("/mkt/ideas")
+@router.post("/mkt/ideas/{idea_id}")
+def idea_save(b: IdeaIn, idea_id: int | None = None, p: dict = Depends(active)):
+    _mkt(p)
+    if b.kind not in KINDS:
+        raise HTTPException(400, "bad kind")
+    with db.pool.connection() as conn, conn.transaction():
+        if idea_id:
+            r = conn.execute("""UPDATE mkt_ideas SET title=%s, text=%s, kind=%s, object_id=%s, status=%s, updated_at=now()
+                                WHERE id=%s RETURNING id""", (b.title.strip(), b.text, b.kind, b.object_id, b.status, idea_id)).fetchone()
+            if not r:
+                raise HTTPException(404)
+        else:
+            r = conn.execute("""INSERT INTO mkt_ideas (title, text, kind, object_id, status, author_id) VALUES (%s,%s,%s,%s,%s,%s)
+                                RETURNING id""", (b.title.strip(), b.text, b.kind, b.object_id, b.status, p["id"])).fetchone()
+        db.audit(conn, p["id"], "mkt_idea_save", "mkt_ideas", r["id"], {"title": b.title, "status": b.status})
+    return {"id": r["id"]}
+
+
+# ---------- графики съёмок ----------
+
+class ShootIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    shoot_date: date
+    at_time: str | None = Field(default=None, max_length=40)
+    object_id: int | None = None
+    place: str | None = Field(default=None, max_length=200)
+    crew: list[int] = Field(default_factory=list, max_length=20)
+    idea_id: int | None = None
+    note: str | None = Field(default=None, max_length=2000)
+    status: str = Field(default="planned", pattern="^(planned|done|cancelled)$")
+
+
+@router.get("/mkt/shoots")
+def shoots(ym: str | None = None, p: dict = Depends(active)):
+    _mkt(p)
+    y, mo = map(int, (ym or date.today().strftime("%Y-%m")).split("-"))
+    t0, t1 = date(y, mo, 1), date(y + mo // 12, mo % 12 + 1, 1)
+    with db.pool.connection() as conn:
+        rows = conn.execute("""SELECT s.*, o.title AS object_title, i.title AS idea_title,
+                                      (SELECT array_agg(full_name ORDER BY full_name) FROM people WHERE id = ANY(s.crew)) AS crew_names
+                               FROM mkt_shoots s LEFT JOIN objects o ON o.id=s.object_id LEFT JOIN mkt_ideas i ON i.id=s.idea_id
+                               WHERE s.status<>'cancelled' AND s.shoot_date >= %s AND s.shoot_date < %s
+                               ORDER BY s.shoot_date, s.at_time NULLS LAST, s.id""", (t0, t1)).fetchall()
+        team = conn.execute("""SELECT id, full_name, role_code FROM people WHERE status='active'
+                               AND (role_code IN ('marketer','head','lead_designer') OR reels) ORDER BY role_code<>'marketer', full_name""").fetchall()
+    return {"items": rows, "team": team}
+
+
+@router.post("/mkt/shoots")
+@router.post("/mkt/shoots/{shoot_id}")
+def shoot_save(b: ShootIn, shoot_id: int | None = None, p: dict = Depends(active)):
+    _mkt(p)
+    vals = (b.title.strip(), b.shoot_date, b.at_time, b.object_id, b.place, b.crew, b.idea_id, b.note, b.status)
+    with db.pool.connection() as conn, conn.transaction():
+        if shoot_id:
+            r = conn.execute("""UPDATE mkt_shoots SET title=%s, shoot_date=%s, at_time=%s, object_id=%s, place=%s, crew=%s, idea_id=%s,
+                                note=%s, status=%s, updated_at=now() WHERE id=%s RETURNING id""", (*vals, shoot_id)).fetchone()
+            if not r:
+                raise HTTPException(404)
+        else:
+            r = conn.execute("""INSERT INTO mkt_shoots (title, shoot_date, at_time, object_id, place, crew, idea_id, note, status, author_id)
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""", (*vals, p["id"])).fetchone()
+        if b.idea_id and b.status != "cancelled":   # идею взяли в съёмку — «в работе», сняли — «снято»
+            conn.execute("UPDATE mkt_ideas SET status=%s, updated_at=now() WHERE id=%s AND status IN ('new','work')",
+                         ("done" if b.status == "done" else "work", b.idea_id))
+        db.audit(conn, p["id"], "mkt_shoot_save", "mkt_shoots", r["id"], {"title": b.title, "status": b.status})
+    return {"id": r["id"]}
