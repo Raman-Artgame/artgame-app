@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api, uuid, webToken } from './api.js'
 import { Viewer, download, uploadBig } from './objects.jsx'
 import { Sheet } from './ui.jsx'
+import { Kit } from './kit.jsx'
 
 // Рабочее место маркетинга (HEAD 14.11): «План» — контент-план месяца, «Медиа» — материал с объектов,
 // HEAD — «На утверждение». Каждую публикацию утверждает HEAD: черновик → «Отправить HEAD» → «Утверждаю» / «Вернуть»
@@ -35,6 +36,8 @@ export function Marketing({ me, pending }) {
   const [open, setOpen] = useState(null)
   const [tick, setTick] = useState(0)
   const reload = () => setTick(t => t + 1)
+  // Сторис из редактора: файл уходит в «Готовые публикации»; дальше — в новую публикацию или просто скачать
+  const publishStory = async (file, how) => { const f = await uploadReady(file, () => {}); how === 'post' ? setEdit({ kind: 'stories', files: [f] }) : download(f) }
   useEffect(() => { if (job === 'lead') api('/mkt/posts?status=check').then(d => setToCheck(d.items.length), () => {}) }, [tick, view])
   return <>
     <div className="card dark prodhead"><span className="kick">Маркетинг{JOB[job] ? ` · ${JOB[job]}` : ''}</span>
@@ -46,7 +49,7 @@ export function Marketing({ me, pending }) {
       {job === 'lead' && <button className={view === 'check' ? 'on' : ''} onClick={() => setView('check')}>Проверка{toCheck ? <span>{toCheck}</span> : null}</button>}
       {tabs.map(([k, t]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}
     </div>
-    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} /> : view === 'brand' ? <Brand /> : view === 'ads' ? <Ads /> :
+    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} /> : view === 'brand' ? <Brand canPost={can.post && !can.onlyAd} onPublish={publishStory} /> : view === 'ads' ? <Ads /> :
       view === 'shoots' ? <Shoots can={can.shoot} /> : view === 'ideas' ? <Ideas can={can.idea} /> : <Plan key={view + tick} can={can.post} onOpen={setOpen} onNew={() => setEdit({})} />}
     {edit && <Editor post={edit} onlyAd={can.onlyAd} onClose={() => setEdit(null)} onSaved={x => { setEdit(null); setOpen(x); reload() }} />}
     {open && !edit && <PostSheet post={open} head={head} mine={can.post && (can.all || open.author_id === me.id)} canResult={can.result} onClose={() => setOpen(null)} onEdit={() => setEdit(open)}
@@ -57,13 +60,15 @@ export function Marketing({ me, pending }) {
 // «Бренд»: книга бренда и паки из папки Диска «06 МАРКЕТИНГ / 01 Бренд» — смотреть и скачивать, без доступа к Диску.
 const fsize = b => !b ? '' : b > 1e6 ? (b / 1e6).toFixed(1) + ' МБ' : Math.ceil(b / 1e3) + ' КБ'
 // «Бренд» (HEAD 14.11): книга как история по главам + полки по задачам. Из главы — сразу к нужной полке и скачать.
-export function Brand() {
+export function Brand({ canPost, onPublish }) {
+  const [kit, setKit] = useState(false)
   const [root, setRoot] = useState(null)
   const [ch, setCh] = useState(null)        // открытая глава
   const [shelf, setShelf] = useState('')
   useEffect(() => { api('/mkt/brand').then(setRoot, e => setRoot({ err: e.message, shelves: [], book: [] })) }, [])
   const top = () => window.scrollTo(0, 0)
   if (!root) return <div className="card"><p className="muted">Загрузка…</p></div>
+  if (kit) return <Kit canPost={canPost} onPublish={onPublish} onBack={() => { setKit(false); top() }} />
   if (shelf) return <Shelf k={shelf} sources={root.sources} onBack={() => { setShelf(''); top() }} />
   const names = Object.fromEntries(root.shelves.map(x => [x.key, x]))
   if (ch) {
@@ -86,6 +91,11 @@ export function Brand() {
       <h3>Книга бренда</h3>
       <p className="small muted">Восемь коротких глав. По ней строится каждая публикация и каждая реклама.</p>
       {root.book.map(c => <div key={c.key} className="bbch" onClick={() => { setCh(c.key); top() }}><i>{c.n}</i><div><b>{c.title}</b><span className="small muted">{c.lead}</span></div><em>›</em></div>)}
+    </div>
+    <div className="card">
+      <h3>Пак элементов</h3>
+      <p className="small muted">Стикеры, плашки, логотипы в плашке, рамки сторис, фоны, элементы для видео. Каждый можно скачать отдельно или собрать сторис прямо здесь.</p>
+      <button onClick={() => { setKit(true); top() }}>Открыть пак и редактор сторис</button>
     </div>
     <div className="card">
       <h3>Скачать для работы</h3>
