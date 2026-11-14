@@ -271,6 +271,7 @@ export function LeadCard({ id, back, openDeal }) {
       <CallOutcome path={`/bx/leads/${id}`} done={() => load(true)} />
       <button className="ghost" onClick={() => setWait(true)}>Жду ответа</button>
     </div>
+    <Origin id={id} origin={l.origin} done={() => load(false)} />
     <div className="card"><h3>В сделку</h3>
       {miss.length ? <p className="small">Не хватает: {miss.map(m => <span key={m} className="miss">{m}</span>)}</p> : <p className="small ok">Всё есть — можно в сделку.</p>}
       <div className="fillgrid">
@@ -316,4 +317,21 @@ export function LeadCard({ id, back, openDeal }) {
     <Feed items={l.feed} />
     {wait && <WaitSheet api={api} path={`/bx/leads/${id}`} onClose={() => setWait(false)} onDone={t => { setWait(false); setMsg(t); load(true); loadToday(true).catch(() => {}) }} />}
   </>
+}
+
+
+// «Откуда клиент» (HEAD 14.11): площадка лида для «Маркетинг → Реклама». Сама — по ссылке площадки; иначе спрашивает и отмечает МОП.
+function Origin({ id, origin, done }) {
+  const [list, setList] = useState(null)
+  const [open, setOpen] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => { api('/mkt/channels').then(setList, () => setList([])) }, [])
+  if (!list || !list.length) return null
+  const pick = c => api(`/bx/leads/${id}/origin`, { method: 'POST', body: { channel_id: c.id } }).then(() => { setOpen(false); done() }, e => setErr(e.message))
+  return <div className="card origin"><h3>Откуда клиент</h3>
+    {origin && !open ? <p><b>{origin.title}</b> <span className="small muted">{origin.auto ? '· определилось само по ссылке' : '· отмечено'}</span> <a onClick={() => setOpen(true)}>изменить</a></p>
+      : <><p className="small muted">Спроси «Как вы о нас узнали?» и отметь. По этому видно, какая реклама приводит клиентов.</p>
+        <div className="chips">{list.map(c => <button key={c.id} className={origin?.channel_id === c.id ? 'on' : ''} onClick={() => pick(c)}>{c.title}</button>)}</div></>}
+    {err && <p className="small why">{err}</p>}
+  </div>
 }

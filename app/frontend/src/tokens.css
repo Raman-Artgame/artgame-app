@@ -965,6 +965,14 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .mktfile .mthumb img { position: absolute; inset: 0; }
 .mktfile > div { overflow-wrap: anywhere; }
 .mktupbox { border: 1px solid var(--line); border-radius: var(--r2); padding: 10px 12px; margin: 8px 0; }
+.mstats.mkt2 { grid-template-columns: repeat(2, 1fr); }
+.mktad { padding: 12px 0; border-top: 1px solid var(--line2); cursor: pointer; }
+.mktadh { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.mktadn { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.mktadn div { min-width: 0; } .mktadn b { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mktadn span { font-size: 11px; color: var(--muted); }
+.mktlink { overflow-wrap: anywhere; font-size: 12px; }
+.origin .chips { margin-top: 6px; }
 .mktres { border-top: 1px solid var(--line2); margin-top: 10px; padding-top: 6px; }
 .mktres .seg input { flex: 1; min-width: 0; }
 /* Карточка проекта (HEAD 14.11): маршрут, кто встречает, эскизы в «Дизайне» */

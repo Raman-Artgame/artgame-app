@@ -15,11 +15,11 @@ const day = s => s ? new Date(s + 'T00:00').toLocaleDateString('ru-RU', { weekda
 
 // Задача в отделе (HEAD 14.11): руководитель видит всё и проверяет первой; остальные — свои вкладки и свои действия.
 const JOB = { lead: 'Руководитель отдела', smm: 'Контент и публикации', stories: 'Сторис и баннеры', target: 'Таргет', video: 'Съёмка' }
-const TABS = { stories: ['plan', 'media', 'brand'], target: ['plan', 'brand'], video: ['shoots', 'ideas', 'media', 'plan', 'brand'] }
+const TABS = { stories: ['plan', 'media', 'brand'], target: ['ads', 'plan', 'brand'], video: ['shoots', 'ideas', 'media', 'plan', 'brand'] }
 const ABOUT = { lead: 'Ты видишь всё. Публикации коллег сначала приходят тебе в «Проверку», после твоего «Проверено» уходят HEAD.',
   smm: 'Поставь публикацию в план: где, когда, текст и материал. Отправь на утверждение, после «Утверждаю» выкладывай и отметь «Вышло» со ссылкой.',
   stories: 'Загрузи готовую сторис или баннер в публикацию и отправь на утверждение. Выкладывать можно только утверждённое.',
-  target: 'Поставь рекламу в план форматом «Реклама»: текст, креатив, дата запуска. Запускать можно только после «Утверждаю».',
+  target: 'В «Рекламе» — расход и заявки по площадкам. Новую рекламу ставь в план форматом «Реклама»: запускать можно только после «Утверждаю».',
   video: 'В «Съёмках» — что, где и когда снимать. В «Идеях» — сценарии. Материал с объектов — в «Медиа».' }
 
 export function Marketing({ me, pending }) {
@@ -27,7 +27,7 @@ export function Marketing({ me, pending }) {
   const job = head ? 'head' : (me.mkt_job || null)
   const can = { post: head || [null, 'lead', 'smm', 'stories', 'target'].includes(job), onlyAd: job === 'target', all: head || [null, 'lead', 'smm'].includes(job),
     idea: job !== 'target', shoot: head || [null, 'lead', 'smm', 'video'].includes(job), result: head || [null, 'lead', 'smm', 'target'].includes(job) }
-  const tabs = [['plan', 'План'], ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа'], ['brand', 'Бренд']].filter(([k]) => !TABS[job] || TABS[job].includes(k))
+  const tabs = [['plan', 'План'], ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа'], ['ads', 'Реклама'], ['brand', 'Бренд']].filter(([k]) => !TABS[job] || TABS[job].includes(k))
     .sort((a, b) => TABS[job] ? TABS[job].indexOf(a[0]) - TABS[job].indexOf(b[0]) : 0)
   const [toCheck, setToCheck] = useState(0)
   const [view, setView] = useState(head && pending ? 'review' : tabs[0][0])
@@ -38,7 +38,7 @@ export function Marketing({ me, pending }) {
   useEffect(() => { if (job === 'lead') api('/mkt/posts?status=check').then(d => setToCheck(d.items.length), () => {}) }, [tick, view])
   return <>
     <div className="card dark prodhead"><span className="kick">Маркетинг{JOB[job] ? ` · ${JOB[job]}` : ''}</span>
-      <h2>{head ? 'Публикации и материал' : job === 'video' ? 'Что и где снимать' : 'Контент-план'}</h2>
+      <h2>{head ? 'Публикации и материал' : job === 'video' ? 'Что и где снимать' : job === 'target' ? 'Реклама' : 'Контент-план'}</h2>
       <p className="small muted">{head ? 'Каждая публикация выходит только после твоего «Утверждаю». Ниже — что ждёт решения и план месяца.' : ABOUT[job] || ABOUT.smm}</p>
     </div>
     <div className="segf mktnav">
@@ -46,7 +46,7 @@ export function Marketing({ me, pending }) {
       {job === 'lead' && <button className={view === 'check' ? 'on' : ''} onClick={() => setView('check')}>Проверка{toCheck ? <span>{toCheck}</span> : null}</button>}
       {tabs.map(([k, t]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}
     </div>
-    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} /> : view === 'brand' ? <Brand /> :
+    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} /> : view === 'brand' ? <Brand /> : view === 'ads' ? <Ads /> :
       view === 'shoots' ? <Shoots can={can.shoot} /> : view === 'ideas' ? <Ideas can={can.idea} /> : <Plan key={view + tick} can={can.post} onOpen={setOpen} onNew={() => setEdit({})} />}
     {edit && <Editor post={edit} onlyAd={can.onlyAd} onClose={() => setEdit(null)} onSaved={x => { setEdit(null); setOpen(x); reload() }} />}
     {open && !edit && <PostSheet post={open} head={head} mine={can.post && (can.all || open.author_id === me.id)} canResult={can.result} onClose={() => setOpen(null)} onEdit={() => setEdit(open)}
@@ -72,6 +72,73 @@ export function Brand() {
         <button className="ghost mini" onClick={() => download(f)}>⬇ Скачать</button></div>)}</div>}</>}
     <Viewer f={view} onClose={() => setView(null)} />
   </div>
+}
+
+// «Реклама» (HEAD 14.11): по каждой площадке — расход, заявки, сделки, цена заявки; что работает, а что сливает бюджет.
+const tg = n => Math.round(n || 0).toLocaleString('ru-RU') + ' ₸'
+const VERDICT = { works: ['работает', 'ok'], weak: ['заявки есть, сделок нет', 'warn'], burns: ['сливает бюджет', 'hot'] }
+function Ads() {
+  const [ym, setYm] = useState(ymNow())
+  const [d, setD] = useState(null)
+  const [edit, setEdit] = useState(null)   // площадка: расход, фраза, ссылка
+  const [phone, setPhone] = useState(null)
+  const [msg, setMsg] = useState('')
+  const load = () => api(`/mkt/ads?ym=${ym}`).then(setD, e => setD({ items: [], err: e.message, unknown: { leads: 0 }, total: { leads: 0, spend: 0 } }))
+  useEffect(() => { setD(null); load() }, [ym])
+  return <div className="card">
+    <div className="mktmonth"><button className="ghost mini" aria-label="Прошлый месяц" onClick={() => setYm(shift(ym, -1))}>‹</button>
+      <b>{monthName(ym)}</b><button className="ghost mini" aria-label="Следующий месяц" onClick={() => setYm(shift(ym, 1))}>›</button></div>
+    {!d ? <p className="muted">Загрузка…</p> : <>
+      {d.err && <p className="small why">{d.err}</p>}
+      <div className="mstats mkt4 mkt2"><div><b>{tg(d.total.spend)}</b><span>расход за месяц</span></div><div><b>{d.total.leads}</b><span>заявок всего</span></div></div>
+      {d.unknown.leads > 0 && <p className="small why">Без площадки: {d.unknown.leads} из {d.total.leads} заявок. МОП отмечает «Откуда клиент» в лиде, а со своих ссылок площадка ставится сама.</p>}
+      {d.can_edit && !d.wa_phone && <p className="small muted">Чтобы площадки считались сами, укажи номер WhatsApp для заявок. <a onClick={() => setPhone('')}>Указать</a></p>}
+      {d.items.map(x => <div key={x.id} className="mktad" onClick={() => d.can_edit && setEdit(x)}>
+        <div className="mktadh"><b>{x.title}</b>{VERDICT[x.verdict] && <span className={'badge ' + VERDICT[x.verdict][1]}>{VERDICT[x.verdict][0]}</span>}</div>
+        <div className="mktadn"><div><b>{x.paid ? tg(x.spend) : '—'}</b><span>расход</span></div><div><b>{x.leads}</b><span>заявки</span></div>
+          <div><b>{x.deals}</b><span>сделки</span></div><div><b>{x.cpl ? tg(x.cpl) : '—'}</b><span>цена заявки</span></div></div>
+        {x.won > 0 && <div className="small muted">Выиграно: {x.won} на {tg(x.won_sum)}</div>}
+        {x.paid && !x.spend && d.can_edit && <div className="small muted">Расход не внесён. Нажми, чтобы внести.</div>}
+      </div>)}
+      {d.can_edit && <div className="seg"><button className="ghost" onClick={() => setEdit({ paid: true, active: true })}>+ Площадка</button>
+        {d.wa_phone && <button className="ghost" onClick={() => setPhone(d.wa_phone)}>Номер WhatsApp</button>}</div>}
+      <p className="small muted">Заявки и сделки берутся из Битрикса. Расход по Instagram подтянется сам после подключения рекламного кабинета, по остальным площадкам вносится раз в месяц.</p>
+    </>}
+    {msg && <p className="small muted">{msg}</p>}
+    {edit && <AdSheet x={edit} ym={ym} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load() }} />}
+    {phone !== null && <Sheet title="Номер WhatsApp для заявок" onClose={() => setPhone(null)}>
+      <p className="small muted">Номер, на который пишут клиенты. По нему собираются ссылки для объявлений.</p>
+      <input inputMode="tel" placeholder="7 705 123 45 67" value={phone} onChange={e => setPhone(e.target.value)} />
+      <button onClick={() => api('/mkt/wa_phone', { method: 'POST', body: { phone } }).then(() => { setPhone(null); load() }, e => setMsg(e.message))}>Сохранить</button>
+    </Sheet>}
+  </div>
+}
+
+function AdSheet({ x, ym, onClose, onSaved }) {
+  const [b, setB] = useState({ title: x.title || '', phrase: x.phrase || '', paid: x.paid !== false, active: x.active !== false, amount: x.spend ? String(x.spend) : '' })
+  const [msg, setMsg] = useState('')
+  const save = async () => {
+    if (b.title.trim().length < 2) return setMsg('Назови площадку.')
+    try {
+      const r = await api(x.id ? `/mkt/channels/${x.id}` : '/mkt/channels', { method: 'POST', body: { title: b.title, phrase: b.phrase || null, paid: b.paid, active: b.active } })
+      if (b.paid && b.amount !== '' && +b.amount !== (x.spend || 0)) await api('/mkt/spend', { method: 'POST', body: { channel_id: r.id, ym, amount: +b.amount || 0 } })
+      onSaved()
+    } catch (e) { setMsg(e.message) }
+  }
+  return <Sheet title={x.id ? x.title : 'Новая площадка'} onClose={onClose}>
+    <label className="muted small">Название</label>
+    <input value={b.title} placeholder="Например: Крыша.kz" onChange={e => setB({ ...b, title: e.target.value })} />
+    <label className="small muted check"><input type="checkbox" checked={b.paid} onChange={e => setB({ ...b, paid: e.target.checked })} /> Платная площадка</label>
+    {b.paid && <><label className="muted small">Расход за {monthName(ym)}, ₸</label>
+      <input inputMode="numeric" placeholder="0" value={b.amount} onChange={e => setB({ ...b, amount: e.target.value.replace(/[^\d]/g, '') })} /></>}
+    <label className="muted small">Первая фраза клиента в ссылке</label>
+    <textarea rows={2} placeholder="Здравствуйте! Пишу с …" value={b.phrase} onChange={e => setB({ ...b, phrase: e.target.value })} />
+    {x.link && <><label className="muted small">Ссылка для объявления</label><p className="mktcap mktlink">{x.link}</p>
+      <button className="ghost" onClick={() => copyText(x.link).then(ok => setMsg(ok ? 'Ссылка скопирована. Поставь её в объявление кнопкой «Написать в WhatsApp».' : 'Выдели ссылку и скопируй вручную.'))}>Скопировать ссылку</button></>}
+    {x.id && <label className="small muted check"><input type="checkbox" checked={b.active} onChange={e => setB({ ...b, active: e.target.checked })} /> Площадка работает <span>· выключенная пропадает из списка, история остаётся</span></label>}
+    {msg && <p className="small why">{msg}</p>}
+    <button onClick={save}>Сохранить</button>
+  </Sheet>
 }
 
 const isVid = f => (f.mime || '').startsWith('video/') || (!(f.mime || '').startsWith('image/') && (f.media_type === 'video' || f.media_type === 'reels'))

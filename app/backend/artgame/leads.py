@@ -141,6 +141,13 @@ def feed(entity: str, eid: int, names: dict, fresh: bool = False) -> list:
     return out[:40]
 
 
+def _origin(lead_id: int) -> dict | None:
+    """Откуда клиент (площадка): сама по ссылке или отметка МОП — «Маркетинг → Реклама» (HEAD 14.11)."""
+    from . import ads
+    with db.pool.connection() as conn:
+        return ads.origin_of(conn, lead_id)
+
+
 def lead_full(p: dict, lead_id: int, fresh: bool = False) -> dict:
     l = _lead(p, lead_id, fresh)
     with db.pool.connection() as conn:
@@ -152,6 +159,7 @@ def lead_full(p: dict, lead_id: int, fresh: bool = False) -> dict:
                 "city_id": str(l.get(L_CITY) or ""), "service_id": str(l.get(L_SERVICE) or ""),
                 "client_name": " ".join(x.strip() for x in (l.get("NAME"), l.get("LAST_NAME")) if x and x.strip()),
                 "feed": feed("lead", lead_id, names, fresh),
+                "origin": _origin(lead_id),
                 "has": {"service": L_SERVICE in have, "area": L_AREA in have},
                 "services": [{"id": k, "name": v} for k, v in _items(L_SERVICE, have).items()],
                 "fail": [{"id": k, "name": v["name"]} for k, v in sorted(st.items(), key=lambda x: x[1]["sort"])
