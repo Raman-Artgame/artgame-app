@@ -237,6 +237,6 @@ export function StoryHome({ canPost, onPublish }) {
     {!kit ? <p className="muted">Загрузка…</p> : kit.err ? <p className="small why">{kit.err}</p> : <>
       <h4 className="kitsub">Или начни с рамки</h4>
       <div className="kitgrid three">{kit.items.filter(x => x.g === 's_stories').map(x => <button key={x.id} className="kittile dark tall" onClick={() => setStory({ frame: x })}>
-        <img src={thumb(x)} alt="" loading="lazy" /><span>{x.title.replace('Сторис · ', '')}</span></button>)}</div></>}
+        <img src={thumb(x)} alt="" loading="lazy" /><span title={x.title.replace('Сторис · ', '')}>{x.title.replace('Сторис · ', '')}</span></button>)}</div></>}
   </div>
 }
