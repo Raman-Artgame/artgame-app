@@ -4,7 +4,7 @@ import { Sheet } from './ui.jsx'
 
 // «Пак элементов» (HEAD 14.11): рабочий набор бренда прямо в приложении. Каждый элемент — скачать отдельно
 // (в CapCut, монтаж, макет) или сразу поставить в редактор сторис. Файлы лежат в /kit (public/kit, список — kit.json).
-// Цен в паке нет: плашки цен из артефакта не перенесены, цены — только из «Значений».
+// Плашки цен перерисованы по «Значениям» (HEAD 14.11); при смене фикс-цен их надо перерисовать.
 const KIT = '/kit/'
 let cache = null
 export const loadKit = () => cache || (cache = fetch(KIT + 'kit.json').then(r => { if (!r.ok) throw new Error('пак не загрузился'); return r.json() }).catch(e => { cache = null; throw e }))

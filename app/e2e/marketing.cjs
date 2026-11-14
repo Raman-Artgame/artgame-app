@@ -279,7 +279,10 @@ const noScroll = async p => assert.ok(await p.evaluate(() => document.documentEl
   await e.getByRole('button', { name: 'Открыть пак и редактор сторис' }).click()
   await e.locator('.kittile').first().waitFor()
   await e.waitForFunction(() => [...document.querySelectorAll('.kittile img')].slice(0, 6).every(i => i.complete && i.naturalWidth))
-  assert.strictEqual(await e.getByText(/Цена \d/).count(), 0)   // цен в паке нет
+  await e.locator('.kitnav').getByRole('button', { name: /Плашки и подписи/ }).click()
+  await e.getByText('Цена 129 000 ₸ · Лёгкий').waitFor()   // плашки цен перерисованы по «Значениям»
+  assert.strictEqual(await e.getByText(/Цена (99|149|249) /).count(), 0)
+  await e.locator('.kitnav').getByRole('button', { name: /Стикеры/ }).click()
   await noScroll(e); await shot(e, 'mkt-32-kit')
   await e.locator('.kittile').first().click()
   await e.locator('.sheetbox').getByRole('button', { name: '⬇ Скачать' }).waitFor()
