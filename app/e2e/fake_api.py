@@ -26,17 +26,14 @@ class FakeDrive:
             STORE.setdefault("drvSKETCH731", {"parents": ["ok731"], "size": "1", "mimeType": "image/png",
                                               "data": open(__file__.replace("fake_api.py", "chek.png"), "rb").read()})
             return [{"id": "drvSKETCH731", "name": "Эскиз кафе.png", "mimeType": "image/png", "size": "1"}]
-        from artgame import brand   # «Бренд»: папка «01 Бренд» с подпапкой и файлами (marketing.cjs)
-        png = open(__file__.replace("fake_api.py", "chek.png"), "rb").read()
-        if parent == brand.BRAND_ID:
-            STORE.setdefault("drvBRANDBOOK", {"name": "ARTGAME Брендбук.pdf", "size": "4", "mimeType": "application/pdf", "data": b"%PDF"})
-            return [{"id": "brLOGO", "name": "Лого", "mimeType": F}, {"id": "brSTORY", "name": "Сторис Рамки", "mimeType": F},
-                    {"id": "drvBRANDBOOK", "name": "ARTGAME Брендбук.pdf", "mimeType": "application/pdf", "size": "4200000"}]
-        if parent == "brLOGO":
+        png = open(__file__.replace("fake_api.py", "chek.png"), "rb").read()   # «Бренд»: полка «Лого» (marketing.cjs)
+        if parent == "11nFXvEyYdRgu5PHkW-ipAA1adozukx4q":
             for i in ("drvLOGO1", "drvLOGO2"):
                 STORE.setdefault(i, {"name": i + ".png", "size": str(len(png)), "mimeType": "image/png", "data": png})
-            return [{"id": "drvLOGO1", "name": "ARTGAME logo white.png", "mimeType": "image/png", "size": str(len(png))},
-                    {"id": "drvLOGO2", "name": "ARTGAME logo red.png", "mimeType": "image/png", "size": str(len(png))}]
+            return [{"id": "brNEON", "name": "Лого Стилизация", "mimeType": F},
+                    {"id": "drvLOGO1", "name": "ARTGAME logo white.png", "mimeType": "image/png", "size": str(len(png))},
+                    {"id": "drvLOGO2", "name": "ARTGAME logo black.png", "mimeType": "image/png", "size": str(len(png))},
+                    {"id": "drvLOGOAI", "name": "ARTGAME logo.ai", "mimeType": "application/postscript", "size": "5200000"}]
         return []
 
     def upload(self, parent, name, data, mime):

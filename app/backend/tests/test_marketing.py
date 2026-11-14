@@ -170,29 +170,37 @@ def test_shoot_hints(client, team):
     assert client.get("/api/mkt/hints", headers=hdr(1000)).json()["ideas"][0]["id"] == i
 
 
-def test_brand_folder(client, team, monkeypatch):
-    """«Бренд»: папка Диска как есть; файл отдаётся только по подписанной ссылке из списка; чужую папку не открыть."""
+def test_brand_shelves(client, team, monkeypatch):
+    """«Бренд»: полки по задачам; агентству — только готовые файлы, исходники и «Печать» — своим, «Служебное» — HEAD."""
     from artgame import brand, drive
     from test_files import FakeDrive
     F = drive.FOLDER
-    FakeDrive.tree = {brand.BRAND_ID: [{"id": "fLOGO", "name": "Лого", "mimeType": F}, {"id": "bookPDF", "name": "Брендбук.pdf", "mimeType": "application/pdf", "size": "4"},
-                                       {"id": "gdoc", "name": "Заметки", "mimeType": "application/vnd.google-apps.document"}],
-                      "fLOGO": [{"id": "logoPNG", "name": "logo.png", "mimeType": "image/png", "size": "3"}]}
-    FakeDrive.store = {"bookPDF": {"name": "Брендбук.pdf", "size": "4", "mimeType": "application/pdf", "data": b"%PDF"},
-                       "logoPNG": {"name": "logo.png", "size": "3", "mimeType": "image/png", "data": b"png"},
+    logo = "11nFXvEyYdRgu5PHkW-ipAA1adozukx4q"
+    FakeDrive.tree = {logo: [{"id": "fSUB", "name": "Лого Стилизация", "mimeType": F}, {"id": "logoPNG", "name": "logo.png", "mimeType": "image/png", "size": "3"},
+                             {"id": "logoAI", "name": "logo.ai", "mimeType": "application/postscript", "size": "9"},
+                             {"id": "gdoc", "name": "Заметки", "mimeType": "application/vnd.google-apps.document"}],
+                      "fSUB": [{"id": "subPNG", "name": "neon.png", "mimeType": "image/png", "size": "3"}]}
+    FakeDrive.store = {"logoPNG": {"name": "logo.png", "size": "3", "mimeType": "image/png", "data": b"png"},
                        "secret": {"name": "s", "size": "1", "mimeType": "text/plain", "data": b"x", "parents": ["other"]}}
     monkeypatch.setattr(drive, "Drive", FakeDrive)
     brand.PARENT.clear()
     assert client.get("/api/mkt/brand", headers=hdr(3000)).status_code == 403
-    root = client.get("/api/mkt/brand", headers=hdr(2000)).json()
-    assert [f["name"] for f in root["folders"]] == ["Лого"] and [f["name"] for f in root["files"]] == ["Брендбук.pdf"] and root["path"] == []
-    sub = client.get("/api/mkt/brand?folder=fLOGO", headers=hdr(2000)).json()
-    assert sub["path"] == [{"id": "fLOGO", "name": "Лого"}] and sub["files"][0]["thumb"]
-    r = client.get(sub["files"][0]["url"])
+    keys = [s["key"] for s in client.get("/api/mkt/brand", headers=hdr(2000)).json()["shelves"]]
+    assert "logo" in keys and "print" not in keys and "inner" not in keys                      # агентство
+    assert {"print", "inner"} <= {s["key"] for s in client.get("/api/mkt/brand", headers=hdr(1000)).json()["shelves"]}
+    a = client.get("/api/mkt/brand?shelf=logo", headers=hdr(2000)).json()
+    assert [f["name"] for f in a["files"]] == ["logo.png"] and a["hidden"] == 1 and [f["name"] for f in a["folders"]] == ["Лого Стилизация"]
+    h = client.get("/api/mkt/brand?shelf=logo", headers=hdr(1000)).json()
+    assert [(f["name"], f["source"]) for f in h["files"]] == [("logo.ai", True), ("logo.png", False)]
+    sub = client.get("/api/mkt/brand?shelf=logo&folder=fSUB", headers=hdr(2000)).json()
+    assert sub["path"] == [{"id": "fSUB", "name": "Лого Стилизация"}] and sub["files"][0]["thumb"]
+    r = client.get(a["files"][0]["url"])
     assert r.status_code == 200 and r.content == b"png"
-    assert "attachment" in client.get(root["files"][0]["url"] + "&dl=1").headers["content-disposition"]
-    assert client.get(sub["files"][0]["url"].replace("logoPNG", "secret")).status_code == 403     # подпись — только на показанное
-    assert client.get("/api/mkt/brand?folder=secret", headers=hdr(2000)).status_code == 404       # не папка «Бренда»
+    assert "attachment" in client.get(a["files"][0]["url"] + "&dl=1").headers["content-disposition"]
+    assert client.get(a["files"][0]["url"].replace("logoPNG", "secret")).status_code == 403    # подпись — только на показанное
+    assert client.get("/api/mkt/brand?shelf=print", headers=hdr(2000)).status_code == 404       # полка не для агентства
+    assert client.get("/api/mkt/brand?shelf=fonts&folder=fSUB", headers=hdr(2000)).status_code == 404   # папка с другой полки
+    assert client.get("/api/mkt/brand?shelf=logo&folder=secret", headers=hdr(2000)).status_code == 404
 
 
 def test_ads_kind_and_shoot_upload(client, team, monkeypatch):
