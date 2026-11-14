@@ -905,3 +905,15 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .dmpic { display: block; max-width: 100%; max-height: 240px; border-radius: 10px; margin-bottom: 4px; }
 .dmwhobtn { margin: 4px 0 8px; }
 .dmmembers { margin-bottom: 10px; }
+
+/* Маркетинг (HEAD 14.11): контент-план и «Медиа» */
+.mitem.picked .mthumb { outline: 3px solid var(--ok); }
+.mktrow { cursor: pointer; }
+.mktmonth { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.mktmonth b { text-transform: capitalize; font-size: 16px; }
+.mktmonth button { width: 44px; flex: none; }
+.mstats.mkt4 { grid-template-columns: repeat(4, 1fr); }
+.mktday h3 { margin: 14px 0 0; font-size: 13px; color: var(--muted); text-transform: capitalize; }
+.mktcap { white-space: pre-wrap; background: var(--alt); border-radius: 12px; padding: 10px 12px; font-size: 14px; }
+.mktfiles { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
+.mktfiles .mthumb { width: 64px; height: 64px; padding: 0; }

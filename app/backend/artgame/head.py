@@ -43,6 +43,7 @@ def pulse(p: dict = Depends(require_head)):
                FROM feedback f JOIN people pe ON pe.id=f.person_id LEFT JOIN roles r ON r.code=f.role_code
                WHERE f.status<>'done' ORDER BY f.status='work', f.created_at DESC LIMIT 20""").fetchall()
         media = one("SELECT count(*) AS n FROM files WHERE kind='media' AND status='ready' AND review='pending'")["n"]
+        posts = one("SELECT count(*) AS n FROM mkt_posts WHERE status='pending'")["n"]   # публикации на утверждение (HEAD 14.11)
         from .dm import _head_unread   # «Чат» (HEAD 11.11): «Руководство» + мои личные; обращения — всем HEAD
         u = _head_unread(conn, p["id"])
         dm = {"unread": u["group"] + u["mine"], "people": u["people"]}   # «Диалог с HEAD» (09.11): непрочитанные от сотрудников
@@ -66,5 +67,5 @@ def pulse(p: dict = Depends(require_head)):
                              count(DISTINCT person_id) AS people
                       FROM shifts WHERE started_at > now() - interval '7 days' AND status<>'cancelled'""")
     return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"]), "payments_sum": float(rv["payments_sum"])},
-            "catalogs": catalogs, "media": media, "feedback": feedback, "dm": dm,
+            "catalogs": catalogs, "media": media, "posts": posts, "feedback": feedback, "dm": dm,
             "bills": bills, "today": today, "team": team, "feed": feed, "week": week}

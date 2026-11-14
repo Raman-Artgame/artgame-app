@@ -1,5 +1,6 @@
 """API для сквозного теста: Google Диск подменён памятью."""
 import uvicorn
+from fastapi import Request
 
 from artgame import drive
 from artgame.config import settings
@@ -150,6 +151,13 @@ dm.BOT = lambda m, **p: SENT.append({"bot": m, **{k: v for k, v in p.items() if 
 @app.get("/api/_e2e/sent")
 def _sent():
     return SENT
+
+
+@app.post("/api/_e2e/store/{fid}")
+async def _store(fid: str, request: Request):
+    """Картинка в подменённом Диске (marketing.cjs): тело запроса — байты файла."""
+    STORE[fid] = {"parents": ["e2e"], "size": "1", "mimeType": request.headers.get("content-type", "image/jpeg"), "data": await request.body()}
+    return {"ok": True}
 
 
 @app.post("/api/_e2e/consts")

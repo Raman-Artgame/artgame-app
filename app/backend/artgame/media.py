@@ -13,7 +13,7 @@ from .work import active
 
 router = APIRouter(prefix="/api")
 TYPES = {"photo": "Фото", "video": "Видео", "reels": "Рилс"}
-LIBRARY = {"lead_designer", "head"}   # медиатека для монтажа рилс (HEAD 10.11)
+LIBRARY = {"lead_designer", "marketer", "head"}   # медиатека для монтажа рилс (HEAD 10.11); маркетинг — для контент-плана (HEAD 14.11)
 
 SQL = """SELECT f.*, pe.full_name AS by, o.title AS object_title, o.city AS object_city
          FROM files f JOIN people pe ON pe.id=f.uploaded_by JOIN objects o ON o.id=f.object_id
@@ -25,7 +25,7 @@ def _out(f: dict) -> dict:
 
 
 @router.get("/media")
-def media_list(scope: str = "mine", object_id: int | None = None, type: str | None = None, p: dict = Depends(active)):
+def media_list(scope: str = "mine", object_id: int | None = None, type: str | None = None, best: bool = False, p: dict = Depends(active)):
     """mine — своё (с отметками HEAD); review — ждёт решения HEAD; object — утверждённое по объекту (карточка проекта);
     object + type=video — все видео объекта (вкладка «Видео», HEAD 09.11): и ждущие HEAD, кроме возвращённых."""
     head = p["role_code"] == "head"
@@ -41,8 +41,8 @@ def media_list(scope: str = "mine", object_id: int | None = None, type: str | No
         cond, args = ("f.object_id=%s" + ("" if head or can_prod(p) else " AND f.review='approved'")), [object_id]
     elif scope == "library":   # HEAD 10.11: Главный дизайнер монтирует рилс — весь материал всех объектов, кроме возвращённого
         if p["role_code"] not in LIBRARY:
-            raise HTTPException(403, "медиатека — у Главного дизайнера и HEAD")
-        cond, args = "f.review IS DISTINCT FROM 'rejected'", []
+            raise HTTPException(403, "медиатека — у Главного дизайнера, маркетинга и HEAD")
+        cond, args = ("f.review='approved'" if best else "f.review IS DISTINCT FROM 'rejected'"), []   # best — только утверждённое HEAD («Продакшн»)
         if type in TYPES:
             cond, args = cond + " AND coalesce(f.media_type, 'photo')=%s", [type]
         if object_id:
