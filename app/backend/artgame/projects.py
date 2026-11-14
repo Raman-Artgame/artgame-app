@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends
 
 from . import bx, db
+from .projcard import can_phone
 from .work import active
 
 router = APIRouter(prefix="/api")
@@ -60,7 +61,7 @@ def projects(p: dict, fresh: bool = False) -> dict:
     names = {u["id"]: u["name"] for u in bx.users()}
     see_sum = p["role_code"] in bx.BX_ROLES
     ids = [int(d["ID"]) for d in rows]
-    done, who, calc, cond, cover, nfiles, now, guess, gip = {}, {}, {}, {}, {}, {}, {}, {}, {}
+    done, who, calc, cond, cover, nfiles, now, guess, gip, contact = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
     if ids:
         from .files import sign
         with db.pool.connection() as conn:
@@ -74,9 +75,13 @@ def projects(p: dict, fresh: bool = False) -> dict:
                                      WHERE object_id = ANY(%s) AND status='ready' AND mime LIKE 'image/%%' AND kind IN ('design','photo','media')
                                      ORDER BY object_id, (kind='design') DESC, (coalesce(note, '') ILIKE '%%утвержд%%') DESC, created_at DESC""", (ids,)).fetchall():
                 cover[r["object_id"]] = sign(r["id"], "thumb")
-            for r in conn.execute("""SELECT o.id, o.gip_person_id, pe.full_name FROM objects o JOIN people pe ON pe.id=o.gip_person_id
-                                     WHERE o.id = ANY(%s)""", (ids,)).fetchall():
-                gip[r["id"]] = {"id": r["gip_person_id"], "name": r["full_name"]}   # ГИП проекта (HEAD 09.11)
+            for r in conn.execute("""SELECT o.id, o.gip_person_id, pe.full_name, o.site_contact, o.site_phone FROM objects o
+                                     LEFT JOIN people pe ON pe.id=o.gip_person_id WHERE o.id = ANY(%s)""", (ids,)).fetchall():
+                if r["gip_person_id"]:
+                    gip[r["id"]] = {"id": r["gip_person_id"], "name": r["full_name"]}   # ГИП проекта (HEAD 09.11)
+                # кто встречает на объекте (HEAD 14.11): имя — всем, телефон — ГИП, МОП и HEAD
+                ph = can_phone(p, r["gip_person_id"])
+                contact[r["id"]] = {"name": r["site_contact"] or "", "phone": (r["site_phone"] or "") if ph else None, "edit": ph}
             for r in conn.execute("SELECT id, level_guess FROM objects WHERE id = ANY(%s) AND level_guess IS NOT NULL", (ids,)).fetchall():
                 guess[r["id"]] = r["level_guess"]   # МОП не указал сложность — оценка по сумме и площади (promo.guess_level)
             for r in conn.execute("""SELECT object_id, count(*) FILTER (WHERE kind='design') AS design,
@@ -130,7 +135,7 @@ def projects(p: dict, fresh: bool = False) -> dict:
                     "done": {"shifts": shifts_done, "m2": float(dn["m2"]) if dn else 0, "last": dn["last"].isoformat() if dn and dn["last"] else None},
                     "progress": progress, "people": who.get(did, []), "state": state,
                     "cond": cond.get(did, {}), "cover": cover.get(did), "files": nfiles.get(did, {"design": 0, "media": 0}),
-                    "now": now.get(did, []), "gip": gip.get(did),
+                    "now": now.get(did, []), "gip": gip.get(did), "contact": contact.get(did),
                     "chat": {"unread": chat[did]["unread"], "open": chat[did]["open"]} if did in chat else None})
     order = {"late": 0, "today": 1, "quiet": 2, "idle": 3, "ok": 4, "soon": 5, "closing": 6}
     out.sort(key=lambda x: (order[x["state"]], x["left"] if x["left"] is not None else 999))

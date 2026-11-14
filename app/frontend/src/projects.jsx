@@ -75,9 +75,9 @@ function ProjectCard({ x, me, back, openDeal }) {
   const [chat, setChat] = useState(false)
   const [st, cls] = STATE[x.state]
   const c = x.cond || {}
-  const kv = [['Город', x.city], ['Адрес', x.address], ['Площадь', x.area ? `${x.area} м²` : ''], ['Сложность', x.level || 'МОП ещё не указал'],
+  const kv = [['Город', x.city], ['Площадь', x.area ? `${x.area} м²` : ''], ['Сложность', x.level || 'МОП ещё не указал'],
     ['Старт', x.start ? dmy(x.start) : ''], ['Сдача', x.due ? dmy(x.due) : ''], ['Смены', x.norm.shifts ? `${x.done.shifts} из ${x.norm.shifts}` : x.done.shifts ? String(x.done.shifts) : ''],
-    ['Состав по норме', x.norm.crew ? `${x.norm.crew} чел.` : ''], ['Сделано', x.done.m2 ? `${x.done.m2} м²` : ''], ['МОП', x.manager], ['ГИП', x.gip?.name || ''], ['Сумма', x.sum ? money(x.sum) : '']].filter(([, v]) => v)
+    ['Состав по норме', x.norm.crew ? `${x.norm.crew} чел.` : ''], ['Сделано', x.done.m2 ? `${x.done.m2} м²` : ''], ['МОП', x.manager], ['ГИП', x.gip?.name || '']].filter(([, v]) => v)
   if (chat) return <ProjChat id={x.id} back={() => { setChat(false); if (x.chat) x.chat.unread = 0 }} backText={'← ' + cleanTitle(x.title, x.id)} />
   return <>
     <div className="phero" style={x.cover ? { backgroundImage: `linear-gradient(180deg, rgba(11,11,13,.15), rgba(11,11,13,.85)), url(${x.cover})` } : undefined}>
@@ -91,6 +91,8 @@ function ProjectCard({ x, me, back, openDeal }) {
     <div className="card">
       {x.working && <div className={'prog ' + (x.state === 'late' ? 'late' : x.progress >= 100 ? 'ok' : '')}><i style={{ width: pct(x) + '%' }} /></div>}
       <div className="conds light">{COND.map(([k, t]) => <span key={k} className={c[k] ? 'on' : ''}>{c[k] ? '● ' : ''}{t}</span>)}</div>
+      {x.address && <a className="route" onClick={() => openUrl(route(x))}>📍 {x.address}<i className="small">Маршрут в 2ГИС ›</i></a>}
+      {x.id > 0 && x.contact && <SiteContact id={x.id} c={x.contact} />}
       <div className="kvgrid">{kv.map(([k, v]) => <div key={k}><span>{k}</span><b>{v}</b></div>)}</div>
       {(x.now?.length > 0 || x.people.length > 0) && <><h3>Команда</h3><div className="who">
         {x.now?.map(n => <span key={'n' + n} className="live">● {n}</span>)}
@@ -100,19 +102,72 @@ function ProjectCard({ x, me, back, openDeal }) {
     </div>
     {me && ASSIGN.has(me.role_code) && <GipPick x={x} />}
     {me && x.id > 0 && <Crew id={x.id} />}
+    {me && x.id > 0 && <DesignBox id={x.id} me={me} obj={{ id: x.id, title: x.title }} />}
     {me && x.id > 0 && <TripBox id={x.id} />}
-    {me && x.id > 0 && DZ_SEE.has(me.role_code) && <DesignBox id={x.id} />}
+    {me && x.id > 0 && MONEY.has(me.role_code) && <MoneyBox id={x.id} />}
+    <Gallery obj={{ id: x.id, title: x.title }} me={me} start="photo" skip={['design']} />
     {me && x.id > 0 && (x.working || x.closing) && <DoneBox id={x.id} />}
     {me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} />}
-    <Gallery obj={{ id: x.id, title: x.title }} me={me} />
   </>
+}
+
+// Ссылку из мини-приложения Telegram открываем через openLink — обычная там может не открыться
+const openUrl = u => { const t = window.Telegram?.WebApp; if (t?.openLink && t.initData) t.openLink(u); else window.open(u, '_blank', 'noopener') }
+const route = x => 'https://2gis.kz/search/' + encodeURIComponent([x.city, x.address].filter(Boolean).join(', '))
+
+// Кто встречает на объекте (HEAD 14.11): имя видят все, телефон и правку — ГИП, МОП и HEAD
+function SiteContact({ id, c }) {
+  const [v, setV] = useState(c)
+  const [f, setF] = useState(null)
+  const [msg, setMsg] = useState('')
+  const save = () => api(`/objects/${id}/contact`, { method: 'POST', body: f }).then(r => { const n = { ...v, ...r }; Object.assign(c, n); setV(n); setF(null); setMsg('') }, e => setMsg(e.message))
+  if (!v.edit && !v.name) return null
+  if (f) return <div className="sitec edit">
+    <input placeholder="Кто встречает: имя, должность" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} />
+    <input placeholder="Телефон" inputMode="tel" value={f.phone} onChange={e => setF({ ...f, phone: e.target.value })} />
+    {msg && <p className="small why">{msg}</p>}
+    <div className="seg"><button className="ghost" onClick={() => setF(null)}>Отмена</button><button onClick={save}>Сохранить</button></div>
+  </div>
+  return <div className="sitec">
+    <div><span className="small muted">Встречает на объекте</span><b>{v.name || 'не указано'}</b></div>
+    {v.phone && <a className="mini btnlink" href={'tel:' + v.phone.replace(/[^\d+]/g, '')}>📞 {v.phone}</a>}
+    {v.edit && <button className="ghost mini" onClick={() => setF({ name: v.name || '', phone: v.phone || '' })}>{v.name ? 'Изменить' : '+ Указать'}</button>}
+  </div>
+}
+
+// Деньги проекта (HEAD 14.11) — только HEAD и МОП: сколько стоит, сколько пришло, сколько потратили и что остаётся.
+// Оплаты вносятся в сделке; здесь только итог.
+const MONEY = new Set(['head', 'mop', 'mop_vip'])
+function MoneyBox({ id }) {
+  const [m, setM] = useState(null)
+  const [open, setOpen] = useState(false)
+  useEffect(() => { api(`/objects/${id}/money`).then(setM, () => setM(false)) }, [id])
+  if (!m) return null
+  const t = n => Math.round(n || 0).toLocaleString('ru-RU') + ' ₸'
+  const pct = m.margin == null ? '' : String(m.margin).replace('.', ',') + '%'
+  return <div className="card pmoney">
+    <h3>Деньги проекта</h3>
+    <div className="kvgrid">
+      <div><span>Сумма</span><b>{t(m.sum)}</b></div>
+      <div><span>Поступило</span><b>{t(m.received)}</b></div>
+      <div><span>Долг</span><b className={m.debt > 0 ? 'why' : 'ok'}>{t(m.debt)}</b></div>
+      <div><span>Затраты</span><b>{t(m.costs_total)}</b></div>
+      <div><span>Прибыль{m.vat_pct ? ' без НДС' : ''}</span><b className={m.profit < 0 ? 'why' : ''}>{t(m.profit)}</b></div>
+      <div><span>Маржа</span><b>{pct || '—'}</b></div>
+    </div>
+    {m.on_check > 0 && <p className="small muted">На сверке у HEAD: {t(m.on_check)}</p>}
+    <button className="ghost mini" onClick={() => setOpen(!open)}>{open ? 'Свернуть затраты' : 'Из чего затраты ›'}</button>
+    {open && <>{m.costs.map(g => <div key={g.key} className="row"><span>{g.title}</span><b className="nowrap">{t(g.total)}</b></div>)}
+      {m.warn.map(w => <p key={w} className="small why">{w}</p>)}</>}
+    <p className="small muted">Оплаты вносятся в сделке, шаг «Оплата». Затраты — утверждённые смены и расходы.</p>
+  </div>
 }
 
 // Дизайн проекта на любой стадии (HEAD 14.11): сложность XS–XL и «+ Дизайн / правка / докидка» → HEAD утверждает → единицы дизайнеру.
 const DZ_SEE = new Set(['head', 'lead_designer', 'designer_asst'])
 const KIND = { design: 'Дизайн проекта', fix: 'Правка / докидка' }
 const DST = { sent: 'у HEAD', approved: 'утверждено', returned: 'вернул' }
-function DesignBox({ id }) {
+function DesignBox({ id, me, obj }) {
   const [d, setD] = useState(null)
   const [f, setF] = useState(null)
   const [msg, setMsg] = useState('')
@@ -122,6 +177,8 @@ function DesignBox({ id }) {
   const units = z => String((d.sizes.find(s => s.code === z) || {}).units ?? '').replace('.', ',')
   const size = z => api(`/design/object/${id}/size`, { method: 'POST', body: { size: z } }).then(r => { setMsg(r.bx.startsWith('error') ? 'В Битрикс не записалось, попробуйте ещё раз' : ''); load() }, e => setMsg(e.message))
   const send = () => api(`/design/object/${id}/extra`, { method: 'POST', body: { ...f, person_id: +f.person_id } }).then(() => { setF(null); setMsg(''); load() }, e => setMsg(e.message))
+  const dz = DZ_SEE.has(me.role_code)
+  if (!dz) return <div className="card dzbox"><h3>Дизайн</h3><Gallery obj={obj} me={me} only={['design']} bare /></div>
   return <div className="card dzbox">
     <div className="head"><h3>Дизайн</h3>{d.can_edit && !f && <button className="mini" onClick={() => setF({ kind: d.rows.some(r => r.kind === 'design') ? 'fix' : 'design', size: 'xs', person_id: d.team[0]?.id || '', note: '', url: '' })}>+ Добавить</button>}</div>
     <label className="muted">Сложность дизайна</label>
@@ -145,6 +202,8 @@ function DesignBox({ id }) {
       <div className="qbtns"><span className={'small ' + (r.status === 'approved' ? 'ok' : r.status === 'returned' ? 'why' : 'muted')}>{DST[r.status]}{r.status === 'approved' ? ` · ${String(+r.units).replace('.', ',')} ед.` : ''}</span></div>
     </div>)}
     {d.can_edit && <p className="small muted">Правки и докидки на объекте вносите здесь. Единицы дизайнеру — после «утверждаю» HEAD.</p>}
+    <h3 className="sub">Эскизы и файлы в печать</h3>
+    <Gallery obj={obj} me={me} only={['design']} bare />
   </div>
 }
 

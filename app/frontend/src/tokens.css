@@ -917,3 +917,14 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .mktcap { white-space: pre-wrap; background: var(--alt); border-radius: 12px; padding: 10px 12px; font-size: 14px; }
 .mktfiles { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
 .mktfiles .mthumb { width: 64px; height: 64px; padding: 0; }
+/* Карточка проекта (HEAD 14.11): маршрут, кто встречает, эскизы в «Дизайне» */
+.route { display: flex; flex-direction: column; gap: 2px; background: var(--alt); border-radius: 10px; padding: 10px 12px; margin: 10px 0 0; color: var(--text); cursor: pointer; text-decoration: none; }
+.route i { color: var(--accent); font-style: normal; }
+.sitec { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--alt); border-radius: 10px; padding: 8px 10px; margin: 8px 0 0; }
+.sitec > div { display: flex; flex-direction: column; flex: 1 1 140px; min-width: 0; }
+.sitec.edit { flex-direction: column; align-items: stretch; }
+.sitec .btnlink { color: var(--text); text-decoration: none; background: var(--surface); border-radius: 8px; padding: 6px 10px; white-space: nowrap; }
+.dzbox h3.sub { font-size: 14px; margin: 14px 0 6px; }
+.gbare { margin-top: 4px; }
+.okmark { color: var(--ok); font-style: normal; }
+.pmoney .row span { color: var(--muted); }

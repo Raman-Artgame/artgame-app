@@ -14,6 +14,7 @@ from .work import active
 
 router = APIRouter(prefix="/api")
 EDIT = {"lead_designer", "head"}
+SEE_ROWS = {"lead_designer", "designer_asst", "head"}   # правки и единицы — дизайнерам и HEAD; эскиз в блоке видят все (HEAD 14.11)
 KIND = {"design": "Дизайн проекта", "fix": "Правка / докидка"}
 
 
@@ -45,7 +46,7 @@ def get(oid: int, p: dict = Depends(active)):
         v = consts.latest(conn)
         team = conn.execute("SELECT id, full_name FROM people WHERE status='active' AND role_code = ANY(%s) ORDER BY full_name",
                             (sorted(DESIGNERS),)).fetchall() if p["role_code"] in EDIT else []
-        return {"size": size, "rows": _rows(conn, oid), "can_edit": p["role_code"] in EDIT, "can_decide": p["role_code"] == "head",
+        return {"size": size, "rows": _rows(conn, oid) if p["role_code"] in SEE_ROWS else [], "can_edit": p["role_code"] in EDIT, "can_decide": p["role_code"] == "head",
                 "sizes": [{"code": s, "units": unit_of(v, s)} for s in SIZES], "team": team}
 
 
