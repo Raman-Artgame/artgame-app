@@ -452,6 +452,59 @@ def shoots(ym: str | None = None, p: dict = Depends(active)):
     return {"items": rows, "team": team}
 
 
+HINTS = {"before": ("Скоро старт", "Сними стену «до»: общий план и детали, пока она пустая."),
+         "start": ("Только начали", "Сними первые линии и команду за работой."),
+         "process": ("Идёт работа", "Сними процесс: руки, краску, таймлапс."),
+         "final": ("Работа сдана", "Сними финал: общий план, детали, отзыв клиента.")}
+
+
+@router.get("/mkt/hints")
+def shoot_hints(p: dict = Depends(active)):
+    """«Что снять на этой неделе» (HEAD 14.11: видеограф всегда знает, что и где снимать).
+
+    Берём проекты на «Выполнении»: ещё без смен — «до»; первые смены — старт; смены за 3 дня — процесс; сдан за 7 дней — финал.
+    Не подсказываем, если клиент запретил публикацию или съёмка по объекту уже стоит (или была за последние 5 дней)."""
+    _mkt(p)
+    from .sync_objects import WORK
+    with db.pool.connection() as conn:
+        rows = conn.execute(
+            """SELECT o.id, o.title, o.city, o.address, o.publish_ok, o.done_on, g.full_name AS gip,
+                      sh.first_at, sh.last_at, coalesce(sh.n, 0) AS shifts,
+                      (SELECT count(*) FROM files f WHERE f.object_id=o.id AND f.kind='media' AND f.status='ready') AS media
+               FROM objects o LEFT JOIN people g ON g.id=o.gip_person_id
+               LEFT JOIN LATERAL (SELECT min(started_at) AS first_at, max(started_at) AS last_at, count(*) AS n
+                                  FROM shifts s WHERE s.object_id=o.id AND s.kind='work' AND s.status<>'cancelled') sh ON true
+               WHERE o.id<>0 AND o.status='active' AND o.bitrix_stage=%s AND o.closed_at IS NULL AND o.publish_ok IS DISTINCT FROM false
+                 AND NOT EXISTS (SELECT 1 FROM mkt_shoots m WHERE m.object_id=o.id AND m.status<>'cancelled'
+                                 AND m.shoot_date >= current_date - 5)
+               ORDER BY o.id DESC""", (WORK,)).fetchall()
+        ideas = conn.execute("""SELECT i.id, i.title, i.kind FROM mkt_ideas i WHERE i.status='new'
+                                AND NOT EXISTS (SELECT 1 FROM mkt_shoots m WHERE m.idea_id=i.id AND m.status<>'cancelled')
+                                ORDER BY i.updated_at DESC LIMIT 5""").fetchall()
+    today = date.today()
+    out = []
+    for r in rows:
+        last = r["last_at"].date() if r["last_at"] else None
+        first = r["first_at"].date() if r["first_at"] else None
+        if r["done_on"] and (today - r["done_on"]).days <= 7:
+            k = "final"
+        elif r["done_on"]:
+            continue
+        elif not r["shifts"]:
+            k = "before"
+        elif (today - first).days <= 3:
+            k = "start"
+        elif (today - last).days <= 3:
+            k = "process"
+        else:
+            continue
+        out.append({"object_id": r["id"], "title": r["title"], "city": r["city"], "address": r["address"], "gip": r["gip"],
+                    "why": k, "label": HINTS[k][0], "what": HINTS[k][1], "media": r["media"], "ask_client": r["publish_ok"] is None})
+    order = {"final": 0, "start": 1, "before": 2, "process": 3}
+    out.sort(key=lambda x: (order[x["why"]], x["media"]))
+    return {"items": out[:12], "ideas": ideas}
+
+
 @router.post("/mkt/shoots")
 @router.post("/mkt/shoots/{shoot_id}")
 def shoot_save(b: ShootIn, shoot_id: int | None = None, p: dict = Depends(active)):

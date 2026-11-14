@@ -948,6 +948,12 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .mktnorm em, .mktnorm u { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; }
 .mktnorm em { background: var(--warn); opacity: .55; } .mktnorm em.ok { background: var(--ok); opacity: .45; }
 .mktnorm u { background: var(--ok); }
+.mkthints h3 { margin: 0 0 2px; }
+.mkthint { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line2); }
+.mkthint > div { min-width: 0; flex: 1; }
+.mkthint b { display: block; margin: 4px 0 2px; }
+.mkthint button { width: auto; flex: none; }
+.mkthsub { margin-top: 8px; }
 .mktres { border-top: 1px solid var(--line2); margin-top: 10px; padding-top: 6px; }
 .mktres .seg input { flex: 1; min-width: 0; }
 /* Карточка проекта (HEAD 14.11): маршрут, кто встречает, эскизы в «Дизайне» */

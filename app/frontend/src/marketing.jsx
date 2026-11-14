@@ -338,10 +338,27 @@ function Shoots({ can }) {
   const [ym, setYm] = useState(ymNow())
   const [d, setD] = useState(null)
   const [edit, setEdit] = useState(null)
+  const [hints, setHints] = useState(null)
+  const [plan, setPlan] = useState(null)   // подсказка, по которой предлагаем съёмку
+  const loadHints = () => api('/mkt/hints').then(setHints, () => setHints(null))
+  useEffect(() => { loadHints() }, [])
   const load = () => api(`/mkt/shoots?ym=${ym}`).then(setD, e => setD({ items: [], team: [], err: e.message }))
   useEffect(() => { setD(null); load() }, [ym])
   const groups = d ? [...d.items.reduce((m, x) => m.set(x.shoot_date, [...(m.get(x.shoot_date) || []), x]), new Map())] : []
-  return <div className="card">
+  return <>{hints && (hints.items.length > 0 || hints.ideas.length > 0) && <div className="card mkthints"><h3>Что снять на этой неделе</h3>
+    <p className="small muted">Подсказки по проектам в работе. Съёмку на объекте подтверждает ГИП.</p>
+    {hints.items.map(x => <div key={x.object_id} className="mkthint">
+      <div><span className={'badge ' + (x.why === 'final' ? 'hot' : x.why === 'process' ? '' : 'warn')} style={{ marginLeft: 0 }}>{x.label}</span>
+        <b>№{x.object_id} {x.title}</b>
+        <div className="small muted">{[x.city, x.address, x.gip && `ГИП ${x.gip}`].filter(Boolean).join(' · ')}</div>
+        <div className="small">{x.what}</div>
+        {x.ask_client && <div className="small why">Клиента о публикации ещё не спросили. Уточни у МОП.</div>}</div>
+      {can && <button className="mini" onClick={() => setPlan(x)}>Предложить</button>}</div>)}
+    {hints.ideas.length > 0 && <><div className="small muted mkthsub">Идеи без съёмки</div>
+      {hints.ideas.map(i => <div key={i.id} className="mkthint"><div><b>{i.title}</b></div>
+        {can && <button className="mini ghost" onClick={() => setEdit({ title: i.title, idea_id: i.id })}>В график</button>}</div>)}</>}
+  </div>}
+  <div className="card">
     <div className="mktmonth"><button className="ghost mini" aria-label="Прошлый месяц" onClick={() => setYm(shift(ym, -1))}>‹</button>
       <b>{monthName(ym)}</b><button className="ghost mini" aria-label="Следующий месяц" onClick={() => setYm(shift(ym, 1))}>›</button></div>
     {can && <button onClick={() => setEdit({})}>+ Съёмка</button>}
@@ -352,8 +369,28 @@ function Shoots({ can }) {
           <div className="small muted">{x.object_title ? `№${x.object_id} ${x.object_title}` : 'вне проектов'}{x.place ? ` · ${x.place}` : ''}</div>
           {x.crew_names && <div className="small">🎥 {x.crew_names.join(', ')}</div>}
           {x.idea_title && <div className="small muted">Идея: {x.idea_title}</div>}</div>)}</div>)}
-    {edit && <ShootEditor x={edit} team={d?.team || []} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load() }} />}
-  </div>
+    {edit && <ShootEditor x={edit} team={d?.team || []} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); loadHints() }} />}
+    {plan && <HintSheet x={plan} onClose={() => setPlan(null)} onSaved={() => { setPlan(null); load(); loadHints() }} />}
+  </div></>
+}
+
+// Съёмка по подсказке: дата и время → предложение ГИП объекта (он подтверждает или называет другую дату в карточке проекта).
+function HintSheet({ x, onClose, onSaved }) {
+  const [b, setB] = useState({ shoot_date: '', at_time: '', note: '' })
+  const [msg, setMsg] = useState('')
+  const save = () => !b.shoot_date ? setMsg('Поставь дату.') :
+    api(`/objects/${x.object_id}/shoots`, { method: 'POST', body: { title: `${x.label}: ${x.title}`.slice(0, 200), shoot_date: b.shoot_date, at_time: b.at_time || null, note: b.note || null } })
+      .then(onSaved, e => setMsg(e.message))
+  return <Sheet title={`Съёмка · №${x.object_id} ${x.title}`} onClose={onClose}>
+    <p className="small muted">{x.what}</p>
+    <label className="muted small">Когда</label>
+    <input type="date" value={b.shoot_date} onChange={e => setB({ ...b, shoot_date: e.target.value })} />
+    <input placeholder="Время, например 11:00" value={b.at_time} onChange={e => setB({ ...b, at_time: e.target.value })} />
+    <textarea rows={2} placeholder="Что нужно от бригады (необязательно)" value={b.note} onChange={e => setB({ ...b, note: e.target.value })} />
+    {msg && <p className="small why">{msg}</p>}
+    <button onClick={save}>Предложить ГИП</button>
+    <p className="small muted">ГИП объекта получит сообщение и подтвердит или предложит другую дату.</p>
+  </Sheet>
 }
 
 function ShootEditor({ x, team, onClose, onSaved }) {

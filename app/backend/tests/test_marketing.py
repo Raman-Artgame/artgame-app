@@ -152,3 +152,19 @@ def test_jobs_lead_checks_first_and_norms(client, team):
     assert client.post("/api/mkt/norms", json={"kind": "stories", "per_month": 60}, headers=hdr(2100)).status_code == 403
     assert client.post("/api/mkt/norms", json={"kind": "stories", "per_month": 60}, headers=hdr(1000)).status_code == 200
     assert client.get("/api/mkt/posts?ym=2026-11", headers=hdr(1000)).json()["norms"][2]["per_month"] == 60
+
+
+def test_shoot_hints(client, team):
+    """Подсказки съёмок: проект на «Выполнении» без смен — «до»; со свежей сменой — старт; запрет клиента и стоящая съёмка — молчим."""
+    with db.pool.connection() as c:
+        c.execute("""INSERT INTO objects (id, title, city, bitrix_stage, publish_ok) VALUES (745, 'Школа', 'Шымкент', 'UC_AV00QK', true),
+                     (750, 'Запрет', 'Астана', 'UC_AV00QK', false), (760, 'Счёт', 'Астана', 'FINAL_INVOICE', NULL)""")
+        c.execute("""INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at)
+                     VALUES (gen_random_uuid(), %s, 745, 'mural', now() - interval '1 day', now() - interval '20 hours')""", (team[3000],))
+    assert client.get("/api/mkt/hints", headers=hdr(3000)).status_code == 403
+    h = client.get("/api/mkt/hints", headers=hdr(2000)).json()["items"]
+    assert [(x["object_id"], x["why"], x["ask_client"]) for x in h] == [(745, "start", False), (731, "before", True)]
+    client.post("/api/mkt/shoots", json={"title": "Процесс", "shoot_date": str(__import__("datetime").date.today()), "object_id": 745}, headers=hdr(2000))
+    assert [x["object_id"] for x in client.get("/api/mkt/hints", headers=hdr(2000)).json()["items"]] == [731]
+    i = client.post("/api/mkt/ideas", json={"title": "Говорящая голова"}, headers=hdr(2000)).json()["id"]
+    assert client.get("/api/mkt/hints", headers=hdr(1000)).json()["ideas"][0]["id"] == i
