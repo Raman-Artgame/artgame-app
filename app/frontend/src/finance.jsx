@@ -212,16 +212,17 @@ function PayRow({ r, m, d, reload }) {
     .then(() => { setOpen(false); reload() }, err(setE))
   const adj = () => api(`/fin/payroll/${m}/accrual`, { method: 'POST', body: { payee_id: r.id, amount: +v.adj, detail: v.detail } }).then(reload, err(setE))
   const drop = id => api(`/fin/accruals/${id}/cancel`, { method: 'POST' }).then(reload, err(setE))
-  return <div className="row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+  return <div className="row payrow" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
     <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
       <span>{r.name} <span className="small muted">{r.group}{r.pay_rule === 'weekly' ? ' · еженедельно' : ''}</span></span>
       <span className="small">{money(r.accrued)} · <span className={r.left > 0 ? 'why' : 'muted'}>{r.left > 0 ? 'осталось ' + money(r.left) : r.accrued ? 'выплачено' : '—'}</span></span></div>
     {open && <div className="dealedit">
       {r.lines.map(a => <div key={a.id} className="small row"><span>{a.detail || a.kind}</span>
         <span>{money(+a.amount)} {a.kind === 'manual' && <a onClick={() => drop(a.id)}>убрать</a>}</span></div>)}
+      {r.pending?.map(a => <div key={a.id} className="small row muted"><span>{a.detail}</span><span>{money(+a.amount)}</span></div>)}
       <p className="small muted">Выплачено {money(r.paid)}{r.last_paid ? ', последняя ' + new Date(r.last_paid).toLocaleDateString('ru-RU') : ''}.</p>
       <input inputMode="numeric" value={v.amount} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder={`Выплата, ₸ (осталось ${Math.max(0, Math.round(r.left))})`} />
-      <div className="segf">{d.accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>
+      <div className="segf accs">{d.accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>
       <input type="date" value={v.op_date} onChange={e => set({ ...v, op_date: e.target.value })} />
       <button disabled={!(+v.amount > 0)} onClick={pay}>Отметить выплату</button>
       <input value={v.adj} onChange={e => set({ ...v, adj: e.target.value.replace(/[^\d-]/g, '') })} placeholder="Доплата / удержание, ₸ (минус — удержание)" />
@@ -243,6 +244,8 @@ function Payroll({ m, d }) {
     <div className="head"><h3>ФОТ</h3><button className="mini" disabled={busy} onClick={compute}>{busy ? 'Считаю…' : 'Пересчитать'}</button></div>
     {p && <div className="kv"><div><span className="muted small">Начислено</span><b>{money(p.accrued)}</b></div>
       <div><span className="muted small">Выплачено</span><b>{money(p.paid)}</b></div><div><span className="muted small">Осталось</span><b>{money(p.left)}</b></div></div>}
+    {p?.pending > 0 && <p className="small muted">Доплаты до минимума по итогам месяца: {money(p.pending)} — не входят в «начислено» и «осталось», пока месяц идёт.
+      После конца месяца нажми «Пересчитать» — недостающее до минимума начислится.</p>}
     <p className="small muted">Пересчёт берёт смены, бонусы печати, оклады, % МОП и возмещение чеков «свои деньги». Ручные начисления не трогает.</p>
     {e && <p className="small why">{e}</p>}
     {p?.rows.map(r => <PayRow key={r.id} r={r} m={m} d={d} reload={load} />)}
@@ -537,6 +540,7 @@ export function MyPay() {
     {p && <><div className="kv"><div><span className="muted small">Начислено</span><b>{money(p.accrued)}</b></div>
       <div><span className="muted small">Выплачено</span><b>{money(p.paid)}</b></div><div><span className="muted small">Осталось</span><b>{money(p.left)}</b></div></div>
       {p.lines.map((a, i) => <div key={i} className="row small"><span>{a.detail || LINE[a.kind]}</span><b>{money(+a.amount)}</b></div>)}
+      {p.pending?.map((a, i) => <div key={'p' + i} className="row small muted"><span>{a.detail || LINE[a.kind]}</span><span>{money(+a.amount)}</span></div>)}
       {!p.lines.length && <p className="small muted">{p.live ? 'Принятых смен за этот месяц пока нет. Как только смену примут — сумма появится здесь сразу.' : 'За этот месяц начислений пока нет.'}</p>}
       {p.live && p.lines.length > 0 && <p className="small muted">Считается сразу по принятым сменам. Окончательно — когда HEAD закроет месяц.</p>}
       {p.payments?.length > 0 && <><h3 style={{ marginTop: 14 }}>Выплаты</h3>
