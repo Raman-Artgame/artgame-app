@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, Response
 from psycopg.types.json import Jsonb
 
 from . import constants as consts
-from . import db
+from . import db, viewas
 from .config import settings
 from .deps import load_person
 from .work import active
@@ -36,19 +36,22 @@ DZ = {"lead_designer", "designer_asst"}
 # editors — кто видит закрытое (vip) и правит общие документы; shared — коллекции, которые правят все, кому место открыто.
 PLACES = {
     "art":   {"title": "Художники", "roles": ART | {"head"}, "aud": {"все", "производство"}},
-    "print": {"title": "Печать", "roles": PRINT | {"lead_artist", "head"}, "aud": {"все", "производство"}},
+    "print": {"title": "Печать", "roles": PRINT | {"lead_artist", "artist_pro", "head"}, "aud": {"все", "производство"}},
     "mop":   {"title": "МОП", "roles": MOP | {"head"}, "aud": {"все", "моп"}, "editors": {"mop_vip", "head"}},
-    "calc":  {"title": "Калькулятор", "roles": MOP | {"head"}, "aud": {"все", "моп"}},
     "dz":    {"title": "Дизайн", "roles": DZ | {"head"}, "aud": {"все", "дизайн"}, "shared": {"projects"}},
+    # Книга главного художника (HEAD 11.11) — только Главным, Про и HEAD; без ставок и бонусов
+    "chief": {"title": "Книга главного", "roles": {"lead_artist", "artist_pro", "head"}, "aud": {"все", "производство"}},
 }
-ORDER = ["art", "print", "mop", "calc", "dz"]
+ORDER = ["art", "print", "mop", "dz", "chief"]
+BX_PLACES = {"mop"}  # на этих страницах работает подтяжка сделок Битрикса (bx.py, place_bx.js)
 # Ссылки между артефактами → места приложения (переписывает place_shim.js).
 ARTIFACTS = {"AUsM36vXPoSqk6J4LQUZqj": "art", "QvriqYAuWNEvypeNKAVAcE": "print", "8uecjatZFajVxKQwneyYQp": "mop",
-             "BGKMEr5zCyQxr2pgWXs8oZ": "calc", "73RaYPuD5WLq43NsvkJFVm": "dz"}
+             "BGKMEr5zCyQxr2pgWXs8oZ": "mop", "73RaYPuD5WLq43NsvkJFVm": "dz"}
 
 TTL = 12 * 3600
 ROOT = Path(__file__).resolve().parent.parent / "places"
 SHIM = Path(__file__).resolve().parent / "place_shim.js"
+BX_JS = Path(__file__).resolve().parent / "place_bx.js"
 DL_DIR = Path(tempfile.gettempdir()) / "artgame-dl"
 DL_TTL = 15 * 60
 MAX_DL = 50_000_000
@@ -93,35 +96,63 @@ def _skey() -> bytes:
     return hashlib.sha256(b"artgame-places:" + settings.bot_token.encode()).digest()
 
 
-def _sig(pid: int, code: str, exp: int) -> str:
-    return hmac.new(_skey(), f"{pid}:{code}:{exp}".encode(), hashlib.sha256).hexdigest()[:32]
+def _sig(pid: int, code: str, exp: int, view: str = "") -> str:
+    msg = f"{pid}:{code}:{exp}" + (f":{view}" if view else "")
+    return hmac.new(_skey(), msg.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _view_tag() -> str:
+    """Ссылка, выданная во время «смотреть как»: v<id HEAD>[-<роль>] — по ней место только для чтения."""
+    d = viewas.ctx()
+    if not d:
+        return ""
+    t = d["target"]
+    return f"v{d['viewer']}" + (f"-{t['role']}" if t.get("kind") == "role" else "")
 
 
 def token(pid: int, code: str, now: float | None = None) -> str:
     exp = int((now or time.time()) + TTL)
-    return f"{pid}.{exp}.{_sig(pid, code, exp)}"
+    view = _view_tag()
+    return f"{pid}.{exp}.{_sig(pid, code, exp, view)}" + (f".{view}" if view else "")
 
 
 def allowed(p: dict, code: str) -> bool:
-    return p["status"] == "active" and p["role_code"] in PLACES[code]["roles"]
+    """Роль — текущая или любая из своих (две роли, HEAD 08.11): ссылка места живёт без заголовка «Я сейчас»."""
+    mine = {p["role_code"], *(p.get("roles") or []), *(p.get("extra_roles") or [])}
+    return p["status"] == "active" and bool(mine & PLACES[code]["roles"])
 
 
 def person_by_token(code: str, tok: str) -> dict:
     if code not in PLACES:
         raise HTTPException(404)
     try:
-        pid_s, exp_s, sig = tok.split(".")
+        parts = tok.split(".")
+        pid_s, exp_s, sig = parts[:3]
+        view = parts[3] if len(parts) == 4 else ""
         pid, exp = int(pid_s), int(exp_s)
+        if len(parts) not in (3, 4) or (view and not view.startswith("v")):
+            raise ValueError
     except ValueError:
         raise HTTPException(403, "bad link")
-    if exp < time.time() or not hmac.compare_digest(_sig(pid, code, exp), sig):
+    if exp < time.time() or not hmac.compare_digest(_sig(pid, code, exp, view), sig):
         raise HTTPException(403, "link expired")
     with db.pool.connection() as conn:
         row = conn.execute("SELECT tg_id FROM people WHERE id=%s", (pid,)).fetchone()
         p = load_person(conn, row["tg_id"]) if row else None
+        if p and view:   # ссылка просмотра: HEAD должен быть действующим, место — только чтение
+            vid, _, role = view[1:].partition("-")
+            head = load_person(conn, int(vid), by="id")
+            p = viewas.resolve(conn, head, f"role:{role}" if role else str(pid), load_person) if head else None
+            if p:
+                p["_ro"] = True
     if not p or not allowed(p, code):
         raise HTTPException(403, "no access")
     return p
+
+
+def read_only(p: dict):
+    if p.get("_ro"):
+        raise HTTPException(403, viewas.RO_MSG)
 
 
 def is_editor(p: dict, code: str) -> bool:
@@ -136,9 +167,26 @@ def places(p: dict = Depends(active)):
             for c in ORDER if allowed(p, c) and (ROOT / c / "index.html.enc").exists()]
 
 
+@router.get("/bx/scripts")
+def mop_scripts(p: dict = Depends(active)):
+    """Скрипты сообщений и шаги алгоритма МОП для карточки сделки (из зашифрованного places/mop/scripts.json)."""
+    if p["role_code"] not in PLACES["mop"]["roles"]:
+        raise HTTPException(403, "только МОП и HEAD")
+    f = ROOT / "mop" / "scripts.json.enc"
+    if not f.exists():
+        raise HTTPException(404, "скрипты не загружены")
+    return Response(decrypt(f.read_bytes(), "mop/scripts.json"), media_type="application/json",
+                    headers={"Cache-Control": "private, max-age=3600"})
+
+
 @router.get("/p/_shim.js")
 def shim():
     return FileResponse(SHIM, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/p/_bx.js")
+def bx_js():
+    return FileResponse(BX_JS, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
 # ---------- цифры из «Значений» (контракт values_spec.md: config/values) ----------
@@ -150,7 +198,7 @@ def config_values(code: str) -> dict:
         return {"id": "values", "exists": False, "data": None}
     aud = PLACES[code]["aud"]
     vals = {k: consts.num(v["value"]) for k, v in row["values"].items()
-            if v["status"] == "Утверждено" and consts.who_set(v["who"]) & aud and str(v["value"]).strip()}
+            if v["status"] == "Утверждено" and consts.who_set(v.get("who") or "") & aud and str(v["value"]).strip()}
     return {"id": "values", "exists": True,
             "data": {"_updated": row["fetched_at"].isoformat(), "_source": "Значения", "values": vals}}
 
@@ -202,6 +250,7 @@ async def db_set(code: str, tok: str, path: str, request: Request):
     coll, doc = _split(path)
     if doc is None:
         raise HTTPException(400, "doc id required")
+    read_only(p)
     if not can_write(p, code, coll):
         raise HTTPException(403, "read only")
     body = await request.body()
@@ -264,9 +313,10 @@ def dl_get(code: str, tok: str, fid: str):
 
 def inject(html: bytes, code: str, p: dict) -> bytes:
     cfg = {"code": code, "editor": is_editor(p, code), "artifacts": ARTIFACTS,
-           "titles": {c: PLACES[c]["title"] for c in ORDER}}
+           "titles": {c: PLACES[c]["title"] for c in ORDER}, "bx": code in BX_PLACES}
     tag = (f'<script>window.ARTGAME_PLACE={json.dumps(cfg, ensure_ascii=False)}</script>'
-           '<script src="/api/p/_shim.js"></script>').encode()
+           '<script src="/api/p/_shim.js"></script>'
+           + ('<script src="/api/p/_bx.js" defer></script>' if code in BX_PLACES else '')).encode()
     head = html.lstrip()[:200].lower()
     if head.startswith(b"<!doctype") or head.startswith(b"<html"):
         i = html[:4000].lower().find(b"<head")

@@ -1,6 +1,7 @@
 """Раздел «Смены и расходы». Отправка идемпотентна по client_uid (офлайн-очередь на телефоне)."""
-from datetime import datetime
-from uuid import UUID
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+from uuid import UUID, uuid5
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -8,13 +9,42 @@ from pydantic import BaseModel, Field
 import math
 
 from . import constants as consts
-from . import db, drive
+from . import db, drive, sync_objects
+from .config import settings
 from .deps import current_person
 
+TZ = ZoneInfo("Asia/Almaty")
 router = APIRouter(prefix="/api")
 
 # Кто проверяет какую зону (ARCHITECTURE.md «Роли и зоны»). HEAD — всё, ГИП — свой объект.
-CHECKS = {"lead_artist": {"mural"}, "print_master": {"print"}, "lead_designer": {"design"}}
+CHECKS = {"lead_artist": {"mural"}, "artist_pro": {"mural"}, "print_master": {"print"}, "lead_designer": {"design"}}
+# Лестница (константы, HEAD 06.11): Саппорт → Художник → Главный → Про. По зоне проверяют только тех, кто ниже по уровню:
+# Главный не проверяет Главного и Про; Про проверяет Главного. ГИП своего объекта и HEAD — всех.
+RANK_SQL = "(SELECT r.level FROM people pp JOIN roles r ON r.code=pp.role_code WHERE pp.id=x.person_id)"
+
+# Проверка в две ступени (HEAD 11.11): куратор (ГИП объекта или старший по зоне) ставит оценку, утверждает только HEAD.
+# Смены и траты самих кураторов — сразу к HEAD. Нет куратора или он не успел за 24 ч — тоже к HEAD («без оценки»).
+CURATORS = ("lead_artist", "artist_pro", "print_master", "lead_designer")
+CURATE_HOURS = 24
+DIRECT_SQL = ("((SELECT coalesce(pp.acting_role, pp.role_code) FROM people pp WHERE pp.id=x.person_id) = ANY('{%s}'::text[]))"
+              % ",".join(CURATORS + ("head",)))
+_ZONE_PAIRS = ",".join(f"('{z}','{r}')" for r, zs in CHECKS.items() for z in sorted(zs))
+HAS_CUR_SQL = f"""EXISTS (SELECT 1 FROM people c JOIN roles cr ON cr.code = coalesce(c.acting_role, c.role_code)
+                     WHERE c.status='active' AND c.id <> x.person_id
+                       AND (c.id = o.gip_person_id OR ((x.zone_code, cr.code) IN ({_ZONE_PAIRS}) AND cr.level > COALESCE({RANK_SQL}, 0))))"""
+# к HEAD: оценено, или автор — куратор, или оценить некому, или куратор не успел
+READY_SQL = (f"(x.cur_at IS NOT NULL OR {DIRECT_SQL} OR NOT {HAS_CUR_SQL} "
+             f"OR coalesce(x.submitted_at, x.created_at) < now() - interval '{CURATE_HOURS} hours')")
+
+
+def stage_of(x: dict) -> str:
+    """Где запись у HEAD: rated — куратор оценил; direct — смена куратора / оценить некому; late — куратор не успел; wait — ждёт оценки."""
+    if x.get("cur_at"):
+        return "rated"
+    if x.get("direct") or not x.get("has_cur"):
+        return "direct"
+    sent = x.get("submitted_at") or x.get("created_at")
+    return "late" if sent and sent < datetime.now(TZ) - timedelta(hours=CURATE_HOURS) else "wait"
 
 
 def active(p: dict = Depends(current_person)) -> dict:
@@ -23,23 +53,131 @@ def active(p: dict = Depends(current_person)) -> dict:
     return p
 
 
-def check_zone(conn, p: dict, zone: str, object_id: int):
+CLOSED = "Сделка закрыта HEAD: смены и расходы на этот объект больше не вносятся"
+
+
+def check_zone(conn, p: dict, zone: str, object_id: int, past: bool = False):
     if zone not in p["zones"]:
         raise HTTPException(400, "zone not assigned")
-    o = conn.execute("SELECT status FROM objects WHERE id=%s", (object_id,)).fetchone()
-    if not o or o["status"] != "active":
+    o = conn.execute("SELECT status, closed_at FROM objects WHERE id=%s", (object_id,)).fetchone()
+    if o and o["closed_at"]:   # HEAD 12.11: сделка закрыта через паспорт — цифры паспорта не должны поплыть
+        raise HTTPException(400, CLOSED)
+    if not o or o["status"] not in (("active", "done") if past else ("active",)):
         raise HTTPException(400, "object closed or missing")
+
+
+def backfill_window() -> dict:
+    """Задним числом (HEAD 09.11: «чтобы ребята всё заполнили с 1 ноября»): с какого дня и до какого числа открыто."""
+    today = datetime.now(TZ).date()
+    a, b = date.fromisoformat(settings.backfill_from), date.fromisoformat(settings.backfill_until)
+    return {"from": a.isoformat(), "until": b.isoformat(), "open": a <= today <= b}
+
+
+def _ru(d: str) -> str:
+    x = date.fromisoformat(d)
+    return f"{x.day} {['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][x.month - 1]}"
+
+
+def check_past_day(day: date, today_ok: bool = False) -> datetime:
+    """День «задним числом». today_ok — смена, которая сегодня уже закончилась (HEAD 10.11: обучение в мастерской 15:30–18:00)."""
+    w = backfill_window()
+    if not w["open"]:
+        raise HTTPException(400, f"Внести задним числом можно было до {_ru(w['until'])}")
+    today = datetime.now(TZ).date()
+    if day < date.fromisoformat(w["from"]) or day > today or (day == today and not today_ok):
+        raise HTTPException(400, f"Выберите день с {_ru(w['from'])} по {'сегодня' if today_ok else 'вчера'}"
+                                 + ("" if today_ok else ". Сегодняшнюю трату внесите обычным способом — без «задним числом»"))
+    return datetime(day.year, day.month, day.day, 9, 0, tzinfo=TZ)
+
+
+# Саппорт тратит только на такси и докупку на объект (HEAD 08.11).
+ROLE_CATS = {"support": ("transport", "purchase"),
+             # дизайнеры — только такси / доставка и «Другое» (HEAD 09.11)
+             "lead_designer": ("transport", "other"), "designer_asst": ("transport", "other")}
+# Категории только для некоторых ролей: проживание в командировке — Главный, Про, Мастер печати (HEAD 08.11)
+CAT_ROLES = {"lodging": {"lead_artist", "artist_pro", "print_master", "head"}}
+
+
+def cats_for(conn, role: str | None) -> list[dict]:
+    rows = conn.execute("SELECT code, title FROM expense_categories WHERE active AND article='project' ORDER BY sort").fetchall()
+    allow = ROLE_CATS.get(role or "")
+    # trip_* вносятся в карточке проекта (блок «Командировка»), не в обычных расходах
+    return [r for r in rows if not r["code"].startswith("trip_") and (not allow or r["code"] in allow)
+            and (r["code"] not in CAT_ROLES or role in CAT_ROLES[r["code"]])]
 
 
 @router.get("/work/dict")
 def work_dict(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         return {
-            "objects": conn.execute("SELECT id, title, city FROM objects WHERE status='active' ORDER BY id DESC").fetchall(),
-            "categories": conn.execute("SELECT code, title FROM expense_categories WHERE active ORDER BY sort").fetchall(),
+            # объекты, куда человека поставили (object_crew, HEAD 09.11), — первыми, с пометкой mine
+            "objects": conn.execute("""SELECT o.id, o.title, o.city, c.person_id IS NOT NULL AS mine FROM objects o
+                                       LEFT JOIN object_crew c ON c.object_id=o.id AND c.person_id=%s
+                                       WHERE o.status='active' AND (o.id=0 OR o.bitrix_stage=%s)
+                                       ORDER BY (c.person_id IS NOT NULL) DESC, o.id DESC""", (p["id"], sync_objects.WORK)).fetchall()
+                       if not set(p.get("roles") or [p["role_code"]]) & set(WORKSHOP_ROLES) else
+                       [{**o, "title": WORKSHOP_TITLE.get(workshop_zone(p) or "", SHOP)} if o["id"] == 0 else o for o in conn.execute("""SELECT o.id, o.title, o.city, c.person_id IS NOT NULL AS mine
+                                       FROM objects o LEFT JOIN object_crew c ON c.object_id=o.id AND c.person_id=%s
+                                       WHERE o.status='active' AND (o.id=0 OR o.bitrix_stage=%s)
+                                       ORDER BY (c.person_id IS NOT NULL) DESC, o.id DESC""", (p["id"], sync_objects.WORK)).fetchall()],
+            "categories": cats_for(conn, p["role_code"]),
             "zones": p["zones"],
             "printer": consts.latest(conn).get("print.tech.printer"),
+            "role": p["role_code"],
+            "workshop": WORKSHOP_TASKS_BY[workshop_zone(p)] if workshop_zone(p) else None,
+            "workshop_zone": workshop_zone(p), "workshop_title": WORKSHOP_TITLE.get(workshop_zone(p) or ""),
+            "roles": p.get("roles") or [p["role_code"]],   # две роли: в какой роли смена — по зоне объекта, можно сменить
+            # подсказки смены (HEAD 08.11): ТБ из «Значений», этапы работ
+            "safety": {k: x for k, x in consts.latest(conn).items() if k.startswith("safety.")},
+            # «Мой путь» (HEAD 11.11): норма росписи и отчёт ГИП — цифры в пути роста только из «Значений»
+            "grow": {k: x for k, x in consts.latest(conn).items() if k.startswith(("norm.mural.", "curator.")) or k in ("print.plan_per_shift", "mop.reply_min")},
+            # ночь и переработка (HEAD 09.11): подпись в «Прошлой смене»; считает finance.shift_pay
+            **(lambda v: {"shift_hours": v.get("shift.hours") or 10, "night_pct": v.get("pay.night") or 0,
+                          "night": f"{v.get('pay.night.from') or '22:00'}–{v.get('pay.night.to') or '6:00'}"})(consts.latest(conn)),
+            "stages": [{"key": k, "title": t} for k, t in __import__("artgame.promo", fromlist=["STAGES"]).STAGES],
+            # задним числом с 1.11 (HEAD 09.11): объекты — и уже сданные
+            "backfill": {**backfill_window(), "objects": conn.execute(
+                """SELECT id, title, city FROM objects WHERE status IN ('active','done') AND id<>0 AND closed_at IS NULL
+                     AND (bitrix_stage=%s OR left_work_at >= %s::date) ORDER BY id DESC""",
+                (sync_objects.WORK, backfill_window()["from"])).fetchall()},   # HEAD 10.11: и ушедшие с «Выполнения» после начала срока   # HEAD 09.11: только «Выполнение проекта» — завершённые HEAD сам возвращает туда
         }
+
+
+def object_cond(conn, object_id: int) -> dict:
+    """Условия объекта из сделки (заполняет МОП, команда не выбирает — HEAD 08.11): сложность — поле сделки «Сложность»
+    (иначе из расчёта), высота / улица / сложная поверхность — из расчёта в карточке сделки, площадь и адрес — из сделки."""
+    o = conn.execute("SELECT id, title, city, level, area_m2, address, geo, level_guess FROM objects WHERE id=%s", (object_id,)).fetchone()
+    if not o:
+        raise HTTPException(404, "no object")
+    c = conn.execute("SELECT data FROM deal_calc WHERE deal_id=%s", (object_id,)).fetchone()
+    i = ((c or {}).get("data") or {}).get("in") or {}
+    lvl = ""
+    if o["level"]:
+        try:
+            from . import bx
+            lvl = bx.level_key(o["level"])
+        except Exception:  # noqa: BLE001 — Битрикс недоступен: возьмём из расчёта
+            lvl = o["level"] if o["level"] in COMPLEXITY else ""
+    src = "deal" if lvl else None
+    if not lvl and i.get("service") == "mural" and i.get("level") in COMPLEXITY:
+        lvl, src = i["level"], "calc"
+    if not lvl and o["level_guess"] in COMPLEXITY and i.get("service") in (None, "mural"):
+        lvl, src = o["level_guess"], "price"   # МОП не указал — оценка по сумме сделки и площади (HEAD 08.11)
+    from .promo import map_url
+    return {"id": o["id"], "title": o["title"], "city": o["city"], "address": o["address"], "complexity_src": src,
+            "map": map_url(o["city"], o["address"], o["geo"]),
+            "area": float(o["area_m2"]) if o["area_m2"] is not None else (float(i["area"]) if i.get("area") else None),
+            "service": i.get("service"), "complexity": lvl or None,
+            "at_height": "height" in (i.get("extras") or []), "outdoor": bool(i.get("outdoor")), "hard_surface": bool(i.get("surface"))}
+
+
+def apply_cond(conn, s) -> None:
+    """Роспись: сложность и условия берём из сделки, если МОП их заполнил (выбор на телефоне не нужен)."""
+    if s.zone_code != "mural" or not s.object_id:
+        return
+    c = object_cond(conn, s.object_id)
+    if c["complexity"]:
+        s.complexity, s.at_height, s.outdoor, s.hard_surface = c["complexity"], c["at_height"], c["outdoor"], c["hard_surface"]
 
 
 class ShiftIn(BaseModel):
@@ -104,6 +242,7 @@ def add_shift(s: ShiftIn, p: dict = Depends(active)):
         check_zone(conn, p, s.zone_code, s.object_id)
         if s.complexity and s.complexity not in COMPLEXITY:
             raise HTTPException(400, "bad complexity")
+        apply_cond(conn, s)
         n = shift_norm(consts.latest(conn), s, p["role_code"])
         row = conn.execute(
             """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, area_m2,
@@ -120,6 +259,365 @@ def add_shift(s: ShiftIn, p: dict = Depends(active)):
         return row
 
 
+# ---------- смена по шагам (HEAD 08.11): начать с фото «до» → закончить с фото «после», м² и «что сделал» ----------
+
+class StartIn(BaseModel):
+    client_uid: UUID
+    object_id: int
+    zone_code: str
+    started_at: datetime
+    photo_before: str | None = Field(default=None, max_length=8_000_000)   # обязательно на объекте; в мастерской — нет
+    geo_lat: float | None = None
+    geo_lon: float | None = None
+    role: str | None = None             # две роли (HEAD 08.11): в какой роли смена; по умолчанию — по зоне объекта
+    workshop: str | None = Field(default=None, max_length=60)   # «Мастерская» без проекта (HEAD 09.11): ТО принтера и т. п.
+    pressed_at: datetime | None = None   # когда нажал «Начать» (время телефона); started_at — своё время, если «Начал раньше?» (HEAD 11.11)
+
+
+PRINT_ROLES = ("print_master", "print_operator")
+MURAL_ROLES = ("support", "artist", "artist_pro", "lead_artist")
+# «Мастерская» без проекта (HEAD 09.11) у печати; «Без объекта» у всех художников (HEAD 11.11)
+WORKSHOP_ROLES = PRINT_ROLES + MURAL_ROLES
+WORKSHOP_ZONES = ("print", "mural")
+WORKSHOP_TASKS = ["ТО принтера", "Ремонт и запчасти", "Тест печати", "Подготовка к объекту", "Обучение", "Другое"]
+WORKSHOP_TASKS_BY = {"print": WORKSHOP_TASKS,
+                     "mural": ["Подготовка к объекту", "Картины и холсты", "Эскиз и пробы", "Сбор и инвентарь", "Обучение", "Другое"]}
+WORKSHOP_TITLE = {"print": "Мастерская", "mural": "Без объекта"}
+
+
+def workshop_zone(p: dict) -> str | None:
+    """Зона смены без объекта: печать — если есть роль печати, иначе роспись. None — такой смены у человека нет."""
+    roles = set(p.get("roles") or [p["role_code"]])
+    for z, rs in (("print", PRINT_ROLES), ("mural", MURAL_ROLES)):
+        if roles & set(rs) and z in (p.get("zones") or []):
+            return z
+    return None
+
+
+def check_workshop(p: dict, zone: str) -> None:
+    roles = set(p.get("roles") or [p["role_code"]])
+    if zone not in WORKSHOP_ZONES or not roles & set(PRINT_ROLES if zone == "print" else MURAL_ROLES):
+        raise HTTPException(400, "Смена без объекта — у печати и художников")
+
+
+def shift_role(p: dict, zone: str, want: str | None = None) -> str:
+    """Роль смены: выбранная (из своих), иначе по зоне — печать → роль печати, роспись → роль художника, иначе текущая."""
+    roles = p.get("roles") or [p["role_code"]]
+    if want and want in roles:
+        return want
+    pick = [r for r in roles if (r in PRINT_ROLES) == (zone == "print")]
+    cur = p["role_code"] if p["role_code"] in roles else roles[0]   # и.о.: ставка — по основной роли, не по исполняемой
+    return cur if cur in pick or not pick else pick[0]
+
+
+class FinishIn(BaseModel):
+    client_uid: UUID                    # тот же, что при «Начать»: офлайн-очередь шлёт по порядку, ID смены телефону не нужен
+    ended_at: datetime
+    area_m2: float | None = Field(default=None, ge=0)
+    work_done: str = Field(min_length=3, max_length=2000)
+    photo_after: str | None = Field(default=None, max_length=8_000_000)   # обязательно на объекте; в мастерской — нет
+    printer: str | None = Field(default=None, max_length=100)
+    note: str | None = Field(default=None, max_length=1000)
+    stage: str | None = None            # этап, который закрыла смена (promo.STAGES)
+    pressed_at: datetime | None = None  # когда нажал «Закончить»; ended_at — своё время, если «Закончил раньше?» (HEAD 11.11)
+
+
+def _photo(conn, p, object_id: int, uid: UUID, tag: str, data: str, note: str) -> int:
+    from .files import get_object, store_photo
+    return store_photo(conn, p, get_object(conn, object_id), uuid5(uid, tag), data, note)["id"]
+
+
+def is_trip(conn, person_id: int, object_id: int) -> bool:
+    """Командировка (HEAD 08.11): МОП отметил на объекте — так и есть; иначе город сотрудника ≠ город объекта."""
+    o = conn.execute("SELECT city, trip FROM objects WHERE id=%s", (object_id,)).fetchone()
+    if not o or object_id == 0:
+        return False
+    if o["trip"] is not None:
+        return bool(o["trip"])
+    pc = (conn.execute("SELECT city FROM people WHERE id=%s", (person_id,)).fetchone() or {}).get("city")
+    norm = lambda x: (x or "").split("(")[0].strip().casefold()  # noqa: E731
+    return bool(pc and o["city"] and norm(pc) != norm(o["city"]))
+
+
+def _shift_out(conn, row: dict) -> dict:
+    out = dict(row)
+    o = conn.execute("SELECT title, city FROM objects WHERE id=%s", (row["object_id"],)).fetchone()
+    out["object_title"] = o["title"] if o else ""
+    return shop_title(photos(out))
+
+
+@router.get("/shifts/open")
+def open_shift(p: dict = Depends(active)):
+    with db.pool.connection() as conn:
+        row = conn.execute("SELECT * FROM shifts WHERE person_id=%s AND status='open' ORDER BY started_at DESC LIMIT 1", (p["id"],)).fetchone()
+        return {"shift": _shift_out(conn, row) if row else None}
+
+
+@router.post("/shifts/start")
+def start_shift(b: StartIn, p: dict = Depends(active)):
+    with db.pool.connection() as conn, conn.transaction():
+        dup = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
+        if dup:
+            return _shift_out(conn, dup)
+        shop = bool(b.workshop)
+        if shop:   # мастерская: без объекта, только печать (HEAD 09.11)
+            b.object_id = 0
+            check_workshop(p, b.zone_code)
+        check_zone(conn, p, b.zone_code, b.object_id)
+        if not b.object_id and not shop:
+            raise HTTPException(400, "Смена — только на объекте")
+        if not shop and not (b.photo_before and len(b.photo_before) >= 30):
+            raise HTTPException(422, "Нужно фото стены до начала")
+        if conn.execute("SELECT 1 FROM shifts WHERE person_id=%s AND status='open'", (p["id"],)).fetchone():
+            raise HTTPException(409, "Смена уже идёт — сначала закончи её")
+        note = time_edit("Начало", b.started_at, b.pressed_at)
+        if b.pressed_at and b.started_at < b.pressed_at - timedelta(hours=BACK_HOURS):
+            raise HTTPException(400, f"«Начал раньше» — не больше чем на {BACK_HOURS} ч. Раньше — через «Прошлую смену»")
+        busy = overlap(conn, p["id"], b.started_at, b.pressed_at or b.started_at + timedelta(minutes=1)) if note else None
+        if busy:
+            raise HTTPException(409, busy)
+        ph = None if shop else _photo(conn, p, b.object_id, b.client_uid, "before", b.photo_before, "до смены")
+        row = conn.execute(
+            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, geo_lat, geo_lon, status, photo_before, trip, role_code, kind, task,
+                                   time_edited, time_note)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
+            (b.client_uid, p["id"], b.object_id, b.zone_code, b.started_at, b.geo_lat, b.geo_lon, ph, False if shop else is_trip(conn, p["id"], b.object_id),
+             shift_role(p, b.zone_code, b.role), "workshop" if shop else "work", b.workshop.strip() if shop else None, bool(note), note)).fetchone()
+        if not row:
+            row = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
+        else:
+            db.audit(conn, p["id"], "shift_start", "shifts", row["id"])
+        return _shift_out(conn, row)
+
+
+class TripIn(BaseModel):
+    trip: bool | None = None   # None — считать по городу
+
+
+@router.post("/objects/{object_id}/trip")
+def set_trip(object_id: int, b: TripIn, p: dict = Depends(active)):
+    """МОП поправляет командировку на объекте (HEAD 08.11). Пишется только в приложении, в Битрикс — нет."""
+    if p["role_code"] not in ("mop", "mop_vip", "head") or p.get("_view_as"):
+        raise HTTPException(403, "командировку отмечает МОП или HEAD")
+    with db.pool.connection() as conn, conn.transaction():
+        row = conn.execute("UPDATE objects SET trip=%s WHERE id=%s AND id<>0 RETURNING id, trip", (b.trip, object_id)).fetchone()
+        if not row:
+            raise HTTPException(404, "объекта ещё нет в приложении")
+        from .trips import retrip   # HEAD 10.11: смены объекта — заново (питание в командировке)
+        n = retrip(conn, object_id)
+        db.audit(conn, p["id"], "object_trip", "objects", object_id, {"trip": b.trip, "shifts": n})
+        return row
+
+
+@router.get("/objects/{object_id}/trip")
+def get_trip(object_id: int, p: dict = Depends(active)):
+    with db.pool.connection() as conn:
+        o = conn.execute("SELECT id, city, trip FROM objects WHERE id=%s", (object_id,)).fetchone()
+        if not o:
+            raise HTTPException(404)
+        return o
+
+
+class PastIn(BaseModel):
+    client_uid: UUID
+    object_id: int
+    zone_code: str
+    day: date
+    hours: float = Field(gt=0, le=48)   # HEAD 09.11: ночные и длинные проекты — до двух суток одной записью
+    start_time: str | None = Field(default=None, pattern=r"^\d{1,2}:\d{2}$")   # когда начали (по умолчанию 9:00) — для ночных часов
+    area_m2: float | None = Field(default=None, ge=0)
+    work_done: str = Field(min_length=3, max_length=2000)
+    photo_after: str | None = Field(default=None, max_length=8_000_000)   # фото по возможности
+    role: str | None = None
+    workshop: str | None = Field(default=None, max_length=60)   # мастерская без проекта (печать, HEAD 09.11)
+
+
+EDIT_MIN = 30          # сдвиг времени от нажатия больше — пометка «время поправлено» (HEAD 11.11)
+BACK_HOURS = 12        # «Начал раньше?» — не больше чем на 12 ч назад
+
+
+def time_edit(what: str, at: datetime, pressed: datetime | None) -> str | None:
+    """Своё время вместо нажатия: в будущее нельзя; сдвиг больше 30 мин — текст пометки, иначе None."""
+    now = datetime.now(TZ)
+    if at > now + timedelta(minutes=10):
+        raise HTTPException(400, f"Время {what} — не позже, чем сейчас")
+    if not pressed or abs((pressed - at).total_seconds()) <= EDIT_MIN * 60:
+        return None
+    return f"{what}: нажал {pressed.astimezone(TZ):%d.%m %H:%M}, указал {at.astimezone(TZ):%d.%m %H:%M}"
+
+
+def overlap(conn, person_id: int, start: datetime, end: datetime, skip: int | None = None) -> str | None:
+    """HEAD 11.11: в один день можно несколько смен (утром Игротека, вечером Вок Вок) — нельзя только пересекаться по времени.
+    Возвращает текст ошибки, если новая смена накладывается на уже внесённую (кроме отклонённых, отменённых и дороги)."""
+    r = conn.execute(f"""SELECT s.started_at, s.ended_at, {SHOP_SQL.format(s="s", pe="pe")} AS title FROM shifts s
+                         JOIN objects o ON o.id=s.object_id JOIN people pe ON pe.id=s.person_id
+                         WHERE s.person_id=%s AND s.status NOT IN ('rejected','cancelled') AND s.kind <> 'road' AND s.id <> %s
+                           AND s.started_at < %s AND coalesce(s.ended_at, greatest(now(), s.started_at + interval '1 hour')) > %s
+                         ORDER BY s.started_at LIMIT 1""", (person_id, skip or 0, end, start)).fetchone()
+    if not r:
+        return None
+    a = r["started_at"].astimezone(TZ)
+    b = f"{r['ended_at'].astimezone(TZ):%H:%M}" if r["ended_at"] else "сейчас"
+    return (f"Это время уже занято сменой «{r['title']}» {a:%d.%m} {a:%H:%M}–{b}. Несколько смен в день можно, если они не пересекаются. "
+            "Если в той смене ошибка — «Кабинет» → «Мои смены» → «Ошибка? Обращение».")
+
+
+@router.post("/shifts/past")
+def past_shift(b: PastIn, p: dict = Depends(active)):
+    """«Прошлая смена» (HEAD 09.11): внести смену задним числом с 1.11 — сразу на проверку, с пометкой backfill."""
+    with db.pool.connection() as conn, conn.transaction():
+        dup = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
+        if dup:
+            return _shift_out(conn, dup)
+        shop = bool(b.workshop)
+        if shop:
+            b.object_id, b.area_m2 = 0, None
+            check_workshop(p, b.zone_code)
+        check_zone(conn, p, b.zone_code, b.object_id, past=True)
+        if not b.object_id and not shop:
+            raise HTTPException(400, "Смена — только на объекте")
+        start = check_past_day(b.day, today_ok=True)
+        if b.start_time:
+            h, m = (int(x) for x in b.start_time.split(":"))
+            if h > 23 or m > 59:
+                raise HTTPException(422, "Время начала — от 0:00 до 23:59")
+            start = start.replace(hour=h, minute=m)
+        if start + timedelta(hours=b.hours) > datetime.now(TZ) + timedelta(minutes=10):
+            raise HTTPException(400, "Эта смена ещё не закончилась. Начните её на вкладке «Смена», а когда закончите — нажмите «Закончить»")
+        # день дороги не мешает рабочей смене в тот же день (HEAD 09.11: Ажар не могла внести 8.11 из-за дороги)
+        busy = overlap(conn, p["id"], start, start + timedelta(hours=b.hours))
+        if busy:
+            raise HTTPException(409, busy)
+        ph = _photo(conn, p, b.object_id, b.client_uid, "after", b.photo_after, "после (задним числом)") if b.photo_after and not shop else None
+        row = conn.execute(
+            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status, area_m2, work_done, photo_after,
+                                   trip, role_code, backfill, kind, task)
+               VALUES (%s,%s,%s,%s,%s,%s,'submitted',%s,%s,%s,%s,%s,true,%s,%s) RETURNING *""",
+            (b.client_uid, p["id"], b.object_id, b.zone_code, start, start + timedelta(hours=b.hours), b.area_m2, b.work_done, ph,
+             False if shop else is_trip(conn, p["id"], b.object_id), shift_role(p, b.zone_code, b.role),
+             "workshop" if shop else "work", b.workshop.strip() if shop else None)).fetchone()
+        db.audit(conn, p["id"], "shift_past", "shifts", row["id"], {"day": b.day.isoformat()})
+        return _shift_out(conn, row)
+
+
+class PhotoIn(BaseModel):
+    client_uid: UUID                    # у каждого фото свой — повтор не создаёт дубль
+    photo: str = Field(min_length=30, max_length=8_000_000)
+
+
+@router.post("/shifts/{sid}/photos")
+def add_shift_photo(sid: int, b: PhotoIn, p: dict = Depends(active)):
+    """Ещё фото к своей смене задним числом (HEAD 09.11: «неограниченное количество фотографий»), пока она не проверена."""
+    with db.pool.connection() as conn, conn.transaction():
+        s = conn.execute("SELECT * FROM shifts WHERE id=%s AND person_id=%s", (sid, p["id"])).fetchone()
+        if not s:
+            raise HTTPException(404, "Смена не найдена")
+        if not s["backfill"] or s["status"] != "submitted" or not s["object_id"]:
+            raise HTTPException(400, "Фото добавляются к отчёту задним числом на объекте, пока он на проверке")
+        fid = _photo(conn, p, s["object_id"], b.client_uid, "extra", b.photo, "отчёт задним числом")
+        conn.execute("INSERT INTO shift_photos (shift_id, file_id) VALUES (%s,%s) ON CONFLICT DO NOTHING", (sid, fid))
+        n = conn.execute("SELECT count(*) AS n FROM shift_photos WHERE shift_id=%s", (sid,)).fetchone()["n"]
+        return {"ok": True, "count": n}
+
+
+class RoadIn(BaseModel):
+    client_uid: UUID
+    object_id: int
+    zone_code: str
+    day: datetime                      # день дороги (время — когда выехал)
+    direction: str = "there"           # there | back
+    note: str | None = Field(default=None, max_length=500)
+    ticket: str | None = Field(default=None, max_length=8_000_000)   # фото билета / чека (по желанию)
+
+
+@router.post("/shifts/road")
+def road_day(b: RoadIn, p: dict = Depends(active)):
+    """День дороги в командировку (HEAD 08.11): идёт на проверку как смена и оплачивается по ставке смены роли."""
+    if b.direction not in ("there", "back"):
+        raise HTTPException(400, "bad direction")
+    with db.pool.connection() as conn, conn.transaction():
+        dup = conn.execute("SELECT * FROM shifts WHERE client_uid=%s", (b.client_uid,)).fetchone()
+        if dup:
+            return _shift_out(conn, dup)
+        check_zone(conn, p, b.zone_code, b.object_id)
+        if not is_trip(conn, p["id"], b.object_id):
+            raise HTTPException(400, "Объект не командировочный: дорога не считается. Город — в «Команде», отметка — у МОП в сделке")
+        day0 = b.day.astimezone(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+        if conn.execute("SELECT 1 FROM shifts WHERE person_id=%s AND kind='road' AND status IN ('submitted','approved') "
+                        "AND started_at >= %s AND started_at < %s + interval '1 day'", (p["id"], day0, day0)).fetchone():
+            raise HTTPException(409, "Дорога в этот день уже отмечена")
+        ph = _photo(conn, p, b.object_id, b.client_uid, "ticket", b.ticket, "билет / дорога") if b.ticket else None
+        hours = consts.latest(conn).get("shift.hours") or 10
+        start = b.day.astimezone(TZ)
+        row = conn.execute(
+            """INSERT INTO shifts (client_uid, person_id, object_id, zone_code, started_at, ended_at, status, kind, trip, work_done, note, photo_after, role_code)
+               VALUES (%s,%s,%s,%s,%s,%s,'submitted','road',true,%s,%s,%s,%s) RETURNING *""",
+            (b.client_uid, p["id"], b.object_id, b.zone_code, start, start + timedelta(hours=float(hours)),
+             "Дорога " + ("на объект" if b.direction == "there" else "обратно"), b.note, ph, shift_role(p, b.zone_code))).fetchone()
+        db.audit(conn, p["id"], "shift_road", "shifts", row["id"], {"direction": b.direction})
+        return _shift_out(conn, row)
+
+
+@router.post("/shifts/finish")
+def finish_shift(b: FinishIn, p: dict = Depends(active)):
+    with db.pool.connection() as conn, conn.transaction():
+        row = conn.execute("SELECT * FROM shifts WHERE client_uid=%s AND person_id=%s FOR UPDATE", (b.client_uid, p["id"])).fetchone()
+        if not row:
+            raise HTTPException(404, "Смена не найдена")
+        if row["status"] != "open":   # повтор из офлайн-очереди
+            return _shift_out(conn, row)
+        if b.ended_at <= row["started_at"]:
+            raise HTTPException(400, "Конец смены — позже начала" if b.pressed_at else "end before start")
+        if b.ended_at - row["started_at"] > timedelta(hours=48):
+            raise HTTPException(400, "Одной сменой — до 48 часов. Поставь время конца или внеси по дням через «Прошлую смену»")
+        fnote = time_edit("Конец", b.ended_at, b.pressed_at)
+        busy = overlap(conn, p["id"], row["started_at"], b.ended_at, skip=row["id"]) if fnote else None
+        if busy:
+            raise HTTPException(409, busy)
+        tnote = "; ".join(x for x in (row.get("time_note"), fnote) if x) or None
+        from .promo import STAGE_KEYS
+        if b.stage and b.stage not in STAGE_KEYS:
+            raise HTTPException(400, "bad stage")
+        shop = row["kind"] == "workshop"
+        if not shop and not (b.photo_after and len(b.photo_after) >= 30):
+            raise HTTPException(422, "Нужно фото в конце смены")
+        ph = None if shop else _photo(conn, p, row["object_id"], b.client_uid, "after", b.photo_after, "после смены")
+        s = ShiftIn(client_uid=b.client_uid, object_id=row["object_id"], zone_code=row["zone_code"], started_at=row["started_at"],
+                    ended_at=b.ended_at, area_m2=b.area_m2, printer=b.printer if row["zone_code"] == "print" else None)
+        apply_cond(conn, s)
+        n = {"plan_m2": None, "kpd": None, "bonus": None} if shop else shift_norm(consts.latest(conn), s, p["role_code"])   # мастерская — без плана
+        row = conn.execute(
+            """UPDATE shifts SET status='submitted', submitted_at=now(), ended_at=%s, area_m2=%s, work_done=%s, note=%s, photo_after=%s, printer=%s,
+                   complexity=%s, at_height=%s, outdoor=%s, hard_surface=%s, plan_m2=%s, kpd=%s, bonus=%s, stage=%s,
+                   time_edited=%s, time_note=%s
+               WHERE id=%s RETURNING *""",
+            (b.ended_at, b.area_m2, b.work_done.strip(), b.note, ph, s.printer, s.complexity, s.at_height, s.outdoor, s.hard_surface,
+             n["plan_m2"], n["kpd"], n["bonus"], b.stage, bool(tnote), tnote, row["id"])).fetchone()
+        db.audit(conn, p["id"], "shift_finish", "shifts", row["id"])
+        return _shift_out(conn, row)
+
+
+@router.get("/work/object/{object_id}")
+def object_promo(object_id: int, zone: str = "mural", p: dict = Depends(active)):
+    """Живая карточка объекта: условия из сделки, норма на смену, эскизы с Диска, ход работ, фото до/после, кто на объекте."""
+    with db.pool.connection() as conn:
+        c = object_cond(conn, object_id)
+        probe = ShiftIn(client_uid=UUID(int=0), object_id=object_id, zone_code=zone, started_at=datetime.now(), complexity=c["complexity"],
+                        at_height=c["at_height"], outdoor=c["outdoor"], hard_surface=c["hard_surface"])
+        c["plan_m2"] = shift_norm(consts.latest(conn), probe, p["role_code"])["plan_m2"]
+        from . import promo
+        obj = conn.execute("SELECT * FROM objects WHERE id=%s", (object_id,)).fetchone()
+        promo.maybe_sync(conn, obj)
+        c["sketches"] = promo.sketches(conn, object_id)
+        c.update(promo.progress(conn, object_id, c["area"], p))
+        c["trip"] = is_trip(conn, p["id"], object_id)   # командировка для этого человека: в смене кнопка «Дорога», суточные
+        c["trip_set"] = obj["trip"]
+        c["now"] = [r["full_name"] for r in conn.execute(
+            """SELECT DISTINCT pe.full_name FROM shifts s JOIN people pe ON pe.id=s.person_id
+               WHERE s.object_id=%s AND s.status='open' ORDER BY 1""", (object_id,)).fetchall()]
+        return c
+
+
 class ExpenseIn(BaseModel):
     client_uid: UUID
     object_id: int
@@ -129,6 +627,7 @@ class ExpenseIn(BaseModel):
     paid_by: str = "own"
     receipt: str | None = Field(default=None, max_length=8_000_000)  # data:image/jpeg;base64,… (сжато на телефоне)
     note: str | None = None
+    day: date | None = None            # задним числом с 1.11 (HEAD 09.11)
 
 
 @router.post("/expenses")
@@ -139,24 +638,32 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
         dup = conn.execute("SELECT * FROM expenses WHERE client_uid=%s", (e.client_uid,)).fetchone()
         if dup:
             return dup
-        check_zone(conn, p, e.zone_code, e.object_id)
-        if not conn.execute("SELECT 1 FROM expense_categories WHERE code=%s AND active", (e.category,)).fetchone():
+        # тот же расход повторно (нажала «Отправить» 3 раза, Звягина 10.11) — второй не создаём
+        same = None if e.day else conn.execute("""SELECT * FROM expenses WHERE person_id=%s AND object_id=%s AND category=%s AND amount=%s
+                                   AND paid_by=%s AND coalesce(note,'')=coalesce(%s,'') AND backfill=%s AND status<>'cancelled'
+                                   AND created_at > now() - interval '10 minutes'
+                                   ORDER BY id LIMIT 1""",
+                            (p["id"], e.object_id, e.category, e.amount, e.paid_by, e.note, bool(e.day))).fetchone()
+        if same:
+            return with_receipt(same)
+        check_zone(conn, p, e.zone_code, e.object_id, past=bool(e.day))
+        at = check_past_day(e.day).replace(hour=12) if e.day else None
+        if e.category not in {c["code"] for c in cats_for(conn, p["role_code"])}:
             raise HTTPException(400, "bad category")
         drive_id = None
         if e.receipt:
             if not e.receipt.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
                 raise HTTPException(400, "bad receipt")
-            obj = conn.execute("SELECT * FROM objects WHERE id=%s", (e.object_id,)).fetchone()
             name = f"Чек {datetime.now():%Y-%m-%d %H-%M} {p['full_name']} {e.amount:.0f}"
             try:
-                drive_id = drive.save_photo(conn, obj, name, e.receipt, kind="receipt")
+                drive_id = drive.save_receipt(conn, e.zone_code, name, e.receipt, deal_id=e.object_id or None)
             except Exception as ex:  # Диск недоступен — телефон повторит позже
-                raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+                raise drive.fail(ex)
         row = conn.execute(
-            """INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, paid_by, receipt_url, note)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """INSERT INTO expenses (client_uid, person_id, object_id, zone_code, category, amount, paid_by, receipt_url, note, created_at, backfill)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,coalesce(%s, now()),%s)
                ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
-            (e.client_uid, p["id"], e.object_id, e.zone_code, e.category, e.amount, e.paid_by, None, e.note)).fetchone()
+            (e.client_uid, p["id"], e.object_id, e.zone_code, e.category, e.amount, e.paid_by, None, e.note, at, bool(e.day))).fetchone()
         if not row:
             return with_receipt(conn.execute("SELECT * FROM expenses WHERE client_uid=%s", (e.client_uid,)).fetchone())
         if drive_id:
@@ -165,8 +672,55 @@ def add_expense(e: ExpenseIn, p: dict = Depends(active)):
                                 VALUES (gen_random_uuid(), %s, 'receipt', %s, %s, %s, %s, %s) RETURNING id""",
                              (e.object_id, name, mime, len(data), drive_id, p["id"])).fetchone()
             row = conn.execute("UPDATE expenses SET receipt_file_id=%s WHERE id=%s RETURNING *", (f["id"], row["id"])).fetchone()
+        row = self_approve(conn, p, row)
         db.audit(conn, p["id"], "expense_add", "expenses", row["id"])
         return with_receipt(row)
+
+
+def self_approve(conn, p: dict, row: dict) -> dict:
+    """Трата самого HEAD (HEAD 08.11: «расход на планшет никуда не подгрузился») не ждёт проверки у него же:
+    сразу «принято», свои деньги — «к выплате», и она сразу в «Финансах»."""
+    if p["role_code"] != "head" or p.get("_view_as") or row["status"] != "submitted":
+        return row
+    return conn.execute("""UPDATE expenses SET status='approved', checked_by=%s, checked_at=now(),
+                             payout_status=CASE WHEN paid_by='own' THEN 'to_pay' ELSE payout_status END,
+                             reason=coalesce(reason, 'трата HEAD — без проверки') WHERE id=%s RETURNING *""", (p["id"], row["id"])).fetchone()
+
+
+def photos(s: dict) -> dict:
+    """Фото стены до / после смены — подписанные миниатюры."""
+    from .files import sign
+    for k in ("photo_before", "photo_after"):
+        s[k + "_url"] = sign(s[k], "thumb") if s.get(k) else None
+        s[k + "_full"] = sign(s[k], "content") if s.get(k) else None
+    return s
+
+
+def more_photos(conn, rows: list[dict]) -> list[dict]:
+    """Доп. фото смены (отчёт задним числом, HEAD 09.11): s["photos"] = [{url, full}] — подписанные ссылки."""
+    from .files import sign
+    ids = [r["id"] for r in rows]
+    by = {}
+    if ids:
+        for r in conn.execute("SELECT shift_id, file_id FROM shift_photos WHERE shift_id = ANY(%s) ORDER BY id", (ids,)).fetchall():
+            by.setdefault(r["shift_id"], []).append({"url": sign(r["file_id"], "thumb"), "full": sign(r["file_id"], "content")})
+    for r in rows:
+        r["photos"] = by.get(r["id"], [])
+    return rows
+
+
+SHOP = "Мастерская"
+# HEAD 10.11: печать (мастер, оператор) работает в мастерской — их смены без объекта подписываем «Мастерская»
+SHOP_SQL = ("CASE WHEN {s}.object_id=0 AND ({s}.kind='workshop' OR {pe}.role_code IN ('print_master','print_operator')) "
+            "THEN CASE WHEN {s}.zone_code='mural' THEN 'Без объекта' ELSE 'Мастерская' END ELSE o.title END")
+
+
+def shop_title(s: dict) -> dict:
+    """Смена без объекта: вместо «Офис / без объекта» — «Мастерская · ТО принтера» (печать) или «Без объекта · Эскиз и пробы» (роспись)."""
+    if s.get("kind") == "workshop" or (s.get("object_id") == 0 and s.get("object_title") in WORKSHOP_TITLE.values()):
+        t = WORKSHOP_TITLE.get(s.get("zone_code"), SHOP)
+        s["object_title"] = t + (f" · {s['task']}" if s.get("task") else "")
+    return s
 
 
 def with_receipt(e: dict) -> dict:
@@ -180,10 +734,11 @@ def with_receipt(e: dict) -> dict:
 def my(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         return {
-            "shifts": conn.execute("""SELECT s.*, o.title AS object_title FROM shifts s JOIN objects o ON o.id=s.object_id
-                                      WHERE person_id=%s ORDER BY started_at DESC LIMIT 100""", (p["id"],)).fetchall(),
-            "expenses": [with_receipt(e) for e in conn.execute("""SELECT e.*, o.title AS object_title FROM expenses e JOIN objects o ON o.id=e.object_id
-                                        WHERE person_id=%s ORDER BY created_at DESC LIMIT 100""", (p["id"],)).fetchall()],
+            "shifts": more_photos(conn, [shop_title(photos(s)) for s in conn.execute(f"""SELECT s.*, {SHOP_SQL.format(s="s", pe="pe")} AS object_title, cb.full_name AS cur_name FROM shifts s JOIN objects o ON o.id=s.object_id
+                                      JOIN people pe ON pe.id=s.person_id LEFT JOIN people cb ON cb.id=s.cur_by
+                                      WHERE s.person_id=%s ORDER BY s.started_at DESC LIMIT 100""", (p["id"],)).fetchall()]),
+            "expenses": [with_receipt(e) for e in conn.execute("""SELECT e.*, o.title AS object_title, cb.full_name AS cur_name FROM expenses e JOIN objects o ON o.id=e.object_id
+                                        LEFT JOIN people cb ON cb.id=e.cur_by WHERE e.person_id=%s ORDER BY e.created_at DESC LIMIT 100""", (p["id"],)).fetchall()],
         }
 
 
@@ -197,7 +752,7 @@ def cancel(kind: str, item_id: int, p: dict = Depends(active)):
     if not t:
         raise HTTPException(404)
     with db.pool.connection() as conn, conn.transaction():
-        row = conn.execute(f"UPDATE {t} SET status='cancelled' WHERE id=%s AND person_id=%s AND status='submitted' RETURNING id",
+        row = conn.execute(f"UPDATE {t} SET status='cancelled' WHERE id=%s AND person_id=%s AND status IN ('submitted','open') RETURNING id",
                            (item_id, p["id"])).fetchone()
         if not row:
             raise HTTPException(409, "not cancellable")
@@ -206,11 +761,15 @@ def cancel(kind: str, item_id: int, p: dict = Depends(active)):
 
 
 def review_filter(p: dict) -> tuple[str, list]:
-    """SQL-условие: какие записи человек может проверять (не свои)."""
+    """SQL-условие: какие записи человек может проверять (не свои). HEAD — всё; куратор — ещё не оценённое у младших
+    (ГИП — на своём объекте), кроме записей других кураторов: они идут сразу к HEAD (HEAD 11.11)."""
     if p["role_code"] == "head":
         return "TRUE", []
     zones = sorted(CHECKS.get(p["role_code"], set()))
-    return "(x.zone_code = ANY(%s) OR o.gip_person_id = %s) AND x.person_id <> %s", [zones, p["id"], p["id"]]
+    own = f"(SELECT level FROM roles WHERE code=%s)"
+    return (f"((x.zone_code = ANY(%s) AND COALESCE({RANK_SQL}, 0) < {own}) OR o.gip_person_id = %s) AND x.person_id <> %s"
+            f" AND x.cur_at IS NULL AND NOT {DIRECT_SQL}",
+            [zones, p["role_code"], p["id"], p["id"]])
 
 
 @router.get("/review")
@@ -220,19 +779,105 @@ def review_list(p: dict = Depends(active)):
         out = {}
         for kind, t in TABLE.items():
             out[t] = conn.execute(
-                f"""SELECT x.*, o.title AS object_title, pe.full_name AS person_name
-                    FROM {t} x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id
+                f"""SELECT x.*, o.title AS object_title, pe.full_name AS person_name, pe.role_code AS person_role,
+                           coalesce(pe.acting_role, pe.role_code) AS eff_role,
+                           cb.full_name AS cur_name, {DIRECT_SQL} AS direct, {HAS_CUR_SQL} AS has_cur
+                    FROM {t} x JOIN objects o ON o.id=x.object_id JOIN people pe ON pe.id=x.person_id LEFT JOIN people cb ON cb.id=x.cur_by
                     WHERE x.status='submitted' AND {cond} ORDER BY x.created_at""", args).fetchall()
+            for x in out[t]:
+                x["stage"] = stage_of(x)
+                x["need_stars"] = t == "shifts" and not x.get("cur_at") and x.get("eff_role") in STAR_ROLES
+            if t == "shifts":
+                for x in out[t]:
+                    if x["object_id"] == 0 and (x.get("kind") == "workshop" or x["person_role"] in PRINT_ROLES):
+                        x["object_title"] = WORKSHOP_TITLE.get(x["zone_code"], SHOP)
+        cats = {c["code"]: c for c in conn.execute("SELECT code, title, article FROM expense_categories").fetchall()}
+        flags = {}   # покупки по каталогу: почему ждёт HEAD (выше потолка / нет ориентира)
+        for r in conn.execute("""SELECT expense_id, array_agg(DISTINCT flag) AS f FROM stock_lines
+                                 WHERE expense_id = ANY(%s) AND flag IN ('over_cap','no_ref') GROUP BY expense_id""",
+                              ([e["id"] for e in out["expenses"]],)).fetchall():
+            flags[r["expense_id"]] = [{"over_cap": "выше потолка цены", "no_ref": "нет ориентира цены"}[f] for f in sorted(r["f"], reverse=True)]
+        for e in out["expenses"]:   # трата отдела продаж: вместо «Офис / без объекта» — статья и сделка
+            c = cats.get(e["category"]) or {}
+            e["category_title"] = c.get("title", e["category"])
+            if c.get("article") in ("stock", "canvas"):
+                fl = flags.get(e["id"])
+                tail = (" · " + ", ".join(fl)) if fl else (" · сверх лимита" if e.get("over_limit") else "")
+                e["object_title"] = ("Склад" if c["article"] == "stock" else "Мастерская холстов") + " · " + e["category_title"] + tail
+            if c.get("article") == "sales":
+                e["object_title"] = "Отдел продаж · " + e["category_title"] + (f" · сделка № {e['deal_id']}" if e.get("deal_id") else "") + (" · сверх лимита" if e.get("over_limit") else "")
         out["expenses"] = [with_receipt(e) for e in out["expenses"]]
+        out["shifts"] = more_photos(conn, [shop_title(photos(x)) for x in out["shifts"]])
+        from .appeals import review_appeals
+        out["appeals"] = review_appeals(conn, p)
+        out["curator"] = p["role_code"] != "head"   # куратор оценивает, HEAD утверждает (HEAD 11.11)
         if p["role_code"] != "head":
             for x in out["shifts"]:
                 x.pop("bonus", None)
         return out
 
 
+class FixIn(BaseModel):
+    start_time: str = Field(pattern=r"^\d{1,2}:\d{2}$")
+    hours: float = Field(gt=0, le=48)
+    kind: str | None = None   # «road» → «work»: дорогу поставили вместо смены
+
+
+@router.post("/shift/{item_id}/fix")
+def fix_shift(item_id: int, b: FixIn, p: dict = Depends(active)):
+    """HEAD 09.11: проверяющий сам исправляет смену до решения — время начала, часы (до 48, через полночь), дорога ↔ смена.
+    Ночь и переработку ФОТ пересчитает по новому времени."""
+    if p.get("_view_as"):
+        raise HTTPException(403, "только просмотр")
+    h, m = (int(x) for x in b.start_time.split(":"))
+    if h > 23 or m > 59:
+        raise HTTPException(422, "Время начала — от 0:00 до 23:59")
+    if b.kind not in (None, "work", "road"):
+        raise HTTPException(400, "bad kind")
+    cond, args = review_filter(p)
+    with db.pool.connection() as conn, conn.transaction():
+        s = conn.execute(f"SELECT x.* FROM shifts x JOIN objects o ON o.id=x.object_id WHERE x.id=%s AND x.status='submitted' AND {cond}",
+                         [item_id, *args]).fetchone()
+        if not s:
+            raise HTTPException(403, "исправить можно смену на проверке, которую вы принимаете")
+        start = s["started_at"].astimezone(TZ).replace(hour=h, minute=m, second=0, microsecond=0)
+        kind = b.kind or s["kind"]
+        conn.execute("""UPDATE shifts SET started_at=%s, ended_at=%s, kind=%s,
+                          work_done=CASE WHEN %s='work' AND kind='road' THEN coalesce(nullif(note, ''), work_done) ELSE work_done END WHERE id=%s""",
+                     (start, start + timedelta(hours=b.hours), kind, kind, item_id))
+        db.audit(conn, p["id"], "shift_fix", "shifts", item_id, {"from": [s["started_at"].isoformat(), s["ended_at"].isoformat() if s["ended_at"] else None, s["kind"]],
+                                                                  "to": [start.isoformat(), b.hours, kind]})
+        row = conn.execute("SELECT * FROM shifts WHERE id=%s", (item_id,)).fetchone()
+    return {"ok": True, "started_at": row["started_at"], "ended_at": row["ended_at"], "kind": row["kind"]}
+
+
 class Decision(BaseModel):
     approve: bool
     reason: str | None = None
+    stars: int | None = Field(default=None, ge=1, le=5)   # оценка HEAD (смены Главных и Про — обязательно)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+# HEAD 12.11: смены Главного художника и Художника-Про HEAD утверждает только со звёздами; остальным — по желанию
+STAR_ROLES = ("lead_artist", "artist_pro")
+
+
+def head_rate(conn, table: str, item_id: int, person_id: int, d: Decision, p: dict) -> None:
+    """Оценка HEAD при утверждении смены: 1–5★ + комментарий (1–2 — обязательно). Уже оценённую куратором не трогаем."""
+    if not d.approve:
+        return
+    row = conn.execute(f"SELECT cur_at FROM {table} WHERE id=%s", (item_id,)).fetchone()
+    if row and row["cur_at"]:
+        return
+    role = conn.execute("SELECT coalesce(acting_role, role_code) AS r FROM people WHERE id=%s", (person_id,)).fetchone()["r"]
+    if not d.stars:
+        if role in STAR_ROLES:
+            raise HTTPException(400, "Поставь оценку смене 1–5★")
+        return
+    note = (d.note or "").strip() or None
+    if d.stars <= 2 and not note:
+        raise HTTPException(400, "Оценка 1–2 — напиши, что не так")
+    conn.execute(f"UPDATE {table} SET cur_by=%s, cur_at=now(), cur_stars=%s, cur_note=%s WHERE id=%s", (p["id"], d.stars, note, item_id))
 
 
 @router.post("/{kind}/{item_id}/review")
@@ -242,15 +887,80 @@ def review(kind: str, item_id: int, d: Decision, p: dict = Depends(active)):
         raise HTTPException(404)
     if not d.approve and not (d.reason or "").strip():
         raise HTTPException(400, "reason required")
+    if p["role_code"] != "head":
+        raise HTTPException(403, "Куратор ставит оценку, утверждает HEAD")
     cond, args = review_filter(p)
     with db.pool.connection() as conn, conn.transaction():
-        ok = conn.execute(f"SELECT x.id FROM {t} x JOIN objects o ON o.id=x.object_id WHERE x.id=%s AND x.status='submitted' AND {cond}",
+        ok = conn.execute(f"SELECT x.id, x.person_id FROM {t} x JOIN objects o ON o.id=x.object_id WHERE x.id=%s AND x.status='submitted' AND {cond}",
                           [item_id, *args]).fetchone()
         if not ok:
             raise HTTPException(403, "cannot review")
+        if t == "shifts":
+            head_rate(conn, t, item_id, ok["person_id"], d, p)
         status = "approved" if d.approve else "rejected"
         extra = ", payout_status = CASE WHEN paid_by='own' THEN 'to_pay' ELSE payout_status END" if t == "expenses" and d.approve else ""
         conn.execute(f"UPDATE {t} SET status=%s, reason=%s, checked_by=%s, checked_at=now(){extra} WHERE id=%s",
                      (status, d.reason, p["id"], item_id))
         db.audit(conn, p["id"], f"{kind}_{status}", t, item_id, {"reason": d.reason})
     return {"ok": True, "status": status}
+
+
+class RateIn(BaseModel):
+    stars: int | None = Field(default=None, ge=1, le=5)   # смена: 1–5 звёзд
+    ok: bool | None = None                                # расход: верно / есть вопрос
+    note: str | None = Field(default=None, max_length=1000)
+
+
+def check_rate(kind: str, b: RateIn) -> str | None:
+    """Оценка куратора: смене — звёзды (1–2 — с комментарием), расходу — «верно / есть вопрос» (вопрос — с комментарием)."""
+    note = (b.note or "").strip() or None
+    if kind in ("shift", "shift_late"):
+        if not b.stars:
+            raise HTTPException(400, "Поставь оценку от 1 до 5 звёзд")
+        if b.stars <= 2 and not note:
+            raise HTTPException(400, "Оценка 1–2 — напиши, что не так")
+    else:
+        if b.ok is None:
+            raise HTTPException(400, "Отметь: верно или есть вопрос")
+        if not b.ok and not note:
+            raise HTTPException(400, "Напиши, какой вопрос")
+    return note
+
+
+@router.post("/{kind}/{item_id}/rate")
+def rate(kind: str, item_id: int, b: RateIn, p: dict = Depends(active)):
+    """Куратор оценивает смену или расход младшего (HEAD 11.11). Статус не меняется — запись уходит HEAD на утверждение."""
+    t = TABLE.get(kind)
+    if not t:
+        raise HTTPException(404)
+    if p["role_code"] == "head":
+        raise HTTPException(400, "HEAD утверждает сразу")
+    note = check_rate(kind, b)
+    cond, args = review_filter(p)
+    with db.pool.connection() as conn, conn.transaction():
+        if not conn.execute(f"SELECT x.id FROM {t} x JOIN objects o ON o.id=x.object_id WHERE x.id=%s AND x.status='submitted' AND {cond}",
+                            [item_id, *args]).fetchone():
+            raise HTTPException(403, "оценить можно запись на проверке у младшего, ещё без оценки")
+        if t == "shifts":
+            conn.execute("UPDATE shifts SET cur_by=%s, cur_at=now(), cur_stars=%s, cur_note=%s WHERE id=%s", (p["id"], b.stars, note, item_id))
+        else:
+            conn.execute("UPDATE expenses SET cur_by=%s, cur_at=now(), cur_ok=%s, cur_note=%s WHERE id=%s", (p["id"], b.ok, note, item_id))
+        db.audit(conn, p["id"], f"{kind}_rate", t, item_id, {"stars": b.stars, "ok": b.ok, "note": note})
+    return {"ok": True}
+
+
+class BulkIn(BaseModel):
+    min_stars: int = Field(default=4, ge=1, le=5)
+
+
+@router.post("/review/bulk")
+def review_bulk(b: BulkIn, p: dict = Depends(active)):
+    """HEAD одним нажатием утверждает смены, которые куратор оценил на min_stars и выше (HEAD 11.11)."""
+    if p["role_code"] != "head":
+        raise HTTPException(403, "утверждает HEAD")
+    with db.pool.connection() as conn, conn.transaction():
+        rows = conn.execute("""UPDATE shifts SET status='approved', checked_by=%s, checked_at=now()
+                               WHERE status='submitted' AND cur_stars >= %s RETURNING id""", (p["id"], b.min_stars)).fetchall()
+        for r in rows:
+            db.audit(conn, p["id"], "shift_approved", "shifts", r["id"], {"bulk": b.min_stars})
+    return {"ok": True, "approved": len(rows)}

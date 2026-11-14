@@ -1,0 +1,8 @@
+[Unit]
+Description=ARTGAME: ночная копия базы (%i)
+
+[Service]
+Type=oneshot
+User=artgame-app
+EnvironmentFile=/etc/artgame-app/%i.env
+ExecStart=/srv/artgame-app/%i/deploy/backup.sh %i

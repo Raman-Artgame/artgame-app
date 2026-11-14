@@ -1,0 +1,10 @@
+[Unit]
+Description=ARTGAME: витрина финансов и оплаты из Битрикса каждые 15 минут (%i)
+
+[Timer]
+# OnBootSec не срабатывает, если таймер включили после загрузки сервера, — поэтому OnCalendar
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

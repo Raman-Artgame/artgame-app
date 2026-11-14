@@ -13,7 +13,11 @@ from .config import settings
 CATEGORY = 0
 ACTIVE = ("FINAL_INVOICE", "UC_AV00QK", "UC_BMKDS4")
 DONE = ("WON",)
-FOLDER_FIELD = "UF_CRM_ARTGAME_PROJECT_FOLDER_ID"  # папку сделки уже создаёт DRIVE01 — берём её, не плодим вторую
+WORK = "UC_AV00QK"   # «Выполнение проекта»: только такие сделки можно выбрать для смен, трат и сборов (HEAD 08.11)
+FOLDER_FIELD = "UF_CRM_ARTGAME_PROJECT_FOLDER_ID"
+# Условия объекта для смены (HEAD 08.11 — заполняет МОП, команда видит без выбора): сложность, площадь, адрес
+F_LEVEL, F_AREA, F_ADDR = "UF_CRM_ARTGAME_COMPLEXITY", "UF_CRM_ARTGAME_AREA_M2", "UF_CRM_1755520919823"
+F_CITY, F_OBJECT = "UF_CRM_6881101914D8D", "UF_CRM_ARTGAME_OBJECT"  # папку сделки уже создаёт DRIVE01 — берём её, не плодим вторую
 
 
 class Gateway:
@@ -64,12 +68,15 @@ class Gateway:
 
 
 def fetch_deals() -> list[dict]:
-    g = Gateway(settings.gateway_url, settings.gateway_token).open()
+    if settings.gateway_url:
+        rd = Gateway(settings.gateway_url, settings.gateway_token).open().bitrix_read
+    else:
+        from .bx import _webhook_read as rd   # шлюз не настроен — читаем вебхуком приложения
     out, start = [], 0
     while start is not None:
-        j = g.bitrix_read("crm.deal.list", {
+        j = rd("crm.deal.list", {
             "filter": {"CATEGORY_ID": CATEGORY, "STAGE_ID": list(ACTIVE + DONE)},
-            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD], "start": start})
+            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD, F_LEVEL, F_AREA, F_ADDR, F_CITY, F_OBJECT, "OPPORTUNITY", "ASSIGNED_BY_ID"], "start": start})
         if isinstance(j, list):  # шлюз может вернуть сразу список
             out += j
             break
@@ -89,32 +96,93 @@ def split_title(deal_id: str, title: str) -> tuple[str, str | None]:
     return (name.strip(), city.strip() or None) if sep and name.strip() else (t, None)
 
 
+def _area(v) -> float | None:
+    try:
+        return float(str(v).replace(",", ".")) if v not in (None, "") else None
+    except ValueError:
+        return None
+
+
+def _city(v) -> str | None:
+    if not v:
+        return None
+    try:
+        from .bx import city_name
+        return (city_name(v) or "").split(" (")[0].strip().upper() or None
+    except Exception:
+        return None
+
+
+def number_titles(deals: list[dict]) -> list[int]:
+    """Сделка в работе без номера в названии (заведена прямо в Битриксе, не через приложение) → «№ · ОБЪЕКТ — ГОРОД»,
+    как у всех (HEAD 13.11: «ШКОЛА КОСШЫ» 1711 без номера). Только этапы объекта (не WON), не больше 5 за проход."""
+    if not settings.bitrix_webhook:
+        return []
+    from . import bx, bxw
+    done = []
+    for d in deals:
+        if d["STAGE_ID"] not in ACTIVE or str(d.get("TITLE") or "").strip().startswith(f"{d['ID']} ·") or len(done) >= 5:
+            continue
+        name, city = split_title(d["ID"], d.get("TITLE") or "")
+        obj = (d.get(F_OBJECT) or "").strip() or name
+        if not obj:
+            continue
+        title = bx.make_title(int(d["ID"]), obj, city or _city(d.get(F_CITY)) or "")
+        try:
+            bxw.CALL("crm.deal.update", {"id": int(d["ID"]), "fields": {"TITLE": title}})
+        except Exception as ex:
+            print(f"title {d['ID']}: {ex}")
+            continue
+        d["TITLE"] = title
+        done.append(int(d["ID"]))
+    return done
+
+
 def upsert(conn, deals: list[dict]) -> list[int]:
-    """Возвращает ID новых объектов."""
+    """Возвращает ID новых объектов. Сумма сделки не хранится: только оценка сложности по ней (promo.guess_level)."""
+    from . import constants as consts
+    from .promo import guess_level, parse_geo
+    v = consts.latest(conn)
     new = []
     for d in deals:
         status = "done" if d["STAGE_ID"] in DONE else "active"
         title, city = split_title(d["ID"], d["TITLE"])
+        city = city or _city(d.get(F_CITY))   # в названии нет «— ГОРОД» (сделку завели прямо в Битриксе) — город из поля
+        addr = d.get(F_ADDR)
+        geo = parse_geo(addr)
+        addr = (addr.split("|")[0].strip() or None) if isinstance(addr, str) else None
+        if addr and addr.lower().startswith("http"):
+            addr = None   # вместо адреса вставлена ссылка на карту — точку берём из неё, ссылку адресом не показываем
+        guess = guess_level(v, _area(d.get(F_AREA)), d.get("OPPORTUNITY"))
         row = conn.execute(
-            """INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,now())
+            """INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at, level, area_m2, address, geo, level_guess, mop_bx_id)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,now(),%s,%s,%s,%s,%s,%s)
                ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, city=EXCLUDED.city, bitrix_stage=EXCLUDED.bitrix_stage,
+                   level=EXCLUDED.level, area_m2=EXCLUDED.area_m2, address=EXCLUDED.address, geo=EXCLUDED.geo, level_guess=EXCLUDED.level_guess,
+                   mop_bx_id=coalesce(EXCLUDED.mop_bx_id, objects.mop_bx_id),
                    drive_folder=coalesce(objects.drive_folder, EXCLUDED.drive_folder),
-                   status=CASE WHEN objects.status='archived' THEN 'archived' ELSE EXCLUDED.status END, synced_at=now()
+                   status=CASE WHEN objects.status='archived' THEN 'archived' ELSE EXCLUDED.status END, synced_at=now(),
+                   left_work_at=CASE WHEN objects.bitrix_stage='UC_AV00QK' AND EXCLUDED.bitrix_stage<>'UC_AV00QK' THEN now()
+                                     ELSE objects.left_work_at END
                RETURNING (xmax = 0) AS inserted""",
-            (int(d["ID"]), title, city, d["STAGE_ID"], int(d["CATEGORY_ID"]), status, d.get(FOLDER_FIELD) or None)).fetchone()
+            (int(d["ID"]), title, city, d["STAGE_ID"], int(d["CATEGORY_ID"]), status, d.get(FOLDER_FIELD) or None,
+             str(d.get(F_LEVEL) or "") or None, _area(d.get(F_AREA)), addr, geo, guess,
+             int(d["ASSIGNED_BY_ID"]) if str(d.get("ASSIGNED_BY_ID") or "").isdigit() else None)).fetchone()
         if row["inserted"]:
             new.append(int(d["ID"]))
     return new
 
 
 def main():
-    if not settings.gateway_url:
-        print("ARTGAME_GATEWAY_URL не задан — пропуск")
+    if not settings.gateway_url and not settings.bitrix_webhook:
+        print("нет ни шлюза (ARTGAME_GATEWAY_URL), ни вебхука (ARTGAME_BITRIX_WEBHOOK) — пропуск")
         return
     p = db.open_pool()
     deals = fetch_deals()
+    titled = number_titles(deals)
     with p.connection() as conn:
+        if titled:
+            db.audit(conn, None, "deal_title_number", data={"deals": titled})
         new = upsert(conn, deals)
         made = 0
         for o in conn.execute("SELECT * FROM objects WHERE status='active' AND id<>0 AND folders='{}'").fetchall():
@@ -123,9 +191,19 @@ def main():
                 made += 1
             except Exception as ex:
                 print(f"folder {o['id']}: {ex}")
+        # эскизы из «ДИЗАЙН» сделки на Диске — для живой карточки (объекты в работе, не чаще раза в 30 мин)
+        from .promo import sync_designs
+        got = 0
+        for o in conn.execute("""SELECT * FROM objects WHERE status='active' AND id<>0 AND drive_folder IS NOT NULL
+                                 AND (design_synced_at IS NULL OR design_synced_at < now() - interval '30 minutes')
+                                 ORDER BY (bitrix_stage=%s) DESC LIMIT 30""", (WORK,)).fetchall():
+            try:
+                got += sync_designs(conn, o)
+            except Exception as ex:
+                print(f"designs {o['id']}: {ex}")
         if new:
             db.audit(conn, None, "objects_sync", data={"new": new})
-    print(f"deals={len(deals)} new={len(new)} folders={made}")
+    print(f"deals={len(deals)} new={len(new)} folders={made} designs+={got}")
 
 
 if __name__ == "__main__":

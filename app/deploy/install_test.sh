@@ -66,10 +66,13 @@ echo "== 5/5 проверка"
 curl -fsS https://test.app.artgame.world/api/health && echo
 systemctl start artgame-constants@test.service || true
 journalctl -u artgame-constants@test -n 3 --no-pager -o cat || true
+# Объекты из Битрикса сразу после выкладки, не ждать таймер (HEAD 09.11: проекты переведены в «Выполнение» задним числом)
+systemctl start artgame-objects@test.service || true
+journalctl -u artgame-objects@test -n 2 --no-pager -o cat || true
 curl -s -o /dev/null -w "mcp.artgame.world: %{http_code}\n" https://mcp.artgame.world/
 set -a; . "$ENVF"; set +a
-curl -fsS -o /dev/null "https://api.telegram.org/bot$ARTGAME_BOT_TOKEN/sendMessage" \
-  -H 'Content-Type: application/json' \
-  -d "{\"chat_id\":$ARTGAME_HEAD_TG_ID,\"text\":\"ARTGAME — тест. Откройте кнопкой ниже\",\"reply_markup\":{\"inline_keyboard\":[[{\"text\":\"ARTGAME — тест\",\"web_app\":{\"url\":\"https://test.app.artgame.world/\"}}]]}}" \
-  && echo "кнопка отправлена в Telegram"
+# Бот (HEAD 08.11): имя, описание до «Старт», без лишних команд, кнопка меню «ARTGAME» → test.app, ответ на «Старт».
+# Сообщение «тест обновлён» HEAD больше не шлём — результат выкладки виден в GitHub Actions.
+(cd /srv/artgame-app/test/backend && /srv/artgame-app/test/venv/bin/python -m artgame.tgbot setup) \
+  || echo "ВНИМАНИЕ: профиль бота не обновлён (см. выше)"
 echo "ГОТОВО: https://test.app.artgame.world"

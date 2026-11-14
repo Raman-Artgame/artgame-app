@@ -6,7 +6,9 @@
 """
 import hashlib
 import hmac
+import re
 import time
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -19,19 +21,25 @@ from .work import active
 
 router = APIRouter(prefix="/api")
 
-DOC_ROLES = {"head", "mop", "mop_vip", "lead_artist", "print_master", "lead_designer"}
-KINDS = ("photo", "design", "doc")
+DOC_ROLES = {"head", "mop", "mop_vip", "artist_pro", "lead_artist", "print_master", "lead_designer"}   # Про — выше Главного (HEAD 09.11)
+KINDS = ("photo", "design", "doc", "media")
+PROD = {"lead_artist", "artist_pro", "print_master", "lead_designer", "head"}   # «Продакшн» (HEAD 08.11; Главный дизайнер — 10.11)
 TTL = 12 * 3600
 MAX_PHOTO = 8_000_000
 MAX_BIG = 2_000_000_000  # 2 ГБ на файл дизайна
 
 
 def can_see(p: dict, kind: str) -> bool:
-    if kind in ("photo", "design"):
+    if kind in ("photo", "design", "media"):
         return True
     if kind == "doc":
         return p["role_code"] in DOC_ROLES
     return p["role_code"] == "head"
+
+
+def can_prod(p: dict) -> bool:
+    """«Продакшн»: роль из PROD или переключатель «Оплачиваемые рилс» у человека (HEAD 09.11: Глеб)."""
+    return p["role_code"] in PROD or bool(p.get("reels"))
 
 
 def can_upload(p: dict, kind: str) -> bool:
@@ -39,6 +47,8 @@ def can_upload(p: dict, kind: str) -> bool:
         return True
     if kind == "design":
         return p["role_code"] == "head" or "design" in p["zones"]
+    if kind == "media":
+        return can_prod(p) or p["role_code"] == "marketer"   # маркетинг кладёт снятое в папку сделки (HEAD 14.11)
     return p["role_code"] in DOC_ROLES
 
 
@@ -59,7 +69,8 @@ def check_sig(file_id: int, what: str, exp: int, sig: str):
 
 
 def links(f: dict) -> dict:
-    out = {k: f[k] for k in ("id", "object_id", "kind", "name", "mime", "size", "note", "status", "created_at")}
+    out = {k: f.get(k) for k in ("id", "object_id", "kind", "name", "mime", "size", "note", "status", "created_at",
+                                 "media_type", "review", "review_note")}
     out["by"] = f.get("by")
     if f["status"] == "ready":
         out["url"] = sign(f["id"], "content")
@@ -71,6 +82,8 @@ def get_object(conn, object_id: int) -> dict:
     o = conn.execute("SELECT * FROM objects WHERE id=%s", (object_id,)).fetchone()
     if not o:
         raise HTTPException(404, "no object")
+    if o["id"] == 0:  # «Офис / без объекта» — только для трат, своей папки на Диске нет (HEAD 08.11)
+        raise HTTPException(400, "files need a deal")
     return o
 
 
@@ -82,7 +95,7 @@ def objects(p: dict = Depends(active)):
                       count(f.id) FILTER (WHERE f.kind='photo')  AS photos,
                       count(f.id) FILTER (WHERE f.kind='design') AS designs
                FROM objects o LEFT JOIN files f ON f.object_id=o.id AND f.status='ready'
-               WHERE o.status='active' GROUP BY o.id ORDER BY o.id=0, o.id DESC""").fetchall()
+               WHERE o.status='active' AND o.id<>0 GROUP BY o.id ORDER BY o.id DESC""").fetchall()
 
 
 @router.get("/objects/{object_id}/files")
@@ -103,34 +116,40 @@ class PhotoIn(BaseModel):
     note: str | None = None
 
 
+def store_photo(conn, p: dict, obj: dict, client_uid, data_url: str, note: str | None = None) -> dict:
+    """Фото с объекта → МЕДИА / Отчёты сделки + карточка файла. Повтор с тем же client_uid не создаёт дубль."""
+    if not data_url.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
+        raise HTTPException(400, "bad photo")
+    dup = conn.execute("SELECT * FROM files WHERE client_uid=%s", (client_uid,)).fetchone()
+    if dup:
+        return dup
+    data, mime = drive.decode_data_url(data_url)
+    name = f"{obj['id']} {p['full_name']} {time.strftime('%Y-%m-%d %H-%M-%S')}" + (f" {note}" if note else "")
+    try:
+        drive_id = drive.save_photo(conn, obj, name, data_url, kind="photo")
+    except Exception as ex:
+        raise drive.fail(ex)
+    f = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, note, uploaded_by)
+                        VALUES (%s,%s,'photo',%s,%s,%s,%s,%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
+                     (client_uid, obj["id"], name, mime, len(data), drive_id, note, p["id"])).fetchone()
+    if not f:
+        return conn.execute("SELECT * FROM files WHERE client_uid=%s", (client_uid,)).fetchone()
+    db.audit(conn, p["id"], "file_add", "files", f["id"], {"kind": "photo", "object": obj["id"]})
+    return f
+
+
 @router.post("/objects/{object_id}/photos")
 def add_photo(object_id: int, body: PhotoIn, p: dict = Depends(active)):
     """Фото с объекта: сжато на телефоне, может прийти из офлайн-очереди."""
-    if not body.data.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
-        raise HTTPException(400, "bad photo")
     with db.pool.connection() as conn, conn.transaction():
-        dup = conn.execute("SELECT * FROM files WHERE client_uid=%s", (body.client_uid,)).fetchone()
-        if dup:
-            return links({**dup, "by": p["full_name"]})
-        obj = get_object(conn, object_id)
-        data, mime = drive.decode_data_url(body.data)
-        name = f"{obj['id']} {p['full_name']} {time.strftime('%Y-%m-%d %H-%M-%S')}"
-        try:
-            drive_id = drive.save_photo(conn, obj, name, body.data, kind="photo")
-        except Exception as ex:
-            raise HTTPException(502, f"drive: {ex.__class__.__name__}")
-        f = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, note, uploaded_by)
-                            VALUES (%s,%s,'photo',%s,%s,%s,%s,%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
-                         (body.client_uid, object_id, name, mime, len(data), drive_id, body.note, p["id"])).fetchone()
-        if not f:
-            f = conn.execute("SELECT * FROM files WHERE client_uid=%s", (body.client_uid,)).fetchone()
-        db.audit(conn, p["id"], "file_add", "files", f["id"], {"kind": "photo", "object": object_id})
+        f = store_photo(conn, p, get_object(conn, object_id), body.client_uid, body.data, body.note)
         return links({**f, "by": p["full_name"]})
 
 
 class UploadIn(BaseModel):
     client_uid: UUID
     kind: str
+    media_type: str | None = None   # «Продакшн»: photo | video | reels
     name: str = Field(min_length=1, max_length=200)
     mime: str = "application/octet-stream"
     size: int = Field(gt=0, le=MAX_BIG)
@@ -142,22 +161,27 @@ def start_upload(object_id: int, body: UploadIn, request: Request, p: dict = Dep
     """Большой файл (дизайн, документ, видео): сервер выдаёт ссылку, телефон грузит прямо в Google."""
     if body.kind not in KINDS or not can_upload(p, body.kind):
         raise HTTPException(403, "no access")
+    media = body.kind == "media"
+    if media and body.media_type not in ("photo", "video", "reels"):
+        raise HTTPException(400, "bad media_type")
+    if media and body.media_type == "reels" and not can_prod(p):   # рилс в «Продакшн» оплачивается команде; агентство готовое грузит в публикацию
+        raise HTTPException(400, "готовый рилс загрузи в публикацию: «План → + Публикация → Загрузить готовое»")
     origin = request.headers.get("origin") or settings.public_origin
     with db.pool.connection() as conn, conn.transaction():
         obj = get_object(conn, object_id)
-        f = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, note, status, uploaded_by)
-                            VALUES (%s,%s,%s,%s,%s,%s,%s,'uploading',%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
-                         (body.client_uid, object_id, body.kind, body.name, body.mime, body.size, body.note, p["id"])).fetchone()
+        f = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, note, status, uploaded_by, media_type, review)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,'uploading',%s,%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
+                         (body.client_uid, object_id, body.kind, body.name, body.mime, body.size, body.note, p["id"],
+                          body.media_type if media else None, "pending" if media else None)).fetchone()
         if not f:
             f = conn.execute("SELECT * FROM files WHERE client_uid=%s", (body.client_uid,)).fetchone()
             if f["status"] == "ready":
                 return {"file_id": f["id"], "done": True}
         try:
             d = drive.Drive()
-            folders = drive.ensure_folders(conn, obj, d)
-            url = d.resumable(folders[body.kind], body.name, body.mime, body.size, origin)
+            url = d.resumable(drive.folder_of(conn, obj, body.kind, d, body.media_type), body.name, body.mime, body.size, origin)
         except Exception as ex:
-            raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+            raise drive.fail(ex)
         return {"file_id": f["id"], "upload_url": url}
 
 
@@ -178,9 +202,9 @@ def finish_upload(file_id: int, body: DoneIn, p: dict = Depends(active)):
         try:
             d = drive.Drive()
             m = d.meta(body.drive_id)
-            folder = drive.ensure_folders(conn, obj, d)[f["kind"]]
+            folder = drive.folder_of(conn, obj, f["kind"], d, f.get("media_type"))
         except Exception as ex:
-            raise HTTPException(502, f"drive: {ex.__class__.__name__}")
+            raise drive.fail(ex)
         if folder not in m.get("parents", []) or int(m.get("size", -1)) != f["size"]:
             raise HTTPException(400, "file mismatch")
         f = conn.execute("UPDATE files SET drive_id=%s, status='ready', mime=%s WHERE id=%s RETURNING *",
@@ -209,13 +233,31 @@ def _ready(file_id: int) -> dict:
     return f
 
 
+def _range(h: str | None, size: int) -> tuple[int, int] | None:
+    """«bytes=a-b» / «bytes=a-» / «bytes=-n» → (a, b) включительно; чужое или кривое — None (отдаём целиком)."""
+    m = re.fullmatch(r"bytes=(\d*)-(\d*)", (h or "").strip())
+    if not m or size <= 0 or (not m[1] and not m[2]):
+        return None
+    a, b = (int(m[1]), int(m[2]) if m[2] else size - 1) if m[1] else (max(0, size - int(m[2])), size - 1)
+    return (a, min(b, size - 1)) if a <= b and a < size else None
+
+
 @router.get("/files/{file_id}/content")
-def content(file_id: int, exp: int, sig: str):
+def content(file_id: int, exp: int, sig: str, request: Request, dl: int = 0):
+    """Файл с Диска через сервер. dl=1 — скачать (attachment), иначе открыть в приложении; Range — для видео."""
     check_sig(file_id, "content", exp, sig)
     f = _ready(file_id)
-    name = f["name"].encode("ascii", "ignore").decode() or "file"
-    return StreamingResponse(drive.Drive().stream(f["drive_id"]), media_type=f["mime"] or "application/octet-stream",
-                             headers={"Content-Disposition": f'inline; filename="{name}"', "Cache-Control": "private, max-age=3600"})
+    name = f["name"] or "file"
+    ascii_name = name.encode("ascii", "ignore").decode().replace('"', "") or "file"
+    disp = f'{"attachment" if dl else "inline"}; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(name)}'
+    hdr = {"Content-Disposition": disp, "Cache-Control": "private, max-age=3600", "Accept-Ranges": "bytes"}
+    size = int(f["size"] or 0)
+    rng = _range(request.headers.get("range"), size)
+    if rng:
+        a, b = rng
+        return StreamingResponse(drive.Drive().stream(f["drive_id"], f"bytes={a}-{b}"), status_code=206, media_type=f["mime"] or "application/octet-stream",
+                                 headers={**hdr, "Content-Range": f"bytes {a}-{b}/{size}", "Content-Length": str(b - a + 1)})
+    return StreamingResponse(drive.Drive().stream(f["drive_id"]), media_type=f["mime"] or "application/octet-stream", headers=hdr)
 
 
 @router.get("/files/{file_id}/thumb")
