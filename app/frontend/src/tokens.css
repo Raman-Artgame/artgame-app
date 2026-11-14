@@ -942,3 +942,11 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .segf.accs { flex-wrap: wrap; }
 .segf.accs button { flex: 1 0 calc(50% - 4px); white-space: normal; }
 .payrow .dealedit input[type=date] { min-width: 0; max-width: 100%; }
+.plan { display: flex; flex-direction: column; gap: 2px; background: var(--alt); border-radius: 10px; padding: 8px 10px; margin: 8px 0 0; border-left: 3px solid var(--ok); }
+.plan.late { border-left-color: var(--hot); }
+.plan.late b { color: var(--hot); }
+.plan .small { color: var(--muted); }
+.card.team label, .card.mats label { display: block; margin: 10px 0 4px; }
+.card.team .gippick select { width: 100%; }
+.promo { display: flex; flex-direction: column; gap: 4px; background: var(--alt); border-radius: 10px; padding: 8px 10px; margin: 10px 0 0; }
+.promo .chips { margin-top: 4px; }
