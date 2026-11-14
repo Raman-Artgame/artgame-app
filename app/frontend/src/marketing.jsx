@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { api, uuid, webToken } from './api.js'
-import { Viewer, download } from './objects.jsx'
+import { Viewer, download, uploadBig } from './objects.jsx'
 import { Sheet } from './ui.jsx'
 
 // Рабочее место маркетинга (HEAD 14.11): «План» — контент-план месяца, «Медиа» — материал с объектов,
@@ -15,19 +15,19 @@ const day = s => s ? new Date(s + 'T00:00').toLocaleDateString('ru-RU', { weekda
 
 // Задача в отделе (HEAD 14.11): руководитель видит всё и проверяет первой; остальные — свои вкладки и свои действия.
 const JOB = { lead: 'Руководитель отдела', smm: 'Контент и публикации', stories: 'Сторис и баннеры', target: 'Таргет', video: 'Съёмка' }
-const TABS = { stories: ['plan', 'media'], target: ['plan'], video: ['shoots', 'ideas', 'media', 'plan'] }
+const TABS = { stories: ['plan', 'media', 'brand'], target: ['plan', 'brand'], video: ['shoots', 'ideas', 'media', 'plan', 'brand'] }
 const ABOUT = { lead: 'Ты видишь всё. Публикации коллег сначала приходят тебе в «Проверку», после твоего «Проверено» уходят HEAD.',
   smm: 'Поставь публикацию в план: где, когда, текст и материал. Отправь на утверждение, после «Утверждаю» выкладывай и отметь «Вышло» со ссылкой.',
   stories: 'Загрузи готовую сторис или баннер в публикацию и отправь на утверждение. Выкладывать можно только утверждённое.',
-  target: 'План публикаций — чтобы знать, что выходит. Реклама и её цифры появятся здесь же.',
+  target: 'Поставь рекламу в план форматом «Реклама»: текст, креатив, дата запуска. Запускать можно только после «Утверждаю».',
   video: 'В «Съёмках» — что, где и когда снимать. В «Идеях» — сценарии. Материал с объектов — в «Медиа».' }
 
 export function Marketing({ me, pending }) {
   const head = me.role_code === 'head'
   const job = head ? 'head' : (me.mkt_job || null)
-  const can = { post: head || [null, 'lead', 'smm', 'stories'].includes(job), all: head || [null, 'lead', 'smm'].includes(job),
+  const can = { post: head || [null, 'lead', 'smm', 'stories', 'target'].includes(job), onlyAd: job === 'target', all: head || [null, 'lead', 'smm'].includes(job),
     idea: job !== 'target', shoot: head || [null, 'lead', 'smm', 'video'].includes(job), result: head || [null, 'lead', 'smm', 'target'].includes(job) }
-  const tabs = [['plan', 'План'], ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа']].filter(([k]) => !TABS[job] || TABS[job].includes(k))
+  const tabs = [['plan', 'План'], ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа'], ['brand', 'Бренд']].filter(([k]) => !TABS[job] || TABS[job].includes(k))
     .sort((a, b) => TABS[job] ? TABS[job].indexOf(a[0]) - TABS[job].indexOf(b[0]) : 0)
   const [toCheck, setToCheck] = useState(0)
   const [view, setView] = useState(head && pending ? 'review' : tabs[0][0])
@@ -46,12 +46,32 @@ export function Marketing({ me, pending }) {
       {job === 'lead' && <button className={view === 'check' ? 'on' : ''} onClick={() => setView('check')}>Проверка{toCheck ? <span>{toCheck}</span> : null}</button>}
       {tabs.map(([k, t]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}
     </div>
-    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media /> :
+    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} /> : view === 'brand' ? <Brand /> :
       view === 'shoots' ? <Shoots can={can.shoot} /> : view === 'ideas' ? <Ideas can={can.idea} /> : <Plan key={view + tick} can={can.post} onOpen={setOpen} onNew={() => setEdit({})} />}
-    {edit && <Editor post={edit} onClose={() => setEdit(null)} onSaved={x => { setEdit(null); setOpen(x); reload() }} />}
+    {edit && <Editor post={edit} onlyAd={can.onlyAd} onClose={() => setEdit(null)} onSaved={x => { setEdit(null); setOpen(x); reload() }} />}
     {open && !edit && <PostSheet post={open} head={head} mine={can.post && (can.all || open.author_id === me.id)} canResult={can.result} onClose={() => setOpen(null)} onEdit={() => setEdit(open)}
       onChanged={x => { setOpen(x.status === 'cancelled' ? null : x); reload() }} />}
   </>
+}
+
+// «Бренд»: книга бренда и паки из папки Диска «06 МАРКЕТИНГ / 01 Бренд» — смотреть и скачивать, без доступа к Диску.
+const fsize = b => !b ? '' : b > 1e6 ? (b / 1e6).toFixed(1) + ' МБ' : Math.ceil(b / 1e3) + ' КБ'
+export function Brand() {
+  const [folder, setFolder] = useState('')
+  const [d, setD] = useState(null)
+  const [view, setView] = useState(null)
+  useEffect(() => { setD(null); api('/mkt/brand' + (folder ? `?folder=${encodeURIComponent(folder)}` : '')).then(setD, e => setD({ err: e.message, path: [], folders: [], files: [] })) }, [folder])
+  return <div className="card">
+    <div className="mktcrumbs"><button className={'ghost mini' + (!folder ? ' on' : '')} onClick={() => setFolder('')}>Бренд</button>
+      {d?.path.map(x => <React.Fragment key={x.id}><span>›</span><button className={'ghost mini' + (x.id === folder ? ' on' : '')} onClick={() => setFolder(x.id)}>{x.name}</button></React.Fragment>)}</div>
+    {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> : !d.folders.length && !d.files.length ? <p className="muted small">В этой папке пусто.</p> : <>
+      {d.folders.map(x => <div key={x.id} className="mktfolder" onClick={() => setFolder(x.id)}><span>📁</span><b>{x.name}</b><i>›</i></div>)}
+      {d.files.length > 0 && <div className="mktgrid">{d.files.map(f => <div key={f.id} className="mktfile">
+        <button className="mthumb" onClick={() => setView(f)}>{f.thumb ? <img src={f.thumb} alt="" loading="lazy" onError={e => { e.target.style.display = 'none' }} /> : null}<span>{(f.name.split('.').pop() || '').slice(0, 4).toUpperCase()}</span></button>
+        <div className="small">{f.name}</div><div className="small muted">{fsize(f.size)}</div>
+        <button className="ghost mini" onClick={() => download(f)}>⬇ Скачать</button></div>)}</div>}</>}
+    <Viewer f={view} onClose={() => setView(null)} />
+  </div>
 }
 
 const isVid = f => (f.mime || '').startsWith('video/') || (!(f.mime || '').startsWith('image/') && (f.media_type === 'video' || f.media_type === 'reels'))
@@ -183,10 +203,10 @@ function PostSheet({ post, head, mine, canResult, onClose, onEdit, onChanged }) 
   </Sheet>
 }
 
-function Editor({ post, onClose, onSaved }) {
+function Editor({ post, onlyAd, onClose, onSaved }) {
   const [d, setD] = useState(null)
   const [objs, setObjs] = useState([])
-  const [b, setB] = useState({ title: post.title || '', channel: post.channel || 'instagram', kind: post.kind || 'reels', plan_date: post.plan_date || '',
+  const [b, setB] = useState({ title: post.title || '', channel: post.channel || 'instagram', kind: post.kind || (onlyAd ? 'ad' : 'reels'), plan_date: post.plan_date || '',
     caption: post.caption || '', object_id: post.object_id || '', files: post.files || [] })
   const [pick, setPick] = useState(false)
   const [msg, setMsg] = useState('')
@@ -217,7 +237,7 @@ function Editor({ post, onClose, onSaved }) {
     {d && <><label className="muted small">Где</label>
       <div className="chips">{Object.entries(d.channels).map(([k, t]) => <button key={k} className={b.channel === k ? 'on' : ''} onClick={() => set('channel', k)}>{t}</button>)}</div>
       <label className="muted small">Формат</label>
-      <div className="chips">{Object.entries(d.kinds).map(([k, t]) => <button key={k} className={b.kind === k ? 'on' : ''} onClick={() => set('kind', k)}>{t}</button>)}</div></>}
+      <div className="chips">{Object.entries(d.kinds).filter(([k]) => !onlyAd || k === 'ad').map(([k, t]) => <button key={k} className={b.kind === k ? 'on' : ''} onClick={() => set('kind', k)}>{t}</button>)}</div></>}
     <label className="muted small">Дата выхода</label>
     <input type="date" value={b.plan_date} onChange={e => set('plan_date', e.target.value)} />
     <label className="muted small">Текст публикации</label>
@@ -239,7 +259,9 @@ function Editor({ post, onClose, onSaved }) {
 
 // «Медиа»: весь материал с объектов от команды (кроме возвращённого HEAD); «Лучшее» — только утверждённое HEAD (Продакшн).
 // С onPick — выбор материала для публикации.
-function Media({ picked, onPick }) {
+function Media({ picked, onPick, canUp }) {
+  const [up, setUp] = useState(null)   // {obj, type, pct, msg} — загрузка снятого в папку сделки
+  const [objsAll, setObjsAll] = useState(null)
   const [type, setType] = useState('reels')
   const [best, setBest] = useState(false)
   const [d, setD] = useState(null)
@@ -253,6 +275,19 @@ function Media({ picked, onPick }) {
   const flip = x => setSel(s => on(x) ? s.filter(y => y.id !== x.id) : [...s, x])
   return <div className={onPick ? '' : 'card'}>
     {!onPick && <p className="small muted">Материал с объектов от команды. «Лучшее» — то, что HEAD утвердил в «Продакшн».</p>}
+    {!onPick && canUp && !up && <button className="ghost" onClick={() => { setUp({ obj: '', type: 'video', pct: null, msg: '' }); if (!objsAll) api('/objects').then(setObjsAll, () => setObjsAll([])) }}>⬆ Загрузить снятое на объекте</button>}
+    {up && <div className="mktupbox"><label className="muted small">Проект</label>
+      <select value={up.obj} onChange={e => setUp({ ...up, obj: e.target.value })}><option value="">— выбери проект —</option>
+        {(objsAll || []).map(o => <option key={o.id} value={o.id}>№{o.id} {o.title}</option>)}</select>
+      <div className="chips">{[['video', 'Видео'], ['photo', 'Фото']].map(([k, t]) => <button key={k} className={up.type === k ? 'on' : ''} onClick={() => setUp({ ...up, type: k })}>{t}</button>)}</div>
+      {up.obj && <label className={'photo mktup' + (up.pct !== null ? ' busy' : '')}>{up.pct !== null ? `Загрузка… ${Math.round(up.pct * 100)}%` : '⬆ Выбрать файлы'}
+        <input type="file" accept={up.type === 'photo' ? 'image/*' : 'video/*'} multiple hidden disabled={up.pct !== null} onChange={async e => {
+          const fs = [...e.target.files]; e.target.value = ''; let msg = ''
+          for (const f of fs) { setUp(u => ({ ...u, pct: 0 })); try { await uploadBig(+up.obj, 'media', f, pct => setUp(u => ({ ...u, pct })), { media_type: up.type }) } catch (err) { msg = `${f.name}: ${err.message}` } }
+          setUp(u => ({ ...u, pct: null, msg: msg || `Загружено: ${fs.length}. Лежит в папке сделки «МЕДИА / Отчёты».` })); setType(up.type); setBest(false); setD(null)
+          api(`/media?scope=library&type=${up.type}`).then(setD, () => {}) }} /></label>}
+      {up.msg && <p className="small muted">{up.msg}</p>}
+      <button className="ghost mini" onClick={() => setUp(null)}>Закрыть</button></div>}
     <div className="seg">{MTYPES.map(([k, t]) => <button key={k} className={type === k ? '' : 'ghost'} onClick={() => { setType(k); setObj('') }}>{t}</button>)}</div>
     <div className="chips"><button className={best ? '' : 'on'} onClick={() => setBest(false)}>Всё</button><button className={best ? 'on' : ''} onClick={() => setBest(true)}>Лучшее</button></div>
     {objs.length > 1 && <select value={obj} onChange={e => setObj(e.target.value)}><option value="">Все объекты</option>

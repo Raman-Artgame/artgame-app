@@ -7,7 +7,7 @@ from datetime import date
 from pydantic import BaseModel, Field
 
 from . import constants as consts
-from . import appeals, closing, marketing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring
+from . import appeals, brand, closing, marketing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring
 from . import bx, bxw, db, deal_money, design, designobj, files, projcard, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
@@ -27,6 +27,7 @@ app.include_router(projchat.router)   # чат проекта (HEAD 13.11)
 app.include_router(recurring.router)   # график постоянных оплат (HEAD 12.11)
 app.include_router(trips.router)
 app.include_router(marketing.router)   # контент-план маркетинга (HEAD 14.11)
+app.include_router(brand.router)       # «Бренд»: книга бренда и паки с Диска (HEAD 14.11)
 app.include_router(media.router)   # до work: там общий /{kind}/{id}/review
 app.include_router(appeals.router)   # до work: /appeals/{id}/rate|cancel, а не общий /{kind}/{id}/…
 app.include_router(work.router)

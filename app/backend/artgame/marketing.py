@@ -17,12 +17,12 @@ from .work import active
 
 router = APIRouter(prefix="/api")
 MKT = {"marketer", "head"}
-CHANNELS = {"instagram": "Instagram", "tiktok": "TikTok", "youtube": "YouTube", "2gis": "2ГИС", "site": "Сайт", "other": "Другое"}
-KINDS = {"reels": "Рилс", "post": "Пост", "carousel": "Карусель", "stories": "Сторис"}
+CHANNELS = {"instagram": "Instagram", "tiktok": "TikTok", "youtube": "YouTube", "2gis": "2ГИС", "olx": "OLX", "site": "Сайт", "other": "Другое"}
+KINDS = {"reels": "Рилс", "post": "Пост", "carousel": "Карусель", "stories": "Сторис", "ad": "Реклама"}
 EDITABLE = ("draft", "rejected")
 # Задача человека в отделе (HEAD 14.11): руководитель видит всё и проверяет первой; остальные делают своё.
 JOBS = {"lead": "Руководитель", "smm": "Контент и публикации", "stories": "Сторис и баннеры", "target": "Таргет", "video": "Съёмка"}
-POST_JOBS = {None, "lead", "smm", "stories"}        # кто ставит публикации в план
+POST_JOBS = {None, "lead", "smm", "stories", "target"}   # кто ставит публикации в план; таргетолог — только формат «Реклама»
 ALL_POSTS = {None, "lead", "smm"}                   # кто правит и чужие публикации; сторис-мейкер — только свои
 IDEA_JOBS = {None, "lead", "smm", "stories", "video"}
 SHOOT_JOBS = {None, "lead", "smm", "video"}
@@ -141,9 +141,11 @@ class PostIn(BaseModel):
     object_id: int | None = None
 
 
-def _check(conn, b: PostIn):
+def _check(conn, b: PostIn, p: dict | None = None):
     if b.channel not in CHANNELS or b.kind not in KINDS:
         raise HTTPException(400, "bad channel/kind")
+    if p and p["role_code"] != "head" and p.get("mkt_job") == "target" and b.kind != "ad":
+        raise HTTPException(403, "таргетолог ставит только рекламу")
     if b.file_ids:
         ok = conn.execute("SELECT count(*) AS n FROM files WHERE id = ANY(%s) AND kind IN ('media','pub') AND status='ready'", (b.file_ids,)).fetchone()["n"]
         if ok != len(set(b.file_ids)):
@@ -154,7 +156,7 @@ def _check(conn, b: PostIn):
 def post_add(b: PostIn, p: dict = Depends(active)):
     _job(p, POST_JOBS, "публикации")
     with db.pool.connection() as conn, conn.transaction():
-        _check(conn, b)
+        _check(conn, b, p)
         r = conn.execute("""INSERT INTO mkt_posts (title, channel, kind, plan_date, caption, file_ids, object_id, author_id)
                             VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                          (b.title.strip(), b.channel, b.kind, b.plan_date, b.caption, b.file_ids, b.object_id, p["id"])).fetchone()
@@ -171,7 +173,7 @@ def post_edit(post_id: int, b: PostIn, p: dict = Depends(active)):
         _own(p, r)
         if r["status"] not in EDITABLE:
             raise HTTPException(409, "править можно черновик или возвращённое")
-        _check(conn, b)
+        _check(conn, b, p)
         conn.execute("""UPDATE mkt_posts SET title=%s, channel=%s, kind=%s, plan_date=%s, caption=%s, file_ids=%s, object_id=%s,
                         status='draft', updated_at=now() WHERE id=%s""",
                      (b.title.strip(), b.channel, b.kind, b.plan_date, b.caption, b.file_ids, b.object_id, post_id))

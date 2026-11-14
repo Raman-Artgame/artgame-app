@@ -48,7 +48,7 @@ def can_upload(p: dict, kind: str) -> bool:
     if kind == "design":
         return p["role_code"] == "head" or "design" in p["zones"]
     if kind == "media":
-        return can_prod(p)
+        return can_prod(p) or p["role_code"] == "marketer"   # маркетинг кладёт снятое в папку сделки (HEAD 14.11)
     return p["role_code"] in DOC_ROLES
 
 
@@ -164,6 +164,8 @@ def start_upload(object_id: int, body: UploadIn, request: Request, p: dict = Dep
     media = body.kind == "media"
     if media and body.media_type not in ("photo", "video", "reels"):
         raise HTTPException(400, "bad media_type")
+    if media and body.media_type == "reels" and not can_prod(p):   # рилс в «Продакшн» оплачивается команде; агентство готовое грузит в публикацию
+        raise HTTPException(400, "готовый рилс загрузи в публикацию: «План → + Публикация → Загрузить готовое»")
     origin = request.headers.get("origin") or settings.public_origin
     with db.pool.connection() as conn, conn.transaction():
         obj = get_object(conn, object_id)

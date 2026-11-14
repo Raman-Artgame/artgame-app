@@ -168,3 +168,46 @@ def test_shoot_hints(client, team):
     assert [x["object_id"] for x in client.get("/api/mkt/hints", headers=hdr(2000)).json()["items"]] == [731]
     i = client.post("/api/mkt/ideas", json={"title": "Говорящая голова"}, headers=hdr(2000)).json()["id"]
     assert client.get("/api/mkt/hints", headers=hdr(1000)).json()["ideas"][0]["id"] == i
+
+
+def test_brand_folder(client, team, monkeypatch):
+    """«Бренд»: папка Диска как есть; файл отдаётся только по подписанной ссылке из списка; чужую папку не открыть."""
+    from artgame import brand, drive
+    from test_files import FakeDrive
+    F = drive.FOLDER
+    FakeDrive.tree = {brand.BRAND_ID: [{"id": "fLOGO", "name": "Лого", "mimeType": F}, {"id": "bookPDF", "name": "Брендбук.pdf", "mimeType": "application/pdf", "size": "4"},
+                                       {"id": "gdoc", "name": "Заметки", "mimeType": "application/vnd.google-apps.document"}],
+                      "fLOGO": [{"id": "logoPNG", "name": "logo.png", "mimeType": "image/png", "size": "3"}]}
+    FakeDrive.store = {"bookPDF": {"name": "Брендбук.pdf", "size": "4", "mimeType": "application/pdf", "data": b"%PDF"},
+                       "logoPNG": {"name": "logo.png", "size": "3", "mimeType": "image/png", "data": b"png"},
+                       "secret": {"name": "s", "size": "1", "mimeType": "text/plain", "data": b"x", "parents": ["other"]}}
+    monkeypatch.setattr(drive, "Drive", FakeDrive)
+    brand.PARENT.clear()
+    assert client.get("/api/mkt/brand", headers=hdr(3000)).status_code == 403
+    root = client.get("/api/mkt/brand", headers=hdr(2000)).json()
+    assert [f["name"] for f in root["folders"]] == ["Лого"] and [f["name"] for f in root["files"]] == ["Брендбук.pdf"] and root["path"] == []
+    sub = client.get("/api/mkt/brand?folder=fLOGO", headers=hdr(2000)).json()
+    assert sub["path"] == [{"id": "fLOGO", "name": "Лого"}] and sub["files"][0]["thumb"]
+    r = client.get(sub["files"][0]["url"])
+    assert r.status_code == 200 and r.content == b"png"
+    assert "attachment" in client.get(root["files"][0]["url"] + "&dl=1").headers["content-disposition"]
+    assert client.get(sub["files"][0]["url"].replace("logoPNG", "secret")).status_code == 403     # подпись — только на показанное
+    assert client.get("/api/mkt/brand?folder=secret", headers=hdr(2000)).status_code == 404       # не папка «Бренда»
+
+
+def test_ads_kind_and_shoot_upload(client, team, monkeypatch):
+    """Реклама утверждается как публикация; таргетолог ставит только её. Маркетинг кладёт снятое в папку сделки, но не «рилс в оплату»."""
+    from artgame import drive
+    from test_files import FakeDrive
+    monkeypatch.setattr(drive, "Drive", FakeDrive)
+    pid = client.post("/api/register", json={"full_name": "T"}, headers=hdr(2300)).json()["id"]
+    client.post(f"/api/people/{pid}", json={"role_code": "marketer", "zones": ["marketing"], "mkt_job": "target"}, headers=hdr(1000))
+    ad = {"title": "Кампания: роспись фасадов", "kind": "ad", "channel": "instagram", "plan_date": "2026-11-20", "caption": "Текст объявления"}
+    assert client.post("/api/mkt/posts", json={**ad, "kind": "reels"}, headers=hdr(2300)).status_code == 403
+    p = client.post("/api/mkt/posts", json=ad, headers=hdr(2300)).json()
+    assert client.post(f"/api/mkt/posts/{p['id']}/submit", headers=hdr(2300)).json()["status"] == "pending"   # руководителя нет — сразу HEAD
+    norms = {n["kind"]: n for n in client.get("/api/mkt/posts?ym=2026-11", headers=hdr(2300)).json()["norms"]}
+    assert norms["ad"]["per_month"] == 2 and norms["ad"]["planned"] == 1
+    up = {"client_uid": "22222222-2222-4222-8222-222222222222", "kind": "media", "name": "Процесс.mp4", "mime": "video/mp4", "size": 9}
+    assert client.post("/api/objects/731/uploads", json={**up, "media_type": "reels"}, headers=hdr(2000)).status_code == 400
+    assert client.post("/api/objects/731/uploads", json={**up, "media_type": "video"}, headers=hdr(2000)).status_code == 200

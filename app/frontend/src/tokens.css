@@ -954,6 +954,17 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .mkthint b { display: block; margin: 4px 0 2px; }
 .mkthint button { width: auto; flex: none; }
 .mkthsub { margin-top: 8px; }
+.mktcrumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.mktcrumbs button { width: auto; } .mktcrumbs button.on { border-color: var(--text); } .mktcrumbs span { color: var(--muted); }
+.mktfolder { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-top: 1px solid var(--line2); cursor: pointer; }
+.mktfolder b { flex: 1; min-width: 0; } .mktfolder i { color: var(--muted); font-style: normal; }
+.mktgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+.mktfile { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.mktfile .mthumb { width: 100%; height: auto; aspect-ratio: 1; padding: 0; border: 0; position: relative; }
+.mktfile .mthumb span { font-size: 13px; font-weight: 700; color: var(--dark-muted); }
+.mktfile .mthumb img { position: absolute; inset: 0; }
+.mktfile > div { overflow-wrap: anywhere; }
+.mktupbox { border: 1px solid var(--line); border-radius: var(--r2); padding: 10px 12px; margin: 8px 0; }
 .mktres { border-top: 1px solid var(--line2); margin-top: 10px; padding-top: 6px; }
 .mktres .seg input { flex: 1; min-width: 0; }
 /* Карточка проекта (HEAD 14.11): маршрут, кто встречает, эскизы в «Дизайне» */
