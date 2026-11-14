@@ -935,3 +935,10 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .gbare { margin-top: 4px; }
 .okmark { color: var(--ok); font-style: normal; }
 .pmoney .row span { color: var(--muted); }
+
+/* ФОТ: раскрытый сотрудник не шире экрана (HEAD 14.11 — 4 счёта в одну строку выталкивали сумму за край) */
+.payrow, .payrow .dealedit { min-width: 0; max-width: 100%; }
+.payrow .head > span:last-child { flex-shrink: 0; text-align: right; }
+.segf.accs { flex-wrap: wrap; }
+.segf.accs button { flex: 1 0 calc(50% - 4px); white-space: normal; }
+.payrow .dealedit input[type=date] { min-width: 0; max-width: 100%; }

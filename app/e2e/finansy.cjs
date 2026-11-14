@@ -127,6 +127,12 @@ async function tab(p, name) {
   await h.getByRole('button', { name: 'Пересчитать' }).click()
   await fot.locator('.row', { hasText: 'Плотник Арман' }).first().getByText('выплачено').waitFor()
   await h.screenshot({ path: `${shots}/fin-payroll.png` })
+  // HEAD 14.11: раскрытый сотрудник в ФОТ не шире экрана (счета в две строки, сумма не уезжает)
+  await fot.locator('.payrow', { hasText: 'Плотник Арман' }).first().locator('.head').click()
+  await fot.getByRole('button', { name: 'Отметить выплату' }).waitFor()
+  const wide = await h.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+  assert.ok(wide <= 0, `ФОТ шире экрана на ${wide}px`)
+  await fot.locator('.payrow', { hasText: 'Плотник Арман' }).first().screenshot({ path: `${shots}/fin-payroll-open.png` })
 
   // 5. Сводка: Kaspi 1 500 000 → 1 488 000, мастерская холстов 12 000
   await h.locator('.segf').getByRole('button', { name: 'Месяц' }).click()
