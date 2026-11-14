@@ -211,3 +211,56 @@ def test_ads_kind_and_shoot_upload(client, team, monkeypatch):
     up = {"client_uid": "22222222-2222-4222-8222-222222222222", "kind": "media", "name": "Процесс.mp4", "mime": "video/mp4", "size": 9}
     assert client.post("/api/objects/731/uploads", json={**up, "media_type": "reels"}, headers=hdr(2000)).status_code == 400
     assert client.post("/api/objects/731/uploads", json={**up, "media_type": "video"}, headers=hdr(2000)).status_code == 200
+
+
+def test_ads_channels_origin_report(client, team, monkeypatch):
+    """«Реклама»: площадка лида — сама по фразе из ссылки или отметка МОП; отчёт: расход, заявки, сделки, цена заявки, «сливает»."""
+    from artgame import ads, bx, chats
+    leads = [{"ID": "101", "STATUS_ID": "CONVERTED"}, {"ID": "102", "STATUS_ID": "NEW"}, {"ID": "103", "STATUS_ID": "NEW"}, {"ID": "104", "STATUS_ID": "CONVERTED"}]
+    deals = [{"ID": "9001", "LEAD_ID": "101", "OPPORTUNITY": "450000", "STAGE_SEMANTIC_ID": "S"},
+             {"ID": "9002", "LEAD_ID": "104", "OPPORTUNITY": "200000", "STAGE_SEMANTIC_ID": "P"}]
+
+    def read(method, params):
+        if method == "crm.lead.list":
+            return {"result": leads, "total": len(leads)}
+        if method == "crm.deal.list":
+            rows = [d for d in deals if int(d["LEAD_ID"]) in params["filter"]["LEAD_ID"]]
+            return {"result": rows, "total": len(rows)}
+        return {"result": []}
+    monkeypatch.setattr(bx, "READ", read)
+    mop = client.post("/api/register", json={"full_name": "МОП"}, headers=hdr(6000)).json()["id"]
+    client.post(f"/api/people/{mop}", json={"role_code": "mop", "zones": ["sales"]}, headers=hdr(1000))
+    ch = {c["title"]: c["id"] for c in client.get("/api/mkt/channels", headers=hdr(6000)).json()}
+    assert {"OLX", "Таргет Instagram", "2ГИС"} <= set(ch)
+    assert client.get("/api/mkt/channels", headers=hdr(3000)).status_code == 403
+    # сама: первая фраза клиента из ссылки OLX
+    hist = {"users": {"7": {"connector": True}}, "message": {"1": {"id": "1", "senderid": "7", "text": "Здравствуйте! Пишу с OLX. Сколько стоит?", "date": "2026-11-10T10:00:00+05:00"},
+                                                              "2": {"id": "2", "senderid": "5", "text": "Добрый день", "date": "2026-11-10T10:05:00+05:00"}}}
+    chats._origin(101, hist)
+    chats._origin(102, {"users": {"7": {"connector": True}}, "message": {"1": {"id": "1", "senderid": "7", "text": "Привет", "date": "2026-11-10"}}})
+    with db.pool.connection() as c:
+        assert ads.origin_of(c, 101)["title"] == "OLX" and ads.origin_of(c, 101)["auto"] and ads.origin_of(c, 102) is None
+    # МОП отмечает сам; маркетолог за МОП не отмечает
+    assert client.post("/api/bx/leads/102/origin", json={"channel_id": ch["Таргет Instagram"]}, headers=hdr(2000)).status_code == 403
+    r = client.post("/api/bx/leads/102/origin", json={"channel_id": ch["Таргет Instagram"]}, headers=hdr(6000)).json()
+    assert r == {"channel_id": ch["Таргет Instagram"], "title": "Таргет Instagram", "auto": False}
+    # расход: обычный маркетолог не вносит, HEAD вносит
+    sp = {"channel_id": ch["OLX"], "ym": "2026-11", "amount": 30000}
+    assert client.post("/api/mkt/spend", json=sp, headers=hdr(2000)).status_code == 403
+    for title, amount in [("OLX", 30000), ("Таргет Instagram", 120000), ("2ГИС", 15000)]:
+        assert client.post("/api/mkt/spend", json={"channel_id": ch[title], "ym": "2026-11", "amount": amount}, headers=hdr(1000)).status_code == 200
+    d = client.get("/api/mkt/ads?ym=2026-11&fresh=1", headers=hdr(2000)).json()
+    row = {x["title"]: x for x in d["items"]}
+    assert (row["OLX"]["leads"], row["OLX"]["deals"], row["OLX"]["won"], row["OLX"]["won_sum"], row["OLX"]["cpl"], row["OLX"]["verdict"]) == (1, 1, 1, 450000.0, 30000, "works")
+    assert (row["Таргет Instagram"]["leads"], row["Таргет Instagram"]["cpl"], row["Таргет Instagram"]["verdict"]) == (1, 120000, "weak")
+    assert row["2ГИС"]["verdict"] == "burns" and row["2ГИС"]["leads"] == 0
+    assert d["unknown"]["leads"] == 2 and d["unknown"]["deals"] == 1 and d["total"] == {"leads": 4, "spend": 165000.0} and not d["can_edit"]
+    # ссылки появляются после номера WhatsApp; площадку не удаляем, а выключаем; одинаковую фразу двум площадкам нельзя
+    assert row["OLX"]["link"] is None
+    assert client.post("/api/mkt/wa_phone", json={"phone": "+7 (705) 123-45-67"}, headers=hdr(1000)).json() == {"wa_phone": "77051234567"}
+    d = client.get("/api/mkt/ads?ym=2026-11", headers=hdr(1000)).json()
+    assert d["can_edit"] and [x for x in d["items"] if x["title"] == "OLX"][0]["link"].startswith("https://wa.me/77051234567?text=%D0%97")
+    assert client.post("/api/mkt/channels", json={"title": "Крыша", "phrase": "здравствуйте пишу с olx"}, headers=hdr(1000)).status_code == 409
+    new = client.post("/api/mkt/channels", json={"title": "Крыша", "phrase": "Пишу с Крыши"}, headers=hdr(1000)).json()["id"]
+    assert client.post(f"/api/mkt/channels/{new}", json={"title": "Крыша", "active": False}, headers=hdr(1000)).status_code == 200
+    assert "Крыша" not in [c["title"] for c in client.get("/api/mkt/channels", headers=hdr(6000)).json()]

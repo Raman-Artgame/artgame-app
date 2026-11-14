@@ -52,6 +52,34 @@ def last_client_wait(hist: dict) -> datetime | None:
     return waiting
 
 
+def first_client_text(hist) -> str:
+    """Первое сообщение клиента в диалоге — в нём фраза из ссылки площадки («Пишу с OLX»)."""
+    if not isinstance(hist, dict):
+        return ""
+    us = hist.get("users")
+    users = {str(k): u for k, u in us.items()} if isinstance(us, dict) else \
+        {str(u.get("id")): u for u in _vals(us) if isinstance(u, dict)}
+    msgs = [m for m in _vals(hist.get("message")) if isinstance(m, dict)]
+    msgs.sort(key=lambda m: (str(m.get("date") or ""), int(m.get("id") or 0) if str(m.get("id") or "0").isdigit() else 0))
+    for m in msgs:
+        u = users.get(str(m.get("senderid") or "0")) or {}
+        text = str(m.get("text") or "")
+        if (u.get("connector") or u.get("type") == "extranet") and not text.startswith(OUT_MARK):
+            return text
+    return ""
+
+
+def _origin(lead_id: int, hist) -> None:
+    """Площадка лида по первой фразе клиента (HEAD 14.11). Сбой здесь не должен ломать «Сегодня»."""
+    try:
+        text = first_client_text(hist)
+        if text:
+            from . import ads
+            ads.auto_origin(lead_id, text)
+    except Exception as e:  # noqa: BLE001
+        print("lead origin:", e)
+
+
 def waiting(fresh: bool = False, owners: set | None = None) -> tuple[list, str]:
     """Диалоги, где клиент ждёт ответа: [{entity, id, since}], и текст ошибки, если переписку прочитать нельзя.
     owners — {(«deal»|«lead», id)} своих сделок и лидов: чужие диалоги не читаем (у HEAD — None, все).
@@ -81,7 +109,10 @@ def waiting(fresh: bool = False, owners: set | None = None) -> tuple[list, str]:
     out = []
     for k, (ent, oid, _) in want.items():
         j = res.get(k)
-        w = last_client_wait((j or {}).get("result") if isinstance(j, dict) else None)
+        hist = (j or {}).get("result") if isinstance(j, dict) else None
+        if ent == "lead":
+            _origin(oid, hist)
+        w = last_client_wait(hist)
         if w:
             out.append({"entity": ent, "id": oid, "since": w})
     return out, err
