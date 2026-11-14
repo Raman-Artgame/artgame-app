@@ -4,7 +4,7 @@ import uuid
 
 from psycopg.types.json import Jsonb
 
-from artgame import db, drive, fin
+from artgame import db, drive, fin, finance
 from conftest import hdr
 
 JPG = "data:image/jpeg;base64,/9j/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -101,8 +101,17 @@ def test_finance_flow(client, monkeypatch):
     p3 = pl["P3000"]
     client.post(f"/api/fin/payees/{p3['id']}", json={"name": "P3000", "grp": "core", "scheme": "shifts", "amount": 50000}, headers=hdr(1000))
     assert client.post("/api/fin/payees", json={"name": "Иван", "grp": "nope", "scheme": "salary"}, headers=hdr(1000)).status_code == 400
-    # начисление
+    # HEAD 14.11: пока месяц идёт, доплата до минимума — «по итогам месяца», в начислено и «осталось» не входит
+    monkeypatch.setattr(finance, "now_ym", lambda: YM)
+    run = {x["name"]: x for x in client.post(f"/api/fin/payroll/{YM}/compute", headers=hdr(1000)).json()["rows"]}["P3000"]
+    assert run["accrued"] == 70000 + 40000 and run["pending_sum"] == 80000 and "topup" not in {a["kind"] for a in run["lines"]}
+    assert "по итогам месяца" in run["pending"][0]["detail"]
+    my3 = client.get("/api/fin/my", params={"ym": YM}, headers=hdr(3000)).json()
+    assert my3["pending"][0]["kind"] == "topup" and my3["accrued"] == 110000
+    # начисление после конца месяца: доплата — в начисленном
+    monkeypatch.setattr(finance, "now_ym", lambda: "2026-12")
     r = client.post(f"/api/fin/payroll/{YM}/compute", headers=hdr(1000)).json()
+    assert r["pending"] == 0
     by = {x["name"]: x for x in r["rows"]}
     assert by["P2000"]["accrued"] == 15000 * 2 + 4 * 1500 + 7000           # 2 смены + 4 ч + возмещение чека
     assert by["P3000"]["accrued"] == 150000 + 40000                         # 20 000 + оклад 50 000 + доплата 80 000 + склад своими
@@ -142,6 +151,17 @@ def test_finance_flow(client, monkeypatch):
     assert next(b for b in s["budget"] if b["code"] == "ads_target")["plan"] == 30000   # 1000 ₸ в день × 30 дней ноября
     assert studio["plan"] == 300000 and studio["fact"] == 300000
     assert s["cash"]["in"] == 1_160_000 and s["cash"]["out"] == 300_000 + 43000
+    # HEAD 14.11: месяц идёт — на Пульте оклады и минимумы по прошедшим дням (15 из 30), прибыль «на сегодня» выше на остаток
+    monkeypatch.setattr(finance, "now_ym", lambda: YM)
+    monkeypatch.setattr(finance, "today_day", lambda: 15)
+    t = client.get("/api/fin/summary", params={"ym": YM}, headers=hdr(1000)).json()
+    with db.pool.connection() as conn:
+        monthly = float(conn.execute("SELECT sum(amount) AS s FROM fin_accruals WHERE period=%s AND status='active' AND kind IN ('salary','topup')",
+                                     (YM,)).fetchone()["s"])
+    td = t["today"]
+    assert monthly > 0 and td["days"] == 15 and td["share"] == 0.5
+    assert td["payroll_month"] == t["costs"]["payroll"] and td["payroll"] == round(t["costs"]["payroll"] - monthly / 2, 2)
+    assert td["profit"] == round(t["profit"] + monthly / 2, 2)
     # отмена выплаты возвращает чек в «к выплате»
     last = [x for x in client.get("/api/fin/ledger", params={"ym": YM}, headers=hdr(1000)).json() if x["article_code"] == "payroll"][0]
     assert client.post(f"/api/fin/ledger/{last['id']}/cancel", headers=hdr(1000)).json()["ok"]

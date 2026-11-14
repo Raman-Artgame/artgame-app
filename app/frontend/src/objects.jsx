@@ -60,7 +60,7 @@ export function Viewer({ f, onClose }) {
 }
 
 // Галерея проекта (HEAD 08.11, «Проекты» и «Объекты» — один раздел): эскизы, фото с объекта, видео, продакшн, документы.
-export function Gallery({ obj, me, start = 'design' }) {
+export function Gallery({ obj, me, start = 'design', only, skip = [], bare = false, top = null }) {
   const [kind, setKind] = useState(start)
   const [list, setList] = useState(null)
   const [busy, setBusy] = useState('')
@@ -70,7 +70,7 @@ export function Gallery({ obj, me, start = 'design' }) {
     .then(setList, () => setList([]))
   useEffect(() => { setList(null); load() }, [kind])
   useEffect(() => { window.addEventListener('artgame:queue', load); return () => window.removeEventListener('artgame:queue', load) }, [kind])
-  const kinds = Object.keys(KIND).filter(k => k !== 'doc' || DOC_ROLES.has(me.role_code))
+  const kinds = Object.keys(KIND).filter(k => (k !== 'doc' || DOC_ROLES.has(me.role_code)) && (!only || only.includes(k)) && !skip.includes(k))
   const canBig = (kind === 'design' && (me.role_code === 'head' || me.zones.includes('design'))) || (kind === 'doc' && DOC_ROLES.has(me.role_code))
   const canVideo = kind === 'video' && (PROD.has(me.role_code) || me.reels) && !me._view_as
 
@@ -92,13 +92,14 @@ export function Gallery({ obj, me, start = 'design' }) {
   }
   const grid = kind === 'photo'   // фото — сеткой; эскизы, видео, продакшн, документы — списком с названием
   const pics = list && (grid ? list.filter(f => f.thumb) : [])
-  const empty = { design: 'Эскизов пока нет — их загружает дизайнер.', video: 'Видео пока нет.', media: 'Утверждённого материала пока нет.' }
-  return <div className="card">
-    <div className="segf">{kinds.map(k => <button key={k} className={k === kind ? 'on' : ''} onClick={() => setKind(k)}>{KIND[k]}</button>)}</div>
-    <p className="small muted gabout">{ABOUT[kind]}</p>
+  const empty = { design: 'Эскизов и файлов в печать пока нет — их загружает дизайнер.', video: 'Видео пока нет.', media: 'Утверждённого материала пока нет.' }
+  return <div className={bare ? 'gbare' : 'card'}>
+    {kinds.length > 1 && <div className="segf">{kinds.map(k => <button key={k} className={k === kind ? 'on' : ''} onClick={() => setKind(k)}>{KIND[k]}</button>)}</div>}
+    {top}
+    {!bare && <p className="small muted gabout">{ABOUT[kind]}</p>}
     {kind === 'photo' && <label className="photo"><span>📷 Добавить фото с объекта</span>
       <input type="file" accept="image/*" multiple hidden onChange={e => e.target.files.length && addPhotos(e.target.files)} /></label>}
-    {canBig && <label className="photo"><span>⬆ Загрузить {kind === 'design' ? 'эскиз' : 'файл'}</span>
+    {canBig && <label className="photo"><span>⬆ Загрузить {kind === 'design' ? 'эскиз или файл в печать' : 'файл'}</span>
       <input type="file" hidden onChange={e => e.target.files[0] && addBig(e.target.files[0])} /></label>}
     {canVideo && <label className="photo"><span>🎥 Загрузить видео с объекта</span>
       <input type="file" accept="video/*" hidden onChange={e => e.target.files[0] && addBig(e.target.files[0], 'media', { media_type: 'video' })} /></label>}
@@ -107,7 +108,7 @@ export function Gallery({ obj, me, start = 'design' }) {
       {pics.length > 0 && <div className="grid">{pics.map(f => <button key={f.id} className="gpic" onClick={() => setOpen(f)}><img src={f.thumb} alt={f.name} loading="lazy" /></button>)}</div>}
       {list.filter(f => !grid || !f.thumb).map(f => <div key={f.id} className="mitem">
         <button className="mthumb" onClick={() => setOpen(f)}>{f.thumb ? <img src={f.thumb} alt="" loading="lazy" /> : <span>{isVideo(f) ? '▶' : '📄'}</span>}</button>
-        <div className="mbody"><a onClick={() => setOpen(f)}><b>{f.media_type === 'reels' ? '🎬 ' : f.media_type === 'video' ? '▶ ' : ''}{f.name}</b></a><br />
+        <div className="mbody"><a onClick={() => setOpen(f)}><b>{f.media_type === 'reels' ? '🎬 ' : f.media_type === 'video' ? '▶ ' : ''}{f.name}</b></a>{kind === 'design' && /утвержд/i.test(f.note || '') && <i className="okmark small"> ✓ утверждён</i>}<br />
           <span className="muted small">{f.size ? size(f.size) + ' · ' : ''}{f.by} · {new Date(f.created_at).toLocaleDateString('ru-RU')}{kind === 'video' && f.review === 'approved' ? ' · в Продакшн' : ''}</span></div>
         <button className="ghost mini" aria-label="Скачать" onClick={() => download(f)}>⬇</button>
       </div>)}</>}

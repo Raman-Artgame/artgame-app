@@ -253,7 +253,7 @@ function Shoots() {
     {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> : !d.items.length ? <p className="muted small">Съёмок в этом месяце нет.</p> :
       groups.map(([dt, list]) => <div key={dt} className="mktday"><h3>{day(dt)}</h3>
         {list.map(x => <div key={x.id} className="mktidea" onClick={() => setEdit(x)}>
-          <b>{x.at_time ? `${x.at_time} · ` : ''}{x.title}</b>{x.status === 'done' && <span className="badge ok">снято</span>}
+          <b>{x.at_time ? `${x.at_time} · ` : ''}{x.title}</b>{x.status === 'done' && <span className="badge ok">снято</span>}{x.status === 'proposed' && <span className="badge warn">{x.alt_date ? 'ГИП предлагает ' + x.alt_date.slice(8, 10) + '.' + x.alt_date.slice(5, 7) : 'ждёт ГИП'}</span>}
           <div className="small muted">{x.object_title ? `№${x.object_id} ${x.object_title}` : 'вне проектов'}{x.place ? ` · ${x.place}` : ''}</div>
           {x.crew_names && <div className="small">🎥 {x.crew_names.join(', ')}</div>}
           {x.idea_title && <div className="small muted">Идея: {x.idea_title}</div>}</div>)}</div>)}

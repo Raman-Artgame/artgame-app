@@ -255,8 +255,12 @@ def units(ym: str | None = None, p: dict = Depends(active)):
         rows = conn.execute(f"""SELECT u.*, pe.full_name FROM design_units u LEFT JOIN people pe ON pe.id=u.person_id
                                 WHERE u.approved_at >= %s AND u.approved_at < %s{cond} ORDER BY u.approved_at""",
                             [start, end, *args]).fetchall()
-    mine = sum(float(r["units"]) for r in rows if r["status"] == "active" and r["person_id"] == p["id"])
-    return {"month": f"{start:%Y-%m}", "rows": rows, "mine": mine, "norm": v.get("pay.design.norm_units"),
+        from . import designobj
+        extras = designobj.month_rows(conn, start, end, None if p["role_code"] in ALL else p["id"])
+        wait = designobj.pending(conn) if p["role_code"] in ALL else []
+    mine = sum(float(r["units"]) for r in rows if r["status"] == "active" and r["person_id"] == p["id"]) \
+        + sum(float(x["units"]) for x in extras if x["person_id"] == p["id"])
+    return {"month": f"{start:%Y-%m}", "rows": rows, "extras": extras, "wait": wait, "mine": mine, "sizes": {z: unit_of(v, z) for z in SIZES}, "norm": v.get("pay.design.norm_units"),
             "unit_over": v.get("pay.design.unit_over"), "can_cancel": p["role_code"] == "head"}
 
 
@@ -380,6 +384,9 @@ def accruals(conn, v: dict, start: datetime, end: datetime) -> tuple[dict, dict,
     units_by = {r["person_id"]: float(r["s"]) for r in conn.execute(
         """SELECT person_id, sum(units) AS s FROM design_units WHERE status='active' AND person_id IS NOT NULL
            AND approved_at >= %s AND approved_at < %s GROUP BY person_id""", (start, end)).fetchall()}
+    for r in conn.execute("""SELECT person_id, sum(units) AS s FROM design_extras WHERE status='approved'
+                             AND decided_at >= %s AND decided_at < %s GROUP BY person_id""", (start, end)).fetchall():
+        units_by[r["person_id"]] = units_by.get(r["person_id"], 0) + float(r["s"])   # дизайн и докидки из карточки проекта (HEAD 14.11)
     cat_by: dict = {}
     warn = []
     amount = v.get("pay.design.catalog") or 0

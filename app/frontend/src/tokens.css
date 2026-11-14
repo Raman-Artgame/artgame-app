@@ -924,3 +924,32 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .mktclip { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; margin: 4px 0 0; }
 .mktres { border-top: 1px solid var(--line2); margin-top: 10px; padding-top: 6px; }
 .mktres .seg input { flex: 1; min-width: 0; }
+/* Карточка проекта (HEAD 14.11): маршрут, кто встречает, эскизы в «Дизайне» */
+.route { display: flex; flex-direction: column; gap: 2px; background: var(--alt); border-radius: 10px; padding: 10px 12px; margin: 10px 0 0; color: var(--text); cursor: pointer; text-decoration: none; }
+.route i { color: var(--accent); font-style: normal; }
+.sitec { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--alt); border-radius: 10px; padding: 8px 10px; margin: 8px 0 0; }
+.sitec > div { display: flex; flex-direction: column; flex: 1 1 140px; min-width: 0; }
+.sitec.edit { flex-direction: column; align-items: stretch; }
+.sitec .btnlink { color: var(--text); text-decoration: none; background: var(--surface); border-radius: 8px; padding: 6px 10px; white-space: nowrap; }
+.dzbox h3.sub { font-size: 14px; margin: 14px 0 6px; }
+.gbare { margin-top: 4px; }
+.okmark { color: var(--ok); font-style: normal; }
+.pmoney .row span { color: var(--muted); }
+
+/* ФОТ: раскрытый сотрудник не шире экрана (HEAD 14.11 — 4 счёта в одну строку выталкивали сумму за край) */
+.payrow, .payrow .dealedit { min-width: 0; max-width: 100%; }
+.payrow .head > span:last-child { flex-shrink: 0; text-align: right; }
+.segf.accs { flex-wrap: wrap; }
+.segf.accs button { flex: 1 0 calc(50% - 4px); white-space: normal; }
+.payrow .dealedit input[type=date] { min-width: 0; max-width: 100%; }
+.plan { display: flex; flex-direction: column; gap: 2px; background: var(--alt); border-radius: 10px; padding: 8px 10px; margin: 8px 0 0; border-left: 3px solid var(--ok); }
+.plan.late { border-left-color: var(--hot); }
+.plan.late b { color: var(--hot); }
+.plan .small { color: var(--muted); }
+.card.team label, .card.mats label { display: block; margin: 10px 0 4px; }
+.card.team .gippick select { width: 100%; }
+.promo { display: flex; flex-direction: column; gap: 4px; background: var(--alt); border-radius: 10px; padding: 8px 10px; margin: 10px 0 0; }
+.promo .chips { margin-top: 4px; }
+.card.shoots .shoot { border-top: 1px solid var(--line2); padding-top: 6px; margin-top: 6px; }
+.card.shoots .shoot .seg input { flex: 1; min-width: 0; }
+.card.shoots .altd { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }

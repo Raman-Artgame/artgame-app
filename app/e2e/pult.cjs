@@ -71,6 +71,7 @@ async function tab(p, name) {
   assert.strictEqual(await money.getByText('Ушло').count(), 0, '«Ушло» заменено на «Упущенная выручка»')
   await money.locator('.kpis > div', { hasText: 'Прибыль до ИПН' }).click()
   await money.locator('.profitwhy').getByText('Выручка без НДС').waitFor()
+  await money.locator('.profitwhy').getByText(/ФОТ за весь месяц будет/).waitFor()   // HEAD 14.11: месяц идёт — оклады по дням
   await money.scrollIntoViewIfNeeded()
   await money.screenshot({ path: `${shots}/pult-dengi.png` })
   await money.locator('.kpis > div', { hasText: 'Упущенная выручка' }).click()
