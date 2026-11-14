@@ -168,7 +168,7 @@ const tday = () => { const t = new Date(); return new Date(t - t.getTimezoneOffs
 function PastShift({ d, done }) {
   const b = d.backfill
   const [open, setOpen] = useState(false)
-  const [v, set] = useState({ object_id: b.objects[0]?.id, zone_code: d.zones[0], day: '', start_time: '09:00', end_time: '19:00', plus: '', area_m2: '', work_done: '', workshop: '' })
+  const [v, set] = useState({ object_id: '', zone_code: d.zones[0], day: '', start_time: '09:00', end_time: '19:00', plus: '', area_m2: '', work_done: '', workshop: '' })
   const shop = !!v.workshop   // мастерская без проекта (печать, HEAD 09.11)
   const [pics, setPics] = useState([])     // сколько угодно фото из галереи (HEAD 09.11)
   const [busy, setBusy] = useState(false)
@@ -209,7 +209,8 @@ function PastShift({ d, done }) {
       {shop ? <><label className="muted">Что делал</label>
         <div className="chips">{d.workshop.map(t => <button key={t} className={v.workshop === t ? 'on' : ''} onClick={() => set({ ...v, workshop: t })}>{t}</button>)}</div></> : <>
       <label className="muted">Объект</label>
-      <select value={v.object_id} onChange={e => set({ ...v, object_id: +e.target.value })}>
+      <select value={v.object_id} onChange={e => set({ ...v, object_id: +e.target.value || '' })}>
+        <option value="">— выберите объект —</option>
         {b.objects.map(o => <option key={o.id} value={o.id}>№{o.id} · {o.title}{o.city ? ` — ${o.city}` : ''}</option>)}
       </select>
       {d.zones.length > 1 && <div className="segf">{d.zones.map(z => <button key={z} className={v.zone_code === z ? 'on' : ''} onClick={() => set({ ...v, zone_code: z })}>{ZONE[z]}</button>)}</div>}</>}

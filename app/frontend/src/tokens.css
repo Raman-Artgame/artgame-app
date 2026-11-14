@@ -1017,3 +1017,5 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .contact .callnote { flex: 1 1 100%; margin: 0; }
 .dealbtns .morebtn.on { background: var(--dark-line); }
 .moreacts { margin-top: 8px; }
+.movelink { display: inline-block; margin-top: 4px; color: var(--accent); cursor: pointer; }
+.moveshift { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }

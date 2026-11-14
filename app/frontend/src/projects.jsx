@@ -107,7 +107,7 @@ function ProjectCard({ x, me, back, openDeal }) {
     {me && x.id > 0 && MONEY.has(me.role_code) && <MoneyBox id={x.id} />}</>}
     <Gallery obj={{ id: x.id, title: x.title }} me={me} start="photo" skip={['design']} top={x.id > 0 && <PromoLine id={x.id} />} />
     {!mkt && me && x.id > 0 && (x.working || x.closing) && <DoneBox id={x.id} />}
-    {!mkt && me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} />}
+    {!mkt && me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} head={me.role_code === 'head'} />}
   </>
 }
 
@@ -400,10 +400,29 @@ const ST = { submitted: 'на проверке', approved: 'принято', rej
 const dt = s => new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 const tm = s => new Date(s).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
 // Вся история проекта для ГИП: кто сколько, по дням — что сделал с фото, расходы с чеками.
-function History({ id, mine }) {
+// Смена не на том объекте (HEAD 14.11, 1611 УйДомДонер): HEAD переносит смену и её фото на нужный объект — в базе и на Диске
+function MoveShift({ s, from, onMoved }) {
+  const [list, setList] = useState(null)
+  const [to, setTo] = useState('')
+  const [msg, setMsg] = useState('')
+  if (!list) return <a className="small movelink" onClick={() => api('/head/move-targets').then(r => setList(r.filter(o => o.id !== from)), e => setMsg(e.message))}>
+    Перенести на другой объект{msg ? ' · ' + msg : ''}</a>
+  const go = () => api(`/shifts/${s.id}/move`, { method: 'POST', body: { object_id: +to } })
+    .then(r => { setMsg(`Перенесено в №${r.object_id} ${r.object_title}${r.files ? `, фото: ${r.files}` : ''}.`); setTimeout(onMoved, 1200) }, e => setMsg(e.message))
+  return <div className="moveshift">
+    <select value={to} onChange={e => setTo(e.target.value)}><option value="">— куда перенести —</option>
+      {list.map(o => <option key={o.id} value={o.id}>№{o.id} · {o.title}{o.city ? ` — ${o.city}` : ''}</option>)}</select>
+    <div className="seg"><button className="ghost mini" onClick={() => setList(null)}>Отмена</button>
+      <button className="mini" disabled={!to} onClick={go}>Перенести смену и фото</button></div>
+    {msg && <p className="small muted">{msg}</p>}
+  </div>
+}
+
+function History({ id, mine, head }) {
   const [h, setH] = useState(null)
   const [err, setErr] = useState('')
-  useEffect(() => { api(`/objects/${id}/history`).then(setH, e => setErr(e.message)) }, [id])
+  const load = () => api(`/objects/${id}/history`).then(setH, e => setErr(e.message))
+  useEffect(() => { load() }, [id])
   if (err) return <div className="card muted">{err}</div>
   if (!h) return <div className="card muted">Загрузка истории…</div>
   return <div className="card history"><h3>{mine ? 'Ты ГИП · вся история проекта' : 'Вся история проекта'}</h3>
@@ -416,7 +435,8 @@ function History({ id, mine }) {
         {s.reason && <div className="small why">Причина: {s.reason}</div>}
         {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <a href={s.photo_before_full} target="_blank" rel="noreferrer"><img src={s.photo_before_url} alt="до" /></a>}
           {s.photo_after_url && <a href={s.photo_after_full} target="_blank" rel="noreferrer"><img src={s.photo_after_url} alt="после" /></a>}</div>}
-        <More x={s} /></div>
+        <More x={s} />
+        {head && s.kind !== 'road' && <MoveShift s={s} from={id} onMoved={load} />}</div>
       <StatusMark status={s.status} /></div>)}</>}
     {h.expenses.length > 0 && <><h3>Расходы · {money(h.spent)}</h3>{h.expenses.map(e => <div key={e.id} className="row">
       <div><b>{money(e.amount)}</b> · {e.category} · {e.full_name}<br /><span className="small muted">{dt(e.created_at)}{e.note ? ' · ' + e.note : ''}</span>

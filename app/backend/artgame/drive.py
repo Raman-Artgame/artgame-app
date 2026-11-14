@@ -182,6 +182,13 @@ class Drive:
         r.raise_for_status()
         return r.json()["id"]
 
+    def move(self, file_id: str, parent: str) -> None:
+        """Перенести файл в другую папку (смена записана не на тот объект, HEAD 14.11). Файл тот же, ссылки не меняются."""
+        old = ",".join(self.meta(file_id).get("parents") or [])
+        r = _retry(httpx.patch, f"{API}/{file_id}", headers=self.h, timeout=60,
+                   params={"supportsAllDrives": "true", "addParents": parent, "removeParents": old, "fields": "id"})
+        r.raise_for_status()
+
     def pdf_from_html(self, parent: str, name: str, html: str) -> str:
         """PDF из HTML (паспорт сделки, HEAD 12.11): HTML → временный Google Документ → PDF в папку → документ в корзину.
         Своей библиотеки PDF на сервере нет — Google делает PDF сам."""

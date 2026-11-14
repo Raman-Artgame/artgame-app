@@ -53,6 +53,9 @@ class FakeDrive:
             STORE[fid] = PENDING.pop("next")
         return STORE[fid]
 
+    def move(self, fid, parent):
+        STORE[fid]["parents"] = [parent]
+
     def copy(self, fid, parent, name=None):
         i = f"drv{len(STORE):08d}"
         STORE[i] = {**STORE[fid], "parents": [parent]}
