@@ -924,3 +924,10 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .mktclip { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; margin: 4px 0 0; }
 .mktres { border-top: 1px solid var(--line2); margin-top: 10px; padding-top: 6px; }
 .mktres .seg input { flex: 1; min-width: 0; }
+
+/* ФОТ: раскрытый сотрудник не шире экрана (HEAD 14.11 — 4 счёта в одну строку выталкивали сумму за край) */
+.payrow, .payrow .dealedit { min-width: 0; max-width: 100%; }
+.payrow .head > span:last-child { flex-shrink: 0; text-align: right; }
+.segf.accs { flex-wrap: wrap; }
+.segf.accs button { flex: 1 0 calc(50% - 4px); white-space: normal; }
+.payrow .dealedit input[type=date] { min-width: 0; max-width: 100%; }
