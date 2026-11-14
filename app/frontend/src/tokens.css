@@ -1019,3 +1019,5 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .moreacts { margin-top: 8px; }
 .movelink { display: inline-block; margin-top: 4px; color: var(--accent); cursor: pointer; }
 .moveshift { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.viewer .vextra { width: min(92vw, 420px); margin: 8px auto 0; }
+.viewer .vextra .check { display: flex; gap: 8px; align-items: center; font-size: 13px; }

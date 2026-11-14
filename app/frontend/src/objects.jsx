@@ -41,7 +41,7 @@ export function download(f) {
 }
 
 // Просмотр внутри приложения: фото — крупно, видео — плеером, остальное — «Скачать»
-export function Viewer({ f, onClose }) {
+export function Viewer({ f, onClose, extra = null }) {
   // тип не известен (ссылка из ленты, чек) — сначала картинкой, не вышло — видео, не вышло — карточка «Скачать»
   const [mode, setMode] = useState(null)
   useEffect(() => setMode(null), [f])
@@ -56,6 +56,26 @@ export function Viewer({ f, onClose }) {
     <div className="vbtns" onClick={e => e.stopPropagation()}>
       <button className="mini" onClick={() => download(f)}>⬇ Скачать</button>
       <button className="ghost mini" onClick={onClose}>Закрыть</button></div>
+    {extra && <div className="vextra" onClick={e => e.stopPropagation()}>{extra}</div>}
+  </div>
+}
+
+// Фото не с этого объекта (HEAD 14.11, 1611): HEAD переносит фото — одно или все фото этого человека за тот день — в нужный проект
+function MoveFile({ f, from, onMoved }) {
+  const [list, setList] = useState(null)
+  const [to, setTo] = useState('')
+  const [all, setAll] = useState(true)
+  const [msg, setMsg] = useState('')
+  if (!list) return <button className="ghost mini" onClick={() => api('/head/move-targets').then(r => setList(r.filter(o => o.id !== from)), e => setMsg(e.message))}>
+    Не с этого объекта? Перенести{msg ? ' · ' + msg : ''}</button>
+  const go = () => api(`/files/${f.id}/move`, { method: 'POST', body: { object_id: +to, same_day: all } })
+    .then(r => { setMsg(`Перенесено в №${r.object_id} ${r.object_title}: ${r.files} фото.`); setTimeout(onMoved, 1200) }, e => setMsg(e.message))
+  return <div className="moveshift">
+    <select value={to} onChange={e => setTo(e.target.value)}><option value="">— в какой проект —</option>
+      {list.map(o => <option key={o.id} value={o.id}>№{o.id} · {o.title}{o.city ? ` — ${o.city}` : ''}</option>)}</select>
+    <label className="check"><input type="checkbox" checked={all} onChange={e => setAll(e.target.checked)} /> и все фото {f.by || 'этого человека'} за этот день</label>
+    <button className="mini" disabled={!to} onClick={go}>Перенести</button>
+    {msg && <p className="small">{msg}</p>}
   </div>
 }
 
@@ -112,7 +132,8 @@ export function Gallery({ obj, me, start = 'design', only, skip = [], bare = fal
           <span className="muted small">{f.size ? size(f.size) + ' · ' : ''}{f.by} · {new Date(f.created_at).toLocaleDateString('ru-RU')}{kind === 'video' && f.review === 'approved' ? ' · в Продакшн' : ''}</span></div>
         <button className="ghost mini" aria-label="Скачать" onClick={() => download(f)}>⬇</button>
       </div>)}</>}
-    <Viewer f={open} onClose={() => setOpen(null)} />
+    <Viewer f={open} onClose={() => setOpen(null)} extra={open && me.role_code === 'head' && !me._view_as && ['photo', 'video', 'media'].includes(kind)
+      ? <MoveFile key={open.id} f={open} from={obj.id} onMoved={() => { setOpen(null); load() }} /> : null} />
   </div>
 }
 
