@@ -301,6 +301,9 @@ def shoot_save(b: ShootIn, shoot_id: int | None = None, p: dict = Depends(active
     vals = (b.title.strip(), b.shoot_date, b.at_time, b.object_id, b.place, b.crew, b.idea_id, b.note, b.status)
     with db.pool.connection() as conn, conn.transaction():
         if shoot_id:
+            cur = conn.execute("SELECT status FROM mkt_shoots WHERE id=%s", (shoot_id,)).fetchone()
+            if cur and cur["status"] == "proposed" and b.status != "cancelled":   # ждёт ГИП — подтверждают в карточке проекта (HEAD 14.11)
+                vals = (*vals[:-1], "proposed")
             r = conn.execute("""UPDATE mkt_shoots SET title=%s, shoot_date=%s, at_time=%s, object_id=%s, place=%s, crew=%s, idea_id=%s,
                                 note=%s, status=%s, updated_at=now() WHERE id=%s RETURNING id""", (*vals, shoot_id)).fetchone()
             if not r:

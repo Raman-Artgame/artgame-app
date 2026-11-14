@@ -950,3 +950,6 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .card.team .gippick select { width: 100%; }
 .promo { display: flex; flex-direction: column; gap: 4px; background: var(--alt); border-radius: 10px; padding: 8px 10px; margin: 10px 0 0; }
 .promo .chips { margin-top: 4px; }
+.card.shoots .shoot { border-top: 1px solid var(--line2); padding-top: 6px; margin-top: 6px; }
+.card.shoots .shoot .seg input { flex: 1; min-width: 0; }
+.card.shoots .altd { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }

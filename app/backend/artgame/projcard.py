@@ -3,10 +3,14 @@
 Контакт: имя видят все, телефон — ГИП объекта, МОП и HEAD; вносят они же. Деньги — только HEAD и МОП (свои сделки):
 сумма, поступило, долг, затраты (как в паспорте закрытия) и маржа сейчас, а не только при закрытии. Оплаты вносятся в сделке.
 """
+import sys
+from datetime import date, datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import bx, db, deal_money
+from .marketing import MKT
 from .work import active
 
 router = APIRouter(prefix="/api")
@@ -125,3 +129,119 @@ def set_publish(oid: int, b: PublishIn, p: dict = Depends(active)):
             raise HTTPException(404, "Нет такого проекта")
         db.audit(conn, p["id"], "publish_ok", "object", oid, {"ok": b.ok})
     return {"publish": b.ok}
+
+
+# ---------- съёмки по проекту (HEAD 14.11): маркетолог предлагает, ГИП объекта подтверждает ----------
+# Таблица mkt_shoots — общая с «Маркетинг → Съёмки». proposed — ждёт ГИП; «Подтверждаю» → planned;
+# «Другая дата» — alt_date, статус остаётся proposed, маркетолог принимает дату (→ planned) или предлагает свою.
+
+class ShootPropose(BaseModel):
+    shoot_date: date
+    at_time: str | None = Field(default=None, max_length=40)
+    title: str = Field(min_length=2, max_length=200)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class ShootAnswer(BaseModel):
+    ok: bool
+    alt_date: date | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+
+def _tell(conn, person_id: int | None, text: str) -> None:
+    if not person_id:
+        return
+    r = conn.execute("SELECT tg_id FROM people WHERE id=%s AND status='active'", (person_id,)).fetchone()
+    if r and r["tg_id"]:
+        try:
+            from .dm import SEND
+            SEND(r["tg_id"], text)
+        except Exception as e:  # noqa: BLE001 — бот недоступен: съёмка всё равно в карточке
+            print("shoot notify:", e, file=sys.stderr)
+
+
+def _shoot_obj(conn, oid: int) -> dict:
+    o = conn.execute("SELECT id, title, gip_person_id FROM objects WHERE id=%s AND id<>0", (oid,)).fetchone()
+    if not o:
+        raise HTTPException(404, "Нет такого проекта")
+    return o
+
+
+@router.get("/objects/{oid}/shoots")
+def obj_shoots(oid: int, p: dict = Depends(active)):
+    with db.pool.connection() as conn:
+        o = _shoot_obj(conn, oid)
+        confirm = p["role_code"] == "head" or o["gip_person_id"] == p["id"]
+        if not (confirm or p["role_code"] in MKT):
+            raise HTTPException(403, "Съёмки видят маркетинг, ГИП и HEAD")
+        rows = conn.execute("""SELECT s.id, s.title, s.shoot_date, s.at_time, s.note, s.status, s.alt_date, s.alt_note, s.confirmed_at,
+                                      a.full_name AS author, c.full_name AS confirmed_name
+                               FROM mkt_shoots s JOIN people a ON a.id=s.author_id LEFT JOIN people c ON c.id=s.confirmed_by
+                               WHERE s.object_id=%s AND s.status<>'cancelled' ORDER BY s.shoot_date DESC, s.id DESC""", (oid,)).fetchall()
+    return {"items": rows, "can_propose": p["role_code"] in MKT, "can_confirm": confirm, "gip": bool(o["gip_person_id"])}
+
+
+@router.post("/objects/{oid}/shoots")
+def obj_shoot_propose(oid: int, b: ShootPropose, p: dict = Depends(active)):
+    if p["role_code"] not in MKT:
+        raise HTTPException(403, "Съёмку предлагает маркетинг")
+    with db.pool.connection() as conn, conn.transaction():
+        o = _shoot_obj(conn, oid)
+        st = "planned" if p["role_code"] == "head" else "proposed"   # HEAD ставит сразу
+        r = conn.execute("""INSERT INTO mkt_shoots (title, shoot_date, at_time, object_id, note, status, author_id, confirmed_by, confirmed_at)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                         (b.title.strip(), b.shoot_date, b.at_time, oid, b.note, st, p["id"],
+                          p["id"] if st == "planned" else None, datetime.now(timezone.utc) if st == "planned" else None)).fetchone()
+        db.audit(conn, p["id"], "shoot_propose", "mkt_shoots", r["id"], {"object": oid, "date": str(b.shoot_date)})
+        if st == "proposed":
+            _tell(conn, o["gip_person_id"], f"🎥 {p['full_name']} предлагает съёмку на объекте «{o['title']}»: {b.shoot_date:%d.%m}"
+                  f"{' ' + b.at_time if b.at_time else ''} — {b.title}. Подтвердите в карточке проекта.")
+    return {"id": r["id"], "status": st}
+
+
+def _shoot(conn, sid: int) -> dict:
+    s = conn.execute("""SELECT s.*, o.gip_person_id, o.title AS object_title FROM mkt_shoots s JOIN objects o ON o.id=s.object_id
+                        WHERE s.id=%s""", (sid,)).fetchone()
+    if not s:
+        raise HTTPException(404, "Нет такой съёмки")
+    return s
+
+
+@router.post("/shoots/{sid}/answer")
+def shoot_answer(sid: int, b: ShootAnswer, p: dict = Depends(active)):
+    """ГИП объекта (или HEAD): «Подтверждаю» или «Другая дата» с датой и комментарием."""
+    with db.pool.connection() as conn, conn.transaction():
+        s = _shoot(conn, sid)
+        if not (p["role_code"] == "head" or s["gip_person_id"] == p["id"]):
+            raise HTTPException(403, "Съёмку подтверждает ГИП объекта")
+        if s["status"] != "proposed":
+            raise HTTPException(409, "Съёмка уже не ждёт ответа")
+        if b.ok:
+            conn.execute("""UPDATE mkt_shoots SET status='planned', confirmed_by=%s, confirmed_at=now(), alt_date=NULL, updated_at=now()
+                            WHERE id=%s""", (p["id"], sid))
+            text = f"✅ {p['full_name']} подтвердил съёмку «{s['title']}» {s['shoot_date']:%d.%m} на объекте «{s['object_title']}»."
+        else:
+            if not b.alt_date:
+                raise HTTPException(400, "Укажите другую дату")
+            conn.execute("UPDATE mkt_shoots SET alt_date=%s, alt_note=%s, updated_at=now() WHERE id=%s", (b.alt_date, b.note, sid))
+            text = (f"📅 {p['full_name']} предлагает другую дату съёмки «{s['title']}»: {b.alt_date:%d.%m}"
+                    f"{' — ' + b.note if b.note else ''}. Примите в карточке проекта.")
+        db.audit(conn, p["id"], "shoot_answer", "mkt_shoots", sid, {"ok": b.ok, "alt": str(b.alt_date) if b.alt_date else None})
+        _tell(conn, s["author_id"], text)
+    return {"ok": True}
+
+
+@router.post("/shoots/{sid}/accept")
+def shoot_accept(sid: int, p: dict = Depends(active)):
+    """Маркетинг принимает дату, которую предложил ГИП: съёмка в плане."""
+    if p["role_code"] not in MKT:
+        raise HTTPException(403, "Дату принимает маркетинг")
+    with db.pool.connection() as conn, conn.transaction():
+        s = _shoot(conn, sid)
+        if s["status"] != "proposed" or not s["alt_date"]:
+            raise HTTPException(409, "Другой даты нет")
+        conn.execute("""UPDATE mkt_shoots SET status='planned', shoot_date=alt_date, alt_date=NULL, confirmed_by=%s, confirmed_at=now(),
+                        updated_at=now() WHERE id=%s""", (s["gip_person_id"] or p["id"], sid))
+        db.audit(conn, p["id"], "shoot_accept", "mkt_shoots", sid, {})
+        _tell(conn, s["gip_person_id"], f"✅ Съёмка «{s['title']}» на объекте «{s['object_title']}» — {s['alt_date']:%d.%m}, как вы предложили.")
+    return {"ok": True}

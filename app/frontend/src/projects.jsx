@@ -74,8 +74,9 @@ function PCard({ x, onOpen }) {
 function ProjectCard({ x, me, back, openDeal }) {
   const [chat, setChat] = useState(false)
   const [st, cls] = STATE[x.state]
+  const mkt = me?.role_code === 'marketer'   // маркетингу — только контент и съёмки (HEAD 14.11)
   const c = x.cond || {}
-  const kv = [['Город', x.city], ['Площадь', x.area ? `${x.area} м²` : ''], ['Сложность', x.level || 'МОП ещё не указал'],
+  const kv = [['Город', x.city], ...(mkt ? [['ГИП', x.gip?.name || 'не назначен']] : []), ['Площадь', x.area ? `${x.area} м²` : ''], ['Сложность', x.level || 'МОП ещё не указал'],
     ['Старт', x.start ? dmy(x.start) : ''], ['Сдача', x.due ? dmy(x.due) : ''], ['Смены', x.norm.shifts ? `${x.done.shifts} из ${x.norm.shifts}` : x.done.shifts ? String(x.done.shifts) : ''],
     ['Состав по норме', x.norm.crew ? `${x.norm.crew} чел.` : ''], ['МОП', x.manager]].filter(([, v]) => v)
   if (chat) return <ProjChat id={x.id} back={() => { setChat(false); if (x.chat) x.chat.unread = 0 }} backText={'← ' + cleanTitle(x.title, x.id)} />
@@ -93,18 +94,20 @@ function ProjectCard({ x, me, back, openDeal }) {
       <div className="conds light">{COND.map(([k, t]) => <span key={k} className={c[k] ? 'on' : ''}>{c[k] ? '● ' : ''}{t}</span>)}</div>
       {x.address && <a className="route" onClick={() => openUrl(route(x))}>📍 {x.address}<i className="small">Маршрут в 2ГИС ›</i></a>}
       {x.id > 0 && x.contact && <SiteContact id={x.id} c={x.contact} />}
-      <Plan x={x} />
+      {!mkt && <Plan x={x} />}
       <div className="kvgrid">{kv.map(([k, v]) => <div key={k}><span>{k}</span><b>{v}</b></div>)}</div>
       {openDeal && <button className="ghost" onClick={() => openDeal(x.id)}>Открыть сделку</button>}
     </div>
-    <TeamBox x={x} me={me} />
+    {!mkt && <TeamBox x={x} me={me} />}
+    {me && x.id > 0 && (mkt || me.role_code === 'head' || x.gip?.id === me.id) && <ShootsBox id={x.id} />}
+    {!mkt && <>
     {me && x.id > 0 && <DesignBox id={x.id} me={me} obj={{ id: x.id, title: x.title }} />}
     {me && x.id > 0 && <MaterialsBox id={x.id} />}
     {me && x.id > 0 && <TripBox id={x.id} />}
-    {me && x.id > 0 && MONEY.has(me.role_code) && <MoneyBox id={x.id} />}
+    {me && x.id > 0 && MONEY.has(me.role_code) && <MoneyBox id={x.id} />}</>}
     <Gallery obj={{ id: x.id, title: x.title }} me={me} start="photo" skip={['design']} top={x.id > 0 && <PromoLine id={x.id} />} />
-    {me && x.id > 0 && (x.working || x.closing) && <DoneBox id={x.id} />}
-    {me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} />}
+    {!mkt && me && x.id > 0 && (x.working || x.closing) && <DoneBox id={x.id} />}
+    {!mkt && me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} />}
   </>
 }
 
@@ -175,6 +178,49 @@ function PromoLine({ id }) {
     <span className="small">Клиент на публикацию: <b className={d.publish ? 'ok' : d.publish === false ? 'why' : 'muted'}>{PUB[d.publish]}</b></span>
     {d.can_set && <div className="chips">{[[true, 'Разрешил'], [false, 'Нет'], [null, 'Не спросили']].map(([v, t]) =>
       <button key={t} className={d.publish === v ? 'on' : 'ghost'} onClick={() => set(v)}>{t}</button>)}</div>}
+  </div>
+}
+
+// Съёмки по проекту (HEAD 14.11): маркетинг предлагает дату, ГИП объекта подтверждает или предлагает другую.
+// Подтверждённая съёмка — в «Маркетинг → Съёмки».
+const dmy2 = d => String(d).slice(0, 10).split('-').reverse().slice(0, 2).join('.')
+function ShootsBox({ id }) {
+  const [d, setD] = useState(null)
+  const [f, setF] = useState(null)
+  const [alt, setAlt] = useState(null)
+  const [msg, setMsg] = useState('')
+  const load = () => api(`/objects/${id}/shoots`).then(setD, () => setD(false))
+  useEffect(() => { load() }, [id])
+  if (!d) return null
+  const done = r => { setF(null); setAlt(null); setMsg(r?.status === 'proposed' ? (d.gip ? 'Отправлено ГИП на подтверждение.' : 'ГИП не назначен — подтвердит HEAD.') : ''); load() }
+  const err = e => setMsg(e.message)
+  const propose = () => api(`/objects/${id}/shoots`, { method: 'POST', body: f }).then(done, err)
+  const answer = (sid, body) => api(`/shoots/${sid}/answer`, { method: 'POST', body }).then(done, err)
+  const accept = sid => api(`/shoots/${sid}/accept`, { method: 'POST' }).then(done, err)
+  return <div className="card shoots">
+    <div className="head"><h3>Съёмки</h3>{d.can_propose && !f && <button className="mini" onClick={() => setF({ shoot_date: '', at_time: '', title: '', note: '' })}>+ Предложить съёмку</button>}</div>
+    {f && <div className="warnbox">
+      <div className="pair"><input type="date" value={f.shoot_date} onChange={e => setF({ ...f, shoot_date: e.target.value })} />
+        <input placeholder="Время, напр. 10:00" value={f.at_time} onChange={e => setF({ ...f, at_time: e.target.value })} /></div>
+      <input placeholder="Что снимаем: процесс, готовый объект, интервью…" value={f.title} onChange={e => setF({ ...f, title: e.target.value })} />
+      <textarea rows="2" placeholder="Что нужно от бригады (по желанию)" value={f.note} onChange={e => setF({ ...f, note: e.target.value })} />
+      <div className="seg"><button className="ghost" onClick={() => setF(null)}>Отмена</button>
+        <button disabled={!f.shoot_date || f.title.trim().length < 2} onClick={propose}>{d.can_confirm ? 'Поставить' : 'Отправить ГИП'}</button></div>
+    </div>}
+    {msg && <p className="small muted">{msg}</p>}
+    {!d.items.length && !f && <p className="small muted">{d.can_propose ? 'Съёмок по проекту пока нет. Предложите дату — ГИП подтвердит.' : 'Съёмок по проекту пока нет.'}</p>}
+    {d.items.map(x => <div key={x.id} className="shoot">
+      <div className="row"><div><b>{dmy2(x.shoot_date)}{x.at_time ? ' · ' + x.at_time : ''} · {x.title}</b>
+        <div className="small muted">{[x.author, x.note].filter(Boolean).join(' · ')}</div>
+        {x.alt_date && <div className="small why">ГИП предлагает {dmy2(x.alt_date)}{x.alt_note ? ': ' + x.alt_note : ''}</div>}</div>
+        <span className={'small nowrap ' + (x.status === 'proposed' ? 'muted' : 'ok')}>{x.status === 'proposed' ? 'ждёт ГИП' : x.status === 'done' ? 'снято' : 'в плане'}</span></div>
+      {x.status === 'proposed' && d.can_confirm && !x.alt_date && (alt === x.id
+        ? <div className="altd"><input type="date" onChange={e => (x._d = e.target.value)} /><input placeholder="Почему другая дата" onChange={e => (x._n = e.target.value)} />
+            <div className="seg"><button className="ghost" onClick={() => setAlt(null)}>Отмена</button>
+              <button onClick={() => answer(x.id, { ok: false, alt_date: x._d || null, note: x._n || null })}>Предложить дату</button></div></div>
+        : <div className="seg"><button className="ghost" onClick={() => setAlt(x.id)}>Другая дата</button><button onClick={() => answer(x.id, { ok: true })}>Подтверждаю</button></div>)}
+      {x.status === 'proposed' && x.alt_date && d.can_propose && <div className="seg"><button onClick={() => accept(x.id)}>Принять {dmy2(x.alt_date)}</button></div>}
+    </div>)}
   </div>
 }
 
