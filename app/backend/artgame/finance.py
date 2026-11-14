@@ -48,7 +48,7 @@ SALARY_ROLE = {"carpenter": "pay.carpenter.month", "designer_asst": "pay.design_
 MINIMUM = {"lead_artist": "pay.chief.min_month", "artist_pro": "pay.pro.min_month"}
 GROUP = {"support": "support", "artist": "core", "artist_pro": "core", "lead_artist": "core", "print_operator": "print",
          "print_master": "print", "mop": "sales", "mop_vip": "sales", "carpenter": "workshop",
-         "lead_designer": "core", "designer_asst": "core"}
+         "lead_designer": "core", "designer_asst": "core", "marketer": "marketing"}
 GROUP_TITLE = {"core": "Основной состав", "support": "Саппорты", "print": "Печать", "sales": "Продажи", "workshop": "Мастерская",
                "office": "Офис", "marketing": "Маркетинг", "contractor": "Подрядчики"}
 IN_KINDS = {"income", "opening"}

@@ -7,7 +7,7 @@ from datetime import date
 from pydantic import BaseModel, Field
 
 from . import constants as consts
-from . import appeals, closing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring
+from . import appeals, closing, marketing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring
 from . import bx, bxw, db, deal_money, design, files, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
@@ -26,6 +26,7 @@ app.include_router(weekly.router)
 app.include_router(projchat.router)   # чат проекта (HEAD 13.11)
 app.include_router(recurring.router)   # график постоянных оплат (HEAD 12.11)
 app.include_router(trips.router)
+app.include_router(marketing.router)   # контент-план маркетинга (HEAD 14.11)
 app.include_router(media.router)   # до work: там общий /{kind}/{id}/review
 app.include_router(appeals.router)   # до work: /appeals/{id}/rate|cancel, а не общий /{kind}/{id}/…
 app.include_router(work.router)
@@ -93,7 +94,7 @@ def register(body: RegisterIn, user: dict = Depends(tg_user)):
              "head" if is_head else None, "active" if is_head else "pending"),
         ).fetchone()
         if is_head:
-            conn.execute("INSERT INTO person_zones (person_id, zone_code) SELECT %s, code FROM zones", (row["id"],))
+            conn.execute("INSERT INTO person_zones (person_id, zone_code) SELECT %s, code FROM zones WHERE code<>'marketing'", (row["id"],))
         db.audit(conn, row["id"], "register", "people", row["id"])
         p = load_person(conn, tg_id)
     if not is_head and settings.head_tg_id and settings.bot_token:
