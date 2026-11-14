@@ -38,6 +38,7 @@ def pulse(p: dict = Depends(require_head)):
                            (SELECT coalesce(sum(amount),0) FROM fin_ledger WHERE source='app' AND status='active' AND checked_at IS NULL
                              AND article_code IN ('client_payment','design_prepay')) AS payments_sum""")
         catalogs = one("SELECT count(*) AS n FROM design_catalogs WHERE status='sent'")["n"]
+        design_wait = one("SELECT count(*) AS n FROM design_extras WHERE status='sent'")["n"]   # дизайн из карточки проекта (HEAD 14.11)
         feedback = conn.execute(   # «Обращения» (HEAD 08.11): новые и в работе
             """SELECT f.id, f.kind, f.text, f.place, f.status, f.created_at, pe.full_name, r.title AS role_title
                FROM feedback f JOIN people pe ON pe.id=f.person_id LEFT JOIN roles r ON r.code=f.role_code
@@ -67,5 +68,5 @@ def pulse(p: dict = Depends(require_head)):
                              count(DISTINCT person_id) AS people
                       FROM shifts WHERE started_at > now() - interval '7 days' AND status<>'cancelled'""")
     return {"pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"]), "payments_sum": float(rv["payments_sum"])},
-            "catalogs": catalogs, "media": media, "posts": posts, "feedback": feedback, "dm": dm,
+            "catalogs": catalogs, "design_wait": design_wait, "media": media, "posts": posts, "feedback": feedback, "dm": dm,
             "bills": bills, "today": today, "team": team, "feed": feed, "week": week}
