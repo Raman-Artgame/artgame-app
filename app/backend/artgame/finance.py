@@ -399,7 +399,7 @@ def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
     sync_payees(conn)
     warn: list[str] = []
     one = "" if only_person is None else " AND payee_id IN (SELECT id FROM fin_payees WHERE person_id=%s)"
-    conn.execute("UPDATE fin_accruals SET status='cancelled' WHERE period=%s AND status='active' AND kind <> 'manual'" + one,
+    conn.execute("UPDATE fin_accruals SET status='cancelled' WHERE period=%s AND status IN ('active','pending') AND kind <> 'manual'" + one,
                  (ym,) if only_person is None else (ym, only_person))
     payees_ = conn.execute("""SELECT f.*, pe.role_code, pe.print_exam_on FROM fin_payees f LEFT JOIN people pe ON pe.id=f.person_id
                               WHERE f.status='active'""" + ("" if only_person is None else " AND f.person_id=%s"),
@@ -410,10 +410,13 @@ def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
         if rev_warn:
             warn.append(rev_warn)
 
-    def acc(pid, kind, amount, detail, ref=None):
+    def acc(pid, kind, amount, detail, ref=None, status="active"):
         if amount:
-            conn.execute("INSERT INTO fin_accruals (period, payee_id, kind, amount, detail, ref, created_by) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                         (ym, pid, kind, round(amount, 2), detail, ref, by["id"]))
+            conn.execute("INSERT INTO fin_accruals (period, payee_id, kind, amount, detail, ref, created_by, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                         (ym, pid, kind, round(amount, 2), detail, ref, by["id"], status))
+
+    # HEAD 14.11: доплата до минимума, пока месяц идёт, — отдельно «по итогам месяца», в начислено и «осталось» не входит
+    running = ym >= now_ym()
 
     t0, t1 = datetime(start.year, start.month, 1, tzinfo=TZ), datetime(end.year, end.month, 1, tzinfo=TZ)
     from . import design
@@ -459,7 +462,8 @@ def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
             acc(f["id"], "salary", fixed, "оклад")
             minimum = v.get(MINIMUM.get(role, ""), 0)
             if minimum and piece + bonus + fixed < minimum:
-                acc(f["id"], "topup", minimum - piece - bonus - fixed, f"доплата до минимума {minimum:,.0f} ₸".replace(",", " "))
+                acc(f["id"], "topup", minimum - piece - bonus - fixed, f"доплата до минимума {minimum:,.0f} ₸".replace(",", " ")
+                    + (" — по итогам месяца" if running else ""), status="pending" if running else "active")
         elif f["scheme"] == "salary":
             amount = _f(f["amount"]) or (v.get(f["amount_key"]) if f["amount_key"] else 0)
             if amount:
@@ -517,6 +521,7 @@ def payroll(ym: str, p: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         pays = conn.execute("SELECT * FROM fin_payees ORDER BY grp, name").fetchall()
         accs = conn.execute("SELECT * FROM fin_accruals WHERE period=%s AND status='active' ORDER BY id", (ym,)).fetchall()
+        pend = conn.execute("SELECT * FROM fin_accruals WHERE period=%s AND status='pending' ORDER BY id", (ym,)).fetchall()
         paid = conn.execute("""SELECT payee_id, coalesce(sum(amount),0) AS s, max(op_date) AS last FROM fin_ledger
                                WHERE period=%s AND article_code='payroll' AND status='active' GROUP BY payee_id""", (ym,)).fetchall()
     paid_by = {r["payee_id"]: r for r in paid}
@@ -525,13 +530,15 @@ def payroll(ym: str, p: dict = Depends(require_head)):
         lines = [a for a in accs if a["payee_id"] == f["id"]]
         accrued = sum(_f(a["amount"]) for a in lines)
         got = _f(paid_by.get(f["id"], {}).get("s"))
+        later = [a for a in pend if a["payee_id"] == f["id"]]
         if not lines and not got and f["status"] != "active":
             continue
         rows.append({"id": f["id"], "name": f["name"], "grp": f["grp"], "group": GROUP_TITLE[f["grp"]], "scheme": f["scheme"],
                      "pay_rule": f["pay_rule"], "lines": lines, "accrued": accrued, "paid": got,
+                     "pending": later, "pending_sum": sum(_f(a["amount"]) for a in later),
                      "left": round(accrued - got, 2), "last_paid": paid_by.get(f["id"], {}).get("last")})
     return {"month": ym, "rows": rows, "accrued": sum(r["accrued"] for r in rows), "paid": sum(r["paid"] for r in rows),
-            "left": sum(r["left"] for r in rows)}
+            "left": sum(r["left"] for r in rows), "pending": sum(r["pending_sum"] for r in rows)}
 
 
 class ManualIn(BaseModel):
@@ -626,7 +633,7 @@ def my_pay(ym: str | None = None, p: dict = Depends(active)):
         # тот же compute, только для себя и в транзакции, которая откатывается; ФОТ месяца закрывает HEAD.
         from .fin_bx import START
         live = ym >= f"{START:%Y-%m}" and p["role_code"] != "head"
-        lines = []
+        lines, pending = [], []
         if live:
             with conn.transaction(force_rollback=True):
                 compute(conn, ym, p, only_person=p["id"])
@@ -634,8 +641,10 @@ def my_pay(ym: str | None = None, p: dict = Depends(active)):
                 if f:
                     lines = conn.execute("""SELECT kind, amount, detail FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='active'
                                             ORDER BY id""", (ym, f["id"])).fetchall()
+                    pending = conn.execute("""SELECT kind, amount, detail FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='pending'
+                                              ORDER BY id""", (ym, f["id"])).fetchall()
         if not f:
-            return {"month": ym, "lines": [], "accrued": 0, "paid": 0, "left": 0, "rate": rate, "live": live}
+            return {"month": ym, "lines": [], "pending": [], "accrued": 0, "paid": 0, "left": 0, "rate": rate, "live": live}
         if not live:
             lines = conn.execute("""SELECT kind, amount, detail FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='active' ORDER BY id""",
                                  (ym, f["id"])).fetchall()
@@ -643,7 +652,7 @@ def my_pay(ym: str | None = None, p: dict = Depends(active)):
                                FROM fin_ledger l JOIN fin_accounts a ON a.code=l.account_code WHERE l.period=%s AND l.payee_id=%s
                                AND l.article_code='payroll' AND l.status='active' ORDER BY l.op_date""", (ym, f["id"])).fetchall()]
     accrued, paid = sum(_f(x["amount"]) for x in lines), sum(_f(x["amount"]) for x in pays)
-    return {"month": ym, "lines": lines, "payments": pays, "accrued": accrued, "paid": paid, "left": round(accrued - paid, 2), "rate": rate, "live": live}
+    return {"month": ym, "lines": lines, "pending": pending, "payments": pays, "accrued": accrued, "paid": paid, "left": round(accrued - paid, 2), "rate": rate, "live": live}
 
 
 @router.post("/fin/my/ack/{ledger_id}")
