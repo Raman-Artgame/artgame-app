@@ -284,8 +284,10 @@ function DesignBox({ id, me, obj }) {
   const [d, setD] = useState(null)
   const [f, setF] = useState(null)
   const [msg, setMsg] = useState('')
-  const load = () => api(`/design/object/${id}`).then(setD, e => setMsg(e.message))
+  const [gone, setGone] = useState(false)   // объекта ещё нет в приложении (сделка только что пришла, синхронизация раз в 10 мин) — блок не показываем
+  const load = () => api(`/design/object/${id}`).then(setD, e => e.status === 404 ? setGone(true) : setMsg(e.message))
   useEffect(() => { load() }, [id])
+  if (gone) return null
   if (!d) return msg ? <div className="card"><p className="small why">{msg}</p></div> : null
   const units = z => String((d.sizes.find(s => s.code === z) || {}).units ?? '').replace('.', ',')
   const size = z => api(`/design/object/${id}/size`, { method: 'POST', body: { size: z } }).then(r => { setMsg(r.bx.startsWith('error') ? 'В Битрикс не записалось, попробуйте ещё раз' : ''); load() }, e => setMsg(e.message))

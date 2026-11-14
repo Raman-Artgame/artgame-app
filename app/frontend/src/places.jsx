@@ -49,7 +49,7 @@ export function Embed({ place, view, dealId, kp, ds, onDoc }) {
   if (!place) return <p className="small muted">Рабочее место МОП недоступно для вашей роли.</p>
   try { localStorage.setItem('artgame.bx.open', JSON.stringify({ id: dealId, view, kp, ds, t: Date.now() })) } catch { /* без памяти */ }
   return <div className="embed">
-    <iframe key={view + dealId + n} title={view} src={`${place.url}?mode=embed#${view}`} />
+    <iframe key={view + dealId + n} title={view} src={`${place.url}?mode=embed&dark=1#${view}`} />
     <button className="ghost mini" style={{ position: 'absolute', top: 8, right: 8 }} onClick={() => setN(n + 1)}>Заново</button>
   </div>
 }

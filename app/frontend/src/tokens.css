@@ -550,7 +550,7 @@ body.viewas.web .webbar { margin-top: 0; }
 .tbcard .tbrow { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line2); }
 .tbcard .tbrow b { flex: none; min-width: 82px; color: var(--accent2); font-size: 18px; }
 /* Нижнее меню лентой (художники и печать, HEAD 08.11): 8 кнопок, листается */
-nav.scroll { display: flex; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
+nav.scroll { display: flex; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; scroll-padding: 0 30px; }
 nav.scroll::-webkit-scrollbar { display: none; }
 nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-snap-align: start; }
 /* Выдано и допуски */
@@ -1004,3 +1004,16 @@ button.pchatbtn:hover { background: var(--hotbg); }
 .card.shoots .shoot { border-top: 1px solid var(--line2); padding-top: 6px; margin-top: 6px; }
 .card.shoots .shoot .seg input { flex: 1; min-width: 0; }
 .card.shoots .altd { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+
+/* Нижнее меню листается (HEAD 14.11): у края с ещё кнопками — затемнение со стрелкой, точка — непрочитанное за краем */
+.navhint { position: fixed; bottom: 0; z-index: 11; width: 34px; height: calc(64px + env(safe-area-inset-bottom)); padding: 0 0 env(safe-area-inset-bottom); display: flex; align-items: center; justify-content: center;
+  font: 700 26px/1 Onest, Inter, system-ui; color: #fff; pointer-events: none; }
+.navhint.r { right: max(0px, calc((100vw - 480px) / 2)); background: linear-gradient(to right, rgba(38, 34, 43, 0), var(--dark) 55%); border-top-right-radius: 18px; }
+.navhint.l { left: max(0px, calc((100vw - 480px) / 2)); background: linear-gradient(to left, rgba(38, 34, 43, 0), var(--dark) 55%); border-top-left-radius: 18px; }
+.navhint.dot::after { content: ""; position: absolute; top: 14px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+/* Звонок и WhatsApp — двумя кнопками во всю ширину (HEAD 14.11) */
+.contact .dealbtns.callbtns { flex: 1 1 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.contact .callbtns .btn { text-align: center; }
+.contact .callnote { flex: 1 1 100%; margin: 0; }
+.dealbtns .morebtn.on { background: var(--dark-line); }
+.moreacts { margin-top: 8px; }

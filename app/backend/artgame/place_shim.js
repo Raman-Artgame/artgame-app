@@ -126,13 +126,18 @@
   if (qp.get('dark') === '1') {
     var st3 = document.createElement('style')
     // текст светлый (--ink), а «чернильные» блоки (герои, карточки, таблицы), что красились тем же --ink, — графитовые
-    var INKBG = '.hero,.mhero,.btn.dark,.mcard,th,.call .bx,.chip,.kinds button.on,.card,.dots i.c,.steps a,.qs button,.alert,.calc .out'
+    var INKBG = '.hero,.mhero,.btn.dark,.mcard,th,.call .bx,.chip,.kinds button.on,.card,.dots i.c,.steps a,.qs button,.alert,.calc .out,.uhero,.ucim'
     st3.textContent = ':root{--paper:#0B0B0D!important;--card:#151418!important;--alt:#1C1A20!important;--ink:#F1F0EC!important;' +
       '--ink2:#2A2530!important;--mut:#A9A3AE!important;--line:#2C2832!important;--on-ink:#F1F0EC!important;--on-ink-mut:#A9A3AE!important;' +
       '--ok:#3DDC97!important;--okbg:#12301F!important;--nobg:#3A1020!important;color-scheme:dark!important}' +
       INKBG + '{background-color:#1E1B22!important}.top img{filter:invert(1) hue-rotate(180deg)}' +
-      'input,select,textarea{background:#1C1A20;color:#F1F0EC;border-color:#2C2832}'
+      'input,select,textarea{background:#1C1A20;color:#F1F0EC;border-color:#2C2832}' +
+      // HEAD 14.11: учебник и бланк договора/КП — тоже тёмные; сам лист документа (как бумага) остаётся белым
+      'body{background:var(--paper)!important;color:var(--ink)!important}.dpaste,.dprev{background:#1C1A20!important}' +
+      '.dnote,.beta{background:#2E2510!important;border-color:#5A4512!important;color:#F0D9A0!important}' +
+      'label.f input.dempty{background:#3A1020!important;border-color:#7A2A44!important}'
     document.head ? document.head.appendChild(st3) : document.documentElement.appendChild(st3)
+    document.documentElement.setAttribute('data-theme', 'dark')   // у генератора документов (#kpgen) своя тёмная палитра
   }
 
   // Ссылки на другие артефакты → открыть место в приложении.

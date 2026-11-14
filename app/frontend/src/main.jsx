@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api, inTelegram, setActRole, setViewAs, setWebToken, viewAs, webToken } from './api.js'
 import { Login } from './login.jsx'
@@ -154,8 +154,11 @@ function Main({ me, onMe, web, logout }) {
   // у HEAD это дубли Пульта и Сделок. В «Ещё» — по важности.
   const HEAD_FIRST = ['review', 'deals', 'projects', 'fin']   // HEAD 09.11: проекты — на главную, команда — в «Ещё»
   const HEAD_MORE = ['chat', 'closing', 'people', 'mkt', 'prod', 'design', 'leads', 'study', 'journal']   // склад — в «Финансы → Закупки»; «Месяц» — в Пульте; «Место» и «Смотреть как» убраны (HEAD 09.11)
+  // МОП (HEAD 14.11 «чтобы чат и кабинет не терялись»): Чат — в первых пяти, Кабинет — перед Учёбой; лента листается, край подсвечен.
+  const SALES_ORDER = ['today', 'leads', 'deals', 'chat', 'projects', 'pays', 'month', 'mine', 'study', 'place']
+  const ordered = sales && !isHead ? [...tabs].sort((a, b) => (SALES_ORDER.indexOf(a[0]) + 1 || 99) - (SALES_ORDER.indexOf(b[0]) + 1 || 99)) : tabs
   const menu = isHead ? [['home', 'Пульт'], ...HEAD_FIRST.map(k => tabs.find(x => x[0] === k)).filter(Boolean),
-    ...HEAD_MORE.map(k => tabs.find(x => x[0] === k)).filter(Boolean)] : tabs
+    ...HEAD_MORE.map(k => tabs.find(x => x[0] === k)).filter(Boolean)] : ordered
   // в «Кабинете» — обе роли; у «и.о.» — исполняемая и основная; у каждой — «Как подняться» (HEAD 09.11)
   const dcodes = [...new Set([...(me.acting ? [role] : []), ...(me.roles?.length ? me.roles : [role])])].filter(r => DUTIES[r])
   // «Мой путь» (HEAD 11.11): следующая ступень — первой карточкой «Кабинета», а не в конце «Правил игры».
@@ -404,12 +407,31 @@ function Nav({ tabs, tab, setTab, counts = {}, scroll }) {
   const main = fold ? tabs.slice(0, MAX - 1) : tabs
   const rest = fold ? tabs.slice(MAX - 1) : []
   const inRest = rest.find(([k]) => k === tab)
+  // лента листается (HEAD 14.11): у края, за которым ещё кнопки, — затемнение со стрелкой (только рисунок, нажатия проходят к кнопкам); точка — если там непрочитанное
+  const ref = useRef(null)
+  const [edge, setEdge] = useState({ l: false, r: false, dot: false })
+  const on = scroll && tabs.length > MAX
+  useEffect(() => {
+    const n = ref.current
+    if (!on || !n) return
+    const upd = () => {
+      const r = n.scrollLeft + n.clientWidth < n.scrollWidth - 4
+      const dot = [...n.querySelectorAll('button')].some(b => b.querySelector('.cnt') && b.offsetLeft + b.offsetWidth / 2 > n.scrollLeft + n.clientWidth)
+      setEdge(e => (e.l === n.scrollLeft > 4 && e.r === r && e.dot === dot) ? e : { l: n.scrollLeft > 4, r, dot })
+    }
+    upd()
+    n.addEventListener('scroll', upd, { passive: true })
+    window.addEventListener('resize', upd)
+    return () => { n.removeEventListener('scroll', upd); window.removeEventListener('resize', upd) }
+  }, [on, tabs.length, tab, JSON.stringify(counts)])
   return <>
     {more && <div className="sheet" onClick={() => setMore(false)}><div className="sheetbox" onClick={e => e.stopPropagation()}>
       {rest.map(([k, t]) => <button key={k} className={'ghost' + (tab === k ? ' on' : '')} onClick={() => { setTab(k); setMore(false) }}><Icon k={k} />{t}</button>)}
     </div></div>}
     <div className="navspace" aria-hidden="true" />{/* место под панель: она закреплена у нижнего края (HEAD 09.11: «везде прыгает») */}
-    <nav className={scroll && tabs.length > MAX ? 'scroll' : ''}>
+    {on && edge.l && <div className="navhint l" aria-hidden="true">‹</div>}
+    {on && edge.r && <div className={'navhint r' + (edge.dot ? ' dot' : '')} aria-hidden="true">›</div>}
+    <nav ref={ref} className={on ? 'scroll' : ''}>
       {main.map(([k, t]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}
         ref={el => { if (el && tab === k && scroll) el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }) }}><Icon k={k} />{t}{counts[k] ? <i className="cnt" aria-hidden="true">{counts[k]}</i> : null}</button>)}
       {rest.length > 0 && <button className={inRest ? 'on' : ''} onClick={() => setMore(true)}><Icon k={inRest ? inRest[0] : 'more'} />{inRest ? inRest[1] : 'Ещё'}</button>}

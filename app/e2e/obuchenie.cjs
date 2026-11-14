@@ -5,6 +5,7 @@ const fs = require('fs')
 const BE = __dirname + '/../backend'
 const OUT = process.env.OUT
 const sign = id => execSync(`cd ${BE} && python3 -c "import sys;sys.path+=['tests'];from conftest import make_init_data;print(make_init_data({'id':${id},'first_name':'Тест'}))"`).toString().trim()
+const act = async (p, name) => { const b = p.locator('.hero').getByRole('button', { name, exact: true }); if (!(await b.count())) await p.locator('.hero .morebtn').click(); await b.first().click() }   // редкие действия — под «Ещё действия» (HEAD 14.11)
 const API = 'http://127.0.0.1:8100/api'
 const call = async (id, path, body) => (await fetch(API + path, { method: body ? 'POST' : 'GET',
   headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': sign(id) }, body: body && JSON.stringify(body) })).json()
@@ -135,7 +136,7 @@ const mopFrame = p => p.frames().find(f => f.url().includes('/api/p/mop/'))
   await cap(p, 'Шаг 6 · Замок', 'Договор закрыт: в сделке ещё нет КП. Так приложение не даёт пропустить шаг.', 4500)
   await scroll(p, 0, 900)
   // Помощник
-  await p.locator('.hero').getByRole('button', { name: 'Заполнить карточку' }).click()
+  await act(p, 'Заполнить карточку')
   await p.locator('.sheetbox textarea').waitFor()
   await cap(p, 'Шаг 7 · Заполнить карточку', 'Сюда можно вставить переписку из WhatsApp или анкету клиента.', 3800)
   await p.locator('.sheetbox textarea').fill('Здравствуйте! Нужна роспись в кафе, Астана, ул. Достык 5, примерно 60 м². Аванс 50%, срок 20 дней. ТОО «Ромашка», БИН 123456789012')
@@ -175,7 +176,7 @@ const mopFrame = p => p.frames().find(f => f.url().includes('/api/p/mop/'))
   await p.locator('.toast', { hasText: 'Итог звонка записан.' }).waitFor()
   await W(p, 1500)
   // Стадия под замком
-  await p.locator('.hero').getByRole('button', { name: 'Стадия' }).click()
+  await act(p, 'Стадия')
   await p.locator('.sheetbox select').selectOption('UC_AV00QK')
   await p.locator('.sheetbox .lockbox').waitFor(); await W(p, 600)
   await cap(p, 'Шаг 11 · Стадия', 'Стадию можно сменить вручную, но вперёд — только когда всё нужное заполнено. Замок покажет, чего не хватает.', 5500)

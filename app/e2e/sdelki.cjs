@@ -18,6 +18,7 @@ const person = async (h, name) => {
 const BE = __dirname + '/../backend'
 const PY = process.env.PY || `${BE}/.venv/bin/python`
 const sign = id => execSync(`cd ${BE} && ${PY} -c "import sys;sys.path+=['tests'];from conftest import make_init_data;print(make_init_data({'id':${id},'first_name':'Тест'}))"`).toString().trim()
+const act = async (p, name) => { const b = p.locator('.hero').getByRole('button', { name, exact: true }); if (!(await b.count())) await p.locator('.hero .morebtn').click(); await b.first().click() }   // редкие действия — под «Ещё действия» (HEAD 14.11)
 const API = 'http://127.0.0.1:8100/api'
 const call = async (id, path, body) => (await fetch(API + path, { method: body ? 'POST' : 'GET',
   headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': sign(id) }, body: body && JSON.stringify(body) })).json()
@@ -82,7 +83,7 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   const tiles = (await p.locator('.tiles').textContent()).match(/^1Горит(\d+)Сегодня(\d+)Можно позже/)
   assert.ok(tiles, 'плитки: 1 горит, затем сегодня и позже')
   assert.match(await p.locator('nav button', { hasText: 'Сегодня' }).textContent(), new RegExp(`${1 + +tiles[1]}$`), 'счётчик в меню')
-  assert.deepStrictEqual(await p.locator('nav button').allTextContents().then(a => a.map(x => x.replace(/\d+$/, ''))), ['Сегодня', 'Лиды', 'Сделки', 'Проекты', 'Месяц', 'Учёба', 'Кабинет', 'Чат'], 'у МОП все кнопки одной лентой (HEAD 08.11)')
+  assert.deepStrictEqual(await p.locator('nav button').allTextContents().then(a => a.map(x => x.replace(/\d+$/, ''))), ['Сегодня', 'Лиды', 'Сделки', 'Чат', 'Проекты', 'Месяц', 'Кабинет', 'Учёба'], 'у МОП все кнопки одной лентой, Чат четвёртым (HEAD 14.11)')
   assert.match(await p.locator('.bucket.today').textContent(), /№ 1601.*КП без ответа/)
   assert.strictEqual(await p.locator('.bucket.hot a.btn', { hasText: 'Ответить' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/lead/details/3001/')
   await p.locator('.strip').waitFor()
@@ -101,7 +102,8 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   assert.match(await p.locator('.hero .steps').textContent(), /Клиент.*Расчёт.*КП.*Договор.*Оплата.*В работе/)
   assert.match(await p.locator('.nextstep').textContent(), /Следующий шаг.*Расчёт.*Посчитать цену и срок/)
   assert.match(await p.locator('.contact').textContent(), /Ромашка.*\+77001112233/)
-  assert.strictEqual(await p.locator('.contact a.btn', { hasText: 'В Битриксе' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/deal/details/1601/')
+  assert.strictEqual(await p.locator('.contact a.btn', { hasText: 'Позвонить' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/deal/details/1601/')
+  assert.strictEqual(await p.locator('.contact a.btn', { hasText: 'WhatsApp' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/deal/details/1601/', 'звонок и WhatsApp — две кнопки, обе в карточку Битрикса (HEAD 14.11)')
   const calc = p.locator('.card', { has: p.locator('h3', { hasText: 'Расчёт' }) })
   assert.strictEqual(await calc.locator('input[type=number]').first().inputValue(), '25', 'площадь из сделки')
   await calc.locator('input[type=number]').first().fill('60')
@@ -137,13 +139,13 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   await p.locator('.lockbox', { hasText: 'КП в сделке' }).waitFor()
   await p.screenshot({ path: `${shots}/mop-lock.png` })
   // стадию вперёд не перевести, пока пусто; окно «Заполнить карточку» с помощником
-  await p.locator('.hero').getByRole('button', { name: 'Стадия' }).click()
+  await act(p, 'Стадия')
   await p.locator('.sheetbox select').selectOption('FINAL_INVOICE')
   await p.locator('.sheetbox .lockbox', { hasText: 'КП в сделке' }).waitFor()
   assert.ok(await p.getByRole('button', { name: 'Перевести' }).isDisabled())
   await p.waitForTimeout(600); await p.screenshot({ path: `${shots}/mop-stage-lock.png` })
   await p.locator('.sheetbox .x').click()
-  await p.locator('.hero').getByRole('button', { name: 'Заполнить карточку' }).click()
+  await act(p, 'Заполнить карточку')
   await p.locator('.sheetbox textarea').fill('Здравствуйте! Нужна роспись в кафе, Астана, ул. Достык 5, примерно 60 м². Аванс 50%, срок 20 дней. ТОО «Ромашка», БИН 123456789012')
   await p.locator('.sheetbox').getByRole('button', { name: 'Разобрать' }).click()
   await p.locator('.sheetbox p.small', { hasText: 'подставлено' }).waitFor()
@@ -173,11 +175,11 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   await p.locator('.sheetbox').getByRole('button', { name: 'Записать' }).click()
   await p.locator('.toast', { hasText: 'Итог звонка записан.' }).waitFor()
   // заметка и «Отложено» с датой
-  await p.locator('.hero').getByRole('button', { name: 'Заметка' }).click()
+  await act(p, 'Заметка')
   await p.locator('.sheetbox textarea').fill('Клиент просил перезвонить в четверг')
   await p.locator('.sheetbox').getByRole('button', { name: 'Записать' }).click()
   await p.locator('.toast', { hasText: 'Заметка записана' }).waitFor()
-  await p.locator('.hero').getByRole('button', { name: 'Стадия' }).click()
+  await act(p, 'Стадия')
   await p.locator('.sheetbox select').selectOption('UC_VCP4VO')
   assert.ok(await p.getByRole('button', { name: 'Перевести' }).isDisabled())   // только с датой возврата
   const until = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
@@ -239,7 +241,7 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   // Лиды (07.11): карточка → объект, город кнопкой, услуга → «В сделку» одной кнопкой → карточка новой сделки «9100 · ОБЪЕКТ — ГОРОД»
   await tab(p, 'Лиды')
   await p.locator('.qrow', { hasText: 'Дана' }).waitFor()
-  assert.match(await p.locator('.qrow', { hasText: 'Дана' }).textContent(), /нет: город.*нет: услугаждёт \d+ ч/)
+  assert.match(await p.locator('.qrow', { hasText: 'Дана' }).textContent(), /нет: город.*нет: услугаждёт \d+ (ч|дн\.)/)
   await p.screenshot({ path: `${shots}/mop-leads.png` })
   await p.locator('.qrow', { hasText: 'Дана' }).click()
   await p.locator('h3', { hasText: 'В сделку' }).waitFor()
@@ -269,7 +271,7 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   assert.ok(calls.find(c => c.method === 'crm.item.update').params.fields.leadId === 3001, 'сделка привязана к лиду')
   assert.strictEqual(calls.find(c => c.method === 'crm.lead.update' && c.params.fields.UF_CRM_1753202309).params.fields.UF_CRM_1753202309, '5501')
   // новая сделка: отказ из карточки — причина из списка + комментарий → поле причины и лента
-  await p.locator('.hero').getByRole('button', { name: 'Стадия' }).click()
+  await act(p, 'Стадия')
   await p.locator('.sheetbox select').selectOption('LOSE')
   await p.locator('.sheetbox .chips button').first().waitFor()
   assert.strictEqual(await p.locator('.sheetbox .chips button').count(), 8)
