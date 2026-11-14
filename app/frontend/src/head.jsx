@@ -15,7 +15,13 @@ const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Диза
 
 export function usePulse(on) {
   const [p, setP] = useState(null)
-  useEffect(() => { if (on) api('/head/pulse').then(setP, () => setP(false)) }, [on])
+  useEffect(() => {
+    if (!on) return
+    const load = () => api('/head/pulse').then(setP, () => setP(p => p || false))
+    load()
+    window.addEventListener('artgame:pulse', load)   // решение принято (утвердил публикацию) — счётчики обновляются сразу
+    return () => window.removeEventListener('artgame:pulse', load)
+  }, [on])
   return p
 }
 

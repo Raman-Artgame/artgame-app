@@ -47,6 +47,8 @@ DEPTS = {"sales": "01 Продажи", "mural": "02 Роспись", "print": "0
 # Чеки оплат клиентов (HEAD 10.11): папка сделки / «ПРИХОДЫ ЧЕКИ», рядом с «Расходы чеки». Создаётся при первом чеке,
 # в SUBFOLDERS не входит — иначе пустая папка появилась бы в каждой сделке. Сделка без папки → «07 Приходы клиентов».
 INCOME = "ПРИХОДЫ ЧЕКИ"
+# «06 МАРКЕТИНГ / 04 Готовые публикации» на диске ARTGAME.KZ: готовые рилс и сторис, загруженные в публикацию (HEAD 14.11).
+MKT_READY_ID = "1r7tvDN3xFC1NKl1WKkHiusBTZRZxIFIm"
 API = "https://www.googleapis.com/drive/v3/files"
 UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 ALL = {"supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}

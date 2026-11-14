@@ -5,12 +5,14 @@
 Неутверждённую публикацию отметить вышедшей нельзя. Ничего не удаляем: «Отменить» = status cancelled.
 """
 from datetime import date
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import db
-from .files import links
+from . import db, drive
+from .config import settings
+from .files import MAX_BIG, links
 from .work import active
 
 router = APIRouter(prefix="/api")
@@ -30,7 +32,7 @@ def _files(conn, ids: list[int]) -> list[dict]:
     if not ids:
         return []
     rows = conn.execute("""SELECT f.*, pe.full_name AS by FROM files f JOIN people pe ON pe.id=f.uploaded_by
-                           WHERE f.id = ANY(%s) AND f.kind='media'""", (ids,)).fetchall()
+                           WHERE f.id = ANY(%s) AND f.kind IN ('media','pub')""", (ids,)).fetchall()
     by = {r["id"]: r for r in rows}
     return [links(by[i]) for i in ids if i in by]
 
@@ -90,7 +92,7 @@ def _check(conn, b: PostIn):
     if b.channel not in CHANNELS or b.kind not in KINDS:
         raise HTTPException(400, "bad channel/kind")
     if b.file_ids:
-        ok = conn.execute("SELECT count(*) AS n FROM files WHERE id = ANY(%s) AND kind='media' AND status='ready'", (b.file_ids,)).fetchone()["n"]
+        ok = conn.execute("SELECT count(*) AS n FROM files WHERE id = ANY(%s) AND kind IN ('media','pub') AND status='ready'", (b.file_ids,)).fetchone()["n"]
         if ok != len(set(b.file_ids)):
             raise HTTPException(400, "материал не найден в «Медиа»")
 
@@ -176,6 +178,89 @@ def post_published(post_id: int, b: PublishedIn, p: dict = Depends(active)):
 def post_cancel(post_id: int, p: dict = Depends(active)):
     _mkt(p)
     return _move(post_id, p, ("draft", "pending", "approved", "rejected"), "cancelled")
+
+
+class DayIn(BaseModel):
+    plan_date: date
+
+
+@router.post("/mkt/review_day")
+def review_day(b: DayIn, p: dict = Depends(active)):
+    """HEAD: «Утвердить все на день» — всё, что ждёт решения с этой датой выхода."""
+    if p["role_code"] != "head":
+        raise HTTPException(403, "утверждает только HEAD")
+    with db.pool.connection() as conn, conn.transaction():
+        rows = conn.execute("""UPDATE mkt_posts SET status='approved', reviewed_by=%s, reviewed_at=now(), review_note=NULL, updated_at=now()
+                               WHERE status='pending' AND plan_date=%s RETURNING id""", (p["id"], b.plan_date)).fetchall()
+        for r in rows:
+            db.audit(conn, p["id"], "mkt_post_review", "mkt_posts", r["id"], {"approve": True, "day": str(b.plan_date)})
+    return {"approved": len(rows)}
+
+
+# ---------- «Загрузить готовое»: рилс / сторис / баннер от агентства — прямо в публикацию (HEAD 14.11) ----------
+
+def _ready_folder(d, when) -> str:
+    """«06 МАРКЕТИНГ / 04 Готовые публикации / ГГГГ / ММ МЕСЯЦ» — по дате начала загрузки."""
+    return d.child(d.child(drive.MKT_READY_ID, str(when.year)), f"{when.month:02d} {drive.MONTHS[when.month - 1]}")
+
+
+class UpIn(BaseModel):
+    client_uid: UUID
+    name: str = Field(min_length=1, max_length=200)
+    mime: str = Field(max_length=100)
+    size: int = Field(gt=0, le=MAX_BIG)
+
+
+@router.post("/mkt/uploads")
+def upload_start(b: UpIn, request: Request, p: dict = Depends(active)):
+    """Телефон грузит файл прямо в Google; сервер выдаёт ссылку. Только видео и картинки."""
+    _mkt(p)
+    if not b.mime.startswith(("video/", "image/")):
+        raise HTTPException(400, "нужно видео или картинка")
+    origin = request.headers.get("origin") or settings.public_origin
+    with db.pool.connection() as conn, conn.transaction():
+        f = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, status, uploaded_by, media_type)
+                            VALUES (%s, 0, 'pub', %s, %s, %s, 'uploading', %s, %s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
+                         (b.client_uid, b.name, b.mime, b.size, p["id"], "reels" if b.mime.startswith("video/") else "photo")).fetchone()
+        if not f:
+            f = conn.execute("SELECT * FROM files WHERE client_uid=%s AND uploaded_by=%s AND kind='pub'", (b.client_uid, p["id"])).fetchone()
+            if not f:
+                raise HTTPException(409, "повтори загрузку")
+            if f["status"] == "ready":
+                return {"file_id": f["id"], "done": True, "file": links({**f, "by": p["full_name"]})}
+        try:
+            d = drive.Drive()
+            url = d.resumable(_ready_folder(d, f["created_at"]), b.name, b.mime, b.size, origin)
+        except Exception as ex:
+            raise drive.fail(ex)
+        return {"file_id": f["id"], "upload_url": url}
+
+
+class UpDone(BaseModel):
+    drive_id: str = Field(min_length=10, max_length=100)
+
+
+@router.post("/mkt/uploads/{file_id}/done")
+def upload_done(file_id: int, b: UpDone, p: dict = Depends(active)):
+    """Загрузка закончена: сервер сверяет папку и размер, только потом файл можно ставить в публикацию."""
+    _mkt(p)
+    with db.pool.connection() as conn, conn.transaction():
+        f = conn.execute("SELECT * FROM files WHERE id=%s AND uploaded_by=%s AND kind='pub'", (file_id, p["id"])).fetchone()
+        if not f:
+            raise HTTPException(404)
+        if f["status"] != "ready":
+            try:
+                d = drive.Drive()
+                m = d.meta(b.drive_id)
+                folder = _ready_folder(d, f["created_at"])
+            except Exception as ex:
+                raise drive.fail(ex)
+            if folder not in m.get("parents", []) or int(m.get("size", -1)) != f["size"]:
+                raise HTTPException(400, "file mismatch")
+            f = conn.execute("UPDATE files SET drive_id=%s, status='ready', mime=%s WHERE id=%s RETURNING *",
+                             (b.drive_id, m.get("mimeType") or f["mime"], file_id)).fetchone()
+            db.audit(conn, p["id"], "file_add", "files", file_id, {"kind": "pub"})
+        return links({**f, "by": p["full_name"]})
 
 
 # ---------- итог публикации, выгрузка плана (HEAD 14.11: «что выполнено, что даёт результат, а что нет») ----------

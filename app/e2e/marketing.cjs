@@ -54,6 +54,7 @@ const noScroll = async p => assert.ok(await p.evaluate(() => document.documentEl
 
   // 1. Маркетолог: меню, «Маркетинг» первым, план месяца пуст
   const m = await open(b, 2600)
+  await m.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000091' }) }))
   const nav = (await m.locator('nav button').allTextContents()).map(t => t.replace(/\d+$/, ''))
   assert.deepStrictEqual(nav, ['Маркетинг', 'Проекты', 'Кабинет', 'Чат'], nav.join(','))
   await m.getByText('В этом месяце пока пусто.').waitFor()
@@ -82,6 +83,10 @@ const noScroll = async p => assert.ok(await p.evaluate(() => document.documentEl
   await m.locator('.sheetbox').getByRole('button', { name: 'Выбрать' }).first().click()
   await shot(m, 'mkt-4-pick')
   await m.locator('.sheetbox').getByRole('button', { name: /Готово · выбрано 1/ }).click()
+  // «Загрузить готовое»: файл агентства идёт прямо в Google (подменён), встаёт в публикацию рядом с выбранным
+  await m.locator('.sheetbox label.mktup input[type=file]').setInputFiles({ name: 'Рилс готовый.mp4', mimeType: 'video/mp4', buffer: Buffer.from('MP4-DATA') })
+  await m.locator('.sheetbox').getByText('Материал · 2').waitFor()
+  await shot(m, 'mkt-4b-ready-new')
   await m.locator('.sheetbox').getByRole('button', { name: 'Сохранить' }).click()
   await m.locator('.sheetbox').getByRole('button', { name: 'Отправить HEAD' }).waitFor()
   assert.strictEqual(await m.locator('.sheetbox').getByRole('button', { name: 'Вышло' }).count(), 0)   // черновик не выложить
@@ -94,17 +99,34 @@ const noScroll = async p => assert.ok(await p.evaluate(() => document.documentEl
   const h = await open(b, 1000)
   await h.getByText('Публикации на утверждение: 1').waitFor()
   await shot(h, 'mkt-6-head-pulse')
+  // ещё две сторис на тот же день и одна на другой — для ленты и «Утвердить все»
+  for (const [t, dd] of [['Сторис: утро на объекте', '20'], ['Сторис: отзыв клиента', '20'], ['Пост: команда', '22']]) {
+    const x = await call(2600, '/mkt/posts', { title: t, kind: t.startsWith('Пост') ? 'post' : 'stories', plan_date: day.slice(0, 8) + dd, caption: 'Текст для ' + t })
+    await call(2600, `/mkt/posts/${x.id}/submit`, {})
+  }
   await h.getByText('Публикации на утверждение: 1').click()
-  await h.getByText('Рилс «Кафе Алма — до и после»').click()
-  await h.locator('.sheetbox').getByRole('button', { name: 'Утверждаю' }).waitFor()
-  await shot(h, 'mkt-7-head-review')
-  await h.locator('.sheetbox').getByRole('button', { name: 'Утверждаю' }).click()
-  await h.locator('.sheetbox .badge', { hasText: 'утверждено' }).waitFor()
-  await h.locator('.sheetbox .x').click()
+  await h.locator('.mktfeed').getByText('1 из 4').waitFor()
+  await h.locator('.mktfeed').getByRole('button', { name: 'Утверждаю' }).waitFor()
+  await noScroll(h); await shot(h, 'mkt-7-head-feed')
+  await h.locator('.mktfeed').getByRole('button', { name: 'Вернуть' }).click()
+  await h.locator('.mktfeed input').fill('Проверка')
+  await shot(h, 'mkt-7a-head-back')
+  await h.locator('.mktfeed').getByRole('button', { name: 'Отмена' }).click()
+  await h.locator('.mktfeed').getByRole('button', { name: /Утвердить все 3 на/ }).click()
+  await h.locator('.mktfeed').getByText('1 из 1').waitFor()
+  await h.locator('.mktfeed .mkttitle', { hasText: 'Пост: команда' }).waitFor()
+  await shot(h, 'mkt-7c-head-text')
+  await h.locator('.mktfeed').getByRole('button', { name: 'Вернуть' }).click()
+  await h.locator('.mktfeed input').fill('Добавь фото команды')
+  await h.locator('.mktfeed').getByRole('button', { name: 'Вернуть на доработку' }).click()
+  await h.getByText('Всё утверждено.').waitFor()
+  await shot(h, 'mkt-7d-head-empty')
 
   // 5. Маркетолог: «Вышло» со ссылкой → в плане «вышло»
   await m.reload(); await m.locator('nav').waitFor()
   await m.getByText('Рилс «Кафе Алма — до и после»').click()
+  await m.locator('.sheetbox').getByRole('button', { name: /Для TikTok/ }).waitFor()
+  await shot(m, 'mkt-7e-tiktok-sent')
   await m.locator('.sheetbox').getByPlaceholder('https://instagram.com/…').fill('https://instagram.com/reel/abc')
   await m.locator('.sheetbox').getByRole('button', { name: 'Вышло' }).click()
   await m.locator('.sheetbox').getByText('Открыть публикацию ›').waitFor()
@@ -146,7 +168,7 @@ const noScroll = async p => assert.ok(await p.evaluate(() => document.documentEl
   await tab(m, 'Кабинет'); await m.waitForTimeout(500); await noScroll(m); await shot(m, 'mkt-9-kabinet')
   await tab(h, 'Команда'); await h.getByText('Маркетинг').first().waitFor(); await shot(h, 'mkt-10-komanda')
   const posts = await call(1000, `/mkt/posts?ym=${day.slice(0, 7)}`)
-  assert.strictEqual(posts.counts.published, 1)
+  assert.strictEqual(posts.counts.published, 1); assert.strictEqual(posts.counts.approved, 2); assert.strictEqual(posts.counts.rejected, 1)
   console.log('marketing ok')
   await b.close()
 })().catch(e => { console.error(e); process.exit(1) })

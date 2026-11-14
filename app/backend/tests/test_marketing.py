@@ -81,3 +81,34 @@ def test_result_csv_ideas_shoots(client, team):
     client.post(f"/api/mkt/shoots/{s}", json={"title": "Интервью", "shoot_date": "2026-11-18", "idea_id": i, "status": "done"}, headers=hdr(2000))
     assert client.get("/api/mkt/ideas", headers=hdr(2000)).json()["items"][0]["status"] == "done"
     assert client.get("/api/mkt/shoots", headers=hdr(3000)).status_code == 403
+
+
+def test_ready_upload_and_review_day(client, team, monkeypatch):
+    """Готовый рилс грузят прямо в публикацию (не в медиа объекта); HEAD утверждает все на день одной кнопкой."""
+    from artgame import drive
+    from test_files import FakeDrive
+    FakeDrive.store = {}
+    monkeypatch.setattr(drive, "Drive", FakeDrive)
+    up = {"client_uid": "11111111-1111-4111-8111-111111111111", "name": "Сторис.mp4", "mime": "video/mp4", "size": 8}
+    assert client.post("/api/mkt/uploads", json=up, headers=hdr(3000)).status_code == 403
+    assert client.post("/api/mkt/uploads", json={**up, "mime": "application/pdf"}, headers=hdr(2000)).status_code == 400
+    r = client.post("/api/mkt/uploads", json=up, headers=hdr(2000)).json()
+    parent, size, mime = FakeDrive.pending
+    assert parent.startswith(drive.MKT_READY_ID)
+    assert client.post("/api/mkt/posts", json={"title": "x", "file_ids": [r["file_id"]]}, headers=hdr(2000)).status_code == 400   # ещё не долетел
+    FakeDrive.store["drvREADY00001"] = {"parents": ["другая"], "size": "8", "mimeType": mime}
+    assert client.post(f"/api/mkt/uploads/{r['file_id']}/done", json={"drive_id": "drvREADY00001"}, headers=hdr(2000)).status_code == 400
+    FakeDrive.store["drvREADY00001"]["parents"] = [parent]
+    f = client.post(f"/api/mkt/uploads/{r['file_id']}/done", json={"drive_id": "drvREADY00001"}, headers=hdr(2000)).json()
+    assert f["kind"] == "pub" and f["url"]
+    assert client.get("/api/media?scope=library&type=reels", headers=hdr(2000)).json()["items"][0]["id"] == 901   # в «Медиа» объектов не попал
+    assert all(x["id"] != f["id"] for x in client.get("/api/media?scope=library&type=reels", headers=hdr(2000)).json()["items"])
+    ids = []
+    for t, day in [("Сторис 1", "2026-11-21"), ("Сторис 2", "2026-11-21"), ("Рилс", "2026-11-22")]:
+        p = client.post("/api/mkt/posts", json={"title": t, "kind": "stories", "plan_date": day, "file_ids": [f["id"]]}, headers=hdr(2000)).json()
+        assert p["files"][0]["id"] == f["id"]
+        client.post(f"/api/mkt/posts/{p['id']}/submit", headers=hdr(2000))
+        ids.append(p["id"])
+    assert client.post("/api/mkt/review_day", json={"plan_date": "2026-11-21"}, headers=hdr(2000)).status_code == 403
+    assert client.post("/api/mkt/review_day", json={"plan_date": "2026-11-21"}, headers=hdr(1000)).json() == {"approved": 2}
+    assert [x["id"] for x in client.get("/api/mkt/posts?status=pending", headers=hdr(1000)).json()["items"]] == [ids[2]]

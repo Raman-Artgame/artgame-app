@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { api, webToken } from './api.js'
+import { api, uuid, webToken } from './api.js'
 import { Viewer, download } from './objects.jsx'
 import { Sheet } from './ui.jsx'
 
@@ -31,11 +31,69 @@ export function Marketing({ me, pending }) {
       {[['plan', 'План'], ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа']].map(([k, t]) =>
         <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}
     </div>
-    {view === 'media' ? <Media /> : view === 'shoots' ? <Shoots /> : view === 'ideas' ? <Ideas /> : <Plan key={view + tick} review={view === 'review'} onOpen={setOpen} onNew={() => setEdit({})} />}
+    {view === 'review' ? <Review key={tick} onOpen={setOpen} /> : view === 'media' ? <Media /> : view === 'shoots' ? <Shoots /> : view === 'ideas' ? <Ideas /> : <Plan key={view + tick} review={view === 'review'} onOpen={setOpen} onNew={() => setEdit({})} />}
     {edit && <Editor post={edit} onClose={() => setEdit(null)} onSaved={x => { setEdit(null); setOpen(x); reload() }} />}
     {open && !edit && <PostSheet post={open} head={head} onClose={() => setOpen(null)} onEdit={() => setEdit(open)}
       onChanged={x => { setOpen(x.status === 'cancelled' ? null : x); reload() }} />}
   </>
+}
+
+const isVid = f => (f.mime || '').startsWith('video/') || (!(f.mime || '').startsWith('image/') && (f.media_type === 'video' || f.media_type === 'reels'))
+const copyText = t => { try { return navigator.clipboard.writeText(t).then(() => true, () => false) } catch { return Promise.resolve(false) } }
+
+// Готовый файл от агентства — прямо в Google, в «06 МАРКЕТИНГ / 04 Готовые публикации»; сервер сверяет результат.
+function uploadReady(file, onProgress) {
+  return api('/mkt/uploads', { method: 'POST', body: { client_uid: uuid(), name: file.name, mime: file.type || 'application/octet-stream', size: file.size } })
+    .then(r => r.done ? r.file : new Promise((ok, fail) => {
+      const x = new XMLHttpRequest()
+      x.open('PUT', r.upload_url)
+      x.upload.onprogress = e => onProgress(e.loaded / e.total)
+      x.onload = () => x.status < 300 ? ok(JSON.parse(x.responseText)) : fail(new Error('Google ' + x.status))
+      x.onerror = () => fail(new Error('нет сети'))
+      x.send(file)
+    }).then(g => api(`/mkt/uploads/${r.file_id}/done`, { method: 'POST', body: { drive_id: g.id } })))
+}
+
+// HEAD: лента «На утверждение» вместо WhatsApp — публикация на весь экран, «Утверждаю» / «Вернуть», следующая сама.
+function Review({ onOpen }) {
+  const [d, setD] = useState(null)
+  const [i, setI] = useState(0)
+  const [fi, setFi] = useState(0)
+  const [back, setBack] = useState(false)
+  const [note, setNote] = useState('')
+  const [msg, setMsg] = useState('')
+  const load = () => api('/mkt/posts?status=pending').then(setD, e => setD({ items: [], err: e.message }))
+  useEffect(() => { load() }, [])
+  if (!d) return <div className="card"><p className="muted">Загрузка…</p></div>
+  if (d.err) return <div className="card"><p className="small why">{d.err}</p></div>
+  if (!d.items.length) return <div className="card"><p className="muted small">Всё утверждено. Новое появится здесь.</p></div>
+  const n = d.items.length, x = d.items[Math.min(i, n - 1)], f = x.files[Math.min(fi, x.files.length - 1)]
+  const sameDay = d.items.filter(y => y.plan_date === x.plan_date).length
+  const go = k => { setI(Math.max(0, Math.min(n - 1, k))); setFi(0); setBack(false); setNote(''); setMsg('') }
+  const drop = ids => { const items = d.items.filter(y => !ids.includes(y.id)); setD({ ...d, items }); setI(v => Math.max(0, Math.min(v, items.length - 1))); setFi(0); setBack(false); setNote(''); setMsg(''); window.dispatchEvent(new Event('artgame:pulse')) }
+  const review = body => api(`/mkt/posts/${x.id}/review`, { method: 'POST', body }).then(() => drop([x.id]), e => setMsg(e.message))
+  const all = () => api('/mkt/review_day', { method: 'POST', body: { plan_date: x.plan_date } })
+    .then(() => drop(d.items.filter(y => y.plan_date === x.plan_date).map(y => y.id)), e => setMsg(e.message))
+  return <div className="card mktfeed">
+    <div className="mktbars">{d.items.map((y, k) => <span key={y.id} className={k === Math.min(i, n - 1) ? 'on' : ''} onClick={() => go(k)} />)}</div>
+    <div className="mktstage">
+      {!f ? <div className="mkttext">{x.caption}</div> : isVid(f) ? <video key={f.id} src={f.url} controls playsInline preload="metadata" /> : <img key={f.id} src={f.url} alt="" />}
+      <div className="mkttop"><b>{d.kinds[x.kind]} · {x.author}</b><span>{d.channels[x.channel]} · выход {day(x.plan_date)}</span></div>
+      {n > 1 && <><button className="mktarr l" aria-label="Назад" disabled={i === 0} onClick={() => go(i - 1)}>‹</button>
+        <button className="mktarr r" aria-label="Дальше" disabled={i >= n - 1} onClick={() => go(i + 1)}>›</button></>}
+    </div>
+    {x.files.length > 1 && <div className="mktfiles">{x.files.map((y, k) => <button key={y.id} className={'mthumb' + (k === fi ? ' on' : '')} onClick={() => setFi(k)}>
+      {y.thumb ? <img src={y.thumb} alt="" loading="lazy" /> : <span>▶</span>}</button>)}</div>}
+    <b className="mkttitle" onClick={() => onOpen(x)}>{x.title}{x.object_title ? ` · №${x.object_id} ${x.object_title}` : ''}</b>
+    {f && x.caption && <p className="mktcap">{x.caption}</p>}
+    {msg && <p className="small why">{msg}</p>}
+    {back ? <><input autoFocus placeholder="Что не так — увидит автор" value={note} onChange={e => setNote(e.target.value)} />
+      <div className="seg"><button onClick={() => note.trim() ? review({ approve: false, note }) : setMsg('Напиши, что поправить.')}>Вернуть на доработку</button>
+        <button className="ghost" onClick={() => { setBack(false); setMsg('') }}>Отмена</button></div></> :
+      <div className="seg"><button onClick={() => review({ approve: true })}>Утверждаю</button><button className="ghost" onClick={() => setBack(true)}>Вернуть</button></div>}
+    {!back && sameDay > 1 && <button className="ghost" onClick={all}>Утвердить все {sameDay} на {day(x.plan_date)}</button>}
+    <p className="small muted mktcount">{Math.min(i, n - 1) + 1} из {n}</p>
+  </div>
 }
 
 function Plan({ review, onOpen, onNew }) {
@@ -96,6 +154,8 @@ function PostSheet({ post, head, onClose, onEdit, onChanged }) {
     {x.status === 'approved' && <><label className="muted small">Ссылка на вышедшую публикацию</label>
       <input placeholder="https://instagram.com/…" value={url} onChange={e => setUrl(e.target.value)} />
       <button onClick={() => act('published', { url })}>Вышло</button></>}
+    {['approved', 'published'].includes(x.status) && x.files.some(isVid) && <button className="ghost" onClick={() => {
+      download(x.files.find(isVid)); copyText(x.caption || '').then(ok => setMsg(ok ? 'Видео скачивается, текст скопирован. Открой TikTok и вставь.' : 'Видео скачивается. Текст скопируй из блока выше.')) }}>♪ Для TikTok: видео и текст</button>}
     {x.status === 'published' && <Result x={x} act={act} />}
     {x.status !== 'published' && <button className="ghost mini" onClick={() => act('cancel')}>Отменить публикацию</button>}
     <Viewer f={view} onClose={() => setView(null)} />
@@ -109,9 +169,20 @@ function Editor({ post, onClose, onSaved }) {
     caption: post.caption || '', object_id: post.object_id || '', files: post.files || [] })
   const [pick, setPick] = useState(false)
   const [msg, setMsg] = useState('')
+  const [up, setUp] = useState(null)   // доля загруженного, пока файл идёт на Диск
+  const addReady = async list => {
+    setMsg('')
+    for (const file of list) {
+      setUp(0)
+      try { const f = await uploadReady(file, setUp); setB(s => ({ ...s, files: [...s.files, f] })) }
+      catch (e) { setMsg(`${file.name}: ${e.message}`) }
+    }
+    setUp(null)
+  }
   useEffect(() => { api('/mkt/dict').then(setD, e => setMsg(e.message)); api('/objects').then(setObjs, () => {}) }, [])
   const set = (k, v) => setB(s => ({ ...s, [k]: v }))
   const save = () => {
+    if (up !== null) return setMsg('Дождись конца загрузки.')
     if (!b.title.trim()) return setMsg('Напиши, что это за публикация.')
     const body = { title: b.title, channel: b.channel, kind: b.kind, plan_date: b.plan_date || null, caption: b.caption || null,
       object_id: b.object_id ? +b.object_id : null, file_ids: b.files.map(f => f.id) }
@@ -134,7 +205,10 @@ function Editor({ post, onClose, onSaved }) {
     <select value={b.object_id} onChange={e => set('object_id', e.target.value)}><option value="">Не про проект</option>
       {objs.map(o => <option key={o.id} value={o.id}>№{o.id} {o.title}</option>)}</select>
     <label className="muted small">Материал · {b.files.length}</label>
-    {b.files.length > 0 && <div className="mktfiles">{b.files.map(f => <span key={f.id} className="mthumb">{f.thumb ? <img src={f.thumb} alt="" /> : <span>▶</span>}</span>)}</div>}
+    {b.files.length > 0 && <div className="mktfiles">{b.files.map(f => <span key={f.id} className="mthumb">{f.thumb ? <img src={f.thumb} alt="" /> : <span>▶</span>}
+      <button className="mktdel" aria-label="Убрать" onClick={() => set('files', b.files.filter(x => x.id !== f.id))}>×</button></span>)}</div>}
+    <label className={'photo mktup' + (up !== null ? ' busy' : '')}>{up !== null ? `Загрузка… ${Math.round(up * 100)}%` : '⬆ Загрузить готовое (рилс, сторис, баннер)'}
+      <input type="file" accept="video/*,image/*" multiple hidden disabled={up !== null} onChange={e => { const fs = [...e.target.files]; e.target.value = ''; addReady(fs) }} /></label>
     <button className="ghost" onClick={() => setPick(true)}>🎬 Выбрать из «Медиа»</button>
     {msg && <p className="small why">{msg}</p>}
     <button onClick={save}>Сохранить</button>
