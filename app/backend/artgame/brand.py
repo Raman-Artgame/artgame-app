@@ -142,6 +142,27 @@ def brand(shelf: str | None = None, folder: str | None = None, p: dict = Depends
     return {"shelf": {k: sh[k] for k in ("key", "title", "icon", "hint", "who")}, "path": path, "folders": folders, "files": files, "hidden": hidden}
 
 
+KIT_NEW_ID = "1UpHC3JnuI-Rl-XeHqx4Id0Ahld-j1u2S"   # «01 Бренд / Пак элементов — новые»: что сюда положили, само появляется в паке и редакторе
+
+
+@router.get("/mkt/kit/new")
+def kit_new(p: dict = Depends(active)):
+    """Новые элементы пака с Диска (HEAD 14.11: «если добавляем элементы, они автоматически подгрузятся?»). Только картинки."""
+    if p["role_code"] not in SEE:
+        raise HTTPException(403, "пак — у маркетинга, дизайна и HEAD")
+    try:
+        rows = drive.Drive().ls(KIT_NEW_ID)
+    except Exception as ex:
+        raise drive.fail(ex)
+    items = []
+    for r in sorted(rows, key=lambda x: x["name"].lower()):
+        if _ext(r["name"]) in ("png", "jpg", "jpeg", "webp"):
+            items.append({"id": "d_" + r["id"], "g": "new", "sub": "", "title": r["name"].rsplit(".", 1)[0], "bg": "dark", "size": int(r.get("size") or 0),
+                          "use": "Добавлен в папку «Пак элементов — новые» на Диске.", "alpha": _ext(r["name"]) == "png",
+                          "name": r["name"], "url": _sign(r["id"], "file"), "thumb": _sign(r["id"], "thumb")})
+    return {"items": items}
+
+
 @router.get("/mkt/brand/file/{drive_id}")
 def brand_file(drive_id: str, exp: int, sig: str, request: Request, dl: int = 0):
     _check(drive_id, "file", exp, sig)

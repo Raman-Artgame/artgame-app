@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { api } from './api.js'
 import { download } from './objects.jsx'
 import { Sheet } from './ui.jsx'
 
@@ -8,18 +9,23 @@ import { Sheet } from './ui.jsx'
 const KIT = '/kit/'
 let cache = null
 export const loadKit = () => cache || (cache = fetch(KIT + 'kit.json').then(r => { if (!r.ok) throw new Error('пак не загрузился'); return r.json() }).catch(e => { cache = null; throw e }))
+// Новые элементы (HEAD 14.11): всё, что положили в папку Диска «01 Бренд / Пак элементов — новые», появляется само — группа «Новые».
+export const loadKitFull = () => loadKit().then(k => api('/mkt/kit/new').then(n => !n.items.length ? k :
+  { groups: [{ key: 'new', title: 'Новые', n: n.items.length }, ...k.groups], items: [...n.items, ...k.items] }, () => k))
 const fsize = b => b > 1e6 ? (b / 1e6).toFixed(1) + ' МБ' : Math.ceil(b / 1e3) + ' КБ'
-const thumb = x => `${KIT}t/${x.g}/${x.id}.webp`
-const ext = x => x.f.split('.').pop()
-const save = x => download({ url: KIT + x.f, name: `artgame_${x.id}.${ext(x)}` })
-const IN_STORY = ['t_logo', 't_stickers', 't_tags', 't_story', 't_cards', 't_bands', 't_video']   // что можно поставить на сторис
+const thumb = x => x.thumb || `${KIT}t/${x.g}/${x.id}.webp`
+const src = x => x.url || KIT + x.f
+const ext = x => (x.name || x.f).split('.').pop()
+const save = x => download({ url: src(x), name: x.name || `artgame_${x.id}.${ext(x)}` })
+const IN_STORY = ['new', 't_logo', 't_stickers', 't_tags', 't_story', 't_cards', 't_bands', 't_video']   // что можно поставить на сторис
 
 export function Kit({ onBack, canPost, onPublish }) {
   const [kit, setKit] = useState(null)
   const [g, setG] = useState('t_stickers')
+  useEffect(() => { if (kit?.groups[0]?.key === 'new') setG('new') }, [kit])
   const [one, setOne] = useState(null)
   const [story, setStory] = useState(null)   // null | {} | {add: элемент} | {frame: рамка}
-  useEffect(() => { loadKit().then(setKit, e => setKit({ err: e.message, groups: [], items: [] })) }, [])
+  useEffect(() => { loadKitFull().then(setKit, e => setKit({ err: e.message, groups: [], items: [] })) }, [])
   const items = useMemo(() => (kit?.items || []).filter(x => x.g === g), [kit, g])
   const subs = useMemo(() => [...new Set(items.map(x => x.sub))], [items])
   if (story) return <StoryEditor kit={kit} start={story} canPost={canPost} onPublish={onPublish} onClose={() => setStory(null)} />
@@ -36,9 +42,9 @@ export function Kit({ onBack, canPost, onPublish }) {
       </React.Fragment>)}
     </>}
     {one && <Sheet title={one.title} onClose={() => setOne(null)}>
-      <div className={'kitbig ' + one.bg}><img src={KIT + one.f} alt="" /></div>
+      <div className={'kitbig ' + one.bg}><img src={src(one)} alt="" /></div>
       <p className="small">{one.use}</p>
-      <p className="small muted">{one.w}×{one.h} · {ext(one).toUpperCase()}{one.alpha ? ', прозрачный фон' : ''} · {fsize(one.size)}</p>
+      <p className="small muted">{one.w ? `${one.w}×${one.h} · ` : ''}{ext(one).toUpperCase()}{one.alpha ? ', прозрачный фон' : ''} · {fsize(one.size)}</p>
       <button onClick={() => save(one)}>⬇ Скачать</button>
       {IN_STORY.includes(one.g) && <button className="ghost" onClick={() => { setStory({ add: one }); setOne(null) }}>Поставить на сторис</button>}
       {one.g === 's_stories' && <button className="ghost" onClick={() => { setStory({ frame: one }); setOne(null) }}>Собрать сторис в этой рамке</button>}
@@ -79,8 +85,11 @@ export function StoryEditor({ kit, start, canPost, onPublish, onClose }) {
   const upd = (id, p) => setLayers(ls => ls.map(l => l.id === id ? { ...l, ...p } : l))
   const stickers = layers.filter(l => l.item?.g === 't_stickers').length
 
-  function mk(item) { const w = Math.min(item.w, item.g === 't_stickers' ? 360 : 760); return { id: seq++, type: 'img', item, x: W / 2, y: H / 2, w, r: 0 } }
-  const addEl = item => { const l = mk(item); setLayers(ls => [...ls, l]); setSel(l.id); setPick(null) }
+  function mk(item) { const w = Math.min(item.w || 500, item.g === 't_stickers' ? 360 : 760); return { id: seq++, type: 'img', item, x: W / 2, y: H / 2, w, r: 0 } }
+  const addEl = async item => {   // у новых с Диска размер узнаём по самой картинке
+    if (!item.w) { try { const i = await loadImg(src(item)); item = { ...item, w: i.naturalWidth, h: i.naturalHeight } } catch (ex) { setPick(null); return setMsg(ex.message) } }
+    const l = mk(item); setLayers(ls => [...ls, l]); setSel(l.id); setPick(null)
+  }
   const addText = () => { const l = { id: seq++, type: 'text', text: 'ТЕКСТ', font: 'compacta', color: '#FFFFFF', size: 170, x: W / 2, y: 620, r: 0 }; setLayers(ls => [...ls, l]); setSel(l.id) }
   const onFile = async e => {
     const f = e.target.files?.[0]; e.target.value = ''
@@ -103,7 +112,9 @@ export function StoryEditor({ kit, start, canPost, onPublish, onClose }) {
     d.id === 'photo' ? setPhoto(p => ({ ...p, x, y })) : upd(d.id, { x, y })
   }
   const up = () => { drag.current = null }
-  const order = dir => setLayers(ls => { const i = ls.findIndex(l => l.id === sel), j = i + dir; if (i < 0 || j < 0 || j >= ls.length) return ls; const n = [...ls];[n[i], n[j]] = [n[j], n[i]]; return n })
+  // слой целиком наверх или под все остальные (HEAD 14.11: «выше / ниже не работают» — шаг на один слой был не виден)
+  const order = top => setLayers(ls => { const l = ls.find(x => x.id === sel); if (!l) return ls; const rest = ls.filter(x => x.id !== sel); return top ? [...rest, l] : [l, ...rest] })
+  const idx = layers.findIndex(l => l.id === sel)
 
   const render = async () => {
     setBusy(true); setMsg('')
@@ -117,7 +128,7 @@ export function StoryEditor({ kit, start, canPost, onPublish, onClose }) {
       if (frame) x.drawImage(await loadImg(KIT + frame.f), 0, 0, W, H)
       for (const l of layers) {
         x.save(); x.translate(l.x, l.y); x.rotate(l.r * Math.PI / 180)
-        if (l.type === 'img') { const h = l.w * l.item.h / l.item.w; x.drawImage(await loadImg(KIT + l.item.f), -l.w / 2, -h / 2, l.w, h) } else {
+        if (l.type === 'img') { const h = l.w * l.item.h / l.item.w; x.drawImage(await loadImg(src(l.item)), -l.w / 2, -h / 2, l.w, h) } else {
           x.font = `${l.font === 'onest' ? '700 ' : ''}${l.size}px ${FONTS[l.font][1]}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = l.color
           const lines = l.text.split('\n'), lh = l.size * 1.05
           lines.forEach((t, i) => { const y = (i - (lines.length - 1) / 2) * lh
@@ -153,7 +164,7 @@ export function StoryEditor({ kit, start, canPost, onPublish, onClose }) {
         {!bg && !photo && <div className="storyhint" onPointerDown={e => e.stopPropagation()} onClick={() => fileIn.current.click()}>Нажми, чтобы выбрать фото</div>}
         {frame && <img className="full pass" src={KIT + frame.f} alt="" draggable={false} />}
         {layers.map(l => l.type === 'img'
-          ? <img key={l.id} className={'ly' + (sel === l.id ? ' sel' : '')} src={KIT + l.item.f} alt="" draggable={false} onPointerDown={e => down(e, l.id)}
+          ? <img key={l.id} className={'ly' + (sel === l.id ? ' sel' : '')} src={src(l.item)} alt="" draggable={false} onPointerDown={e => down(e, l.id)}
             style={{ left: l.x, top: l.y, width: l.w, transform: `translate(-50%,-50%) rotate(${l.r}deg)` }} />
           : <div key={l.id} className={'ly tx ' + l.font + (sel === l.id ? ' sel' : '')} onPointerDown={e => down(e, l.id)}
             style={{ left: l.x, top: l.y, fontSize: l.size, color: l.color, fontFamily: FONTS[l.font][1], transform: `translate(-50%,-50%) rotate(${l.r}deg)`,
@@ -172,7 +183,8 @@ export function StoryEditor({ kit, start, canPost, onPublish, onClose }) {
           ? <input type="range" min="40" max="420" value={cur.size} onChange={e => upd(cur.id, { size: +e.target.value })} />
           : <input type="range" min="60" max="1600" value={cur.w} onChange={e => upd(cur.id, { w: +e.target.value })} />}</label>
         <label className="storyrng"><span>Поворот</span><input type="range" min="-180" max="180" value={cur.r} onChange={e => upd(cur.id, { r: +e.target.value })} /></label>
-        <div className="seg"><button className="ghost mini" onClick={() => order(1)}>Выше</button><button className="ghost mini" onClick={() => order(-1)}>Ниже</button>
+        <div className="seg">{layers.length > 1 && <><button className="ghost mini" disabled={idx === layers.length - 1} onClick={() => order(true)}>Поверх всех</button>
+          <button className="ghost mini" disabled={idx === 0} onClick={() => order(false)}>Под все</button></>}
           <button className="ghost mini" onClick={() => { setLayers(ls => ls.filter(l => l.id !== sel)); setSel(null) }}>Убрать</button><button className="mini" onClick={() => setSel(null)}>Ок</button></div>
       </> : sel === 'photo' && photo ? <>
         <label className="storyrng"><span>Размер</span><input type="range" min="100" max="400" value={photo.s * 100} onChange={e => setPhoto(p => ({ ...p, s: +e.target.value / 100 }))} /></label>
@@ -205,9 +217,26 @@ export function StoryEditor({ kit, start, canPost, onPublish, onClose }) {
 }
 
 function ElPick({ kit, onPick, onClose }) {
-  const [g, setG] = useState('t_story')
+  const [g, setG] = useState(kit.groups[0]?.key === 'new' ? 'new' : 't_story')
   return <Sheet title="Элемент из пака" onClose={onClose}>
     <div className="kitnav">{kit.groups.filter(x => IN_STORY.includes(x.key)).map(x => <button key={x.key} className={'ghost mini' + (g === x.key ? ' on' : '')} onClick={() => setG(x.key)}>{x.title}</button>)}</div>
     <div className="kitgrid three">{kit.items.filter(x => x.g === g).map(x => <button key={x.id} className={'kittile ' + x.bg} onClick={() => onPick(x)}><img src={thumb(x)} alt="" loading="lazy" /><span>{x.title}</span></button>)}</div>
   </Sheet>
+}
+
+// Вкладка «Сторис» (HEAD 14.11: «редактор нужно сделать отдельной плашкой»): начать с пустого кадра или сразу с рамки дизайнера.
+export function StoryHome({ canPost, onPublish }) {
+  const [kit, setKit] = useState(null)
+  const [story, setStory] = useState(null)
+  useEffect(() => { loadKitFull().then(setKit, e => setKit({ err: e.message, groups: [], items: [] })) }, [])
+  if (story) return <StoryEditor kit={kit} start={story} canPost={canPost} onPublish={onPublish} onClose={() => setStory(null)} />
+  return <div className="card">
+    <h3>Редактор сторис</h3>
+    <p className="small muted">Своё фото, рамка дизайнера, элементы пака и текст фирменными шрифтами. Готовую сторис можно скачать или сразу отправить на утверждение.</p>
+    <button disabled={!kit || !!kit.err} onClick={() => setStory({})}>Собрать сторис</button>
+    {!kit ? <p className="muted">Загрузка…</p> : kit.err ? <p className="small why">{kit.err}</p> : <>
+      <h4 className="kitsub">Или начни с рамки</h4>
+      <div className="kitgrid three">{kit.items.filter(x => x.g === 's_stories').map(x => <button key={x.id} className="kittile dark tall" onClick={() => setStory({ frame: x })}>
+        <img src={thumb(x)} alt="" loading="lazy" /><span>{x.title.replace('Сторис · ', '')}</span></button>)}</div></>}
+  </div>
 }
