@@ -14,13 +14,13 @@ from pydantic import BaseModel, Field
 
 from . import constants as consts
 from . import db, drive
-from .gip import can_crew
+from .gip import GIP_ROLES, can_crew
 from .work import CLOSED, TZ, active, is_trip, self_approve, with_receipt
 
 router = APIRouter(prefix="/api")
 ITEMS = [("lodging", "Проживание"), ("trip_road", "Дорога (билеты, бензин)"), ("trip_local", "Транспорт на месте"), ("trip_other", "Прочее")]
 CODES = {c for c, _ in ITEMS}
-TRIP_BY = {"mop", "mop_vip", "head"}
+TRIP_BY = {"mop", "mop_vip", "head"} | GIP_ROLES   # командировку, как и раньше, ведут МОП, Главный, Про, Мастер, ГИП и HEAD (команду объекта — только ГИП и HEAD, 14.11)
 
 
 def can_trip(conn, p: dict, oid: int) -> bool:

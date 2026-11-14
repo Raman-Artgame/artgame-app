@@ -14,6 +14,7 @@ const BE = __dirname + '/../backend'
 const PY = process.env.PY || `${BE}/.venv/bin/python`
 const SIG = {}
 const sign = id => SIG[id] || (SIG[id] = execSync(`cd ${BE} && ${PY} -c "import sys;sys.path+=['tests'];from conftest import make_init_data;print(make_init_data({'id':${id},'first_name':'Тест'}))"`).toString().trim())
+const act = async (p, name) => { const b = p.locator('.hero').getByRole('button', { name, exact: true }); if (!(await b.count())) await p.locator('.hero .morebtn').click(); await b.first().click() }   // редкие действия — под «Ещё действия» (HEAD 14.11)
 const API = 'http://127.0.0.1:8100/api'
 const req = async (id, path, body) => { const r = await fetch(API + path, { method: body ? 'POST' : 'GET',
   headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': sign(id) }, body: body && JSON.stringify(body) }); return { status: r.status, body: await r.json() } }
@@ -156,7 +157,7 @@ async function closeStep(p) {
   assert.ok(await c.locator('.ck.skip', { hasText: 'Утверждённый дизайн' }).count(), 'дизайна не было — пункт не нужен')
   await shot(p, 'close-mop-blocked-all', c)
   // «Оплата получена» в списке стадий нет — только через «Закрытие»; сервер тоже не пускает
-  await p.locator('.hero').getByRole('button', { name: 'Стадия' }).click()
+  await act(p, 'Стадия')
   const opts = await p.locator('.sheetbox select option').evaluateAll(o => o.map(x => x.value))
   assert.ok(opts.includes('UC_BMKDS4') && !opts.includes('WON'), opts.join(','))
   await p.locator('.sheetbox', { hasText: '«Оплата получена» — через шаг «Закрытие»' }).waitFor()

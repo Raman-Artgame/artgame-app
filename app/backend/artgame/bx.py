@@ -48,6 +48,12 @@ _gw = None
 
 # ---------- чтение через шлюз ----------
 
+def _ago(days: float) -> str:
+    """Сколько ждёт: до суток — часы, дальше дни (HEAD 14.11: «до 24 часов часы, а далее дни»)."""
+    h = int(days * 24)
+    return f"{h} ч" if h < 24 else f"{h // 24} дн."
+
+
 def _webhook_read(method: str, params: dict):
     """Чтение тем же вебхуком, что и запись (шлюз ARTGAME-MCP на сервере только под OAuth, 05.11).
     Битрикс пускает ~2 запроса в секунду: на QUERY_LIMIT_EXCEEDED ждём и повторяем; сеть/таймаут — 502, а не 500."""
@@ -588,7 +594,7 @@ def _today(p: dict, fresh: bool = False) -> dict:
             q["hot"].append(item("deal", d, "пора вернуться" + (f": {r['note']}" if r["note"] else "")))
         elif sales and code == "NEW" and since_new <= kp_d and since_new * 24 >= new_h:
             out["new"].append(d)
-            q["hot"].append(item("deal", d, f"новая заявка без ответа {int(since_new * 24)} ч", action="call"))
+            q["hot"].append(item("deal", d, f"новая заявка без ответа {_ago(since_new)}", action="call"))
         elif sales and code == "NEW" and since_new <= kp_d:
             q["today"].append(item("deal", d, "новая заявка", action="call"))
         elif sales and code == "PREPARATION" and age >= kp_d:
@@ -609,7 +615,7 @@ def _today(p: dict, fresh: bool = False) -> dict:
             n = lead_due[l["id"]]["note"]
             q["hot"].append(item("lead", l, "перезвонить" + (f": {n}" if n else ""), action="call"))
         elif l["new"] and age * 24 >= new_h:
-            q["hot"].append(item("lead", l, f"новый лид без ответа {int(age * 24)} ч", action="call"))
+            q["hot"].append(item("lead", l, f"новый лид без ответа {_ago(age)}", action="call"))
         elif l["new"]:
             q["today"].append(item("lead", l, "новый лид", action="call"))
         elif age >= idle_d:

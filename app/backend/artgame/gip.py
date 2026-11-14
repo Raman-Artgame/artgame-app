@@ -86,8 +86,9 @@ def history(oid: int, p: dict = Depends(active)):
             "spent": sum(float(e["amount"]) for e in exps if e["status"] != "rejected")}
 
 
-# Команда объекта (HEAD 09.11): назначают ГИП объекта, Главный художник, Художник-Про, Мастер печати, HEAD и МОП.
-CREW_BY = ASSIGN | GIP_ROLES
+# Команда объекта: людей на объект ставит только куратор ГИП этого объекта (один человек) и HEAD.
+# HEAD 14.11: «МОП может поставить только КУРАТОР ГИП», «КУРАТОР ГИП ЭТО ОДИН ЧЕЛОВЕК!» (раньше, 09.11, — ещё МОП, Главный, Про, Мастер).
+CREW_BY = {"head"}
 CREW_ROLES = ("support", "artist", "artist_pro", "lead_artist", "print_operator", "print_master", "carpenter")
 
 
@@ -129,7 +130,7 @@ class CrewIn(BaseModel):
 def set_crew(oid: int, b: CrewIn, p: dict = Depends(active)):
     with db.pool.connection() as conn, conn.transaction():
         if not can_crew(conn, p, oid):
-            raise HTTPException(403, "на объект назначают ГИП, Главный художник, Про, Мастер печати, МОП и HEAD")
+            raise HTTPException(403, "людей на объект ставит куратор ГИП этого объекта или HEAD")
         o = conn.execute("SELECT id, title, city FROM objects WHERE id=%s", (oid,)).fetchone()
         if not o or not oid:
             raise HTTPException(404, "объекта ещё нет в приложении — он появится после синхронизации со сделкой")

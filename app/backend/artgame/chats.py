@@ -89,4 +89,4 @@ def waiting(fresh: bool = False, owners: set | None = None) -> tuple[list, str]:
 
 def ago(t: datetime) -> str:
     m = int((datetime.now(timezone.utc) - t).total_seconds() // 60)
-    return f"{m} мин" if m < 60 else f"{m // 60} ч" if m < 48 * 60 else f"{m // 1440} дн."
+    return f"{m} мин" if m < 60 else f"{m // 60} ч" if m < 24 * 60 else f"{m // 1440} дн."   # до суток — часы, дальше дни (HEAD 14.11)

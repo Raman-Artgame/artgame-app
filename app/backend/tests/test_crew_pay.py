@@ -10,10 +10,15 @@ from artgame import db, files
 def test_crew(client, team):  # noqa: F811
     sup, lead, art = team[2000], team[3000], team[5000]
     assert client.post("/api/objects/731/crew", json={"person_id": sup}, headers=hdr(5000)).status_code == 403   # художник не ставит
+    # HEAD 14.11: ставит только куратор ГИП объекта (и HEAD) — Главный, пока не ГИП этого объекта, не ставит
+    assert client.get("/api/objects/731/crew", headers=hdr(3000)).json()["can_edit"] is False
+    assert client.post("/api/objects/731/crew", json={"person_id": sup}, headers=hdr(3000)).status_code == 403
+    with db.pool.connection() as c:
+        c.execute("UPDATE objects SET gip_person_id=%s WHERE id=731", (lead,))
     d = client.get("/api/objects/731/crew", headers=hdr(3000)).json()
     assert d["can_edit"] and {c["id"] for c in d["candidates"]} >= {sup, art}
     assert client.get("/api/objects/731/crew", headers=hdr(5000)).json()["can_edit"] is False
-    r = client.post("/api/objects/731/crew", json={"person_id": sup}, headers=hdr(3000)).json()   # Главный художник ставит саппорта
+    r = client.post("/api/objects/731/crew", json={"person_id": sup}, headers=hdr(3000)).json()   # куратор ГИП ставит саппорта
     assert [c["id"] for c in r["crew"]] == [sup]
     objs = client.get("/api/work/dict", headers=hdr(2000)).json()["objects"]
     assert objs[0]["id"] == 731 and objs[0]["mine"]

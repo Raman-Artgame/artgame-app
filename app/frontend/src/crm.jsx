@@ -45,9 +45,11 @@ export function Contact({ phone, name, entity, id }) {
   useEffect(() => { try { if (link) localStorage.setItem('artgame.bx.last', JSON.stringify({ entity, id, link, t: Date.now() })) } catch { /* без памяти */ } }, [link])
   return <div className="contact">
     <div><b>{name || '—'}</b><div className="small muted">{phone || 'телефона нет — добавьте в Битриксе'}</div></div>
-    <div className="dealbtns">
-      {link && <a className="btn ghost" href={link} target="_blank" rel="noreferrer">Позвонить · WhatsApp в Битриксе</a>}
-    </div>
+    {/* HEAD 14.11: звонок и WhatsApp — двумя кнопками; обе ведут в карточку Битрикса (телефония и Wazzup там, решение 05.11) */}
+    {link && <><div className="dealbtns callbtns">
+      <a className="btn ghost" href={link} target="_blank" rel="noreferrer">Позвонить</a>
+      <a className="btn ghost" href={link} target="_blank" rel="noreferrer">WhatsApp</a>
+    </div><p className="small muted callnote">Откроется карточка в Битриксе: звонок и переписка сразу запишутся в сделку.</p></>}
   </div>
 }
 
@@ -204,7 +206,7 @@ export function Leads({ openLead }) {
         <div className="qmain"><div className="qt"><b>{l.name}</b></div>
           <div className="small muted">{[l.phone, l.city, l.manager].filter(Boolean).join(' · ')}</div>
           {!!l.missing.length && <div>{l.missing.map(m => <span key={m} className="miss">нет: {m}</span>)}</div>}</div>
-        <span className={'badge' + ((l.new ? hours(l) >= (d.new_hours || 4) : ageDays(l.modified) >= 3) ? ' hot' : '')}>{l.new ? (hours(l) ? `ждёт ${hours(l)} ч` : 'только что') : `${ageDays(l.modified)} дн.`}</span>
+        <span className={'badge' + ((l.new ? hours(l) >= (d.new_hours || 4) : ageDays(l.modified) >= 3) ? ' hot' : '')}>{l.new ? (hours(l) ? `ждёт ${hours(l) < 24 ? hours(l) + ' ч' : Math.floor(hours(l) / 24) + ' дн.'}` : 'только что') : `${ageDays(l.modified)} дн.`}</span>
       </div>)}
     </div>
   </>

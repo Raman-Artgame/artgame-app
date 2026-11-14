@@ -373,6 +373,7 @@ export function DealCard({ id, back, place }) {
   const [stages, setStages] = useState([])
   const [calc, setCalc] = useState(undefined)
   const [panel, setPanel] = useState(null)
+  const [moreActs, setMoreActs] = useState(false)
   const [sheet, setSheet] = useState(null)   // {kind: call|stage|note|say, ...}
   const [msg, setMsg] = useState('')
   const portal = usePortal()
@@ -417,22 +418,25 @@ export function DealCard({ id, back, place }) {
       <div className="nextstep">{nextI >= 0 ? <><div><span className="small muted">Следующий шаг</span><b>{name(st[nextI][0])}</b></div>
         <button className="mini" onClick={() => setPanel(st[nextI][0])}>{NEXT[st[nextI][0]]}</button></>
         : <div><b>Все шаги пройдены</b><span className="small muted">{d.stage === 'WON' ? 'сделка закрыта · оплата получена' : 'проект в работе'}</span></div>}</div>
+      {/* HEAD 14.11 «максимально удобно и понятно»: на виду — три частых действия, редкие — под «Ещё действия» */}
       <div className="dealbtns wrapbtns">
         <button className="ghost" onClick={() => setSheet({ kind: 'call' })}>Итог звонка</button>
         <button className="ghost" onClick={() => setSheet({ kind: 'wait' })}>Жду ответа</button>
         <button className="ghost" onClick={say}>Сообщение</button>
+        <button className={'ghost morebtn' + (moreActs ? ' on' : '')} aria-expanded={moreActs} onClick={() => setMoreActs(!moreActs)}>Ещё действия {moreActs ? '▴' : '▾'}</button>
+      </div>
+      {moreActs && <div className="dealbtns wrapbtns moreacts">
         <button className="ghost" onClick={() => setSheet({ kind: 'fill' })}>Заполнить карточку</button>
         <button className="ghost" onClick={() => setSheet({ kind: 'note' })}>Заметка</button>
         <button className="ghost" onClick={() => setSheet({ kind: 'stage' })}>Стадия</button>
         <button className={'ghost' + (cur === 'hist' ? ' on' : '')} onClick={() => setPanel('hist')}>История</button>
-      </div>
+      </div>}
     </div>
     {msg && <div className="toast">{msg}</div>}
 
     {cur === 'client' && <div className="card">
       <div className="panelhead"><h3>Клиент</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>
       <div className="hint"><div><b>Шаг 1–3.</b> Ответить в течение 30 минут, узнать помещение, город, площадь и фото стены; назвать ориентир по лестнице цены; договориться о следующем касании.</div></div>
-      {portal && <a className="btn" href={bxLink(portal, 'deal', d.id)} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: 10 }}>Позвонить · WhatsApp в Битриксе</a>}
       <Qualify key={d.modified} d={d} onDone={() => load(true)} />
     </div>}
     {cur === 'calc' && <Calc key={calc?.at || 'new'} d={d} saved={calc} onSaved={t => { loadCalc(); said(t) }} />}
@@ -466,11 +470,13 @@ export function DealCard({ id, back, place }) {
         </div>
         {d.pay.on_check > 0 && <p className="small why">На сверке у HEAD: {money(d.pay.on_check)}{d.pay.count_unchecked ? ' (уже в «Поступило»)' : ' (войдёт в «Поступило» после ✓ HEAD)'}.</p>}
         <Payments pay={d.pay} onDate={x => setSheet({ kind: 'pay', slot: x })} />
-        <p className="small muted">Оплату вносите здесь, с фото чека: чек ляжет в папку сделки «Приходы чеки», HEAD сверит, «Поступило» и «Долг» в Битриксе приложение запишет само. Когда аванс пришёл и договор подписан — переведите сделку в работу и передайте куратору.</p>
+        <p className="small muted">Оплату вносите здесь, с фото чека: чек ляжет в папку сделки «Приходы чеки», HEAD сверит, «Поступило» и «Долг» в Битриксе приложение запишет само. Когда аванс пришёл и договор подписан — переведите сделку в работу и передайте куратору ГИП.</p>
         <div className="dealbtns wrapbtns">
           <button className="mini" onClick={() => setSheet({ kind: 'pay' })}>+ Внести оплату</button>
-          <button className="ghost mini" onClick={() => setSheet({ kind: 'stage' })}>Перевести в работу</button>
-          <button className="ghost mini" onClick={() => setSheet({ kind: 'note', text: 'Передаю куратору: аванс получен, договор подписан. Старт — после подтверждения загрузки.' })}>Передать куратору</button>
+          {/* «в работу» и «куратору ГИП» — только когда аванс уже пришёл (HEAD 14.11: без лишних кнопок раньше времени) */}
+          {(d.pay.received > 0 || d.pay.on_check > 0) && <>
+            <button className="ghost mini" onClick={() => setSheet({ kind: 'stage' })}>Перевести в работу</button>
+            <button className="ghost mini" onClick={() => setSheet({ kind: 'note', text: 'Передаю куратору ГИП: аванс получен, договор подписан. Старт — после подтверждения загрузки.' })}>Передать куратору ГИП</button></>}
           <button className="ghost mini" onClick={say}>Скрипты шага</button>
         </div>
       </div>
