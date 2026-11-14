@@ -104,8 +104,15 @@ def object_files(object_id: int, kind: str = "photo", p: dict = Depends(active))
         raise HTTPException(403, "no access")
     with db.pool.connection() as conn:
         get_object(conn, object_id)
+        # фото отменённой смены в галерею объекта не попадают (HEAD 14.11: Индира отменила смену, внесённую не на тот объект,
+        # а её фото остались в 1611). Файлы не удаляются — остаются на Диске и у смены.
         rows = conn.execute("""SELECT f.*, pe.full_name AS by FROM files f JOIN people pe ON pe.id=f.uploaded_by
-                               WHERE f.object_id=%s AND f.kind=%s AND f.status='ready' ORDER BY f.created_at DESC""",
+                               WHERE f.object_id=%s AND f.kind=%s AND f.status='ready'
+                                 AND NOT (EXISTS (SELECT 1 FROM shifts s LEFT JOIN shift_photos sp ON sp.shift_id=s.id
+                                                  WHERE s.status='cancelled' AND (s.photo_before=f.id OR s.photo_after=f.id OR sp.file_id=f.id))
+                                          AND NOT EXISTS (SELECT 1 FROM shifts s LEFT JOIN shift_photos sp ON sp.shift_id=s.id
+                                                  WHERE s.status<>'cancelled' AND (s.photo_before=f.id OR s.photo_after=f.id OR sp.file_id=f.id)))
+                               ORDER BY f.created_at DESC""",
                             (object_id, kind)).fetchall()
     return [links(f) for f in rows]
 
