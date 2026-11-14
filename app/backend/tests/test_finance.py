@@ -4,7 +4,7 @@ import uuid
 
 from psycopg.types.json import Jsonb
 
-from artgame import db, drive, fin
+from artgame import db, drive, fin, finance
 from conftest import hdr
 
 JPG = "data:image/jpeg;base64,/9j/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -142,6 +142,17 @@ def test_finance_flow(client, monkeypatch):
     assert next(b for b in s["budget"] if b["code"] == "ads_target")["plan"] == 30000   # 1000 ₸ в день × 30 дней ноября
     assert studio["plan"] == 300000 and studio["fact"] == 300000
     assert s["cash"]["in"] == 1_160_000 and s["cash"]["out"] == 300_000 + 43000
+    # HEAD 14.11: месяц идёт — на Пульте оклады и минимумы по прошедшим дням (15 из 30), прибыль «на сегодня» выше на остаток
+    monkeypatch.setattr(finance, "now_ym", lambda: YM)
+    monkeypatch.setattr(finance, "today_day", lambda: 15)
+    t = client.get("/api/fin/summary", params={"ym": YM}, headers=hdr(1000)).json()
+    with db.pool.connection() as conn:
+        monthly = float(conn.execute("SELECT sum(amount) AS s FROM fin_accruals WHERE period=%s AND status='active' AND kind IN ('salary','topup')",
+                                     (YM,)).fetchone()["s"])
+    td = t["today"]
+    assert monthly > 0 and td["days"] == 15 and td["share"] == 0.5
+    assert td["payroll_month"] == t["costs"]["payroll"] and td["payroll"] == round(t["costs"]["payroll"] - monthly / 2, 2)
+    assert td["profit"] == round(t["profit"] + monthly / 2, 2)
     # отмена выплаты возвращает чек в «к выплате»
     last = [x for x in client.get("/api/fin/ledger", params={"ym": YM}, headers=hdr(1000)).json() if x["article_code"] == "payroll"][0]
     assert client.post(f"/api/fin/ledger/{last['id']}/cancel", headers=hdr(1000)).json()["ok"]

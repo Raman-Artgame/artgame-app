@@ -72,6 +72,10 @@ def now_ym() -> str:
     return ym_of(datetime.now(TZ))
 
 
+def today_day() -> int:
+    return datetime.now(TZ).day
+
+
 NIGHT_KEYS = ("pay.night.from", "pay.night.to")   # время «22:00» / «06:00» — строкой, иначе ночь не считалась (найдено 12.11)
 
 
@@ -716,6 +720,9 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
                                       (ym,)).fetchone()["s"])
         reimb = _f(conn.execute("SELECT coalesce(sum(amount),0) AS s FROM fin_accruals WHERE period=%s AND status='active' AND kind='reimburse'",
                                 (ym,)).fetchone()["s"])
+        # оклады и доплаты до минимума начислены сразу за месяц (HEAD 14.11: на Пульте — «на сегодня», по прошедшим дням)
+        monthly = _f(conn.execute("SELECT coalesce(sum(amount),0) AS s FROM fin_accruals WHERE period=%s AND status='active' AND kind IN ('salary','topup')",
+                                  (ym,)).fetchone()["s"])
         cash = conn.execute("""SELECT a.kind, l.article_code, a.title, l.direction, sum(l.amount) AS s FROM fin_ledger l
                                JOIN fin_articles a ON a.code=l.article_code WHERE l.status='active' AND l.op_date >= %s AND l.op_date < %s
                                  AND a.kind <> 'transfer' GROUP BY a.kind, l.article_code, a.title, l.direction ORDER BY a.kind""",
@@ -768,7 +775,14 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
         warn.append("нет ключа fin.tax.ipn в «Значениях» — ИПН не оценён")
     inflow = sum(_f(r["s"]) for r in cash if r["direction"] == "in" and r["kind"] != "opening")
     outflow = sum(_f(r["s"]) for r in cash if r["direction"] == "out")
-    return {"month": ym, "warn": warn,
+    today = None
+    if ym == now_ym():   # месяц идёт: часть окладов и минимумов, ещё не заработанная, — не расход «на сегодня»
+        days, day = (end - start).days, today_day()
+        share = min(day, days) / days
+        later = round(monthly * (1 - share), 2)
+        today = {"share": round(share, 4), "days": day, "days_month": days, "payroll": round(costs["payroll"] - later, 2),
+                 "payroll_month": costs["payroll"], "profit": None if profit is None else round(profit + later, 2)}
+    return {"month": ym, "warn": warn, "today": today,
             "revenue": {"gross": gross, "net": None if net is None else round(net), "vat": None if gross is None else round(gross - net)},
             "costs": costs, "profit": profit,
             "ipn": round(max(profit, 0) * ipn_pct / 100) if profit is not None and ipn_pct else None,
