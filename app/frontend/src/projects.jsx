@@ -77,7 +77,7 @@ function ProjectCard({ x, me, back, openDeal }) {
   const c = x.cond || {}
   const kv = [['Город', x.city], ['Площадь', x.area ? `${x.area} м²` : ''], ['Сложность', x.level || 'МОП ещё не указал'],
     ['Старт', x.start ? dmy(x.start) : ''], ['Сдача', x.due ? dmy(x.due) : ''], ['Смены', x.norm.shifts ? `${x.done.shifts} из ${x.norm.shifts}` : x.done.shifts ? String(x.done.shifts) : ''],
-    ['Состав по норме', x.norm.crew ? `${x.norm.crew} чел.` : ''], ['Сделано', x.done.m2 ? `${x.done.m2} м²` : ''], ['МОП', x.manager], ['ГИП', x.gip?.name || '']].filter(([, v]) => v)
+    ['Состав по норме', x.norm.crew ? `${x.norm.crew} чел.` : ''], ['МОП', x.manager]].filter(([, v]) => v)
   if (chat) return <ProjChat id={x.id} back={() => { setChat(false); if (x.chat) x.chat.unread = 0 }} backText={'← ' + cleanTitle(x.title, x.id)} />
   return <>
     <div className="phero" style={x.cover ? { backgroundImage: `linear-gradient(180deg, rgba(11,11,13,.15), rgba(11,11,13,.85)), url(${x.cover})` } : undefined}>
@@ -93,22 +93,89 @@ function ProjectCard({ x, me, back, openDeal }) {
       <div className="conds light">{COND.map(([k, t]) => <span key={k} className={c[k] ? 'on' : ''}>{c[k] ? '● ' : ''}{t}</span>)}</div>
       {x.address && <a className="route" onClick={() => openUrl(route(x))}>📍 {x.address}<i className="small">Маршрут в 2ГИС ›</i></a>}
       {x.id > 0 && x.contact && <SiteContact id={x.id} c={x.contact} />}
+      <Plan x={x} />
       <div className="kvgrid">{kv.map(([k, v]) => <div key={k}><span>{k}</span><b>{v}</b></div>)}</div>
-      {(x.now?.length > 0 || x.people.length > 0) && <><h3>Команда</h3><div className="who">
-        {x.now?.map(n => <span key={'n' + n} className="live">● {n}</span>)}
-        {x.people.filter(n => !(x.now || []).includes(n)).map(n => <span key={n}>{n}</span>)}</div>
-        <p className="small muted">● — смена идёт сейчас; остальные были на объекте последние 4 дня.</p></>}
       {openDeal && <button className="ghost" onClick={() => openDeal(x.id)}>Открыть сделку</button>}
     </div>
-    {me && ASSIGN.has(me.role_code) && <GipPick x={x} />}
-    {me && x.id > 0 && <Crew id={x.id} />}
+    <TeamBox x={x} me={me} />
     {me && x.id > 0 && <DesignBox id={x.id} me={me} obj={{ id: x.id, title: x.title }} />}
+    {me && x.id > 0 && <MaterialsBox id={x.id} />}
     {me && x.id > 0 && <TripBox id={x.id} />}
     {me && x.id > 0 && MONEY.has(me.role_code) && <MoneyBox id={x.id} />}
-    <Gallery obj={{ id: x.id, title: x.title }} me={me} start="photo" skip={['design']} />
+    <Gallery obj={{ id: x.id, title: x.title }} me={me} start="photo" skip={['design']} top={x.id > 0 && <PromoLine id={x.id} />} />
     {me && x.id > 0 && (x.working || x.closing) && <DoneBox id={x.id} />}
     {me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} />}
   </>
+}
+
+// План по дням (HEAD 14.11): сколько м² должно быть к сегодняшнему дню при равномерной работе и сколько сделано.
+// Срок — рабочие дни (сб и вс не считаем), как в «Проектах».
+const workdays = (a, b) => { let n = 0; const d = new Date(a); while (d < b) { d.setDate(d.getDate() + 1); if (d.getDay() % 6) n++ } return n }
+function Plan({ x }) {
+  if (!x.working || !x.start || !x.area) return null
+  const term = x.norm.term || 0
+  const days = Math.min(term, workdays(new Date(x.start + 'T00:00'), new Date()))
+  const need = term ? Math.round(x.area * days / term) : 0
+  const got = Math.round(x.done.m2 || 0)
+  const late = term && got < need
+  return <div className={'plan' + (late ? ' late' : '')}>
+    <b>{term ? `План на сегодня ${need} м² · сделано ${got} м²` : `Сделано ${got} м² из ${x.area}`}</b>
+    <span className="small">{!term ? 'срок в сделке не указан' : late ? `отстаём на ${need - got} м²` : got >= x.area ? 'площадь закрыта' : 'идём по плану'} · всего {x.area} м², {term} раб. дн.</span>
+  </div>
+}
+
+// Команда проекта (HEAD 14.11): ГИП, кто назначен и кто сейчас на смене — одним блоком.
+function TeamBox({ x, me }) {
+  const gip = me && ASSIGN.has(me.role_code)
+  const live = x.now || [], was = x.people.filter(n => !live.includes(n))
+  return <div className="card team">
+    <h3>Команда</h3>
+    {gip ? <GipPick x={x} /> : <p className="small"><span className="muted">ГИП: </span><b>{x.gip?.name || 'не назначен'}</b></p>}
+    {me && x.id > 0 && <Crew id={x.id} />}
+    {(live.length > 0 || was.length > 0) && <><label className="muted">На смене и были на объекте</label><div className="who">
+      {live.map(n => <span key={'n' + n} className="live">● {n}</span>)}
+      {was.map(n => <span key={n}>{n}</span>)}</div>
+      <p className="small muted">● — смена идёт сейчас; остальные были последние 4 дня.</p></>}
+  </div>
+}
+
+// Материалы (HEAD 14.11): что взяли по «Сбору» и что купили по чекам на объект. Видят ГИП, главные, МОП и HEAD.
+const ZONE = { mural: 'Роспись', print: 'Печать' }
+const qty = n => String(+(+n).toFixed(2)).replace('.', ',')
+function MaterialsBox({ id }) {
+  const [m, setM] = useState(null)
+  useEffect(() => { api(`/objects/${id}/materials`).then(setM, () => setM(false)) }, [id])
+  if (!m) return null
+  return <div className="card mats">
+    <div className="head"><h3>Материалы и расходы</h3>{m.buys_total > 0 && <b className="nowrap">{money(m.buys_total)}</b>}</div>
+    {!m.kits.length && <p className="small muted">«Сбор на объект» ещё не заполняли.</p>}
+    {m.kits.map(k => <div key={k.zone}>
+      <label className="muted">Сбор · {ZONE[k.zone]} · {k.closed ? 'сдан' : 'на объекте'}</label>
+      {k.rows.map(r => <div key={r.title} className="row"><span>{r.title}</span>
+        <b className="nowrap">{qty(r.taken)} {r.unit}{r.used != null ? ` · ушло ${qty(r.used)}` : ''}</b></div>)}
+      {!k.rows.length && <p className="small muted">Материалы не отмечены.</p>}
+      <p className="small muted">Оборудования взято: {k.tools}{k.lost ? ` · не вернули: ${k.lost}` : ''}</p>
+    </div>)}
+    <label className="muted">Куплено по чекам на объект</label>
+    {!m.buys.length && <p className="small muted">Покупок пока нет.</p>}
+    {m.buys.map(b => <div key={b.id} className="row"><div><b>{b.title}</b><div className="small muted">{[b.person, new Date(b.created_at).toLocaleDateString('ru-RU'), b.note].filter(Boolean).join(' · ')}</div></div>
+      <div className="qbtns"><b className="nowrap">{money(b.amount)}</b>{b.status === 'submitted' && <span className="small muted">на проверке</span>}</div></div>)}
+  </div>
+}
+
+// Строка маркетинга над фото (HEAD 14.11): что утверждено в Продакшн и разрешил ли клиент публикацию (отмечают МОП и HEAD).
+const PUB = { true: 'разрешил', false: 'не разрешил', null: 'не спросили' }
+function PromoLine({ id }) {
+  const [d, setD] = useState(null)
+  useEffect(() => { api(`/objects/${id}/promo`).then(setD, () => {}) }, [id])
+  if (!d) return null
+  const set = ok => api(`/objects/${id}/publish`, { method: 'POST', body: { ok } }).then(r => setD({ ...d, publish: r.publish }))
+  return <div className="promo">
+    <span className="small">В Продакшн: фото {d.photo} · видео {d.video} · рилс {d.reels}{d.wait ? ` · ждут HEAD ${d.wait}` : ''}</span>
+    <span className="small">Клиент на публикацию: <b className={d.publish ? 'ok' : d.publish === false ? 'why' : 'muted'}>{PUB[d.publish]}</b></span>
+    {d.can_set && <div className="chips">{[[true, 'Разрешил'], [false, 'Нет'], [null, 'Не спросили']].map(([v, t]) =>
+      <button key={t} className={d.publish === v ? 'on' : 'ghost'} onClick={() => set(v)}>{t}</button>)}</div>}
+  </div>
 }
 
 // Ссылку из мини-приложения Telegram открываем через openLink — обычная там может не открыться
@@ -217,12 +284,12 @@ function GipPick({ x }) {
   useEffect(() => { api('/gip/candidates').then(setList, () => setList([])) }, [])
   const save = id => api(`/objects/${x.id}/gip`, { method: 'POST', body: { person_id: id } })
     .then(r => { setCur(r.gip_id || 0); x.gip = r.gip_id ? { id: r.gip_id, name: r.gip_name } : null; setMsg(r.gip_id ? `ГИП — ${r.gip_name}, ему пришло сообщение.` : 'ГИП снят.') }, e => setMsg(e.message))
-  return <div className="card gippick"><h3>ГИП проекта</h3>
+  return <div className="gippick"><label className="muted">ГИП проекта</label>
     <select value={cur} onChange={e => save(+e.target.value)} disabled={!list}>
       <option value={0}>— не назначен —</option>
       {(list || []).map(p => <option key={p.id} value={p.id}>{p.full_name} · {p.acting ? 'и.о. ' : ''}{p.role_title}</option>)}
     </select>
-    <p className="small muted">{msg || 'ГИП видит всю историю проекта и принимает его смены.'}</p></div>
+    {msg && <p className="small muted">{msg}</p>}</div>
 }
 
 // Команда объекта (HEAD 09.11: «Где главный художник назначает на объект?»): ставят ГИП, Главный, Про, Мастер печати, МОП и HEAD.
@@ -236,7 +303,7 @@ function Crew({ id }) {
   const set = (pid, on) => api(`/objects/${id}/crew`, { method: 'POST', body: { person_id: pid, on } })
     .then(r => { setD({ ...d, crew: r.crew }); setAdd(0); setMsg(on ? 'Поставлен на объект, ему пришло сообщение.' : 'Снят с объекта.') }, e => setMsg(e.message))
   const free = (d.candidates || []).filter(c => !d.crew.some(x => x.id === c.id))
-  return <div className="card crew"><h3>На объекте работают</h3>
+  return <div className="crew"><label className="muted">Назначены на объект</label>
     {d.crew.length ? <div className="who">{d.crew.map(c => <span key={c.id}>{c.full_name} <i className="small muted">· {c.role_title}</i>
       {d.can_edit && <a className="x" aria-label="снять" onClick={() => confirm(`Снять ${c.full_name} с объекта?`) && set(c.id, false)}> ✕</a>}</span>)}</div>
       : <p className="small muted">Пока никого не поставили.</p>}
@@ -244,7 +311,7 @@ function Crew({ id }) {
       <option value={0}>— кого поставить —</option>
       {free.map(c => <option key={c.id} value={c.id}>{c.full_name} · {c.role_title}</option>)}</select>
       <button className="mini" disabled={!add} onClick={() => set(add, true)}>Поставить</button></div>}
-    <p className="small muted">{msg || (d.can_edit ? 'Назначенный получит сообщение, объект у него станет первым в «Смене».' : 'Состав ставят ГИП и главные.')}</p></div>
+    {msg && <p className="small muted">{msg}</p>}</div>
 }
 
 // Командировка (HEAD 10.11): галочка в проекте → пункты расходов (проживание, дорога, транспорт на месте, прочее).

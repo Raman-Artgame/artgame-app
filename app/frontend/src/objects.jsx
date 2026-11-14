@@ -60,7 +60,7 @@ export function Viewer({ f, onClose }) {
 }
 
 // Галерея проекта (HEAD 08.11, «Проекты» и «Объекты» — один раздел): эскизы, фото с объекта, видео, продакшн, документы.
-export function Gallery({ obj, me, start = 'design', only, skip = [], bare = false }) {
+export function Gallery({ obj, me, start = 'design', only, skip = [], bare = false, top = null }) {
   const [kind, setKind] = useState(start)
   const [list, setList] = useState(null)
   const [busy, setBusy] = useState('')
@@ -95,6 +95,7 @@ export function Gallery({ obj, me, start = 'design', only, skip = [], bare = fal
   const empty = { design: 'Эскизов и файлов в печать пока нет — их загружает дизайнер.', video: 'Видео пока нет.', media: 'Утверждённого материала пока нет.' }
   return <div className={bare ? 'gbare' : 'card'}>
     {kinds.length > 1 && <div className="segf">{kinds.map(k => <button key={k} className={k === kind ? 'on' : ''} onClick={() => setKind(k)}>{KIND[k]}</button>)}</div>}
+    {top}
     {!bare && <p className="small muted gabout">{ABOUT[kind]}</p>}
     {kind === 'photo' && <label className="photo"><span>📷 Добавить фото с объекта</span>
       <input type="file" accept="image/*" multiple hidden onChange={e => e.target.files.length && addPhotos(e.target.files)} /></label>}
