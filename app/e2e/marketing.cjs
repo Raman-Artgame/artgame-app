@@ -65,7 +65,7 @@ const noScroll = async p => assert.ok(await p.evaluate(() => document.documentEl
   await m.getByText('wall_orange.jpg').waitFor()
   await m.locator('.chips').getByRole('button', { name: 'Лучшее' }).click()
   await m.getByText('wall_faces.jpg').waitFor()
-  assert.strictEqual(await m.getByText('wall_orange.jpg').count(), 0)
+  await m.getByText('wall_orange.jpg').waitFor({ state: 'detached' })   // «Лучшее» — без ждущего HEAD (wall_faces виден и до переключения — ждём, пока список обновится)
   await noScroll(m); await shot(m, 'mkt-2-media')
   // 3. Новая публикация: название, Instagram/Рилс, дата, текст, проект, материал
   await m.locator('.segf').getByRole('button', { name: 'План' }).click()
