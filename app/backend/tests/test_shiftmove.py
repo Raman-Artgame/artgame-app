@@ -50,3 +50,17 @@ def test_move_loose_photos(client, team, monkeypatch):  # noqa: F811
     assert r["files"] == 3
     with db.pool.connection() as c:
         assert {x["object_id"] for x in c.execute("SELECT object_id FROM files WHERE id = ANY(%s)", (ids,)).fetchall()} == {734}
+
+
+def test_cancelled_shift_photos_hidden(client, team, monkeypatch):  # noqa: F811
+    """HEAD 14.11: смену внесли не на тот объект и отменили — её фото не остаются в галерее объекта."""
+    from artgame import drive
+    monkeypatch.setattr(drive, "Drive", Moving)
+    y = _today() - timedelta(days=1)
+    monkeypatch.setattr(settings, "backfill_from", (y - timedelta(days=5)).isoformat())
+    monkeypatch.setattr(settings, "backfill_until", _today().isoformat())
+    body = {"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "day": y.isoformat(), "hours": 8, "work_done": "Не тот объект"}
+    s = client.post("/api/shifts/past", json={**body, "photo_after": JPEG}, headers=hdr(5000)).json()
+    assert len(client.get("/api/objects/731/files?kind=photo", headers=hdr(1000)).json()) == 1
+    assert client.post(f"/api/shift/{s['id']}/cancel", headers=hdr(5000)).status_code == 200
+    assert client.get("/api/objects/731/files?kind=photo", headers=hdr(1000)).json() == []
