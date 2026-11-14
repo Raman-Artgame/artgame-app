@@ -11,7 +11,7 @@ import { closeAsks, useClosing } from './closing.jsx'
 // команда и последние действия. Отсюда же — «Смотреть как сотрудник».
 const tm = s => new Date(s).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
 const ym = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Almaty' }).slice(0, 7)
-const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
+const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи', marketing: 'Маркетинг' }
 
 export function usePulse(on) {
   const [p, setP] = useState(null)
@@ -53,6 +53,7 @@ export function Pulse({ me, pulse, go }) {
     p.catalogs && { k: 'design:cat', t: `Каталоги дизайна на утверждение: ${p.catalogs}`, s: 'утвердить или вернуть' },
     p.dm?.unread && { k: 'chat', t: `Чат: новых ${p.dm.unread}`, s: `от ${p.dm.people} чел. · ответить`, hot: true },
     p.media && { k: 'prod', t: `Материал с объектов на утверждение: ${p.media}`, s: 'в «Продакшн» и рилс к оплате' },
+    p.posts && { k: 'mkt', t: `Публикации на утверждение: ${p.posts}`, s: 'контент-план маркетинга — «Утверждаю» или «Вернуть»' },
   ].filter(Boolean)
   const curating = r.curating ? `Ещё ${r.curating} ждут оценки куратора (до 24 ч), потом придут сюда` : ''
   const name = (me.full_name || '').split(' ')[0]

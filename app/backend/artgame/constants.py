@@ -18,6 +18,7 @@ RANGE = "Значения!A2:I"
 ROLE_AUDIENCE = {
     "mop": {"все", "моп"}, "mop_vip": {"все", "моп"},
     "lead_designer": {"все", "дизайн"}, "designer_asst": {"все", "дизайн"},
+    "marketer": {"все", "маркетинг"},
 }
 PRODUCTION = {"все", "производство"}
 

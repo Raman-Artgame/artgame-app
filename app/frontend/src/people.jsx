@@ -3,7 +3,7 @@ import { api } from './api.js'
 import { startViewAs } from './head.jsx'
 
 const ROLE_ZONE = { support: 'mural', artist: 'mural', artist_pro: 'mural', lead_artist: 'mural', print_operator: 'print', print_master: 'print',
-  mop: 'sales', mop_vip: 'sales', lead_designer: 'design', designer_asst: 'design' }
+  mop: 'sales', mop_vip: 'sales', lead_designer: 'design', designer_asst: 'design', marketer: 'marketing' }
 const DZ_ROLES = new Set(['lead_designer', 'designer_asst'])
 // Связь с пользователем Битрикса: МОП — свои сделки, дизайнеры — свои задачи воронки «Дизайн РК» (без неё «Дизайн» не открывается).
 const BX_ROLES = new Set(['mop', 'mop_vip', ...DZ_ROLES])
@@ -40,7 +40,7 @@ export function People({ ROLE, ZONE, openViewAs }) {
 }
 
 const DEPTS = [['HEAD', ['head']], ['Роспись', ['lead_artist', 'artist_pro', 'artist', 'support']], ['Печать', ['print_master', 'print_operator']],
-  ['Дизайн', ['lead_designer', 'designer_asst']], ['Продажи', ['mop_vip', 'mop']], ['Плотники', ['carpenter']]]
+  ['Дизайн', ['lead_designer', 'designer_asst']], ['Продажи', ['mop_vip', 'mop']], ['Маркетинг', ['marketer']], ['Плотники', ['carpenter']]]
 const RANK = Object.fromEntries(DEPTS.flatMap(([, r]) => r).map((r, i) => [r, i]))
 
 function Dept({ title, list, open, flip, warn, closed, children }) {

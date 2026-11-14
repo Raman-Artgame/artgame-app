@@ -28,7 +28,7 @@ RO_MSG = "Режим просмотра: от имени сотрудника н
 
 # Роль → зона по умолчанию (как в «Команде»): без зоны «Смена» закрыта.
 ROLE_ZONE = {"support": "mural", "artist": "mural", "artist_pro": "mural", "lead_artist": "mural", "print_operator": "print",
-             "print_master": "print", "mop": "sales", "mop_vip": "sales", "lead_designer": "design", "designer_asst": "design"}
+             "print_master": "print", "mop": "sales", "mop_vip": "sales", "lead_designer": "design", "designer_asst": "design", "marketer": "marketing"}
 
 # Один изменяемый словарь на запрос: middleware кладёт его до обработчиков, current_person дописывает, кто смотрит.
 # Словарь — общий объект, поэтому виден и в потоках, куда FastAPI уносит синхронные обработчики.

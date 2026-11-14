@@ -147,12 +147,13 @@ class TextIn(BaseModel):
 @router.get("/unread")
 def unread(p: dict = Depends(active)):
     with db.pool.connection() as conn:
+        from .projchat import unread as proj
         if _as_head(p):
             u = _head_unread(conn, p["id"])
-            return {"n": u["group"] + u["mine"]}
+            return {"n": u["group"] + u["mine"] + proj(conn, p)}
         hq = conn.execute("""SELECT count(*) AS n FROM dm WHERE person_id=%s AND from_head AND read_at IS NULL
                              AND (broadcast_id IS NOT NULL OR head_id IS NULL)""", (p["id"],)).fetchone()["n"]
-        return {"n": hq + _pm_unread(conn, p["id"])}
+        return {"n": hq + _pm_unread(conn, p["id"]) + proj(conn, p)}
 
 
 # ---------- сотрудник ----------
@@ -181,7 +182,9 @@ def chat_list(p: dict = Depends(active)):
                                   ORDER BY created_at DESC, id DESC LIMIT 1) l ON true
                WHERE pe.status='active' AND pe.id<>%(me)s AND pe.tg_id > 0) t
                ORDER BY unread > 0 DESC, last_at DESC NULLS LAST, role_code <> 'head', full_name""", {"me": me}).fetchall()
-    return {"hq": hq, "people": people}
+        from .projchat import chats
+        projects = chats(conn, p)
+    return {"hq": hq, "people": people, "projects": projects}
 
 
 def _peer(conn, pid: int, me: int) -> dict:

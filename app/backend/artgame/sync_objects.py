@@ -76,7 +76,7 @@ def fetch_deals() -> list[dict]:
     while start is not None:
         j = rd("crm.deal.list", {
             "filter": {"CATEGORY_ID": CATEGORY, "STAGE_ID": list(ACTIVE + DONE)},
-            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD, F_LEVEL, F_AREA, F_ADDR, F_CITY, F_OBJECT, "OPPORTUNITY"], "start": start})
+            "select": ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", FOLDER_FIELD, F_LEVEL, F_AREA, F_ADDR, F_CITY, F_OBJECT, "OPPORTUNITY", "ASSIGNED_BY_ID"], "start": start})
         if isinstance(j, list):  # шлюз может вернуть сразу список
             out += j
             break
@@ -155,17 +155,19 @@ def upsert(conn, deals: list[dict]) -> list[int]:
             addr = None   # вместо адреса вставлена ссылка на карту — точку берём из неё, ссылку адресом не показываем
         guess = guess_level(v, _area(d.get(F_AREA)), d.get("OPPORTUNITY"))
         row = conn.execute(
-            """INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at, level, area_m2, address, geo, level_guess)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,now(),%s,%s,%s,%s,%s)
+            """INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at, level, area_m2, address, geo, level_guess, mop_bx_id)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,now(),%s,%s,%s,%s,%s,%s)
                ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, city=EXCLUDED.city, bitrix_stage=EXCLUDED.bitrix_stage,
                    level=EXCLUDED.level, area_m2=EXCLUDED.area_m2, address=EXCLUDED.address, geo=EXCLUDED.geo, level_guess=EXCLUDED.level_guess,
+                   mop_bx_id=coalesce(EXCLUDED.mop_bx_id, objects.mop_bx_id),
                    drive_folder=coalesce(objects.drive_folder, EXCLUDED.drive_folder),
                    status=CASE WHEN objects.status='archived' THEN 'archived' ELSE EXCLUDED.status END, synced_at=now(),
                    left_work_at=CASE WHEN objects.bitrix_stage='UC_AV00QK' AND EXCLUDED.bitrix_stage<>'UC_AV00QK' THEN now()
                                      ELSE objects.left_work_at END
                RETURNING (xmax = 0) AS inserted""",
             (int(d["ID"]), title, city, d["STAGE_ID"], int(d["CATEGORY_ID"]), status, d.get(FOLDER_FIELD) or None,
-             str(d.get(F_LEVEL) or "") or None, _area(d.get(F_AREA)), addr, geo, guess)).fetchone()
+             str(d.get(F_LEVEL) or "") or None, _area(d.get(F_AREA)), addr, geo, guess,
+             int(d["ASSIGNED_BY_ID"]) if str(d.get("ASSIGNED_BY_ID") or "").isdigit() else None)).fetchone()
         if row["inserted"]:
             new.append(int(d["ID"]))
     return new

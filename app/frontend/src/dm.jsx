@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { api } from './api.js'
+import { api, uuid } from './api.js'
 import { FeedbackInbox } from './feedback.jsx'
+import { shrink } from './work.jsx'
 
 // «Чат» (HEAD 11.11): «HEAD» — объявления + вопросы руководству (видят все HEAD); личные чаты любой ↔ любой (видят двое).
 // В бот — только объявления.
@@ -70,6 +71,7 @@ export function Chat({ head }) {
   useEffect(() => { load() }, [])
   const back = () => { setOpen(null); load() }
   if (open === 'hq') return head ? <HeadInbox back={back} /> : <HqRoom back={back} />
+  if (open?.proj) return <ProjChat id={open.proj} back={back} />
   if (open) return <Pm who={open} back={back} />
   if (!d) return <div className="card muted">Загрузка…</div>
   if (d.err) return <div className="card muted">{d.err}</div>
@@ -92,6 +94,16 @@ export function Chat({ head }) {
           {d.hq.last_text && <div className={'small dmlast' + (+d.hq.unread ? ' new' : '')}>{d.hq.last_text}</div>}
         </div><span className="muted">›</span></div>
     </div>
+    {d.projects?.length > 0 && <div className="card dm">
+      <h3>Проекты</h3>
+      {d.projects.map(x => <div key={x.id} className="qrow dmrow dmproj" onClick={() => setOpen({ proj: x.id })}>
+        <span className="ic dmav proj">№</span>
+        <div className="qmain"><b>{cleanName(x.title, x.id)}</b>{cnt(x.unread)}
+          <div className="small muted">№ {x.id}{x.open ? '' : ' · только чтение'}{x.last_at ? ' · ' + when(x.last_at) : ''}</div>
+          {x.last_at && <div className={'small dmlast' + (+x.unread ? ' new' : '')}>{x.last_name?.split(' ')[0]}: {x.last_text || '📷 фото'}</div>}
+        </div><span className="muted">›</span></div>)}
+      <p className="small muted dmsub">Чат проекта видят: кто на объекте, ГИП, МОП и HEAD.</p>
+    </div>}
     <div className="card dm">
       <h3>Личные</h3>
       <input className="dmsearch" placeholder="Найти по имени или роли" value={q} onChange={e => setQ(e.target.value)} />
@@ -205,5 +217,47 @@ function Broadcast({ roles, back }) {
     {ok ? <><p className="small ok">{ok}</p><button className="ghost" onClick={back}>Готово</button></> :
       <Composer ph="Текст объявления"
         send={text => api('/dm/broadcast', { method: 'POST', body: { text, roles: pick.length ? pick : null } }).then(r => setOk(`Отправлено: ${r.sent} чел.`))} />}
+  </div>
+}
+
+// чат проекта (HEAD 13.11): создаётся сам у проекта на «Выполнении»; видят кто на объекте, ГИП, МОП и все HEAD
+const cleanName = (t, id) => (t || '').replace(new RegExp('^' + id + '\\s*·\\s*'), '')
+const WHY = { gip: 'ГИП', mop: 'МОП', head: 'HEAD', crew: '' }
+export function ProjChat({ id, back, backText = '‹ Все чаты' }) {
+  const [d, setD] = useState(null)
+  const [who, setWho] = useState(false)
+  const [busy, setBusy] = useState('')
+  const pic = useRef(null)
+  const load = () => api(`/pchat/${id}`).then(r => { setD(r); done() }, e => setD({ err: e.message }))
+  useEffect(() => { load() }, [id])
+  const photo = async f => {
+    if (!f) return
+    setBusy('Отправляю фото…')
+    try { await api(`/pchat/${id}`, { method: 'POST', body: { photo: await shrink(f), client_uid: uuid() } }); await load(); setBusy('') }
+    catch (e) { setBusy(e.message) }
+  }
+  if (!d) return <div className="card dm"><button className="ghost mini dmback" onClick={back}>{backText}</button><p className="small muted">Загрузка…</p></div>
+  if (d.err) return <div className="card dm"><button className="ghost mini dmback" onClick={back}>{backText}</button><p className="small muted">{d.err}</p></div>
+  const o = d.object
+  return <div className="card dm">
+    <button className="ghost mini dmback" onClick={back}>{backText}</button>
+    <h2>Чат проекта</h2>
+    <p className="small muted">№ {o.id} · {cleanName(o.title, o.id)}</p>
+    <button className="ghost mini dmwhobtn" onClick={() => setWho(!who)}>Участники: {d.members.length} {who ? '▴' : '▾'}</button>
+    {who && <div className="who dmmembers">{d.members.map(m => <span key={m.id}>{m.full_name}{WHY[m.why] ? ' · ' + WHY[m.why] : ''}</span>)}</div>}
+    {d.items.length ? <div className="dmlist">
+      {d.items.map(m => <div key={m.id} className={'dmb ' + (m.mine ? 'me' : 'them')}>
+        {m.photo && <a href={m.photo.url} target="_blank" rel="noreferrer"><img className="dmpic" src={m.photo.thumb} alt="" /></a>}
+        {m.text && <div className="dmtext">{m.text}</div>}
+        <span className="dmmeta">{m.mine ? '' : m.name + (m.head ? ' · HEAD' : '') + ' · '}{when(m.created_at)}</span>
+      </div>)}
+    </div> : <p className="small muted dmempty">Сообщений пока нет. Напиши первым — увидит вся команда проекта.</p>}
+    {o.open ? <>
+      <Composer ph="Написать команде проекта" send={text => api(`/pchat/${id}`, { method: 'POST', body: { text } }).then(load)} />
+      <input ref={pic} type="file" accept="image/*" hidden onChange={e => { photo(e.target.files[0]); e.target.value = '' }} />
+      <button className="ghost mini" onClick={() => pic.current?.click()}>📷 Фото</button>
+      {busy && <p className="small muted">{busy}</p>}
+      <p className="small dmwho">Фото ложится в папку сделки. Бот о чате не пишет — новое видно на вкладке «Чат».</p>
+    </> : <p className="small muted">Проект ушёл с «Выполнения» — чат только для чтения.</p>}
   </div>
 }
