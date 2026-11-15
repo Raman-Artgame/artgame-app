@@ -48,7 +48,8 @@ def test_chat_hq_and_pm(client, team, monkeypatch):  # noqa: F811
     assert client.get("/api/dm/unread", headers=hdr(2000)).json() == {"n": 3}                   # ответ Алины + P3000 + Раман
     # объявление — в «HEAD» каждому и в бот
     b = client.post("/api/dm/broadcast", json={"text": "Сбор в 9"}, headers=hdr(6000)).json()
-    assert b["sent"] == 3 and sorted(x[0] for x in sent) == [2000, 3000, 5000] and "Алина" in sent[0][1]
+    assert b["sent"] == 3 and sorted(x[0] for x in sent) == [1000, 2000, 3000, 5000, 6000] and "Алина" in sent[0][1]   # + копия всем HEAD (15.11)
+    assert client.get("/api/dm/threads", headers=hdr(1000)).json()["broadcasts"][0]["in_bot"] == 3
     hq = client.get("/api/dm/room/hq", headers=hdr(2000)).json()["items"]
     assert [(x["author"], x["text"], x["broadcast"]) for x in hq] == [
         ("P2000", "Не грузится фото", False), ("Алина", "Посмотрим", False), ("Алина", "Сбор в 9", True)]

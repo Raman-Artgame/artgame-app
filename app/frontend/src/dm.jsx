@@ -183,7 +183,7 @@ function HeadInbox({ back }) {
       </div>
       {d.broadcasts.length > 0 && <div className="card dm"><h3>Объявления</h3>
         {d.broadcasts.map(b => <div key={b.id} className="dmcastrow">
-          <div className="small muted">{when(b.created_at)} · {b.author} · {b.roles?.length ? b.roles.map(r => d.roles.find(x => x.code === r)?.title || r).join(', ') : 'всем'} · получили {b.sent}</div>
+          <div className="small muted">{when(b.created_at)} · {b.author} · {b.roles?.length ? b.roles.map(r => d.roles.find(x => x.code === r)?.title || r).join(', ') : 'всем'} · получили {b.sent} · в боте {b.in_bot}</div>
           <div className="dmtext">{b.text}</div></div>)}
       </div>}
     </>}

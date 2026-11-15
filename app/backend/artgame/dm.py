@@ -66,7 +66,7 @@ def _deliver(jobs: list[tuple[int, int, str]]) -> None:
         except Exception as e:  # noqa: BLE001
             print("dm notify:", e, file=sys.stderr)
             continue
-        if mid:
+        if mid and dm_id:   # копия HEAD (dm_id=None) — только в бот, строки в чате нет
             with db.pool.connection() as conn:
                 conn.execute("UPDATE dm SET tg_msg_id=%s WHERE id=%s", (mid, dm_id))
 
@@ -264,7 +264,8 @@ def threads(p: dict = Depends(require_head)):
             """SELECT r.code, r.title, count(pe.id) AS n FROM roles r JOIN people pe ON pe.role_code=r.code
                WHERE pe.status='active' AND pe.tg_id > 0 AND r.code<>'head' GROUP BY r.code ORDER BY r.level, r.title""").fetchall()
         casts = conn.execute(
-            """SELECT b.id, b.text, b.roles, b.sent, b.created_at, a.full_name AS author FROM dm_broadcasts b
+            """SELECT b.id, b.text, b.roles, b.sent, b.created_at, a.full_name AS author,
+                      (SELECT count(*) FROM dm d WHERE d.broadcast_id=b.id AND d.tg_msg_id IS NOT NULL) AS in_bot FROM dm_broadcasts b
                JOIN people a ON a.id=b.author_id ORDER BY b.created_at DESC LIMIT 10""").fetchall()
     return {"group": group, "roles": roles, "broadcasts": casts}
 
@@ -330,6 +331,8 @@ def broadcast(b: CastIn, bg: BackgroundTasks, p: dict = Depends(require_head)):
             row = _add(conn, who["id"], p, True, p["id"], text, bid=bid)
             if _real(who["tg_id"]):
                 jobs.append((row["id"], who["tg_id"], note))
+        # HEAD 15.11: «объявления от HEAD не приходят в бот?» — копия в бот всем HEAD (и автору), чтобы видели, что ушло
+        jobs += [(None, h["tg_id"], note) for h in _heads(conn) if _real(h["tg_id"])]
         db.audit(conn, p["id"], "dm_broadcast", "dm_broadcasts", bid, {"roles": roles, "sent": len(people)})
     bg.add_task(_deliver, jobs)
     return {"id": bid, "sent": len(people)}
