@@ -14,6 +14,9 @@ from .work import is_trip
 router = APIRouter(prefix="/api")
 
 
+SHOP0 = "Без объекта / Мастерская"
+
+
 class MoveIn(BaseModel):
     object_id: int
 
@@ -21,7 +24,9 @@ class MoveIn(BaseModel):
 @router.get("/head/move-targets")
 def targets(p: dict = Depends(require_head)):
     with db.pool.connection() as conn:
-        return conn.execute("SELECT id, title, city FROM objects WHERE id<>0 ORDER BY id DESC LIMIT 300").fetchall()
+        rows = conn.execute("SELECT id, title, city FROM objects WHERE id<>0 AND closed_at IS NULL ORDER BY id DESC LIMIT 300").fetchall()
+    # HEAD 15.11 (Асель): работала не на объекте — смену переносят в «Без объекта / Мастерская» (object_id 0)
+    return [{"id": 0, "title": SHOP0, "city": None}, *rows]
 
 
 def _move_files(obj: dict, ids: list[str]) -> None:
@@ -41,26 +46,26 @@ def move(sid: int, b: MoveIn, bg: BackgroundTasks, p: dict = Depends(require_hea
         s = conn.execute("SELECT * FROM shifts WHERE id=%s FOR UPDATE", (sid,)).fetchone()
         if not s or s["status"] == "cancelled":
             raise HTTPException(404, "Смена не найдена")
-        if b.object_id == 0 or s["object_id"] == 0:
-            raise HTTPException(400, "Смену мастерской не переносим")
+        if s["kind"] == "road":
+            raise HTTPException(400, "Дорогу командировки не переносим")
         o = conn.execute("SELECT * FROM objects WHERE id=%s", (b.object_id,)).fetchone()
         if not o:
             raise HTTPException(404, "Нет такого объекта")
         if s["object_id"] == b.object_id:
             raise HTTPException(400, "Смена уже на этом объекте")
-        if o["closed_at"]:
+        if o["closed_at"] and b.object_id != 0:
             raise HTTPException(409, "Этот проект уже закрыт — смены на него не вносятся")
         files = conn.execute("""SELECT id, drive_id FROM files WHERE id = ANY(
                                   SELECT unnest(ARRAY[%s::bigint, %s::bigint]) UNION SELECT file_id FROM shift_photos WHERE shift_id=%s)""",
                              (s["photo_before"], s["photo_after"], sid)).fetchall()
-        conn.execute("UPDATE shifts SET object_id=%s, trip=%s WHERE id=%s", (b.object_id, is_trip(conn, s["person_id"], b.object_id), sid))
+        conn.execute("UPDATE shifts SET object_id=%s, trip=%s WHERE id=%s", (b.object_id, b.object_id != 0 and is_trip(conn, s["person_id"], b.object_id), sid))
         if files:
             conn.execute("UPDATE files SET object_id=%s WHERE id = ANY(%s)", (b.object_id, [f["id"] for f in files]))
         db.audit(conn, p["id"], "shift_move", "shifts", sid, {"from": s["object_id"], "to": b.object_id, "files": [f["id"] for f in files]})
     ids = [f["drive_id"] for f in files if f["drive_id"]]
-    if ids:
+    if ids and b.object_id != 0:   # без объекта папки сделки нет — на Диске фото остаются, где были
         bg.add_task(_move_files, o, ids)
-    return {"ok": True, "files": len(files), "object_id": b.object_id, "object_title": o["title"]}
+    return {"ok": True, "files": len(files), "object_id": b.object_id, "object_title": SHOP0 if b.object_id == 0 else o["title"]}
 
 
 # ---------- фото с объекта не на том объекте (HEAD 14.11: в 1611 фото добавляли через «Добавить фото с объекта», без смены) ----------
@@ -81,7 +86,7 @@ def move_file(fid: int, b: FileMoveIn, bg: BackgroundTasks, p: dict = Depends(re
         o = conn.execute("SELECT * FROM objects WHERE id=%s", (b.object_id,)).fetchone()
         if not o:
             raise HTTPException(404, "Нет такого объекта")
-        if o["closed_at"]:
+        if o["closed_at"] and b.object_id != 0:
             raise HTTPException(409, "Этот проект уже закрыт")
         rows = [f]
         if b.same_day:

@@ -360,9 +360,15 @@ def shift_pay(v: dict, role: str, hours: float, night: float = 0.0) -> tuple[flo
     return round(pay, 2), ""
 
 
-def one_shift_pay(v: dict, role: str, kind: str | None, started_at: datetime, ended_at: datetime | None) -> tuple[float, str]:
-    """Оплата одной смены: часы, ночь, мастерская по часовой ставке. Возвращает (сумма, чего не хватает в «Значениях»)."""
+def one_shift_pay(v: dict, role: str, kind: str | None, started_at: datetime, ended_at: datetime | None,
+                  own_hour=None) -> tuple[float, str]:
+    """Оплата одной смены: часы, ночь, мастерская по часовой ставке. Возвращает (сумма, чего не хватает в «Значениях»).
+    own_hour — личная ставка в час из «Команды» (people.hour_rate, HEAD 15.11): часы × ставка + ночные %."""
     hours = ((ended_at - started_at).total_seconds() / 3600) if ended_at else (v.get("shift.hours") or 10)
+    if own_hour:
+        night = night_hours(v, started_at, ended_at)
+        own = float(own_hour)
+        return round(hours * own + min(night, hours) * own * (v.get("pay.night") or 0) / 100, 2), ""
     wk = WORKSHOP_RATE.get(role) if kind == "workshop" else None
     night = night_hours(v, started_at, ended_at)
     if wk and v.get(wk):
@@ -401,7 +407,7 @@ def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
     one = "" if only_person is None else " AND payee_id IN (SELECT id FROM fin_payees WHERE person_id=%s)"
     conn.execute("UPDATE fin_accruals SET status='cancelled' WHERE period=%s AND status IN ('active','pending') AND kind <> 'manual'" + one,
                  (ym,) if only_person is None else (ym, only_person))
-    payees_ = conn.execute("""SELECT f.*, pe.role_code, pe.print_exam_on FROM fin_payees f LEFT JOIN people pe ON pe.id=f.person_id
+    payees_ = conn.execute("""SELECT f.*, pe.role_code, pe.print_exam_on, pe.hour_rate FROM fin_payees f LEFT JOIN people pe ON pe.id=f.person_id
                               WHERE f.status='active'""" + ("" if only_person is None else " AND f.person_id=%s"),
                            () if only_person is None else (only_person,)).fetchall()
     revenue, rev_warn = (None, "")
@@ -436,7 +442,7 @@ def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
             by_role: dict[str, int] = {}
             for s in shifts:   # две роли (HEAD 08.11): каждая смена — по ставке своей роли
                 r = s["role_code"] or role
-                pay, miss = one_shift_pay(v, rate_role(r, f["print_exam_on"], s["started_at"]), s["kind"], s["started_at"], s["ended_at"])
+                pay, miss = one_shift_pay(v, rate_role(r, f["print_exam_on"], s["started_at"]), s["kind"], s["started_at"], s["ended_at"], f["hour_rate"])
                 missing = miss or missing
                 piece += pay
                 bonus += _f(s["bonus"])
@@ -620,6 +626,10 @@ def my_pay(ym: str | None = None, p: dict = Depends(active)):
         roles = p.get("roles") or [p["role_code"]]
         rroles = [rate_role(r, p.get("print_exam_on"), datetime.now(TZ)) for r in roles]   # оператор после экзамена — своя ставка
         rate = my_rate(v, rroles[0], f)
+        own = conn.execute("SELECT hour_rate FROM people WHERE id=%s", (p["id"],)).fetchone()
+        if own and own["hour_rate"]:   # личная ставка в час (HEAD 15.11) вместо ставок роли за смену
+            rate = [x for x in rate if not x["label"].startswith(("Смена ", "Час ("))]
+            rate.insert(0, {"label": "Твоя ставка в час", "amount": float(own["hour_rate"])})
         if p.get("reels") and v.get("pay.reels") and not any(x["label"].startswith("Рилс") for x in rate):   # «Оплачиваемые рилс» (HEAD 09.11)
             rate.append({"label": "Рилс после утверждения HEAD" + (f" (до {v['pay.reels.max']:g} в месяц)" if v.get("pay.reels.max") else ""),
                          "amount": v["pay.reels"]})

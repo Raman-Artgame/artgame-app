@@ -311,10 +311,11 @@ def decide(aid: int, d: Decision, p: dict = Depends(active)):
                              (start, end, x.get("area_m2", s["area_m2"]), x.get("work_done") or s["work_done"], p["id"], note, aid,
                               s["status"] != "approved" and closed, cur, a["cur_by"], a["cur_at"], a["cur_note"], s["id"]))
             else:   # принятая смена закрытого месяца: смену не трогаем, разница — строкой ФОТ текущего месяца
-                pe = conn.execute("SELECT role_code, print_exam_on FROM people WHERE id=%s", (s["person_id"],)).fetchone()
+                pe = conn.execute("SELECT role_code, print_exam_on, hour_rate FROM people WHERE id=%s", (s["person_id"],)).fetchone()
                 v = vals(conn)
                 role = rate_role(s["role_code"] or pe["role_code"], pe["print_exam_on"], s["started_at"])
-                delta = round(one_shift_pay(v, role, s["kind"], start, end)[0] - one_shift_pay(v, role, s["kind"], s["started_at"], s["ended_at"])[0], 2)
+                own = pe["hour_rate"]
+                delta = round(one_shift_pay(v, role, s["kind"], start, end, own)[0] - one_shift_pay(v, role, s["kind"], s["started_at"], s["ended_at"], own)[0], 2)
         else:   # expense_fix
             e = conn.execute("SELECT * FROM expenses WHERE id=%s FOR UPDATE", (a["target_id"],)).fetchone()
             amount = x.get("amount", float(e["amount"]))

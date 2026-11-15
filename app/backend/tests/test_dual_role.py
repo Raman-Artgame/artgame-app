@@ -83,3 +83,20 @@ def test_exam_is_grow_item(client, team):  # noqa: F811
     client.post(f"/api/people/{pid}", json={"print_exam_on": "2026-11-03"}, headers=hdr(1000))
     x = next(p for p in client.get("/api/grow/team", headers=hdr(1000)).json()["people"] if p["id"] == pid)
     assert x["print_exam_on"] == "2026-11-03" and x["marks"][0]["confirmed_at"]
+
+
+def test_person_hour_rate(client, team):  # noqa: F811
+    """HEAD 15.11 («У Элины нужно поставить ставку 1200 в час»): личная ставка в час — смена = часы × ставка; 0 — снять."""
+    pid = client.post("/api/register", json={"full_name": "Элина Почасовая"}, headers=hdr(6400)).json()["id"]
+    client.post(f"/api/people/{pid}", json={"role_code": "support", "zones": ["mural"]}, headers=hdr(1000))
+    assert client.post(f"/api/people/{pid}", json={"hour_rate": 1200}, headers=hdr(1000)).json()["hour_rate"] == 1200
+    assert client.post(f"/api/people/{pid}", json={"hour_rate": -5}, headers=hdr(1000)).status_code == 400
+    assert next(p for p in client.get("/api/people", headers=hdr(1000)).json() if p["id"] == pid)["hour_rate"] == 1200
+    _shift(client, 6400, "mural", 6)    # 10 ч
+    with db.pool.connection() as c:
+        c.execute("UPDATE shifts SET status='approved' WHERE person_id=%s", (pid,))
+    row = next(r for r in client.post("/api/fin/payroll/2026-11/compute", headers=hdr(1000)).json()["rows"] if r["name"] == "Элина Почасовая")
+    assert float(next(l for l in row["lines"] if l["kind"] == "piece")["amount"]) == 12000
+    rate = {x["label"]: x["amount"] for x in client.get("/api/fin/my", headers=hdr(6400)).json()["rate"]}
+    assert rate.get("Твоя ставка в час") == 1200 and not any(k.startswith("Смена ") for k in rate), rate
+    assert client.post(f"/api/people/{pid}", json={"hour_rate": 0}, headers=hdr(1000)).json()["hour_rate"] is None

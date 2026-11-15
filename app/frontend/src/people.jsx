@@ -105,6 +105,9 @@ function PersonRow({ p, open, flip, ROLE, ZONE, bx, save, setRole }) {
       {(p.role_code === 'print_operator' || (p.extra_roles || []).includes('print_operator')) && <label className="small muted">Сдал экзамен оператора <span>· с этого дня принтерные смены — по ставке после экзамена из «Значений»; саппортом — по-прежнему</span>
         <div className="pair"><input type="date" defaultValue={p.print_exam_on || ''} onBlur={e => e.target.value && e.target.value !== p.print_exam_on && save(p.id, { print_exam_on: e.target.value })} />
           {p.print_exam_on && <button className="ghost mini" onClick={() => confirm('Снять отметку экзамена?') && save(p.id, { no_print_exam: true })}>Снять</button>}</div></label>}
+      {p.role_code && p.role_code !== 'head' && <label className="small muted">Личная ставка в час, ₸ <span>· если есть — каждая смена = часы × ставка (+ ночные), ставка смены роли не действует; пусто — по «Значениям»</span>
+        <input type="number" inputMode="numeric" min="0" defaultValue={p.hour_rate ? +p.hour_rate : ''} placeholder="по ставкам роли"
+          onBlur={e => (+e.target.value || 0) !== (+p.hour_rate || 0) && save(p.id, { hour_rate: +e.target.value || 0 })} /></label>}
       <label className="small muted">Город сотрудника <span>· объект в другом городе — командировка: дорога как смена и суточные</span>
         <input defaultValue={p.city || ''} placeholder="Астана" onBlur={e => e.target.value.trim() !== (p.city || '') && save(p.id, { city: e.target.value })} /></label>
       <IssuedEdit person={p} />

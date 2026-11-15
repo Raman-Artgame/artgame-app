@@ -37,6 +37,13 @@ def test_move_shift(client, team, monkeypatch):  # noqa: F811
         assert c.execute("SELECT count(*) AS n FROM audit_log WHERE action='shift_move'").fetchone()["n"] == 1
     assert all("deal-733" in FakeDrive.store[f["drive_id"]]["parents"][0] for f in fs)
     assert any(o["id"] == 733 for o in client.get("/api/head/move-targets", headers=hdr(1000)).json())
+    # HEAD 15.11 (Асель): работала не на объекте — «Без объекта / Мастерская»; на Диске фото остаются, где были
+    assert client.get("/api/head/move-targets", headers=hdr(1000)).json()[0] == {"id": 0, "title": "Без объекта / Мастерская", "city": None}
+    r = client.post(f"/api/shifts/{s['id']}/move", json={"object_id": 0}, headers=hdr(1000)).json()
+    assert r["object_title"] == "Без объекта / Мастерская"
+    with db.pool.connection() as c:
+        assert c.execute("SELECT object_id, trip FROM shifts WHERE id=%s", (s["id"],)).fetchone() == {"object_id": 0, "trip": False}
+    assert client.post(f"/api/shifts/{s['id']}/move", json={"object_id": 733}, headers=hdr(1000)).json()["object_id"] == 733
 
 
 def test_move_loose_photos(client, team, monkeypatch):  # noqa: F811

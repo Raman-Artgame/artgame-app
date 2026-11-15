@@ -4,6 +4,7 @@ import { api, testAs, uuid, viewAs } from './api.js'
 import { clearFailed, enqueue, failed, flush, pending } from './queue.js'
 import { startViewAs } from './head.jsx'
 import { BOSS, HINT_TITLE, hintsFor } from './hints.js'
+import { MoveShift } from './shiftmove.jsx'
 
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
 const PRINT_ROLES = ['print_master', 'print_operator']
@@ -768,6 +769,7 @@ export function Review() {
       {cur ? null : <CurMark x={x} />}
       {!cur && k === 'shift' && !x.cur_at && <HeadStars path={`/shift/${x.id}/review`} need={x.need_stars} />}
       {k === 'shift' && <FixShift x={x} done={load} />}
+      {!cur && k === 'shift' && x.kind !== 'road' && x.object_id != null ? <MoveShift s={x} from={x.object_id} onMoved={load} /> : null}
       {cur && <RateBox path={`/${k}/${x.id}/rate`} stars={k === 'shift'} done={load} />}</div>
     {!cur && <div className="seg"><button onClick={() => decide(`/${k}/${x.id}/review`, true, x.need_stars)}>✓</button><button className="ghost" onClick={() => decide(`/${k}/${x.id}/review`, false)}>✕</button></div>}
   </div>

@@ -158,7 +158,7 @@ def profile(body: ProfileIn, p: dict = Depends(current_person)):
 def people(_: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         return conn.execute(
-            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city, p.phone, p.birth_date, p.last_name, p.first_name, p.middle_name, p.emergency_name, p.emergency_phone, p.clothes_size, p.profile_at, p.extra_roles, p.reels, p.pays, p.mkt_job, p.acting_role, p.acting_since, p.acting_promo, p.acting_note, p.print_exam_on,
+            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city, p.phone, p.birth_date, p.last_name, p.first_name, p.middle_name, p.emergency_name, p.emergency_phone, p.clothes_size, p.profile_at, p.extra_roles, p.reels, p.pays, p.mkt_job, p.acting_role, p.acting_since, p.acting_promo, p.acting_note, p.print_exam_on, p.hour_rate,
                       coalesce(array_agg(z.zone_code ORDER BY z.zone_code) FILTER (WHERE z.zone_code IS NOT NULL), '{}') AS zones
                FROM people p LEFT JOIN person_zones z ON z.person_id = p.id
                GROUP BY p.id ORDER BY p.created_at""").fetchall()
@@ -178,6 +178,7 @@ class AssignIn(BaseModel):
     acting_note: str | None = None
     print_exam_on: date | None = None   # оператор печати сдал экзамен — с этого дня ставка pay.print.operator_exam (HEAD 13.11)
     no_print_exam: bool | None = None   # снять отметку экзамена
+    hour_rate: float | None = None      # личная ставка в час (HEAD 15.11), 0 — снять: смены снова по ставкам роли из «Значений»
     extra_roles: list[str] | None = None  # вторая роль (HEAD 08.11): напр. оператор печати + саппорт; ставки — по роли смены
 
 
@@ -232,6 +233,10 @@ def assign(person_id: int, body: AssignIn, head: dict = Depends(require_head)):
         if body.print_exam_on is not None or body.no_print_exam:
             from .grow import set_exam   # дата экзамена = пункт 1 пути «Оператор → Мастер печати»
             set_exam(conn, person_id, head["id"], None if body.no_print_exam else body.print_exam_on)
+        if body.hour_rate is not None:
+            if body.hour_rate < 0:
+                raise HTTPException(400, "bad rate")
+            conn.execute("UPDATE people SET hour_rate=%s, updated_at=now() WHERE id=%s", (body.hour_rate or None, person_id))
         if body.acting_note is not None:
             conn.execute("UPDATE people SET acting_note=%s, updated_at=now() WHERE id=%s", (body.acting_note.strip() or None, person_id))
         if body.zones is not None:
@@ -239,7 +244,7 @@ def assign(person_id: int, body: AssignIn, head: dict = Depends(require_head)):
             for z in body.zones:
                 conn.execute("INSERT INTO person_zones (person_id, zone_code) VALUES (%s,%s)", (person_id, z))
         db.audit(conn, head["id"], "assign", "people", person_id, body.model_dump(mode="json", exclude_none=True))
-        return conn.execute("SELECT id, role_code, status, extra_roles, reels, pays, mkt_job, acting_role, acting_since, acting_promo, acting_note, print_exam_on FROM people WHERE id=%s", (person_id,)).fetchone()
+        return conn.execute("SELECT id, role_code, status, extra_roles, reels, pays, mkt_job, acting_role, acting_since, acting_promo, acting_note, print_exam_on, hour_rate FROM people WHERE id=%s", (person_id,)).fetchone()
 
 
 @app.get("/api/constants")
