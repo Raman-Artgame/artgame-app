@@ -442,12 +442,13 @@ function Running({ o, d, done }) {
   </>
 }
 
-export function ExpenseForm({ done }) {
+// obj — расход сразу на этот проект (HEAD 15.11: «где мне с моего аккаунта добавить расход доставки на проект?»): из карточки проекта
+export function ExpenseForm({ done, obj, cancel, head }) {
   const d = useDict()
   const [v, set] = useState(null)
   const [busy, setBusy] = useState(false)
   const [uid] = useState(uuid)   // один расход = один client_uid: повторное нажатие не создаёт дубль (Звягина 10.11)
-  useEffect(() => { if (d) set({ object_id: d.objects[0]?.id, zone_code: d.zones[0], category: d.categories[0]?.code, amount: '', paid_by: 'own', note: '' }) }, [d])
+  useEffect(() => { if (d) set({ object_id: obj || d.objects[0]?.id, zone_code: obj && d.zones.includes('mural') ? 'mural' : d.zones[0], category: d.categories[0]?.code, amount: '', paid_by: 'own', note: '' }) }, [d])
   if (!d || !v) return <div className="card muted">Загрузка…</div>
   const past = !!v.day
   const objs = past ? d.backfill.objects : d.objects
@@ -456,16 +457,18 @@ export function ExpenseForm({ done }) {
     setBusy(true)
     try {
       const left = await enqueue('/expenses', { ...v, client_uid: uid, amount: +v.amount, day: v.day || null })
-      done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Расход отправлен на проверку.')
+      done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : head ? 'Расход записан на проект.' : 'Расход отправлен на проверку.')
     } catch (e) { setBusy(false); throw e }
   }
-  return <div className="card">
-    <h2>Расход</h2>
-    {d.backfill?.open && <><div className="segf"><button className={past ? '' : 'on'} onClick={() => set({ ...v, day: '', object_id: d.objects[0]?.id })}>Сегодня</button>
-      <button className={past ? 'on' : ''} onClick={() => set({ ...v, day: yday(), object_id: d.backfill.objects[0]?.id })}>Прошлая дата</button></div>
+  return <div className={obj ? 'expinline' : 'card'}>
+    {obj ? null : <h2>Расход</h2>}
+    {d.backfill?.open && <><div className="segf"><button className={past ? '' : 'on'} onClick={() => set({ ...v, day: '', object_id: obj || d.objects[0]?.id })}>Сегодня</button>
+      <button className={past ? 'on' : ''} onClick={() => set({ ...v, day: yday(), object_id: obj || d.backfill.objects[0]?.id })}>Прошлая дата</button></div>
       {past && <><p className="small muted">Расходы с {dm(d.backfill.from)} можно внести до {dm(d.backfill.until)}.</p>
         <input type="date" min={d.backfill.from} max={yday()} value={v.day} onChange={e => set({ ...v, day: e.target.value })} /></>}</>}
-    <Common d={{ ...d, objects: objs }} v={v} set={set} />
+    {obj ? (d.zones.length > 1 && <><label className="muted">Зона</label>
+      <select value={v.zone_code} onChange={e => set({ ...v, zone_code: e.target.value })}>{d.zones.map(z => <option key={z} value={z}>{ZONE[z]}</option>)}</select></>)
+      : <Common d={{ ...d, objects: objs }} v={v} set={set} />}
     <label className="muted">Категория</label>
     <select value={v.category} onChange={e => set({ ...v, category: e.target.value })}>
       {d.categories.map(c => <option key={c.code} value={c.code}>{c.title}</option>)}
@@ -478,7 +481,8 @@ export function ExpenseForm({ done }) {
     <p className="small muted">{v.paid_by === 'own' ? 'Свои деньги: после одобрения чек «к выплате», возвращаем в понедельник вместе с выплатами.' : 'Деньги компании: платили картой или наличными компании, тебе возвращать нечего.'}</p>
     <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
     <Receipt value={v.receipt} pick={async f => set({ ...v, receipt: await shrink(f) })} />
-    <button disabled={!v.amount || busy} onClick={send}>{busy ? 'Отправляю…' : 'Отправить расход'}</button>
+    <div className="seg">{cancel && <button className="ghost" onClick={cancel}>Отмена</button>}
+      <button disabled={!v.amount || busy} onClick={send}>{busy ? 'Отправляю…' : 'Отправить расход'}</button></div>
   </div>
 }
 

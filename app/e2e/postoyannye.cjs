@@ -62,7 +62,7 @@ const shots = process.env.SHOTS || '/var/tmp'
   assert.strictEqual(wide, 0, 'строки не вылезают за экран')
   // «+ Расход» на Пульте (HEAD 12.11): одна форма, сразу в «Деньги»
   await p.locator('nav').getByRole('button', { name: 'Пульт', exact: true }).click()
-  await p.getByRole('button', { name: '+ Расход' }).click()
+  await p.getByRole('button', { name: '+ Общий' }).click()
   const f = p.locator('.spendcard')
   await f.locator('select').first().waitFor()
   const opts = await f.locator('select').first().innerText()

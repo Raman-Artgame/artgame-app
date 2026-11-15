@@ -4,6 +4,8 @@ import { api, setViewAs, viewAs } from './api.js'
 import { flush } from './queue.js'
 import { money } from './crm.jsx'
 import { LedgerForm } from './finance.jsx'
+import { ExpenseForm } from './work.jsx'
+import { ProjectSpend } from './shiftmove.jsx'
 import { Spark, mln } from './charts.jsx'
 import { closeAsks, useClosing } from './closing.jsx'
 
@@ -78,9 +80,13 @@ export function Pulse({ me, pulse, go }) {
       </div>
     </div>
 
-    <div className="card spendcard">{spend ? <><h3>Расход</h3>
+    {/* HEAD 15.11: «расходы вывести отдельным удобным блоком» — на проект (доставка, такси, докупка) и общий (аренда, подписки, своё) */}
+    <div className="card spendcard"><h3>Расходы</h3>{spend === 'project' ? <><h3 className="small muted">На проект</h3>
+      <ProjectSpend ExpenseForm={ExpenseForm} cancel={() => setSpend(null)} done={t => { setSpend(null); setSpent(t) }} /></>
+      : spend ? <><h3 className="small muted">Общий расход</h3>
       <LedgerForm d={spend} spend cancel={() => setSpend(null)} done={() => { setSpend(null); setSpent('Записано в «Деньги».') }} /></>
-      : <><button onClick={openSpend}>+ Расход</button><p className="small muted">{spent || 'Аренда, коммуналка, покупка, своя трата — сумма, статья и чек. Чек ляжет в «06 РАСХОДЫ HEAD».'}</p></>}</div>
+      : <><div className="seg"><button onClick={() => { setSpent(''); setSpend('project') }}>+ На проект</button><button className="ghost" onClick={openSpend}>+ Общий</button></div>
+        <p className="small muted">{spent || 'На проект — доставка, такси, докупка: проект поиском, сумма, чек; сразу в затратах проекта. Общий — аренда, коммуналка, своя трата, чек в «06 РАСХОДЫ HEAD».'}</p></>}</div>
     {asks.length > 0 && <div className="card"><h3>Ждёт вашего решения</h3>
       {asks.map((a, i) => <div key={i} className={'qrow' + (a.red ? ' hot' : '')} onClick={() => go(a.k)}>
         <div className="qmain"><b>{a.t}</b><div className={'small ' + (a.hot ? 'why' : 'muted')}>{a.s}</div></div><span className="muted">›</span>

@@ -1105,3 +1105,14 @@ button.kittile { display: flex; flex-direction: column; align-items: stretch; ga
 .storybar i { font-style: normal; font-size: 18px; line-height: 1; }
 .storyrng { display: flex; align-items: center; gap: 10px; margin: 2px 0; } .storyrng span { width: 64px; flex: none; font-size: 13px; color: var(--muted); } .storyrng input { flex: 1; margin: 0; padding: 0; }
 .storyout { display: block; max-height: 46vh; margin: 0 auto 12px; border-radius: 10px; }
+/* «+ Расход на проект» в карточке проекта (HEAD 15.11): форма внутри блока «Материалы и расходы» */
+.expinline { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line, rgba(255,255,255,.08)); }
+.expinline .seg { display: flex; gap: 8px; }
+.expinline .seg button { flex: 1; }
+/* «Перенести на другой объект» (HEAD 15.11): поиск и короткий список актуальных проектов */
+.moveshift .movelist { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; margin: 6px 0; }
+.moveshift .movelist button { text-align: left; white-space: normal; font-weight: 500; }
+.moveshift .movepick { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 6px 0; }
+.moveshift .movepick b { overflow-wrap: anywhere; }
+.spendcard .seg { display: flex; gap: 8px; }
+.spendcard .seg button { flex: 1; }

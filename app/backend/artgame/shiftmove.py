@@ -7,7 +7,7 @@ import sys
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
-from . import db, drive
+from . import db, drive, sync_objects
 from .deps import require_head
 from .work import is_trip
 
@@ -24,7 +24,9 @@ class MoveIn(BaseModel):
 @router.get("/head/move-targets")
 def targets(p: dict = Depends(require_head)):
     with db.pool.connection() as conn:
-        rows = conn.execute("SELECT id, title, city FROM objects WHERE id<>0 AND closed_at IS NULL ORDER BY id DESC LIMIT 300").fetchall()
+        # HEAD 15.11: «оставь только актуальные проекты, которые в выполнении и оплатах» — стадии sync_objects.ACTIVE
+        rows = conn.execute("""SELECT id, title, city FROM objects WHERE id<>0 AND closed_at IS NULL AND bitrix_stage = ANY(%s)
+                               ORDER BY (bitrix_stage = %s) DESC, id DESC""", (list(sync_objects.ACTIVE), sync_objects.WORK)).fetchall()
     # HEAD 15.11 (Асель): работала не на объекте — смену переносят в «Без объекта / Мастерская» (object_id 0)
     return [{"id": 0, "title": SHOP0, "city": None}, *rows]
 

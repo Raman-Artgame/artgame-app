@@ -36,7 +36,10 @@ def test_move_shift(client, team, monkeypatch):  # noqa: F811
         assert {f["object_id"] for f in fs} == {733}
         assert c.execute("SELECT count(*) AS n FROM audit_log WHERE action='shift_move'").fetchone()["n"] == 1
     assert all("deal-733" in FakeDrive.store[f["drive_id"]]["parents"][0] for f in fs)
-    assert any(o["id"] == 733 for o in client.get("/api/head/move-targets", headers=hdr(1000)).json())
+    with db.pool.connection() as c:   # HEAD 15.11: в списке только «Выполнение» и оплаты, закрытых (WON) нет
+        c.execute("INSERT INTO objects (id, title, city, bitrix_stage, status) VALUES (735, 'Старый', 'Астана', 'WON', 'done')")
+    ids = [o["id"] for o in client.get("/api/head/move-targets", headers=hdr(1000)).json()]
+    assert 733 in ids and 735 not in ids
     # HEAD 15.11 (Асель): работала не на объекте — «Без объекта / Мастерская»; на Диске фото остаются, где были
     assert client.get("/api/head/move-targets", headers=hdr(1000)).json()[0] == {"id": 0, "title": "Без объекта / Мастерская", "city": None}
     r = client.post(f"/api/shifts/{s['id']}/move", json={"object_id": 0}, headers=hdr(1000)).json()

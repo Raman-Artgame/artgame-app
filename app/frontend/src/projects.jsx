@@ -3,7 +3,7 @@ import { Receipt, StatusMark } from './ui.jsx'
 import { api, uuid } from './api.js'
 import { Skeleton, cleanTitle, money } from './crm.jsx'
 import { Gallery } from './objects.jsx'
-import { More, shrink } from './work.jsx'
+import { ExpenseForm, More, shrink } from './work.jsx'
 import { DoneBox } from './closing.jsx'
 import { ProjChat } from './dm.jsx'
 import { MoveShift } from './shiftmove.jsx'
@@ -103,7 +103,7 @@ function ProjectCard({ x, me, back, openDeal }) {
     {me && x.id > 0 && (mkt || me.role_code === 'head' || x.gip?.id === me.id) && <ShootsBox id={x.id} />}
     {!mkt && <>
     {me && x.id > 0 && <DesignBox id={x.id} me={me} obj={{ id: x.id, title: x.title }} />}
-    {me && x.id > 0 && <MaterialsBox id={x.id} />}
+    {me && x.id > 0 && <MaterialsBox id={x.id} head={me.role_code === 'head' && !me._view_as} />}
     {me && x.id > 0 && <TripBox id={x.id} />}
     {me && x.id > 0 && MONEY.has(me.role_code) && <MoneyBox id={x.id} />}</>}
     <Gallery obj={{ id: x.id, title: x.title }} me={me} start="photo" skip={['design']} top={x.id > 0 && <PromoLine id={x.id} />} />
@@ -146,9 +146,12 @@ function TeamBox({ x, me }) {
 // Материалы (HEAD 14.11): что взяли по «Сбору» и что купили по чекам на объект. Видят ГИП, главные, МОП и HEAD.
 const ZONE = { mural: 'Роспись', print: 'Печать' }
 const qty = n => String(+(+n).toFixed(2)).replace('.', ',')
-function MaterialsBox({ id }) {
+function MaterialsBox({ id, head }) {
   const [m, setM] = useState(null)
-  useEffect(() => { api(`/objects/${id}/materials`).then(setM, () => setM(false)) }, [id])
+  const [add, setAdd] = useState(false)   // HEAD 15.11: расход на проект (доставка и т. п.) — прямо здесь, сразу «принято»
+  const [msg, setMsg] = useState('')
+  const load = () => api(`/objects/${id}/materials`).then(setM, () => setM(false))
+  useEffect(() => { load() }, [id])
   if (!m) return null
   return <div className="card mats">
     <div className="head"><h3>Материалы и расходы</h3>{m.buys_total > 0 && <b className="nowrap">{money(m.buys_total)}</b>}</div>
@@ -164,6 +167,9 @@ function MaterialsBox({ id }) {
     {!m.buys.length && <p className="small muted">Покупок пока нет.</p>}
     {m.buys.map(b => <div key={b.id} className="row"><div><b>{b.title}</b><div className="small muted">{[b.person, new Date(b.created_at).toLocaleDateString('ru-RU'), b.note].filter(Boolean).join(' · ')}</div></div>
       <div className="qbtns"><b className="nowrap">{money(b.amount)}</b>{b.status === 'submitted' && <span className="small muted">на проверке</span>}</div></div>)}
+    {head && (add ? <ExpenseForm obj={id} head cancel={() => setAdd(false)} done={t => { setAdd(false); setMsg(t); load() }} />
+      : <><button className="ghost" onClick={() => { setMsg(''); setAdd(true) }}>+ Расход на проект</button>
+        <p className="small muted">{msg || 'Доставка, такси, докупка — сумма, категория и чек. Ваш расход сразу принят, без проверки.'}</p></>)}
   </div>
 }
 
