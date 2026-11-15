@@ -201,6 +201,13 @@ def test_brand_shelves(client, team, monkeypatch):
     assert client.get("/api/mkt/brand?shelf=print", headers=hdr(2000)).status_code == 404       # полка не для агентства
     assert client.get("/api/mkt/brand?shelf=fonts&folder=fSUB", headers=hdr(2000)).status_code == 404   # папка с другой полки
     assert client.get("/api/mkt/brand?shelf=logo&folder=secret", headers=hdr(2000)).status_code == 404
+    book = client.get("/api/mkt/brand", headers=hdr(2000)).json()["book"]
+    assert len(book) == 8 and book[2]["shelves"] == ["logo", "fonts", "bg"] and book[0]["art"].startswith("t_stickers/")
+    # новые элементы пака: картинки из папки Диска появляются сами, прочее не показываем
+    FakeDrive.tree[brand.KIT_NEW_ID] = [{"id": "newSTAR", "name": "Звезда новая.png", "mimeType": "image/png", "size": "5"}, {"id": "newDOC", "name": "бриф.docx", "mimeType": "application/msword", "size": "9"}]
+    new = client.get("/api/mkt/kit/new", headers=hdr(2000)).json()["items"]
+    assert [(x["title"], x["g"]) for x in new] == [("Звезда новая", "new")] and "/brand/file/newSTAR" in new[0]["url"]
+    assert client.get("/api/mkt/kit/new", headers=hdr(3000)).status_code == 403
 
 
 def test_ads_kind_and_shoot_upload(client, team, monkeypatch):

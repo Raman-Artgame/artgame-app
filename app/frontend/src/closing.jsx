@@ -6,7 +6,8 @@ import { Skeleton, cleanTitle } from './crm.jsx'
 // Закрытие сделки через HEAD (HEAD 12.11 «Да, по рекомендациям»). МОП: шаг «Закрытие» в карточке сделки — 12 пунктов (12-й — Продакшн, HEAD 12.11)
 // (их проверяет приложение) и кнопка «На закрытие». HEAD: заявки на Пульте, паспорт сделки, «Закрыть» или «Вернуть».
 const tg = n => Math.round(n || 0).toLocaleString('ru-RU') + ' ₸'
-const dm = s => s ? s.slice(0, 10).split('-').reverse().join('.') : '—'
+// дата по Алматы: время из базы приходит в UTC, без этого с 00:00 до 05:00 показывало вчера
+const dm = s => !s ? '—' : s.length > 10 ? new Date(s).toLocaleDateString('ru-RU', { timeZone: 'Asia/Almaty' }) : s.slice(0, 10).split('-').reverse().join('.')
 const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Almaty' })
 const READY = 'UC_BMKDS4'
 const pct = v => v == null ? '—' : (+v).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + '%'

@@ -27,6 +27,9 @@ class FakeDrive:
                                               "data": open(__file__.replace("fake_api.py", "chek.png"), "rb").read()})
             return [{"id": "drvSKETCH731", "name": "Эскиз кафе.png", "mimeType": "image/png", "size": "1"}]
         png = open(__file__.replace("fake_api.py", "chek.png"), "rb").read()   # «Бренд»: полка «Лого» (marketing.cjs)
+        if parent == "1UpHC3JnuI-Rl-XeHqx4Id0Ahld-j1u2S":   # «Пак элементов — новые»
+            STORE.setdefault("drvKITNEW1", {"name": "Звезда новая.png", "size": str(len(png)), "mimeType": "image/png", "data": png})
+            return [{"id": "drvKITNEW1", "name": "Звезда новая.png", "mimeType": "image/png", "size": str(len(png))}]
         if parent == "11nFXvEyYdRgu5PHkW-ipAA1adozukx4q":
             for i in ("drvLOGO1", "drvLOGO2"):
                 STORE.setdefault(i, {"name": i + ".png", "size": str(len(png)), "mimeType": "image/png", "data": png})
