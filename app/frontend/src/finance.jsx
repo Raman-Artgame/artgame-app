@@ -240,7 +240,7 @@ function Payroll({ m, d }) {
   const load = () => api('/fin/payroll/' + m).then(setP, err(setE))
   useEffect(() => { setP(null); load() }, [m])
   const compute = () => { setBusy(true); setE(''); api(`/fin/payroll/${m}/compute`, { method: 'POST' }).then(r => { setP(r); setE((r.warn || []).join('; ')) }, err(setE)).finally(() => setBusy(false)) }
-  return <><Advance d={d} onPaid={load} /><Monday d={d} onPaid={load} /><div className="card">
+  return <><Monday d={d} onPaid={load} /><Advance d={d} onPaid={load} /><div className="card">
     <div className="head"><h3>ФОТ</h3><button className="mini" disabled={busy} onClick={compute}>{busy ? 'Считаю…' : 'Пересчитать'}</button></div>
     {p && <div className="kv"><div><span className="muted small">Начислено</span><b>{money(p.accrued)}</b></div>
       <div><span className="muted small">Выплачено</span><b>{money(p.paid)}</b></div><div><span className="muted small">Осталось</span><b>{money(p.left)}</b></div></div>}
@@ -256,38 +256,45 @@ function Payroll({ m, d }) {
 function Advance({ d, onPaid }) {
   const [a, setA] = useState(null)
   const [e, setE] = useState('')
-  const [v, setV] = useState(null)   // {payee_id, amount, cash, receipt}
+  const [who, setWho] = useState('')   // HEAD 16.11: «плашка, чтобы просто выбрать сотрудника, а не весь список смотреть»
+  const [v, setV] = useState({ amount: '', cash: false, receipt: '' })
   const [busy, setBusy] = useState(false)
+  const [ok, setOk] = useState('')
   const bank = d.accounts.filter(x => x.code !== 'cash')
   const hasCash = d.accounts.some(x => x.code === 'cash')
   const [acc, setAcc] = useState((bank[0] || d.accounts[0])?.code)
   const load = () => api('/fin/advances').then(setA, err(setE))
   useEffect(() => { load() }, [])
   if (!a?.open) return null
-  const pay = r => {
+  const r = a.rows.find(x => String(x.payee_id) === who)
+  const pick = id => { setWho(id); setV({ amount: '', cash: false, receipt: '' }); setE(''); setOk('') }
+  const pay = () => {
     setBusy(true); setE('')
     api('/fin/advances/pay', { method: 'POST', body: { client_uid: uuid(), payee_id: r.payee_id, amount: +v.amount, account: v.cash ? 'cash' : acc, receipt: v.cash ? null : v.receipt || null } })
-      .then(() => { setV(null); load(); onPaid && onPaid() }, err(setE)).finally(() => setBusy(false))
+      .then(() => { setOk(`${r.name}: аванс ${money(+v.amount)} записан`); setWho(''); setV({ amount: '', cash: false, receipt: '' }); load(); onPaid && onPaid() }, err(setE))
+      .finally(() => setBusy(false))
   }
-  return <div className="card">
+  return <div className="card advance">
     <div className="head"><h3>Аванс</h3><span className="small muted nowrap">до {a.to} числа</span></div>
-    <p className="small muted">Сколько каждый заработал за месяц на сегодня и сколько уже получил. Впиши сумму — не больше «можно». Выплаченное само вычтется в расчёте 5-го и в понедельник.</p>
+    {!a.rows.length ? <p className="small muted">За месяц пока никому ничего не начислено.</p> :
+      <select value={who} onChange={x => pick(x.target.value)}>
+        <option value="">Выбери сотрудника</option>
+        {a.rows.map(x => <option key={x.payee_id} value={x.payee_id}>{x.name} · можно {money(x.max)}</option>)}</select>}
+    {ok && <p className="small">✓ {ok}</p>}
     {e && <p className="small why">{e}</p>}
-    {a.rows.length > 0 && bank.length > 1 && <select value={acc} onChange={x => setAcc(x.target.value)}>{bank.map(x => <option key={x.code} value={x.code}>Со счёта: {x.title}</option>)}</select>}
-    {!a.rows.length && <p className="small muted">За месяц пока никому ничего не начислено.</p>}
-    {a.rows.map(r => <div key={r.payee_id} className="row advrow">
-      <div><b>{r.name}</b> <span className="small muted">{r.group}</span>
-        <div className="small muted">заработал {money(r.earned)}{r.paid ? ` · получил ${money(r.paid)}` : ''} · <span className={r.max ? '' : 'muted'}>можно {money(r.max)}</span></div></div>
-      {v?.payee_id !== r.payee_id && r.max > 0 && <button className="mini" onClick={() => setV({ payee_id: r.payee_id, amount: '', cash: false, receipt: '' })}>Дать</button>}
-      {v?.payee_id === r.payee_id && <div className="dealedit" style={{ flexBasis: '100%' }}>
-        <input inputMode="numeric" autoFocus value={v.amount} onChange={x => setV({ ...v, amount: x.target.value.replace(/\D/g, '') })} placeholder={`Аванс, ₸ (можно ${money(r.max)})`} />
+    {r && <div className="dealedit">
+      <div className="kv"><div><span className="muted small">Заработал</span><b>{money(r.earned)}</b></div>
+        <div><span className="muted small">Получил</span><b>{money(r.paid)}</b></div><div><span className="muted small">Можно</span><b>{money(r.max)}</b></div></div>
+      {r.max > 0 ? <>
+        <input inputMode="numeric" value={v.amount} onChange={x => setV({ ...v, amount: x.target.value.replace(/\D/g, '') })} placeholder={`Аванс, ₸ (не больше ${money(r.max)})`} />
         <div className="seg"><button className={v.cash ? 'ghost' : ''} onClick={() => setV({ ...v, cash: false })}>Переводом</button>
           {hasCash && <button className={v.cash ? '' : 'ghost'} onClick={() => setV({ ...v, cash: true, receipt: '' })}>Наличными</button>}</div>
-        {v.cash ? <p className="small muted">Наличные — без чека. Сотрудник нажмёт «Получил» в «Мои выплаты».</p>
-          : <Receipt value={v.receipt} pick={async f => setV({ ...v, receipt: await shrink(f) })} />}
-        <div className="seg"><button disabled={busy || !(+v.amount > 0) || +v.amount > r.max} onClick={() => pay(r)}>Выплачено</button>
-          <button className="ghost" onClick={() => setV(null)}>Отмена</button></div></div>}
-    </div>)}
+        {v.cash ? <p className="small muted">Наличные — без чека. Сотрудник нажмёт «Получил» в «Мои выплаты».</p> : <>
+          {bank.length > 1 && <select value={acc} onChange={x => setAcc(x.target.value)}>{bank.map(x => <option key={x.code} value={x.code}>Со счёта: {x.title}</option>)}</select>}
+          <Receipt value={v.receipt} pick={async f => setV({ ...v, receipt: await shrink(f) })} /></>}
+        <button disabled={busy || !(+v.amount > 0) || +v.amount > r.max} onClick={pay}>Выплачено</button></>
+        : <p className="small muted">Всё заработанное уже выплачено.</p>}
+      <p className="small muted">Аванс сам вычтется в расчёте 5-го и в понедельник.</p></div>}
   </div>
 }
 
