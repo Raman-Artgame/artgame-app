@@ -278,7 +278,8 @@ function Monday({ d, onPaid }) {
     {!w ? <p className="muted small">Загрузка…</p> : !w.rows.length ? <p className="small muted">Всё выплачено.</p> :
       w.rows.map(r => <div key={r.payee_id} className="row">
         <div><b>{r.name}</b> · {money(r.total)}
-          <div className="small muted">{r.lines.map(x => `${x.what} за ${x.ym.slice(5)}.${x.ym.slice(0, 4)}: ${money(x.amount)}`).join(' · ')}{r.checks ? ` · чеков ${r.checks}` : ''}</div></div>
+          <div className="small muted">{r.lines.map(x => `${x.what} за ${x.ym.slice(5)}.${x.ym.slice(0, 4)}: ${money(x.amount)}`).join(' · ')}{r.checks ? ` · чеков ${r.checks}` : ''}</div>
+          <WeeklyDetail id={r.payee_id} /></div>
         {rc?.payee_id === r.payee_id ? null : <button className="mini" onClick={() => setRc({ payee_id: r.payee_id, receipt: '', cash: false })}>Выплачено</button>}
         {rc?.payee_id === r.payee_id && <div className="dealedit" style={{ flexBasis: '100%' }}>
           <div className="seg"><button className={rc.cash ? 'ghost' : ''} onClick={() => setRc({ ...rc, cash: false })}>Переводом</button>
@@ -291,6 +292,29 @@ function Monday({ d, onPaid }) {
       {w.paid.map(x => <div key={x.id} className="row"><div><b>{x.name}</b> · {money(+x.amount)}
         <div className="small muted">{new Date(x.op_date + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} · {x.account} · за {x.period}{x.account_code === 'cash' ? (x.ack_at ? ' · получил ' + new Date(x.ack_at).toLocaleDateString('ru-RU') : ' · ждёт «Получил»')
           : x.receipt_url ? <> · <a href={x.receipt_url}>чек</a></> : ' · без чека'}</div></div></div>)}</details>}
+  </div>
+}
+
+// Расшифровка «К выплате» (HEAD 16.11: «чёткий список кому и за что, чтобы мы произвели оплату»): смены и каждый чек с фото
+const dmy = t => new Date(t).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+function WeeklyDetail({ id }) {
+  const [d, setD] = useState(null)
+  const [open, setOpen] = useState(false)
+  const [e, setE] = useState('')
+  const flip = () => { setOpen(!open); if (!d) api(`/fin/weekly/${id}/detail`).then(setD, x => setE(x.message)) }
+  return <div className="wdetail">
+    <a className="small" onClick={flip}>{open ? '▴ скрыть' : '▾ за что'}</a>
+    {open && (e ? <p className="small why">{e}</p> : !d ? <p className="small muted">Загрузка…</p> : d.months.map(m => <div key={m.ym}>
+      {m.shifts.length > 0 && <><div className="small muted">Смены за {m.ym.slice(5)}.{m.ym.slice(0, 4)} · {m.shifts.length} · {money(m.shifts_sum)}</div>
+        {m.shifts.map(s => <div key={s.id} className="wline small"><span>{dmy(s.started_at)} · {s.object_title || 'без объекта'}{s.kind === 'road' ? ' · дорога' : ''}{s.hours ? ` · ${s.hours} ч` : ''}</span><b>{money(s.pay)}</b></div>)}</>}
+      {m.checks.length > 0 && <><div className="small muted">Чеки «свои деньги» · {m.checks.length} · {money(m.checks_sum)}</div>
+        {m.checks.map(c => <div key={c.id} className="wline small"><span>{dmy(c.created_at)} · {c.category}{c.object_title ? ` · ${c.object_title}` : ''}{c.note ? ` · ${c.note}` : ''}
+          {c.receipt_url ? <> · <a href={c.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</span><b>{money(c.amount)}</b></div>)}</>}
+      {m.paid_before > 0 && <div className="wline small muted"><span>Уже выплачено за месяц</span><b>−{money(m.paid_before)}</b></div>}
+      {Math.abs(m.shifts_sum + m.checks_sum - m.paid_before - m.due) >= 1 && <div className="wline small muted"><span>Прочее по ФОТ (бонусы, суточные, доплаты)</span>
+        <b>{money(m.due - m.shifts_sum - m.checks_sum + m.paid_before)}</b></div>}
+      <div className="wline small"><span>К выплате за месяц</span><b>{money(m.due)}</b></div>
+    </div>))}
   </div>
 }
 

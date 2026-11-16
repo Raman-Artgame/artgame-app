@@ -25,6 +25,12 @@ def test_weekly_payouts(client, team):  # noqa: F811
     assert rows[team[5000]]["total"] == 4500 and rows[team[5000]]["checks"] == 1   # «деньги компании» — не к выплате
     assert w["total"] == VALS["pay.support.shift"] + 4500 and w["monday"]
     art = rows[team[5000]]
+    # HEAD 16.11: расшифровка — каждый чек и каждая смена, ничего не пишет
+    dt = client.get(f"/api/fin/weekly/{art['payee_id']}/detail", headers=hdr(1000)).json()
+    assert [c["amount"] for c in dt["months"][0]["checks"]] == [4500] and dt["months"][0]["checks"][0]["category"]
+    ds = client.get(f"/api/fin/weekly/{rows[team[2000]]['payee_id']}/detail", headers=hdr(1000)).json()["months"][0]
+    assert len(ds["shifts"]) == 1 and ds["shifts_sum"] == VALS["pay.support.shift"] and ds["shifts"][0]["object_title"]
+    assert client.get(f"/api/fin/weekly/{art['payee_id']}/detail", headers=hdr(5000)).status_code == 403
     body = {"client_uid": str(uuid.uuid4()), "payee_id": art["payee_id"], "account": "kaspi", "op_date": w["monday"], "amount": 4000}
     assert client.post("/api/fin/weekly/pay", json=body, headers=hdr(1000)).status_code == 409   # сумма не та
     assert client.post("/api/fin/weekly/pay", json={**body, "amount": 4500}, headers=hdr(1000)).json()["paid"] == 4500

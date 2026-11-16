@@ -115,6 +115,11 @@ async function tab(p, name) {
   const mrow = mon.locator('.row', { hasText: 'Плотник Арман' })
   await mrow.getByText(/чеки за 11\.2026: 12\s000/).waitFor()
   await h.screenshot({ path: `${shots}/fin-ponedelnik.png` })
+  // HEAD 16.11: «за что» — расшифровка: каждый чек с датой, статьёй и суммой
+  await mrow.getByText('▾ за что').click()
+  await mrow.locator('.wdetail .wline', { hasText: /Чеки|12\s000/ }).first().waitFor()
+  await mrow.getByText(/Чеки «свои деньги» · 1/).waitFor()
+  await mrow.scrollIntoViewIfNeeded(); await h.screenshot({ path: `${shots}/fin-ponedelnik-zachto.png` })
   await mrow.getByRole('button', { name: 'Выплачено' }).click()
   await mrow.locator('.receipt input').first().setInputFiles(__dirname + '/chek.png')   // чек перевода из галереи (HEAD 10.11)
   await mrow.locator('.receipt img').waitFor()

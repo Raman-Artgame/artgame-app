@@ -88,6 +88,48 @@ def weekly(p: dict = Depends(require_head)):
     return {"monday": next_monday(), "rows": rows, "total": round(sum(r["total"] for r in rows), 2), "paid": paid}
 
 
+@router.get("/fin/weekly/{payee_id}/detail")
+def weekly_detail(payee_id: int, p: dict = Depends(require_head)):
+    """Расшифровка строки «К выплате в понедельник» (HEAD 16.11: «напиши чёткий список кому и за что, чтобы мы произвели оплату»):
+    по месяцам — каждый чек (дата, статья, объект, комментарий, сумма, фото) и, у саппортов, каждая принятая смена
+    (дата, объект, часы, сумма по ставке) плюс уже выплаченное за месяц. Ничего не меняет: расчёт в транзакции с откатом."""
+    from .finance import one_shift_pay, rate_role, vals
+    with db.pool.connection() as conn:
+        with conn.transaction(force_rollback=True):
+            rows = due(conn, p, payee_id)
+            if not rows:
+                return {"months": []}
+            r = rows[0]
+            pe = conn.execute("SELECT role_code, print_exam_on, hour_rate FROM people WHERE id=%s", (r["person_id"],)).fetchone()
+            v = vals(conn)
+            months = []
+            for x in r["lines"]:
+                m = {"ym": x["ym"], "due": x["amount"], "shifts": [], "paid_before": 0.0, "shifts_sum": 0.0, "checks_sum": 0.0}
+                m["checks"] = [with_receipt({**e, "amount": _f(e["amount"])}) for e in conn.execute(
+                    """SELECT e.id, e.created_at, e.amount, e.note, e.receipt_file_id, c.title AS category, o.title AS object_title
+                       FROM expenses e LEFT JOIN expense_categories c ON c.code=e.category LEFT JOIN objects o ON o.id=e.object_id
+                       WHERE e.id = ANY(%s) ORDER BY e.created_at""", (x["expense_ids"],)).fetchall()]
+                m["checks_sum"] = round(sum(e["amount"] for e in m["checks"]), 2)
+                if r["weekly"]:
+                    y, mo = map(int, x["ym"].split("-"))
+                    t0 = datetime(y, mo, 1, tzinfo=TZ)
+                    t1 = datetime(y + (mo == 12), mo % 12 + 1, 1, tzinfo=TZ)
+                    for s in conn.execute("""SELECT s.id, s.started_at, s.ended_at, s.kind, s.role_code, s.bonus, o.title AS object_title FROM shifts s
+                                             LEFT JOIN objects o ON o.id=s.object_id WHERE s.person_id=%s AND s.status='approved'
+                                             AND ((s.pay_ym IS NULL AND s.started_at >= %s AND s.started_at < %s) OR s.pay_ym=%s)
+                                             ORDER BY s.started_at""", (r["person_id"], t0, t1, x["ym"])).fetchall():
+                        role = rate_role(s["role_code"] or pe["role_code"], pe["print_exam_on"], s["started_at"])
+                        pay = one_shift_pay(v, role, s["kind"], s["started_at"], s["ended_at"], pe["hour_rate"])[0] + _f(s["bonus"])
+                        h = (s["ended_at"] - s["started_at"]).total_seconds() / 3600 if s["ended_at"] else None
+                        m["shifts"].append({"id": s["id"], "started_at": s["started_at"], "object_title": s["object_title"], "kind": s["kind"],
+                                            "hours": round(h, 1) if h else None, "pay": round(pay, 2)})
+                    m["shifts_sum"] = round(sum(s["pay"] for s in m["shifts"]), 2)
+                    m["paid_before"] = _f(conn.execute("""SELECT coalesce(sum(amount),0) AS s FROM fin_ledger WHERE period=%s AND payee_id=%s
+                                                          AND article_code='payroll' AND status='active'""", (x["ym"], r["payee_id"])).fetchone()["s"])
+                months.append(m)
+    return {"name": r["name"], "total": r["total"], "months": months}
+
+
 class WeeklyPayIn(BaseModel):
     client_uid: uuid.UUID
     payee_id: int
