@@ -99,17 +99,34 @@ def _gateway_read(method: str, params: dict):
 READ = _gateway_read  # тесты подменяют
 
 
+_key_locks: dict = {}
+CACHE_MAX = 2000   # ответов в памяти воркера; старше — выбрасываются (память службы ограничена 512 МБ)
+
+
 def read(method: str, params: dict, ttl: int = TTL, fresh: bool = False):
+    """Один и тот же запрос от нескольких человек разом идёт в Битрикс один раз (HEAD 16.11, нагрузка): Битрикс пускает
+    ~2 запроса в секунду, и пять МОП, открывших «Сегодня» вместе, упирались в QUERY_LIMIT_EXCEEDED и ждали."""
     key = (method, repr(sorted(params.items())))
-    now = time.time()
+    t0 = time.time()
     with _lock:
         hit = _cache.get(key)
-    if hit and not fresh and now - hit[0] < ttl:
+        kl = _key_locks.setdefault(key, threading.Lock())
+    if hit and not fresh and t0 - hit[0] < ttl:
         return hit[1]
-    data = READ(method, params)
-    with _lock:
-        _cache[key] = (now, data)
-    return data
+    with kl:
+        with _lock:
+            hit = _cache.get(key)
+        if hit and hit[0] >= t0 or (hit and not fresh and time.time() - hit[0] < ttl):   # пока ждали, посчитал другой
+            return hit[1]
+        now = time.time()
+        data = READ(method, params)
+        with _lock:
+            _cache[key] = (now, data)
+            if len(_cache) > CACHE_MAX:
+                for k in sorted(_cache, key=lambda k: _cache[k][0])[:len(_cache) - CACHE_MAX // 2]:
+                    _cache.pop(k, None)
+                    _key_locks.pop(k, None)
+        return data
 
 
 def _rows(j):
@@ -862,7 +879,7 @@ def api_journal(person: int | None = None, days: int = 30, p: dict = Depends(act
                           count(*) FILTER (WHERE a.action='deal_open' AND a.at > now() - interval '1 day') AS deals_today,
                           count(*) FILTER (WHERE a.action='place_download' AND a.at > now() - interval '1 day') AS files_today,
                           max(a.at) AS last_at
-                   FROM people p JOIN audit_log a ON a.person_id=p.id
+                   FROM people p LEFT JOIN audit_log a ON a.person_id=p.id AND a.at > now() - interval '30 days'
                    WHERE p.role_code IN ('mop','mop_vip') GROUP BY p.id ORDER BY p.full_name""").fetchall()
     return {"items": rows, "summary": summary}
 

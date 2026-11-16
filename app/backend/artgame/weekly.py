@@ -38,14 +38,22 @@ def due(conn, by: dict, payee_id: int | None = None) -> list[dict]:
     out = []
     payees = conn.execute("""SELECT f.*, pe.role_code FROM fin_payees f JOIN people pe ON pe.id=f.person_id
                              WHERE f.status='active' AND (%s::bigint IS NULL OR f.id=%s) ORDER BY f.name""", (payee_id, payee_id)).fetchall()
+    # начисления саппортов — одним пересчётом на месяц для всех сразу (HEAD 16.11, нагрузка): раньше пересчёт месяца
+    # шёл отдельно на каждого человека и каждый месяц — при 30 саппортах 60 пересчётов на одно открытие экрана
+    weekly_ = [f for f in payees if f["pay_rule"] == "weekly" and f["person_id"]]
+    accs: dict = {}
+    if weekly_:
+        for ym in _periods():
+            with conn.transaction(force_rollback=True):
+                compute(conn, ym, by, only_person=[f["person_id"] for f in weekly_])
+                for a in conn.execute("""SELECT payee_id, kind, amount, ref FROM fin_accruals WHERE period=%s AND payee_id = ANY(%s) AND status='active'""",
+                                      (ym, [f["id"] for f in weekly_])).fetchall():
+                    accs.setdefault((ym, a["payee_id"]), []).append(a)
     for f in payees:
         lines = []
         if f["pay_rule"] == "weekly":
             for ym in _periods():
-                with conn.transaction(force_rollback=True):
-                    compute(conn, ym, by, only_person=f["person_id"])
-                    acc = conn.execute("""SELECT kind, amount, ref FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='active'""",
-                                       (ym, f["id"])).fetchall()
+                acc = accs.get((ym, f["id"]), [])
                 accrued = sum(_f(a["amount"]) for a in acc)
                 paid = _f(conn.execute("""SELECT coalesce(sum(amount),0) AS s FROM fin_ledger WHERE period=%s AND payee_id=%s
                                           AND article_code='payroll' AND status='active'""", (ym, f["id"])).fetchone()["s"])

@@ -386,7 +386,7 @@ function Editor({ post, onlyAd, onClose, onSaved }) {
     <select value={b.object_id} onChange={e => set('object_id', e.target.value)}><option value="">Не про проект</option>
       {objs.map(o => <option key={o.id} value={o.id}>№{o.id} {o.title}</option>)}</select>
     <label className="muted small">Материал · {b.files.length}</label>
-    {b.files.length > 0 && <div className="mktfiles">{b.files.map(f => <span key={f.id} className="mthumb">{f.thumb ? <img src={f.thumb} alt="" /> : <span>▶</span>}
+    {b.files.length > 0 && <div className="mktfiles">{b.files.map(f => <span key={f.id} className="mthumb">{f.thumb ? <img loading="lazy" src={f.thumb} alt="" /> : <span>▶</span>}
       <button className="mktdel" aria-label="Убрать" onClick={() => set('files', b.files.filter(x => x.id !== f.id))}>×</button></span>)}</div>}
     <label className={'photo mktup' + (up !== null ? ' busy' : '')}>{up !== null ? `Загрузка… ${Math.round(up * 100)}%` : '⬆ Загрузить готовое (рилс, сторис, баннер)'}
       <input type="file" accept="video/*,image/*" multiple hidden disabled={up !== null} onChange={e => { const fs = [...e.target.files]; e.target.value = ''; addReady(fs) }} /></label>

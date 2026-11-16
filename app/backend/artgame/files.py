@@ -126,22 +126,51 @@ class PhotoIn(BaseModel):
     note: str | None = None
 
 
-def store_photo(conn, p: dict, obj: dict, client_uid, data_url: str, note: str | None = None) -> dict:
-    """Фото с объекта → МЕДИА / Отчёты сделки + карточка файла. Повтор с тем же client_uid не создаёт дубль."""
+def _photo_name(p: dict, obj_id: int, note: str | None) -> str:
+    return f"{obj_id} {p['full_name']} {time.strftime('%Y-%m-%d %H-%M-%S')}" + (f" {note}" if note else "")
+
+
+def preupload(p: dict, object_id: int | None, client_uid, data_url: str | None, note: str | None = None) -> dict | None:
+    """Фото — на Диск ДО транзакции (HEAD 16.11 «приложение зависает»): пока файл идёт к Google, соединение с базой
+    свободно. Результат передаётся в store_photo(pre=…). Нечего грузить или фото уже есть — None."""
+    if not object_id or not data_url or len(data_url) < 30:
+        return None
+    if not data_url.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
+        raise HTTPException(400, "bad photo")
+    with db.pool.connection() as conn:
+        if conn.execute("SELECT 1 FROM files WHERE client_uid=%s", (client_uid,)).fetchone():
+            return None
+        obj = get_object(conn, object_id)
+    name = _photo_name(p, object_id, note)
+    data, mime = drive.decode_data_url(data_url)
+    try:
+        drive_id = drive.save_photo(None, obj, name, data_url, kind="photo")
+    except Exception as ex:
+        raise drive.fail(ex)
+    return {"uid": str(client_uid), "object_id": object_id, "name": name, "drive_id": drive_id, "size": len(data), "mime": mime}
+
+
+def store_photo(conn, p: dict, obj: dict, client_uid, data_url: str, note: str | None = None, pre: dict | None = None) -> dict:
+    """Фото с объекта → МЕДИА / Отчёты сделки + карточка файла. Повтор с тем же client_uid не создаёт дубль.
+    pre — фото уже на Диске (preupload): здесь только короткая запись в базу."""
     if not data_url.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):
         raise HTTPException(400, "bad photo")
     dup = conn.execute("SELECT * FROM files WHERE client_uid=%s", (client_uid,)).fetchone()
     if dup:
         return dup
-    data, mime = drive.decode_data_url(data_url)
-    name = f"{obj['id']} {p['full_name']} {time.strftime('%Y-%m-%d %H-%M-%S')}" + (f" {note}" if note else "")
-    try:
-        drive_id = drive.save_photo(conn, obj, name, data_url, kind="photo")
-    except Exception as ex:
-        raise drive.fail(ex)
+    if pre and pre["uid"] == str(client_uid) and pre["object_id"] == obj["id"]:
+        name, mime, drive_id, size = pre["name"], pre["mime"], pre["drive_id"], pre["size"]
+    else:
+        data, mime = drive.decode_data_url(data_url)
+        size = len(data)
+        name = _photo_name(p, obj["id"], note)
+        try:
+            drive_id = drive.save_photo(conn, obj, name, data_url, kind="photo")
+        except Exception as ex:
+            raise drive.fail(ex)
     f = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, note, uploaded_by)
                         VALUES (%s,%s,'photo',%s,%s,%s,%s,%s,%s) ON CONFLICT (client_uid) DO NOTHING RETURNING *""",
-                     (client_uid, obj["id"], name, mime, len(data), drive_id, note, p["id"])).fetchone()
+                     (client_uid, obj["id"], name, mime, size, drive_id, note, p["id"])).fetchone()
     if not f:
         return conn.execute("SELECT * FROM files WHERE client_uid=%s", (client_uid,)).fetchone()
     db.audit(conn, p["id"], "file_add", "files", f["id"], {"kind": "photo", "object": obj["id"]})
@@ -151,8 +180,9 @@ def store_photo(conn, p: dict, obj: dict, client_uid, data_url: str, note: str |
 @router.post("/objects/{object_id}/photos")
 def add_photo(object_id: int, body: PhotoIn, p: dict = Depends(active)):
     """Фото с объекта: сжато на телефоне, может прийти из офлайн-очереди."""
+    pre = preupload(p, object_id, body.client_uid, body.data, body.note)
     with db.pool.connection() as conn, conn.transaction():
-        f = store_photo(conn, p, get_object(conn, object_id), body.client_uid, body.data, body.note)
+        f = store_photo(conn, p, get_object(conn, object_id), body.client_uid, body.data, body.note, pre=pre)
         return links({**f, "by": p["full_name"]})
 
 

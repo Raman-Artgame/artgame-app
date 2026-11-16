@@ -203,3 +203,27 @@ def test_deal_without_number_gets_title_city_geo(client, fake, monkeypatch):
     assert (o["title"], o["city"], o["address"], o["geo"]) == ("ШКОЛА КОСШЫ", "АСТАНА", None, "50.990932;71.376512")
     assert parse_geo("Караганда Ерубаева 16/6|;|1969") is None and parse_geo("x|0;0|1") is None
     assert parse_geo("ул|42.31;69.58|1") == "42.31;69.58"
+
+
+def test_photo_upload_does_not_hold_db(client, fake, monkeypatch):
+    """HEAD 16.11 «приложение зависает»: пока фото и чек идут к Google, соединение с базой свободно —
+    иначе 20 одновременных отправок занимали весь пул, и остальные экраны ждали очереди."""
+    setup_people(client)
+    seen = []
+    up = FakeDrive.upload
+
+    def watch(self, parent, name, data, mime):
+        seen.append(db.pool.get_stats().get("pool_size", 0) - db.pool.get_stats().get("pool_available", 0))
+        return up(self, parent, name, data, mime)
+    monkeypatch.setattr(FakeDrive, "upload", watch)
+    r = client.post("/api/objects/731/photos", json={"client_uid": str(uuid.uuid4()), "data": JPEG}, headers=hdr(2000))
+    assert r.status_code == 200 and r.json()["status"] == "ready"
+    e = client.post("/api/expenses", json={"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "category": "paint",
+                                           "amount": 1200, "receipt": JPEG}, headers=hdr(2000))
+    assert e.status_code == 200 and e.json()["receipt_file_id"]
+    assert seen == [0, 0]   # во время загрузки ни одно соединение не занято
+    # повтор того же фото из очереди телефона — на Диск второй раз не идёт
+    uid = str(uuid.uuid4())
+    client.post("/api/objects/731/photos", json={"client_uid": uid, "data": JPEG}, headers=hdr(2000))
+    client.post("/api/objects/731/photos", json={"client_uid": uid, "data": JPEG}, headers=hdr(2000))
+    assert len(seen) == 3
