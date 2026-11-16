@@ -1122,3 +1122,9 @@ button.kittile { display: flex; flex-direction: column; align-items: stretch; ga
 .wdetail .wline span { min-width: 0; overflow-wrap: anywhere; }
 .wdetail .wline b { white-space: nowrap; }
 .wdetail > div > .small.muted:not(.wline) { margin-top: 8px; }
+/* HEAD 16.11: две кнопки «Камера» и «Галерея» под фото */
+div.photo.snap { flex-direction: column; gap: 10px; padding: 12px; cursor: default; }
+div.photo.snap > span { padding: 18px 0 4px; }
+.snapbtns { display: flex; gap: 8px; width: 100%; margin: 8px 0; }
+.snapbtns .btnlike { flex: 1; }
+.addpics label { cursor: pointer; }

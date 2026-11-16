@@ -117,8 +117,11 @@ export function Gallery({ obj, me, start = 'design', only, skip = [], bare = fal
     {kinds.length > 1 && <div className="segf">{kinds.map(k => <button key={k} className={k === kind ? 'on' : ''} onClick={() => setKind(k)}>{KIND[k]}</button>)}</div>}
     {top}
     {!bare && <p className="small muted gabout">{ABOUT[kind]}</p>}
-    {kind === 'photo' && <label className="photo"><span>📷 Добавить фото с объекта</span>
-      <input type="file" accept="image/*" multiple hidden onChange={e => e.target.files.length && addPhotos(e.target.files)} /></label>}
+    {/* HEAD 16.11: на iPhone без capture — меню, на Samsung в Telegram — только галерея; поэтому две кнопки */}
+    {kind === 'photo' && <div className="seg snapbtns"><label className="btnlike">📷 Снять фото с объекта
+      <input type="file" accept="image/*" capture="environment" hidden onChange={e => { const f = [...e.target.files]; e.target.value = ''; f.length && addPhotos(f) }} /></label>
+      <label className="btnlike ghost">🖼 Из галереи
+      <input type="file" accept="image/*" multiple hidden onChange={e => { const f = [...e.target.files]; e.target.value = ''; f.length && addPhotos(f) }} /></label></div>}
     {canBig && <label className="photo"><span>⬆ Загрузить {kind === 'design' ? 'эскиз или файл в печать' : 'файл'}</span>
       <input type="file" hidden onChange={e => e.target.files[0] && addBig(e.target.files[0])} /></label>}
     {canVideo && <label className="photo"><span>🎥 Загрузить видео с объекта</span>

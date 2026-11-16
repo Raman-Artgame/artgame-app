@@ -223,7 +223,7 @@ async function tab(p, name) {
     await io.locator('.card.past').screenshot({ path: `${shots}/kab-proshlaya-smena.png` })
     // сколько угодно фото из галереи (HEAD 09.11)
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC', 'base64')
-    await io.locator('.card.past .pics input[type=file]').setInputFiles([1, 2, 3].map(i => ({ name: `p${i}.png`, mimeType: 'image/png', buffer: png })))
+    await io.locator('.card.past .snapbtns input[type=file]').last().setInputFiles([1, 2, 3].map(i => ({ name: `p${i}.png`, mimeType: 'image/png', buffer: png })))
     await io.getByText('Фото работы · выбрано 3').waitFor()
     await io.locator('.card.past').getByRole('button', { name: 'Отправить на проверку' }).click()
     await io.getByText(/ушла на проверку, фото: 3/).waitFor()

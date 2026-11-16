@@ -69,18 +69,26 @@ async function tab(p, name) {
   await a.getByRole('button', { name: 'Начать смену' }).waitFor()
   await a.locator('.promo').getByText('Средний').waitFor()
   assert.ok(await a.getByRole('button', { name: 'Начать смену' }).isDisabled())   // без фото «до» не начать
-  await a.locator('.snap input[type=file]').setInputFiles(__dirname + '/chek.png')
+  await a.locator('.snapbtns input[type=file]').last().setInputFiles(__dirname + '/chek.png')
   await a.locator('.snap img').waitFor()
   await a.screenshot({ path: `${shots}/1-smena.png`, fullPage: true })
   await a.getByRole('button', { name: 'Начать смену' }).click()
   await a.getByText('Смена идёт').waitFor()
   await a.locator('input[inputmode=decimal]').fill('12,5')
   await a.locator('textarea').fill('Загрунтовал стену и перенёс эскиз')
-  await a.locator('.snap input[type=file]').setInputFiles(__dirname + '/chek.png')
-  await a.locator('.snap img').waitFor()
+  // HEAD 16.11: в конце смены — несколько фото сразу из галереи, и есть кнопка «Камера»
+  await a.locator('label.btnlike', { hasText: 'Камера' }).first().waitFor()
+  await a.locator('.snapbtns input[type=file]').last().setInputFiles([__dirname + '/chek.png', __dirname + '/chek.png', __dirname + '/chek.png'])
+  await a.locator('.pics img').nth(2).waitFor()
   await a.screenshot({ path: `${shots}/1-smena-idet.png`, fullPage: true })
   await a.getByRole('button', { name: 'Закончить и отправить на проверку' }).click()
   await a.getByText('Смена закончена').waitFor()
+  for (let i = 0; i < 40; i++) {   // доп. фото ушли очередью после «Закончить»
+    const n = +execSync(`psql "${process.env.ARTGAME_DATABASE_URL}" -tAc "SELECT count(*) FROM shift_photos"`).toString().trim()
+    if (n >= 2) break
+    if (i === 39) throw new Error('доп. фото смены не дошли: ' + n)
+    await a.waitForTimeout(250)
+  }
 
   // 3. Расход без сети → очередь → сеть вернулась → ушёл
   await a.getByRole('button', { name: 'Расход' }).click()
@@ -159,7 +167,7 @@ async function tab(p, name) {
   await a.locator('.dzbox label.photo input[type=file]').setInputFiles({ name: 'Эскиз.psd', mimeType: 'image/vnd.adobe.photoshop', buffer: Buffer.from('PSD-DATA') })
   await a.getByText('Эскиз.psd').waitFor()
   await a.locator('.segf').getByRole('button', { name: 'Фото' }).click()
-  await a.locator('label.photo', { hasText: 'Добавить фото' }).locator('input[type=file]').setInputFiles([__dirname + '/chek.png', __dirname + '/chek.png'])
+  await a.locator('label.btnlike', { hasText: 'Из галереи' }).locator('input[type=file]').setInputFiles([__dirname + '/chek.png', __dirname + '/chek.png'])
   await a.locator('.grid img').nth(1).waitFor()
   await a.screenshot({ path: `${shots}/5-kartochka-proekta.png`, fullPage: true })
 

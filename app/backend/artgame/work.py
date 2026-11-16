@@ -522,19 +522,33 @@ class PhotoIn(BaseModel):
 
 @router.post("/shifts/{sid}/photos")
 def add_shift_photo(sid: int, b: PhotoIn, p: dict = Depends(active)):
-    """Ещё фото к своей смене задним числом (HEAD 09.11: «неограниченное количество фотографий»), пока она не проверена."""
+    """Ещё фото к своей смене (HEAD 09.11: «неограниченное количество фотографий»), пока она не проверена.
+    HEAD 16.11 («можем только одну фотку прикрепить»): и к обычной смене, не только к отчёту задним числом."""
+    return _add_photo(p, b, "id", sid)
+
+
+@router.post("/shifts/by-uid/{shift_uid}/photos")
+def add_shift_photo_uid(shift_uid: UUID, b: PhotoIn, p: dict = Depends(active)):
+    """То же по client_uid смены: «Закончить» и доп. фото идут через офлайн-очередь по порядку, ID смены телефону не нужен."""
+    return _add_photo(p, b, "client_uid", shift_uid)
+
+
+def _add_photo(p: dict, b: PhotoIn, col: str, key) -> dict:
     with db.pool.connection() as conn:
-        s0 = conn.execute("SELECT object_id FROM shifts WHERE id=%s AND person_id=%s AND backfill AND status='submitted'", (sid, p["id"])).fetchone()
-    pre = _pre(p, s0["object_id"], b.client_uid, "extra", b.photo, "отчёт задним числом") if s0 else None
+        s0 = conn.execute(f"SELECT object_id FROM shifts WHERE {col}=%s AND person_id=%s AND status='submitted'", (key, p["id"])).fetchone()
+    pre = _pre(p, s0["object_id"], b.client_uid, "extra", b.photo, "фото смены") if s0 else None
     with db.pool.connection() as conn, conn.transaction():
-        s = conn.execute("SELECT * FROM shifts WHERE id=%s AND person_id=%s", (sid, p["id"])).fetchone()
+        s = conn.execute(f"SELECT * FROM shifts WHERE {col}=%s AND person_id=%s", (key, p["id"])).fetchone()
         if not s:
             raise HTTPException(404, "Смена не найдена")
-        if not s["backfill"] or s["status"] != "submitted" or not s["object_id"]:
-            raise HTTPException(400, "Фото добавляются к отчёту задним числом на объекте, пока он на проверке")
-        fid = _photo(conn, p, s["object_id"], b.client_uid, "extra", b.photo, "отчёт задним числом", pre)
-        conn.execute("INSERT INTO shift_photos (shift_id, file_id) VALUES (%s,%s) ON CONFLICT DO NOTHING", (sid, fid))
-        n = conn.execute("SELECT count(*) AS n FROM shift_photos WHERE shift_id=%s", (sid,)).fetchone()["n"]
+        if s["status"] != "submitted" or not s["object_id"]:
+            raise HTTPException(400, "Фото добавляются к смене на объекте, пока она на проверке")
+        if conn.execute("""SELECT 1 FROM shift_photos sp JOIN files f ON f.id=sp.file_id WHERE sp.shift_id=%s AND f.client_uid=%s""",
+                        (s["id"], uuid5(b.client_uid, "extra"))).fetchone():
+            return {"ok": True, "repeat": True}
+        fid = _photo(conn, p, s["object_id"], b.client_uid, "extra", b.photo, "фото смены", pre)
+        conn.execute("INSERT INTO shift_photos (shift_id, file_id) VALUES (%s,%s) ON CONFLICT DO NOTHING", (s["id"], fid))
+        n = conn.execute("SELECT count(*) AS n FROM shift_photos WHERE shift_id=%s", (s["id"],)).fetchone()["n"]
         return {"ok": True, "count": n}
 
 

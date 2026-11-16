@@ -100,3 +100,14 @@ def test_person_hour_rate(client, team):  # noqa: F811
     rate = {x["label"]: x["amount"] for x in client.get("/api/fin/my", headers=hdr(6400)).json()["rate"]}
     assert rate.get("Твоя ставка в час") == 1200 and not any(k.startswith("Смена ") for k in rate), rate
     assert client.post(f"/api/people/{pid}", json={"hour_rate": 0}, headers=hdr(1000)).json()["hour_rate"] is None
+
+
+def test_live_shift_many_photos(client, team):  # noqa: F811
+    """HEAD 16.11: «когда отчёты закидываем, можем только одну фотку прикрепить» — к обычной смене тоже, по client_uid смены."""
+    s = _shift(client, 5000, "mural", 7)
+    uid = s["client_uid"]
+    for _ in range(2):
+        r = client.post(f"/api/shifts/by-uid/{uid}/photos", json={"client_uid": str(uuid.uuid4()), "photo": JPEG}, headers=hdr(5000))
+        assert r.status_code == 200, r.text
+    assert r.json()["count"] == 2
+    assert client.post(f"/api/shifts/by-uid/{uid}/photos", json={"client_uid": str(uuid.uuid4()), "photo": JPEG}, headers=hdr(2000)).status_code == 404

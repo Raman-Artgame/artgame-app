@@ -132,12 +132,27 @@ export function Hints({ step, role, cond, v, uid }) {
   </div>
 }
 
-// gallery (HEAD 09.11): в отчётах задним числом фото берут из галереи телефона, а не только с камеры
-function Snap({ value, set, label, gallery }) {
-  return <label className={'photo snap' + (value ? ' has' : '')}>
-    {value ? <img src={value} alt={label} /> : <span>{gallery ? '🖼' : '📷'} {label}</span>}
-    <input type="file" accept="image/*" {...(gallery ? {} : { capture: 'environment' })} hidden onChange={async e => e.target.files[0] && set(await shrink(e.target.files[0]))} />
-  </label>
+// HEAD 16.11: «у Самсунга — только галерея, с айфона — только камера». Атрибут capture на iPhone даёт только камеру,
+// без него Android в Telegram открывает только галерею. Поэтому везде две кнопки: «Камера» (capture) и «Галерея» (без него).
+const fileIn = (cam, multi, onFiles) => <input type="file" accept="image/*" {...(cam ? { capture: 'environment' } : {})} {...(multi && !cam ? { multiple: true } : {})} hidden
+  onChange={e => { const f = [...e.target.files]; e.target.value = ''; f.length && onFiles(f) }} />
+function Snap({ value, set, label }) {
+  const one = async f => set(await shrink(f[0]))
+  return <div className={'photo snap' + (value ? ' has' : '')}>
+    {value ? <img src={value} alt={label} /> : <span>📷 {label}</span>}
+    <div className="seg snapbtns"><label className="btnlike">📷 Камера{fileIn(true, false, one)}</label>
+      <label className="btnlike ghost">🖼 Галерея{fileIn(false, false, one)}</label></div>
+  </div>
+}
+// Несколько фото: камерой по одному или сразу пачкой из галереи (HEAD 16.11)
+export function MultiPick({ pics, setPics, label }) {
+  const add = async files => { for (const f of files) { const x = await shrink(f); setPics(a => [...a, x]) } }
+  return <>
+    {label && <label className="muted">{label} · {pics.length ? `выбрано ${pics.length}` : 'сколько угодно'}</label>}
+    <div className="pics">{pics.map((x, i) => <span key={i}><img src={x} alt="" /><button className="ghost mini" onClick={() => setPics(a => a.filter((_, j) => j !== i))}>✕</button></span>)}</div>
+    <div className="seg snapbtns"><label className="btnlike">📷 Камера{fileIn(true, false, add)}</label>
+      <label className="btnlike ghost">🖼 Галерея{fileIn(false, true, add)}</label></div>
+  </>
 }
 
 // Смена по шагам (HEAD 08.11): «Начать» с фото стены до → смена идёт → «Закончить» с фото в конце, м² и «что сделал».
@@ -175,9 +190,6 @@ function PastShift({ d, done }) {
   const [busy, setBusy] = useState(false)
   const [prog, setProg] = useState('')
   const [err, setErr] = useState('')
-  const pick = async files => {
-    for (const f of [...files]) { const x = await shrink(f); setPics(a => [...a, x]) }
-  }
   // Часы считаем из «начали» и «закончили» (Диана 11.11 ввела конец «1930» в поле часов)
   const hm = t => { const m = String(t || '').trim().match(/^(\d{1,2})(?:[:.\s,-]?(\d{2}))?$/); return m && +m[1] < 24 && +(m[2] || 0) < 60 ? +m[1] * 60 + +(m[2] || 0) : null }
   const a = hm(v.start_time), z = hm(v.end_time)
@@ -223,9 +235,7 @@ function PastShift({ d, done }) {
       <p className="small muted">Сверх {d.shift_hours || 10} ч — по часовой ставке, ночные часы ({d.night || '22:00–6:00'}) — +{d.night_pct ?? 10}% к часу. Посчитается само.</p>
       {!shop && <><label className="muted">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: e.target.value.replace(',', '.').replace(/[^\d.]/g, '') })} /></>}
       <label className="muted">Что сделал</label><textarea value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} placeholder="Фон, контур, детали…" />
-      {!shop && <><label className="muted">Фото работы · {pics.length ? `выбрано ${pics.length}` : 'из галереи, сколько угодно'}</label>
-        <div className="pics">{pics.map((x, i) => <span key={i}><img src={x} alt="" /><button className="ghost mini" onClick={() => setPics(pics.filter((_, j) => j !== i))}>✕</button></span>)}
-          <label className="photo snap add"><span>🖼 Добавить фото</span><input type="file" accept="image/*" multiple hidden onChange={e => { pick(e.target.files); e.target.value = '' }} /></label></div></>}
+      {!shop && <MultiPick pics={pics} setPics={setPics} label="Фото работы" />}
       {prog && <p className="small muted">{prog}</p>}
       <button disabled={busy || !v.day || (!shop && !v.object_id) || !hours || tooLong || v.work_done.trim().length < 3} onClick={send}>{busy ? 'Отправляю…' : 'Отправить на проверку'}</button>
       {err && <p className="small why">{err}</p>}
@@ -392,7 +402,8 @@ function StartObject({ d, onStarted, onRoad }) {
 function Running({ o, d, done }) {
   const [now, setNow] = useState(Date.now())
   const [v, set] = useState({ area_m2: '', work_done: '', note: '', printer: d.printer || '', stage: '', own: null })
-  const [photo, setPhoto] = useState('')
+  const [pics, setPics] = useState([])   // HEAD 16.11: несколько фото в конце смены — первое «после», остальные к смене
+  const photo = pics[0] || ''
   const [busy, setBusy] = useState(false)
   const [cond, setCond] = useState({})
   const stages = d.stages || []
@@ -405,8 +416,11 @@ function Running({ o, d, done }) {
     setBusy(true)
     try {
       const pressed = new Date().toISOString()
-      const left = await enqueue('/shifts/finish', { client_uid: o.client_uid, ended_at: endAt ? endAt.toISOString() : pressed, pressed_at: pressed, area_m2: v.area_m2 === '' ? null : +v.area_m2,
+      let left = await enqueue('/shifts/finish', { client_uid: o.client_uid, ended_at: endAt ? endAt.toISOString() : pressed, pressed_at: pressed, area_m2: v.area_m2 === '' ? null : +v.area_m2,
         work_done: v.work_done.trim(), photo_after: photo || null, note: v.note || null, printer: print ? v.printer || null : null, stage: v.stage || null })
+      let rest = 0
+      for (const x of pics.slice(1)) rest = await enqueue(`/shifts/by-uid/${o.client_uid}/photos`, { client_uid: uuid(), photo: x })   // очередь шлёт по порядку: сначала «Закончить»
+      if (rest > left) left = rest
       done(left ? 'Сохранено на телефоне, отправится, когда будет сеть.' : 'Смена закончена и ушла на проверку.')
     } catch { setBusy(false) }
   }
@@ -433,7 +447,7 @@ function Running({ o, d, done }) {
         <div className="chips stagepick">{stages.map(s => <button key={s.key} className={v.stage === s.key ? 'on' : 'ghost'} onClick={() => set({ ...v, stage: v.stage === s.key ? '' : s.key })}>{s.title}</button>)}</div></>}
       {!shop && <><Hints step="finish" role={o.role || d.role} cond={{ ...cond, handover: v.stage === 'handover' }} v={d.safety || {}} uid={o.client_uid} />
       <h3>Фото в конце смены</h3>
-      <Snap value={photo} set={setPhoto} label="Сфотографировать результат" /></>}
+      <MultiPick pics={pics} setPics={setPics} /></>}
       <TimePick label="Закончил раньше?" value={v.own} set={x => set({ ...v, own: x })} after={o.started_at} />
       <button disabled={!ok || busy} onClick={finish}>{busy ? 'Отправляю…' : 'Закончить и отправить на проверку'}</button>
       {!ok && <p className="small muted">{shop ? 'Напиши пару слов, что сделано.' : 'Нужно фото в конце смены и пара слов, что сделано.'}</p>}
@@ -503,7 +517,7 @@ function AddPics({ id, done }) {
     }
     setMsg(`Добавлено фото: ${ok}`); done()
   }
-  return <label className="small addpics"><a>🖼 Добавить фото</a><input type="file" accept="image/*" multiple hidden onChange={e => { const f = [...e.target.files]; e.target.value = ''; up(f) }} />{msg && <span className="muted"> {msg}</span>}</label>
+  return <div className="small addpics"><label><a>📷 Снять ещё</a>{fileIn(true, false, up)}</label> · <label><a>🖼 Добавить из галереи</a>{fileIn(false, true, up)}</label>{msg && <span className="muted"> {msg}</span>}</div>
 }
 
 export function Mine() {
