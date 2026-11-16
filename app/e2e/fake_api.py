@@ -186,6 +186,10 @@ def _consts(values: dict):
 
 # Анкета «Мои данные» (HEAD 09.11): в сквозных тестах люди считаются заполнившими анкету, кроме tg 8800 —
 # на нём kabinety.cjs проверяет саму анкету при первом входе.
+# аванс (HEAD 16.11) открыт с 15 по 20 — в e2e всегда «16-е» текущего месяца, чтобы блок был виден в любой день
+from artgame import advances  # noqa: E402
+from artgame.finance import TZ as _TZ  # noqa: E402
+advances.today = lambda: datetime.now(_TZ).date().replace(day=16)
 from artgame import db as _db  # noqa: E402
 
 

@@ -115,6 +115,18 @@ async function tab(p, name) {
   const mrow = mon.locator('.row', { hasText: 'Плотник Арман' })
   await mrow.getByText(/чеки за 11\.2026: 12\s000/).waitFor()
   await h.screenshot({ path: `${shots}/fin-ponedelnik.png` })
+  // HEAD 16.11 «без просьб, сам»: с 15 по 20 блок «Аванс» — кто сколько заработал и сколько можно дать
+  const adv = h.locator('.card', { hasText: 'до 20 числа' })
+  const arow = adv.locator('.advrow', { hasText: 'Плотник Арман' })
+  await arow.getByText(/можно 12\s000/).waitFor()
+  await arow.getByRole('button', { name: 'Дать' }).click()
+  await arow.getByPlaceholder(/Аванс, ₸/).fill('20000')
+  assert.ok(await arow.getByRole('button', { name: /^Выплачено/ }).isDisabled(), 'аванс больше «можно» не выплатить')
+  await arow.getByPlaceholder(/Аванс, ₸/).fill('5000')
+  await arow.getByRole('button', { name: 'Наличными' }).click()
+  await adv.screenshot({ path: `${shots}/fin-avans.png` })
+  assert.ok(await h.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'аванс шире экрана')
+  await arow.getByRole('button', { name: 'Отмена' }).click()
   // HEAD 16.11: «за что» — расшифровка: каждый чек с датой, статьёй и суммой
   await mrow.getByText('▾ за что').click()
   await mrow.locator('.wdetail .wline', { hasText: /Чеки|12\s000/ }).first().waitFor()

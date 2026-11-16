@@ -240,7 +240,7 @@ function Payroll({ m, d }) {
   const load = () => api('/fin/payroll/' + m).then(setP, err(setE))
   useEffect(() => { setP(null); load() }, [m])
   const compute = () => { setBusy(true); setE(''); api(`/fin/payroll/${m}/compute`, { method: 'POST' }).then(r => { setP(r); setE((r.warn || []).join('; ')) }, err(setE)).finally(() => setBusy(false)) }
-  return <><Monday d={d} onPaid={load} /><div className="card">
+  return <><Advance d={d} onPaid={load} /><Monday d={d} onPaid={load} /><div className="card">
     <div className="head"><h3>ФОТ</h3><button className="mini" disabled={busy} onClick={compute}>{busy ? 'Считаю…' : 'Пересчитать'}</button></div>
     {p && <div className="kv"><div><span className="muted small">Начислено</span><b>{money(p.accrued)}</b></div>
       <div><span className="muted small">Выплачено</span><b>{money(p.paid)}</b></div><div><span className="muted small">Осталось</span><b>{money(p.left)}</b></div></div>}
@@ -250,6 +250,45 @@ function Payroll({ m, d }) {
     {e && <p className="small why">{e}</p>}
     {p?.rows.map(r => <PayRow key={r.id} r={r} m={m} d={d} reload={load} />)}
   </div></>
+}
+
+// Аванс с 15 по 20 (HEAD 16.11, «без просьб, сам»): кто сколько заработал за месяц на сегодня — HEAD вписывает сумму и платит
+function Advance({ d, onPaid }) {
+  const [a, setA] = useState(null)
+  const [e, setE] = useState('')
+  const [v, setV] = useState(null)   // {payee_id, amount, cash, receipt}
+  const [busy, setBusy] = useState(false)
+  const bank = d.accounts.filter(x => x.code !== 'cash')
+  const hasCash = d.accounts.some(x => x.code === 'cash')
+  const [acc, setAcc] = useState((bank[0] || d.accounts[0])?.code)
+  const load = () => api('/fin/advances').then(setA, err(setE))
+  useEffect(() => { load() }, [])
+  if (!a?.open) return null
+  const pay = r => {
+    setBusy(true); setE('')
+    api('/fin/advances/pay', { method: 'POST', body: { client_uid: uuid(), payee_id: r.payee_id, amount: +v.amount, account: v.cash ? 'cash' : acc, receipt: v.cash ? null : v.receipt || null } })
+      .then(() => { setV(null); load(); onPaid && onPaid() }, err(setE)).finally(() => setBusy(false))
+  }
+  return <div className="card">
+    <div className="head"><h3>Аванс</h3><span className="small muted nowrap">до {a.to} числа</span></div>
+    <p className="small muted">Сколько каждый заработал за месяц на сегодня и сколько уже получил. Впиши сумму — не больше «можно». Выплаченное само вычтется в расчёте 5-го и в понедельник.</p>
+    {e && <p className="small why">{e}</p>}
+    {a.rows.length > 0 && bank.length > 1 && <select value={acc} onChange={x => setAcc(x.target.value)}>{bank.map(x => <option key={x.code} value={x.code}>Со счёта: {x.title}</option>)}</select>}
+    {!a.rows.length && <p className="small muted">За месяц пока никому ничего не начислено.</p>}
+    {a.rows.map(r => <div key={r.payee_id} className="row advrow">
+      <div><b>{r.name}</b> <span className="small muted">{r.group}</span>
+        <div className="small muted">заработал {money(r.earned)}{r.paid ? ` · получил ${money(r.paid)}` : ''} · <span className={r.max ? '' : 'muted'}>можно {money(r.max)}</span></div></div>
+      {v?.payee_id !== r.payee_id && r.max > 0 && <button className="mini" onClick={() => setV({ payee_id: r.payee_id, amount: '', cash: false, receipt: '' })}>Дать</button>}
+      {v?.payee_id === r.payee_id && <div className="dealedit" style={{ flexBasis: '100%' }}>
+        <input inputMode="numeric" autoFocus value={v.amount} onChange={x => setV({ ...v, amount: x.target.value.replace(/\D/g, '') })} placeholder={`Аванс, ₸ (можно ${money(r.max)})`} />
+        <div className="seg"><button className={v.cash ? 'ghost' : ''} onClick={() => setV({ ...v, cash: false })}>Переводом</button>
+          {hasCash && <button className={v.cash ? '' : 'ghost'} onClick={() => setV({ ...v, cash: true, receipt: '' })}>Наличными</button>}</div>
+        {v.cash ? <p className="small muted">Наличные — без чека. Сотрудник нажмёт «Получил» в «Мои выплаты».</p>
+          : <Receipt value={v.receipt} pick={async f => setV({ ...v, receipt: await shrink(f) })} />}
+        <div className="seg"><button disabled={busy || !(+v.amount > 0) || +v.amount > r.max} onClick={() => pay(r)}>Выплачено</button>
+          <button className="ghost" onClick={() => setV(null)}>Отмена</button></div></div>}
+    </div>)}
+  </div>
 }
 
 // Выплаты по понедельникам (HEAD 10.11): саппортам — смены, всем — чеки «свои деньги». «Выплачено» пишет строку в журнал денег.
@@ -568,7 +607,7 @@ export function MyPay() {
       {!p.lines.length && <p className="small muted">{p.live ? 'Принятых смен за этот месяц пока нет. Как только смену примут — сумма появится здесь сразу.' : 'За этот месяц начислений пока нет.'}</p>}
       {p.live && p.lines.length > 0 && <p className="small muted">Считается сразу по принятым сменам. Окончательно — когда HEAD закроет месяц.</p>}
       {p.payments?.length > 0 && <><h3 style={{ marginTop: 14 }}>Выплаты</h3>
-        {p.payments.map(x => <div key={x.id} className="row small"><div><b>{money(+x.amount)}</b>
+        {p.payments.map(x => <div key={x.id} className="row small"><div><b>{money(+x.amount)}</b>{x.advance && ' · аванс'}
           <div className="muted">{new Date(x.op_date + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} · {x.account}
             {x.receipt_url && <> · <a href={x.receipt_url}>чек</a></>}{x.ack_at && ' · получил ' + new Date(x.ack_at).toLocaleDateString('ru-RU')}</div></div>
           {!x.ack_at && <button className="mini" onClick={() => api('/fin/my/ack/' + x.id, { method: 'POST' }).then(() => setP({ ...p,

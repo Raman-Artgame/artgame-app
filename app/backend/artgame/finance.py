@@ -660,7 +660,8 @@ def my_pay(ym: str | None = None, p: dict = Depends(active)):
         if not live:
             lines = conn.execute("""SELECT kind, amount, detail FROM fin_accruals WHERE period=%s AND payee_id=%s AND status='active' ORDER BY id""",
                                  (ym, f["id"])).fetchall()
-        pays = [with_receipt(x) for x in conn.execute("""SELECT l.id, l.op_date, l.amount, l.account_code, a.title AS account, l.ack_at, l.receipt_file_id
+        pays = [with_receipt(x) for x in conn.execute("""SELECT l.id, l.op_date, l.amount, l.account_code, a.title AS account, l.ack_at, l.receipt_file_id,
+                               l.note LIKE 'Аванс:%%' AS advance
                                FROM fin_ledger l JOIN fin_accounts a ON a.code=l.account_code WHERE l.period=%s AND l.payee_id=%s
                                AND l.article_code='payroll' AND l.status='active' ORDER BY l.op_date""", (ym, f["id"])).fetchall()]
     accrued, paid = sum(_f(x["amount"]) for x in lines), sum(_f(x["amount"]) for x in pays)
