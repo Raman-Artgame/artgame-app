@@ -6,8 +6,11 @@
 """
 import hashlib
 import hmac
+import os
+import tempfile
 import re
 import time
+from pathlib import Path
 from urllib.parse import quote
 from uuid import UUID
 
@@ -267,11 +270,35 @@ def content(file_id: int, exp: int, sig: str, request: Request, dl: int = 0):
     return StreamingResponse(drive.Drive().stream(f["drive_id"]), media_type=f["mime"] or "application/octet-stream", headers=hdr)
 
 
+THUMBS = Path(os.environ.get("ARTGAME_THUMB_DIR") or Path(tempfile.gettempdir()) / "artgame-thumbs")
+
+
+def _thumb_cached(drive_id: str) -> bytes | None:
+    """Миниатюра с Диска — один раз, дальше с диска сервера (HEAD 16.11 «приложение зависает»: галерея каждый раз
+    дёргала Диск дважды на каждое фото). Файл на Диске не меняется — id тот же, миниатюра та же."""
+    p = THUMBS / (re.sub(r"[^A-Za-z0-9_-]", "", drive_id) + ".jpg")
+    try:
+        if p.stat().st_size:
+            return p.read_bytes()
+    except OSError:
+        pass
+    data = drive.Drive().thumbnail(drive_id)
+    if data:
+        try:
+            THUMBS.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(f".{os.getpid()}.tmp")
+            tmp.write_bytes(data)
+            tmp.replace(p)
+        except OSError:
+            pass
+    return data
+
+
 @router.get("/files/{file_id}/thumb")
 def thumb(file_id: int, exp: int, sig: str):
     check_sig(file_id, "thumb", exp, sig)
     f = _ready(file_id)
-    data = drive.Drive().thumbnail(f["drive_id"])
+    data = _thumb_cached(f["drive_id"])
     if data is None:
         raise HTTPException(404, "no thumbnail")
     return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})

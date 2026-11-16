@@ -62,7 +62,9 @@ def fake(monkeypatch):
     return FakeDrive
 
 
-def test_photo_upload_view_and_folders(client, fake):
+def test_photo_upload_view_and_folders(client, fake, monkeypatch, tmp_path):
+    from artgame import files as files_mod
+    monkeypatch.setattr(files_mod, "THUMBS", tmp_path)
     ids = setup_people(client)
     body = {"client_uid": str(uuid.uuid4()), "data": JPEG, "note": "стена до"}
     f = client.post("/api/objects/731/photos", json=body, headers=hdr(2000)).json()
@@ -82,6 +84,10 @@ def test_photo_upload_view_and_folders(client, fake):
     # просмотр по подписанной ссылке; подделка — нет
     assert client.get(f["url"]).content == b"\xff\xd8\xff\x00"
     assert client.get(f["thumb"]).content == b"thumb"
+    # HEAD 16.11 «приложение зависает»: второй раз миниатюра — с диска сервера, без Диска
+    calls = []
+    monkeypatch.setattr(FakeDrive, "thumbnail", lambda self, fid: calls.append(fid) or b"other")
+    assert client.get(f["thumb"]).content == b"thumb" and not calls
     assert client.get(f["url"].replace("sig=", "sig=0")).status_code == 403
     objs = client.get("/api/objects", headers=hdr(2000)).json()
     assert {o["id"]: o["photos"] for o in objs}[731] == 1

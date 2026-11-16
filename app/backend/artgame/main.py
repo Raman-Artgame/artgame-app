@@ -15,6 +15,10 @@ from .deps import current_person, load_person, require_head, tg_user
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # HEAD 16.11 «приложение зависает»: обычные (не async) ручки идут в общий пул из 40 потоков на воркер; галерея из сотни
+    # миниатюр (каждая — два запроса к Диску) занимала их все, и остальные запросы приложения ждали. Потоков — 200.
+    import anyio.to_thread
+    anyio.to_thread.current_default_thread_limiter().total_tokens = 200
     if db.pool is None:
         db.open_pool()
     db.migrate(db.pool)
@@ -22,6 +26,19 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ARTGAME", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def slow_log(request, call_next):
+    """Медленные запросы — в журнал сервиса строкой SLOW (путь без подписи, код, секунды), чтобы видеть, что тормозит."""
+    import sys
+    import time
+    t = time.monotonic()
+    resp = await call_next(request)
+    dt = time.monotonic() - t
+    if dt > 3:
+        print(f"SLOW {dt:.1f}s {request.method} {request.url.path} {resp.status_code}", file=sys.stderr, flush=True)
+    return resp
 app.include_router(weekly.router)
 app.include_router(projchat.router)   # чат проекта (HEAD 13.11)
 app.include_router(recurring.router)   # график постоянных оплат (HEAD 12.11)

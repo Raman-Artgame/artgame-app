@@ -13,7 +13,10 @@ pool: ConnectionPool | None = None
 
 def open_pool(url: str | None = None) -> ConnectionPool:
     global pool
-    pool = ConnectionPool(url or settings.database_url, kwargs={"row_factory": dict_row}, open=True)
+    # HEAD 16.11 «приложение зависает»: по умолчанию в пуле всего 4 соединения на воркер — пока одни запросы ждут Диск/Битрикс
+    # с открытым соединением, остальные стоят в очереди. Теперь до 20, лишние закрываются через 5 мин простоя.
+    pool = ConnectionPool(url or settings.database_url, kwargs={"row_factory": dict_row}, open=True,
+                          min_size=4, max_size=20, timeout=20, max_idle=300)
     return pool
 
 
