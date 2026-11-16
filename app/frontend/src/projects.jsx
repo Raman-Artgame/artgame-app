@@ -422,8 +422,8 @@ function History({ id, mine, head }) {
         {s.backfill && <span className="tag draft">задним числом</span>}
         {s.work_done && <div className="small">Сделал: {s.work_done}</div>}
         {s.reason && <div className="small why">Причина: {s.reason}</div>}
-        {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <a href={s.photo_before_full} target="_blank" rel="noreferrer"><img src={s.photo_before_url} alt="до" /></a>}
-          {s.photo_after_url && <a href={s.photo_after_full} target="_blank" rel="noreferrer"><img src={s.photo_after_url} alt="после" /></a>}</div>}
+        {(s.photo_before_url || s.photo_after_url) && <div className="pair">{s.photo_before_url && <a href={s.photo_before_full} target="_blank" rel="noreferrer"><img loading="lazy" src={s.photo_before_url} alt="до" /></a>}
+          {s.photo_after_url && <a href={s.photo_after_full} target="_blank" rel="noreferrer"><img loading="lazy" src={s.photo_after_url} alt="после" /></a>}</div>}
         <More x={s} />
         {head && s.kind !== 'road' && <MoveShift s={s} from={id} onMoved={load} />}</div>
       <StatusMark status={s.status} /></div>)}</>}

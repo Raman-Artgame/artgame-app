@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { StatusMark, Receipt } from './ui.jsx'
 import { api, testAs, uuid, viewAs } from './api.js'
-import { clearFailed, enqueue, failed, flush, pending } from './queue.js'
+import { clearFailed, enqueue, failed, flush, pending, unsaved } from './queue.js'
 import { startViewAs } from './head.jsx'
 import { BOSS, HINT_TITLE, hintsFor } from './hints.js'
 import { MoveShift } from './shiftmove.jsx'
@@ -519,7 +519,7 @@ export function Mine() {
   if (!m) return <div className="card muted">Загрузка…</div>
   const cancel = (k, id) => api(`/${k}/${id}/cancel`, { method: 'POST' }).then(load)
   return <>
-    {pending() > 0 && <div className="card">Ждут сети: {pending()}</div>}
+    {pending() > 0 && <div className="card">Ждут сети: {pending()}{unsaved() && <><br /><b>Не закрывай приложение, пока не уйдёт: память телефона заполнена.</b></>}</div>}
     {failed().length > 0 && <div className="card"><h3>Не принято сервером</h3>
       {failed().map((x, i) => <div key={i} className="row"><div><b>{x.amount ? money(x.amount) : x.path}</b>{x.note ? ` · ${x.note}` : ''}
         <div className="small why">{x.error}</div></div></div>)}

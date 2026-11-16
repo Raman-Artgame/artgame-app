@@ -116,16 +116,23 @@ def api_write(oid: int, b: MsgIn, p: dict = Depends(active)):
     text = (b.text or "").strip() or None
     if not text and not b.photo:
         raise HTTPException(400, "пустое сообщение")
+    from uuid import uuid4
+    uid = b.client_uid or uuid4()
+    pre = None
+    if b.photo:   # фото — на Диск до транзакции (HEAD 16.11, зависания)
+        with db.pool.connection() as conn:
+            ok = _obj(conn, oid, p)["open"]
+        if ok:
+            from .files import preupload
+            pre = preupload(p, oid, uid, b.photo, "чат проекта")
     with db.pool.connection() as conn, conn.transaction():
         o = _obj(conn, oid, p)
         if not o["open"]:
             raise HTTPException(409, "проект ушёл с «Выполнения» — чат только для чтения")
         fid = None
         if b.photo:
-            from uuid import uuid4
-
             from .files import get_object, store_photo
-            fid = store_photo(conn, p, get_object(conn, oid), b.client_uid or uuid4(), b.photo, "чат проекта")["id"]
+            fid = store_photo(conn, p, get_object(conn, oid), uid, b.photo, "чат проекта", pre=pre)["id"]
         row = conn.execute("INSERT INTO proj_msg (object_id, author_id, text, file_id) VALUES (%s,%s,%s,%s) RETURNING id, created_at",
                            (oid, p["id"], text, fid)).fetchone()
         conn.execute("""INSERT INTO proj_read (object_id, person_id, last_id) VALUES (%s,%s,%s)

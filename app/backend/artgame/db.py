@@ -14,9 +14,10 @@ pool: ConnectionPool | None = None
 def open_pool(url: str | None = None) -> ConnectionPool:
     global pool
     # HEAD 16.11 «приложение зависает»: по умолчанию в пуле всего 4 соединения на воркер — пока одни запросы ждут Диск/Битрикс
-    # с открытым соединением, остальные стоят в очереди. Теперь до 20, лишние закрываются через 5 мин простоя.
+    # с открытым соединением, остальные стоят в очереди. Фото и чеки больше не держат соединение, пока идут в Google
+    # (files.preupload, drive._own_conn), поэтому хватает 15 на воркер: 2 воркера × (test + prod) = 60 из 100 у Postgres.
     pool = ConnectionPool(url or settings.database_url, kwargs={"row_factory": dict_row}, open=True,
-                          min_size=4, max_size=20, timeout=20, max_idle=300)
+                          min_size=4, max_size=15, timeout=15, max_idle=300)
     return pool
 
 

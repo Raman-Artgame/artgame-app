@@ -58,6 +58,8 @@ FOLDER = "application/vnd.google-apps.folder"
 # 12.11 (Владимир, «drive: TransportError»): токен брали заново на каждый файл, и разовый сбой связи с Google
 # валил отправку смены. Теперь токен живёт до истечения, а сбой связи повторяем 3 раза.
 _TOK: dict = {}
+_CHILD: dict = {}          # (папка, имя) → (когда, id подпапки)
+CHILD_TTL = 6 * 3600
 TRIES = 3
 
 
@@ -125,6 +127,17 @@ class Drive:
                 return out
 
     def child(self, parent: str, name: str) -> str:
+        """Подпапка по имени (нет — создаётся). Найденная запоминается на 6 ч (HEAD 16.11, нагрузка): чек без сделки
+        раньше каждый раз листал три папки Диска — «отдел / год / месяц»."""
+        k = (parent, name.casefold())
+        hit = _CHILD.get(k)
+        if hit and time.time() - hit[0] < CHILD_TTL:
+            return hit[1]
+        fid = self._child(parent, name)
+        _CHILD[k] = (time.time(), fid)
+        return fid
+
+    def _child(self, parent: str, name: str) -> str:
         # регистр не важен: DRIVE01 создаёт «ДИЗАЙН», приложение искало «Дизайн» и плодило вторую папку
         found = [f for f in self.ls(parent) if f.get("mimeType") == FOLDER and f["name"].casefold() == name.casefold()]
         found.sort(key=lambda f: f["name"] != name)   # точное имя (утверждённое) — первым, «Дизайн» рядом с «ДИЗАЙН» не берём
@@ -246,11 +259,23 @@ def _ext(mime: str) -> str:
     return ".png" if mime == "image/png" else ".jpg"
 
 
+def _own_conn(conn, fn):
+    """conn=None — своё короткое соединение только на поиск папки (HEAD 16.11 «приложение зависает»): раньше фото
+    и чеки грузились на Диск внутри транзакции, и 1–3 с (при сбое связи — до 30 с) соединение с базой стояло занятым;
+    при 20 одновременных отправках остальные экраны ждали очереди. Сам файл идёт к Google без соединения."""
+    if conn is not None:
+        return fn(conn)
+    from . import db
+    with db.pool.connection() as c:
+        return fn(c)
+
+
 def save_photo(conn, obj: dict, name: str, data_url: str, kind: str = "photo") -> str:
-    """Фото объекта (или другой файл) в подпапку сделки. Возвращает ID файла на Диске."""
+    """Фото объекта (или другой файл) в подпапку сделки. Возвращает ID файла на Диске. conn=None — см. _own_conn."""
     data, mime = decode_data_url(data_url)
     d = Drive()
-    return d.upload(ensure_folders(conn, obj, d)[key_of(kind)], name + _ext(mime), data, mime)
+    folder = _own_conn(conn, lambda c: ensure_folders(c, obj, d)[key_of(kind)])
+    return d.upload(folder, name + _ext(mime), data, mime)
 
 
 def folder_of(conn, obj: dict, kind: str, d: "Drive | None" = None, media_type: str | None = None) -> str:
@@ -288,10 +313,12 @@ def save_income_receipt(conn, name: str, data_url: str, deal_id: int) -> str:
 
 
 def save_receipt(conn, dept: str, name: str, data_url: str, deal_id: int | None = None) -> str:
-    """Единая точка для чеков всех трат (смены, МОП, склад, финансы). Возвращает ID файла на Диске."""
+    """Единая точка для чеков всех трат (смены, МОП, склад, финансы). Возвращает ID файла на Диске.
+    conn=None — загрузка без чужой транзакции (см. _own_conn)."""
     data, mime = decode_data_url(data_url)
     d = Drive()
-    folder, in_deal = receipt_folder(conn, d, dept, deal_id)
+    folder, in_deal = _own_conn(conn, lambda c: receipt_folder(c, d, dept, deal_id))
     if deal_id and not in_deal and f"сделка {deal_id}" not in name:
         name += f" сделка {deal_id}"
     return d.upload(folder, name + _ext(mime), data, mime)
+

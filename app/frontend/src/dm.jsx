@@ -254,7 +254,7 @@ export function ProjChat({ id, back, backText = '‹ Все чаты' }) {
     {who && <div className="who dmmembers">{d.members.map(m => <span key={m.id}>{m.full_name}{WHY[m.why] ? ' · ' + WHY[m.why] : ''}</span>)}</div>}
     {d.items.length ? <div className="dmlist">
       {d.items.map(m => <div key={m.id} className={'dmb ' + (m.mine ? 'me' : 'them')}>
-        {m.photo && <a href={m.photo.url} target="_blank" rel="noreferrer"><img className="dmpic" src={m.photo.thumb} alt="" /></a>}
+        {m.photo && <a href={m.photo.url} target="_blank" rel="noreferrer"><img loading="lazy" className="dmpic" src={m.photo.thumb} alt="" /></a>}
         {m.text && <div className="dmtext">{m.text}</div>}
         <span className="dmmeta">{m.mine ? '' : m.name + (m.head ? ' · HEAD' : '') + ' · '}{when(m.created_at)}</span>
       </div>)}

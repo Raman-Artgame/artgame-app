@@ -404,12 +404,14 @@ def compute(conn, ym: str, by: dict, only_person: int | None = None) -> dict:
     v = vals(conn)
     sync_payees(conn)
     warn: list[str] = []
-    one = "" if only_person is None else " AND payee_id IN (SELECT id FROM fin_payees WHERE person_id=%s)"
+    # only_person — один человек или список (выплаты понедельника считают всех саппортов одним проходом, HEAD 16.11)
+    who = None if only_person is None else list(only_person) if isinstance(only_person, (list, tuple, set)) else [only_person]
+    one = "" if who is None else " AND payee_id IN (SELECT id FROM fin_payees WHERE person_id = ANY(%s))"
     conn.execute("UPDATE fin_accruals SET status='cancelled' WHERE period=%s AND status IN ('active','pending') AND kind <> 'manual'" + one,
-                 (ym,) if only_person is None else (ym, only_person))
+                 (ym,) if who is None else (ym, who))
     payees_ = conn.execute("""SELECT f.*, pe.role_code, pe.print_exam_on, pe.hour_rate FROM fin_payees f LEFT JOIN people pe ON pe.id=f.person_id
-                              WHERE f.status='active'""" + ("" if only_person is None else " AND f.person_id=%s"),
-                           () if only_person is None else (only_person,)).fetchall()
+                              WHERE f.status='active'""" + ("" if who is None else " AND f.person_id = ANY(%s)"),
+                           () if who is None else (who,)).fetchall()
     revenue, rev_warn = (None, "")
     if any(x["scheme"] == "mop" for x in payees_):
         revenue, rev_warn = company_revenue(start.year, start.month)

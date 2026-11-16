@@ -566,3 +566,40 @@ def test_act_goes_to_its_field():
     """АВР из приложения — в поле «АВР» блока «Документы», а не в «Прочие» (HEAD 11.11)."""
     assert bxw.KIND_FIELD["avr"] == "UF_CRM_ARTGAME_DOC05_ACTS" and bxw.F_ACTS in bxw.WRITABLE and bxw.F_ACTS in bxw.MULTI_FILE
     assert bxw.kind_of("ARTGAME_avr_1347.pdf") == "avr" and bx.FILES[bxw.F_ACTS] == "АВР"
+
+
+def test_aibolit_advance_to_cash(client, monkeypatch):
+    """Айболит 1347 (HEAD 16.11 «заменить оплату на наличные, Анна неправильно написала»): миграция 072 меняет счёт ровно
+    у аванса 800 000 от 09.11 с «Переводы HEAD» на «Наличные». Сумма, дата и итог сделки те же; остаток от 16.11 (уже
+    «Наличные») и такая же оплата другой сделки не трогаются; повторный прогон и две одинаковые строки — ничего не меняют."""
+    from pathlib import Path
+    ids = setup(client, monkeypatch)
+    d = deal(1347, opp=1_600_000)
+
+    def add(day, acc, amount, deal_id=1347, note="1347 · ТЦ АЙБОЛИТ — КАРАГАНДА · Аванс 50%"):
+        with db.pool.connection() as conn:
+            return conn.execute("""INSERT INTO fin_ledger (client_uid, op_date, account_code, direction, amount, article_code, period, deal_id,
+                                                           note, source, created_by)
+                                   VALUES (%s,%s,%s,'in',%s,'client_payment',%s,%s,%s,'app',%s) RETURNING id""",
+                                (uid(), day, acc, amount, day[:7], deal_id, note, ids[3000])).fetchone()["id"]
+    sql = (Path(__file__).parents[1] / "migrations" / "072_aibolit_nalichnye.sql").read_text()
+    avans = add("2026-11-09", "head", 800000)
+    rest = add("2026-11-16", "cash", 800000, note="1347 · ТЦ АЙБОЛИТ — КАРАГАНДА · Остаток")
+    other = add("2026-11-09", "head", 800000, deal_id=1349)
+    before = dm.card(d)
+    with db.pool.connection() as conn:
+        conn.execute(sql)
+        conn.execute(sql)   # повторно: на «Переводы HEAD» её больше нет — пропуск
+        rows = {r["id"]: r for r in conn.execute("SELECT * FROM fin_ledger").fetchall()}
+        log = conn.execute("SELECT data FROM audit_log WHERE action='ledger_fix'").fetchall()
+    a = rows[avans]
+    assert (str(a["op_date"]), a["account_code"], float(a["amount"]), a["status"]) == ("2026-11-09", "cash", 800000, "active")
+    assert rows[rest]["account_code"] == "cash" and rows[other]["account_code"] == "head"
+    assert [(x["data"]["from"], x["data"]["to"]) for x in log] == [("head", "cash")]
+    after = dm.card(d)
+    assert after["received"] == before["received"] == 1_600_000 and after["debt"] == before["debt"] == 0
+    # две одинаковые строки — непонятно, какую менять: ничего не трогаем
+    two = [add("2026-11-09", "head", 800000), add("2026-11-09", "head", 800000)]
+    with db.pool.connection() as conn:
+        conn.execute(sql)
+        assert {conn.execute("SELECT account_code FROM fin_ledger WHERE id=%s", (i,)).fetchone()["account_code"] for i in two} == {"head"}
