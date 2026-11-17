@@ -603,3 +603,95 @@ def test_aibolit_advance_to_cash(client, monkeypatch):
     with db.pool.connection() as conn:
         conn.execute(sql)
         assert {conn.execute("SELECT account_code FROM fin_ledger WHERE id=%s", (i,)).fetchone()["account_code"] for i in two} == {"head"}
+
+
+def test_alina_table_payments(client, monkeypatch):
+    """Таблица Алины (HEAD 16.11 «да»): миграция 074 отменяет строки из полей «Поступление», которых у Алины нет, и вносит
+    её оплаты с её датами: до ноября — «История», сразу сверены; ноябрьские — на свой счёт, без чека, на сверке у HEAD.
+    Новая оплата занимает своё «Поступление N»: импорт полей её не задваивает, даже если поле в сделке потом поправят.
+    Сделку, у которой в журнале не то, что было при сверке, миграция не трогает; повторный прогон ничего не меняет."""
+    from datetime import date
+    from pathlib import Path
+    ids = setup(client, monkeypatch)
+    A3, D3 = "UF_CRM_ARTGAME_FIN03_PAY3_AMOUNT", "UF_CRM_ARTGAME_FIN03_PAY3_DATE"
+    A4, D4 = "UF_CRM_ARTGAME_FIN03_PAY4_AMOUNT", "UF_CRM_ARTGAME_FIN03_PAY4_DATE"
+
+    def add(deal_id, n, amount, day, src="bitrix", acc="hist", ref=True):
+        with db.pool.connection() as conn:
+            return conn.execute("""INSERT INTO fin_ledger (client_uid, op_date, account_code, direction, amount, article_code, period, deal_id,
+                                                           note, source, source_ref, created_by)
+                                   VALUES (%s,%s,%s,'in',%s,'client_payment',%s,%s,%s,%s,%s,%s) RETURNING id""",
+                                (uid(), day, acc, amount, day[:7], deal_id, f"{deal_id} · поступление {n}", src,
+                                 f"deal:{deal_id}:pay{n}" if ref else None, ids[3000] if src == "app" else None)).fetchone()["id"]
+    old = {"677": add(677, 1, 8370000, "2026-03-14"), "1091.1": add(1091, 1, 10000000, "2026-08-09"),
+           "1091.2": add(1091, 2, 500000, "2026-08-31"), "1281.1": add(1281, 1, 1267000, "2026-09-01"),
+           "1281.2": add(1281, 2, 203000, "2026-08-13"), "489.1": add(489, 1, 225000, "2026-02-09"),
+           "489.2": add(489, 2, 25000, "2026-02-11"), "1187.2": add(1187, 2, 175000, "2026-09-06"),
+           "545": add(545, 1, 2000000, "2026-03-01"), "944": add(944, 1, 8370000, "2026-03-14"),
+           "981": add(981, 1, 5645000, "2026-08-01"), "1575": add(1575, 1, 100000, "2026-10-10"),
+           "871": add(871, 1, 488000, "2026-06-05"), "1479.1": add(1479, 1, 188000, "2026-01-01"),
+           "1479.2": add(1479, 2, 188000, "2026-03-07"), "1019.1": add(1019, 1, 300000, "2026-07-22"),
+           "1019.2": add(1019, 2, 347200, "2026-07-13")}
+    add(545, 9, 50000, "2026-11-05", src="app", acc="kaspi", ref=False)   # у 545 появилась оплата после сверки — не трогаем
+    sql = (Path(__file__).parents[1] / "migrations" / "074_alina_sverka.sql").read_text()
+    with db.pool.connection() as conn:
+        conn.execute(sql)
+        snap = conn.execute("SELECT id, deal_id, status, source, source_ref, op_date, amount, account_code, checked_at, note FROM fin_ledger ORDER BY id").fetchall()
+        n_log = conn.execute("SELECT count(*) AS n FROM audit_log WHERE action='ledger_fix'").fetchone()["n"]
+        conn.execute(sql)   # повторно: «поступило» уже не как при сверке — всё пропускается
+        assert conn.execute("SELECT id, deal_id, status, source, source_ref, op_date, amount, account_code, checked_at, note FROM fin_ledger ORDER BY id").fetchall() == snap
+        assert conn.execute("SELECT count(*) AS n FROM audit_log WHERE action='ledger_fix'").fetchone()["n"] == n_log
+    rows = {r["id"]: r for r in snap}
+    st = {k: rows[i]["status"] for k, i in old.items()}
+    assert st == {"677": "cancelled", "1091.1": "cancelled", "1091.2": "cancelled", "1281.1": "cancelled", "1281.2": "cancelled",
+                  "489.1": "active", "489.2": "cancelled", "1187.2": "cancelled", "545": "active", "944": "active",
+                  "981": "cancelled", "1575": "cancelled", "871": "cancelled", "1479.1": "cancelled", "1479.2": "cancelled",
+                  "1019.1": "active", "1019.2": "active"}   # 1019 HEAD 17.11 «оставить»
+    new = {(r["source_ref"]): r for r in snap if r["source"] == "app" and r["source_ref"]}
+    assert {k: (str(r["op_date"]), float(r["amount"]), r["account_code"], r["checked_at"] is not None) for k, r in new.items()} == {
+        "deal:677:pay1": ("2026-04-28", 1800000, "hist", True), "deal:677:pay2": ("2026-07-09", 2000000, "hist", True),
+        "deal:1091:pay1": ("2026-08-16", 2500000, "hist", True), "deal:1091:pay2": ("2026-08-22", 1400000, "hist", True),
+        "deal:1091:pay3": ("2026-08-28", 2000000, "hist", True), "deal:1091:pay4": ("2026-10-02", 4000000, "hist", True),
+        "deal:1281:pay1": ("2026-08-06", 735000, "hist", True), "deal:1187:pay2": ("2026-09-06", 174000, "hist", True),
+        "deal:1445:pay1": ("2026-10-19", 600300, "hist", True), "deal:1693:pay1": ("2026-11-12", 150000, "artamonov", False),
+        "deal:981:pay1": ("2026-07-27", 1320000, "hist", True), "deal:981:pay2": ("2026-08-18", 955000, "hist", True),
+        "deal:981:pay3": ("2026-08-25", 1200000, "hist", True), "deal:981:pay4": ("2026-09-21", 730000, "hist", True),
+        "deal:1575:pay1": ("2026-10-14", 130000, "hist", True),
+        "deal:871:pay1": ("2026-06-04", 244000, "hist", True), "deal:871:pay2": ("2026-07-09", 310000, "hist", True),
+        "deal:1479:pay1": ("2026-02-07", 188000, "hist", True)}
+    assert new["deal:1091:pay1"]["note"] == "1091 · ШКОЛА — АСТАНА · по таблице Алины · до ноября · переводы 15–16.08 на номер Raman K."
+    # оплаты сверх четырёх полей «Поступление» — без своего поля, как внесённые в приложении
+    extra = sorted((r["deal_id"], str(r["op_date"]), float(r["amount"]), r["account_code"], r["checked_at"] is not None)
+                   for r in snap if r["source"] == "app" and r["source_ref"] is None and r["deal_id"] in (981, 1091))
+    assert extra == [(981, "2026-10-07", 300000, "hist", True), (981, "2026-10-14", 70000, "hist", True),
+                     (981, "2026-10-28", 100000, "hist", True), (981, "2026-11-03", 100000, "artamonov", False),
+                     (981, "2026-11-05", 100000, "artamonov", False), (981, "2026-11-09", 100000, "artamonov", False),
+                     (981, "2026-11-10", 100000, "artamonov", False), (981, "2026-11-12", 50000, "artamonov", False),
+                     (1091, "2026-10-14", 4000000, "hist", True), (1091, "2026-10-29", 3000000, "hist", True),
+                     (1091, "2026-11-16", 5260000, "artamonov", False)]
+    assert {r["note"] for r in snap if r["deal_id"] == 1091 and r["source"] == "app" and str(r["op_date"]) == "2026-11-16"} == {
+        "1091 · ШКОЛА — АСТАНА · по таблице Алины · без чека"}
+    # итоги сделок по журналу (суммы сделок Битрикс получит задачей на сервере)
+    f677 = {A1: "8370000|KZT", D1: "2026-03-14T03:00:00+03:00"}
+    f1091 = {A1: "10000000|KZT", D1: "2026-08-09T03:00:00+03:00", A2: "500000|KZT", D2: "2026-08-31T03:00:00+03:00"}
+    c = dm.card(deal(677, stage="UC_BMKDS4", opp=8_390_000, **f677))
+    assert (c["received"], c["debt"], c["history"], c["on_check"]) == (3_800_000, 4_590_000, [], 0)
+    c = dm.card(deal(1091, stage="UC_BMKDS4", opp=22_160_000, **f1091))
+    assert (c["received"], c["debt"], c["overpaid"], c["on_check"]) == (22_160_000, 0, 0, 5_260_000)
+    assert dm.card(deal(1281, stage="UC_BMKDS4", opp=1_470_000))["debt"] == 735_000
+    assert dm.card(deal(1693, stage="UC_BMKDS4", opp=150_000))["on_check"] == 150_000
+    c = dm.card(deal(981, stage="UC_BMKDS4", opp=5_650_000, **{A1: "5645000|KZT", D1: "2026-08-01T03:00:00+03:00"}))
+    assert (c["received"], c["debt"], c["on_check"]) == (5_125_000, 525_000, 450_000)   # школе QCS осталось 525 000
+    c = dm.card(deal(1575, stage="WON", sem="S", opp=130_000, **{A1: "100000|KZT", D1: "2026-10-10T03:00:00+03:00"}))
+    assert (c["received"], c["debt"]) == (130_000, 0)
+    assert dm.card(deal(545, stage="WON", sem="S", opp=2_000_000, **{A1: "2000000|KZT", D1: "2026-03-01"}))["received"] == 2_050_000
+    # импорт полей сделки: старые значения и значения Алины, вписанные в поля потом, ничего не добавляют
+    for f in (f677, {A1: "1800000|KZT", D1: "2026-04-28T03:00:00+03:00", A2: "2000000|KZT", D2: "2026-07-09T03:00:00+03:00"}):
+        monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False, f=f, **k: [deal(677, stage="UC_BMKDS4", opp=8_390_000, **f)])
+        with db.pool.connection() as conn, conn.transaction():
+            assert fin_bx.import_payments(conn, since=date(2026, 1, 1), until=fin_bx.START, ids=[677]) == {"deals": 1, "added": 0, "changed": 0}
+    late = {**f1091, A3: "", D3: "", A4: "5260000|KZT", D4: "2026-11-16T03:00:00+03:00"}
+    monkeypatch.setattr(bx, "read_all", lambda m, p, fresh=False, **k: [deal(1091, stage="UC_BMKDS4", opp=22_160_000, **late)])
+    with db.pool.connection() as conn, conn.transaction():
+        assert fin_bx.import_payments(conn) == {"deals": 1, "added": 0, "changed": 0}
+    assert dm.card(deal(1091, stage="UC_BMKDS4", opp=22_160_000, **late))["received"] == 22_160_000
