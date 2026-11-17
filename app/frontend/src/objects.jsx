@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api, uuid } from './api.js'
 import { enqueue } from './queue.js'
 import { shrink } from './work.jsx'
+import { CamLabel } from './camera.jsx'
 
 // Разделы проекта (HEAD 09.11: «что за что отвечает», плашка «Видео»)
 export const KIND = { design: 'Эскизы', photo: 'Фото', video: 'Видео', media: 'Продакшн', doc: 'Документы' }
@@ -118,8 +119,7 @@ export function Gallery({ obj, me, start = 'design', only, skip = [], bare = fal
     {top}
     {!bare && <p className="small muted gabout">{ABOUT[kind]}</p>}
     {/* HEAD 16.11: на iPhone без capture — меню, на Samsung в Telegram — только галерея; поэтому две кнопки */}
-    {kind === 'photo' && <div className="seg snapbtns"><label className="btnlike">📷 Снять фото с объекта
-      <input type="file" accept="image/*" capture="environment" hidden onChange={e => { const f = [...e.target.files]; e.target.value = ''; f.length && addPhotos(f) }} /></label>
+    {kind === 'photo' && <div className="seg snapbtns"><CamLabel multi className="btnlike" onFiles={addPhotos}>📷 Снять фото с объекта</CamLabel>
       <label className="btnlike ghost">🖼 Из галереи
       <input type="file" accept="image/*" multiple hidden onChange={e => { const f = [...e.target.files]; e.target.value = ''; f.length && addPhotos(f) }} /></label></div>}
     {canBig && <label className="photo"><span>⬆ Загрузить {kind === 'design' ? 'эскиз или файл в печать' : 'файл'}</span>

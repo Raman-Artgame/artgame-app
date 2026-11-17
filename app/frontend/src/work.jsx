@@ -5,6 +5,7 @@ import { clearFailed, enqueue, failed, flush, pending, unsaved } from './queue.j
 import { startViewAs } from './head.jsx'
 import { BOSS, HINT_TITLE, hintsFor } from './hints.js'
 import { MoveShift } from './shiftmove.jsx'
+import { CamLabel } from './camera.jsx'
 
 const ZONE = { mural: 'Роспись', print: 'Печать', design: 'Дизайн', sales: 'Продажи' }
 const PRINT_ROLES = ['print_master', 'print_operator']
@@ -133,14 +134,14 @@ export function Hints({ step, role, cond, v, uid }) {
 }
 
 // HEAD 16.11: «у Самсунга — только галерея, с айфона — только камера». Атрибут capture на iPhone даёт только камеру,
-// без него Android в Telegram открывает только галерею. Поэтому везде две кнопки: «Камера» (capture) и «Галерея» (без него).
-const fileIn = (cam, multi, onFiles) => <input type="file" accept="image/*" {...(cam ? { capture: 'environment' } : {})} {...(multi && !cam ? { multiple: true } : {})} hidden
+// без него Android в Telegram — только галерея. Две кнопки: «Камера» (camera.jsx: на Android своя камера, на iPhone capture) и «Галерея».
+const fileIn = (cam, multi, onFiles) => <input type="file" accept="image/*" {...(multi ? { multiple: true } : {})} hidden
   onChange={e => { const f = [...e.target.files]; e.target.value = ''; f.length && onFiles(f) }} />
 function Snap({ value, set, label }) {
   const one = async f => set(await shrink(f[0]))
   return <div className={'photo snap' + (value ? ' has' : '')}>
     {value ? <img src={value} alt={label} /> : <span>📷 {label}</span>}
-    <div className="seg snapbtns"><label className="btnlike">📷 Камера{fileIn(true, false, one)}</label>
+    <div className="seg snapbtns"><CamLabel className="btnlike" onFiles={one}>📷 Камера</CamLabel>
       <label className="btnlike ghost">🖼 Галерея{fileIn(false, false, one)}</label></div>
   </div>
 }
@@ -150,7 +151,7 @@ export function MultiPick({ pics, setPics, label }) {
   return <>
     {label && <label className="muted">{label} · {pics.length ? `выбрано ${pics.length}` : 'сколько угодно'}</label>}
     <div className="pics">{pics.map((x, i) => <span key={i}><img src={x} alt="" /><button className="ghost mini" onClick={() => setPics(a => a.filter((_, j) => j !== i))}>✕</button></span>)}</div>
-    <div className="seg snapbtns"><label className="btnlike">📷 Камера{fileIn(true, false, add)}</label>
+    <div className="seg snapbtns"><CamLabel multi className="btnlike" onFiles={add}>📷 Камера</CamLabel>
       <label className="btnlike ghost">🖼 Галерея{fileIn(false, true, add)}</label></div>
   </>
 }
@@ -517,7 +518,7 @@ function AddPics({ id, done }) {
     }
     setMsg(`Добавлено фото: ${ok}`); done()
   }
-  return <div className="small addpics"><label><a>📷 Снять ещё</a>{fileIn(true, false, up)}</label> · <label><a>🖼 Добавить из галереи</a>{fileIn(false, true, up)}</label>{msg && <span className="muted"> {msg}</span>}</div>
+  return <div className="small addpics"><CamLabel multi className="linkbtn" onFiles={up}><a>📷 Снять ещё</a></CamLabel> · <label><a>🖼 Добавить из галереи</a>{fileIn(false, true, up)}</label>{msg && <span className="muted"> {msg}</span>}</div>
 }
 
 export function Mine() {

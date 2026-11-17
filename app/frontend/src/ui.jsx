@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { CamLabel } from './camera.jsx'
 
 // Всплывающее окно (HEAD 06.11): лист снизу на телефоне, окно по центру на компьютере. Закрывается тапом по фону, ✕ и Esc.
 export function Sheet({ title, onClose, children, wide }) {
@@ -85,7 +86,7 @@ export function Receipt({ value, pick, need }) {
     {value && <img src={value} alt="чек" />}
     <div className="seg">
       <label className="btnlike">🖼 {value ? 'Другой' : 'Из галереи'}{input(false)}</label>
-      <label className="btnlike ghost">📷 Снять{input(true)}</label>
+      <CamLabel className="btnlike ghost" onFiles={f => pick(f[0])}>📷 Снять</CamLabel>
     </div>
     {!value && <p className="small muted">{need ? 'Фото чека обязательно: ' : ''}скриншот из галереи или снимок камерой.</p>}
   </div>

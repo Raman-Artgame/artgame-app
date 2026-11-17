@@ -11,8 +11,9 @@ const call = async (id, path, body) => (await fetch(API + path, { method: body ?
   headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': sign(id) }, body: body && JSON.stringify(body) })).json()
 const shots = process.env.SHOTS || '/var/tmp'
 
-async function page(b, id, name) {
-  const ctx = await b.newContext({ viewport: { width: 390, height: 780 } })
+async function page(b, id, name, android) {
+  const ctx = await b.newContext({ viewport: { width: 390, height: 780 }, ...(android ? { permissions: ['camera'],
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-A546B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36 Telegram-Android/11.4.2' } : {}) })
   const p = await ctx.newPage()
   const d = sign(id)
   await p.addInitScript(([d, name]) => { window.Telegram = { WebApp: { initData: d, initDataUnsafe: { user: { first_name: name } }, ready() {} } } }, [d, name])
@@ -31,7 +32,7 @@ async function tab(p, name) {
 }
 
 ;(async () => {
-  const b = await chromium.launch()
+  const b = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] })   // камера для Android-проверки
   await call(1000, '/register', { full_name: 'HEAD' })
   const lead = await call(3000, '/register', { full_name: 'Главный' })
   await call(1000, `/people/${lead.id}`, { role_code: 'lead_artist', zones: ['mural'] })
@@ -69,6 +70,23 @@ async function tab(p, name) {
   await a.getByRole('button', { name: 'Начать смену' }).waitFor()
   await a.locator('.promo').getByText('Средний').waitFor()
   assert.ok(await a.getByRole('button', { name: 'Начать смену' }).isDisabled())   // без фото «до» не начать
+  // HEAD 17.11: «у Лизы Самсунг, не может сфоткать, только фото добавить» — на Android «Камера» открывает свою камеру в приложении
+  {
+    const { p: an, ctx: actx } = await page(b, 2000, 'Дана', true)
+    await an.getByRole('button', { name: 'Начать смену' }).waitFor()
+    await an.locator('.snapbtns button.btnlike', { hasText: 'Камера' }).click()
+    const sh = an.locator('.shooter')
+    await sh.locator('video').waitFor()
+    await an.waitForFunction(() => document.querySelector('.shooter video')?.videoWidth > 0)
+    await sh.getByRole('button', { name: 'Снять' }).and(an.locator(':enabled')).waitFor()
+    await an.screenshot({ path: `${shots}/1-android-kamera.png` })
+    await sh.getByRole('button', { name: 'Снять' }).click()
+    await an.locator('.snap img').waitFor()
+    assert.equal(await an.locator('.shooter').count(), 0)
+    assert.ok(!(await an.getByRole('button', { name: 'Начать смену' }).isDisabled()), 'после снимка камерой смену можно начать')
+    await an.screenshot({ path: `${shots}/1-android-snyato.png` })
+    await actx.close()
+  }
   await a.locator('.snapbtns input[type=file]').last().setInputFiles(__dirname + '/chek.png')
   await a.locator('.snap img').waitFor()
   await a.screenshot({ path: `${shots}/1-smena.png`, fullPage: true })

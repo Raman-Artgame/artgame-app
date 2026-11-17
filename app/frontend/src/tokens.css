@@ -1128,3 +1128,19 @@ div.photo.snap > span { padding: 18px 0 4px; }
 .snapbtns { display: flex; gap: 8px; width: 100%; margin: 8px 0; }
 .snapbtns .btnlike { flex: 1; }
 .addpics label { cursor: pointer; }
+
+/* своя камера на Android (HEAD 17.11) */
+.shooter { position: fixed; inset: 0; z-index: 1000; background: #000; display: flex; flex-direction: column; }
+.shooter video { flex: 1; width: 100%; min-height: 0; object-fit: contain; background: #000; }
+.shooter-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); }
+.shooter-bar > button:not(.shutter), .shooter-gap { flex: none; width: 96px; display: block; }
+.shooter .shutter:hover { background: #fff; }
+.shooter .shutter { flex: none; width: 72px; height: 72px; min-width: 72px; aspect-ratio: 1; border-radius: 50%; padding: 0; background: #fff; border: 5px solid rgba(255,255,255,.35); background-clip: padding-box; }
+.shooter .shutter:active { transform: scale(.92); }
+.shooter-pics { display: flex; gap: 6px; overflow-x: auto; padding: 8px 16px 0; }
+.shooter-pics img { width: 52px; height: 52px; object-fit: cover; border-radius: 8px; flex: none; }
+.shooter-err { margin: auto; padding: 24px 16px; display: flex; flex-direction: column; gap: 12px; color: #fff; max-width: 420px; }
+button.linkbtn { background: none; border: 0; padding: 0; min-height: 0; width: auto; color: inherit; font: inherit; }
+button.btnlike { padding: 12px 10px; font-size: 13px; font-weight: 600; margin: 0; }
+.snapbtns .btnlike { margin-top: 0; }
+.seg button.btnlike.ghost { background: transparent; color: inherit; border: 1px solid var(--line); }
