@@ -1,4 +1,5 @@
 """Подключение к PostgreSQL и применение миграций по порядку."""
+import sys
 from pathlib import Path
 
 from psycopg.rows import dict_row
@@ -24,15 +25,29 @@ def open_pool(url: str | None = None) -> ConnectionPool:
 def migrate(p: ConnectionPool) -> list[str]:
     applied = []
     with p.connection() as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())")
-        done = {r["name"] for r in conn.execute("SELECT name FROM schema_migrations").fetchall()}
-        for f in sorted(MIGRATIONS.glob("*.sql")):
-            if f.name in done:
-                continue
-            with conn.transaction():
-                conn.execute(f.read_text())
-                conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (f.name,))
-            applied.append(f.name)
+        # RAISE NOTICE миграций данных (что пропущено и почему) — в журнал службы: journalctl -u artgame-api@test | grep MIGRATION
+        cur = {"f": ""}
+        def notice(d):
+            if cur["f"]:
+                print(f"MIGRATION {cur['f']}: {d.severity} {d.message_primary}", file=sys.stderr, flush=True)
+        conn.add_notice_handler(notice)
+        try:
+            return _apply(conn, applied, cur)
+        finally:
+            conn.remove_notice_handler(notice)
+
+
+def _apply(conn, applied: list[str], cur: dict) -> list[str]:
+    conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())")
+    done = {r["name"] for r in conn.execute("SELECT name FROM schema_migrations").fetchall()}
+    for f in sorted(MIGRATIONS.glob("*.sql")):
+        if f.name in done:
+            continue
+        cur["f"] = f.name
+        with conn.transaction():
+            conn.execute(f.read_text())
+            conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (f.name,))
+        applied.append(f.name)
     return applied
 
 
