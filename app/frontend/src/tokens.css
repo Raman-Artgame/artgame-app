@@ -1144,3 +1144,13 @@ button.linkbtn { background: none; border: 0; padding: 0; min-height: 0; width: 
 button.btnlike { padding: 12px 10px; font-size: 13px; font-weight: 600; margin: 0; }
 .snapbtns .btnlike { margin-top: 0; }
 .seg button.btnlike.ghost { background: transparent; color: inherit; border: 1px solid var(--line); }
+
+/* листать фото отчёта (HEAD 18.11) */
+.viewer .vcount { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); color: #fff; font-size: 13px; font-weight: 600;
+  background: rgba(255,255,255,.14); padding: 5px 12px; border-radius: 999px; white-space: nowrap; }
+.viewer button.vnav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; min-width: 44px; padding: 0; border-radius: 50%; z-index: 2;
+  background: rgba(255,255,255,.16); color: #fff; font-size: 30px; line-height: 1; font-weight: 400; display: flex; align-items: center; justify-content: center; }
+.viewer button.vnav:hover { background: rgba(255,255,255,.26); }
+.viewer button.vnav:active { transform: translateY(-50%) scale(.92); }
+.viewer .vnav.prev { left: 6px; }
+.viewer .vnav.next { right: 6px; }

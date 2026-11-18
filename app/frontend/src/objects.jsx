@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { api, uuid } from './api.js'
 import { enqueue } from './queue.js'
 import { shrink } from './work.jsx'
@@ -42,13 +42,35 @@ export function download(f) {
 }
 
 // Просмотр внутри приложения: фото — крупно, видео — плеером, остальное — «Скачать»
-export function Viewer({ f, onClose, extra = null }) {
+// HEAD 18.11: «нормально сделать, чтобы можно было отчёты листать» — list + onNav: свайп влево/вправо, стрелки, счётчик «2 из 5»
+export function Viewer({ f, onClose, extra = null, list = null, onNav = null }) {
   // тип не известен (ссылка из ленты, чек) — сначала картинкой, не вышло — видео, не вышло — карточка «Скачать»
   const [mode, setMode] = useState(null)
+  const touch = useRef(null)
   useEffect(() => setMode(null), [f])
+  const many = !!(f && onNav && list && list.length > 1)
+  const i = many ? Math.max(0, list.findIndex(x => x === f || (x.url && x.url === f.url))) : 0
+  const go = d => many && onNav(list[(i + d + list.length) % list.length])
+  useEffect(() => {
+    if (!f) return
+    const k = e => { if (e.key === 'ArrowRight') go(1); else if (e.key === 'ArrowLeft') go(-1); else if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', k)
+    if (many) [1, -1].forEach(d => { const x = list[(i + d + list.length) % list.length]; if (x && !isVideo(x)) new Image().src = x.url })   // соседние — заранее
+    return () => document.removeEventListener('keydown', k)
+  }, [f, list])
   if (!f) return null
   const m = mode || (isVideo(f) ? 'video' : isImage(f) || !f.mime ? 'img' : 'file')
-  return <div className="lightbox viewer" onClick={onClose}>
+  const ts = e => { touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }
+  const te = e => {
+    const t = touch.current; touch.current = null
+    if (!t || !many) return
+    const dx = e.changedTouches[0].clientX - t.x, dy = e.changedTouches[0].clientY - t.y
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.3) go(dx < 0 ? 1 : -1)
+  }
+  return <div className="lightbox viewer" onClick={onClose} onTouchStart={ts} onTouchEnd={te}>
+    {many && <div className="vcount" onClick={e => e.stopPropagation()}>{i + 1} из {list.length}</div>}
+    {many && <button className="vnav prev" aria-label="Назад" onClick={e => { e.stopPropagation(); go(-1) }}>‹</button>}
+    {many && <button className="vnav next" aria-label="Дальше" onClick={e => { e.stopPropagation(); go(1) }}>›</button>}
     <div className="vbox" onClick={e => e.stopPropagation()}>
       {m === 'video' ? <video src={f.url} controls playsInline autoPlay preload="metadata" onError={() => setMode('file')} /> :
         m === 'img' ? <img src={f.url} alt={f.name || ''} onError={() => setMode(f.mime ? 'file' : 'video')} /> : <div className="vfile">📄<b>{f.name || 'Файл'}</b></div>}
@@ -135,7 +157,7 @@ export function Gallery({ obj, me, start = 'design', only, skip = [], bare = fal
           <span className="muted small">{f.size ? size(f.size) + ' · ' : ''}{f.by} · {new Date(f.created_at).toLocaleDateString('ru-RU')}{kind === 'video' && f.review === 'approved' ? ' · в Продакшн' : ''}</span></div>
         <button className="ghost mini" aria-label="Скачать" onClick={() => download(f)}>⬇</button>
       </div>)}</>}
-    <Viewer f={open} onClose={() => setOpen(null)} extra={open && me.role_code === 'head' && !me._view_as && ['photo', 'video', 'media'].includes(kind)
+    <Viewer f={open} onClose={() => setOpen(null)} list={pics && pics.length > 1 && pics.includes(open) ? pics : null} onNav={setOpen} extra={open && me.role_code === 'head' && !me._view_as && ['photo', 'video', 'media'].includes(kind)
       ? <MoveFile key={open.id} f={open} from={obj.id} onMoved={() => { setOpen(null); load() }} /> : null} />
   </div>
 }
@@ -143,15 +165,23 @@ export function Gallery({ obj, me, start = 'design', only, skip = [], bare = fal
 // Любая ссылка на файл приложения (/api/files/…/content) открывается здесь же, а не в браузере (HEAD 09.11)
 export function FileLinks() {
   const [f, setF] = useState(null)
+  const [list, setList] = useState(null)
   useEffect(() => {
+    const isFile = a => /\/content\b/.test(a.getAttribute('href') || '')
+    const item = a => ({ url: a.getAttribute('href'), name: a.getAttribute('title') || a.textContent.trim() || '' })
     const on = e => {
       const a = e.target.closest?.('a[href*="/api/files/"]')
-      if (!a || !/\/content\b/.test(a.getAttribute('href')) || e.defaultPrevented) return
+      if (!a || !isFile(a) || e.defaultPrevented) return
       e.preventDefault()
-      setF({ url: a.getAttribute('href'), name: a.getAttribute('title') || a.textContent.trim() || '' })
+      // фото отчёта листаются (HEAD 18.11): все фото-ссылки той же строки смены/проекта — до, после и доп. фото
+      const box = a.querySelector('img') && a.closest('.row, .card')
+      const links = box ? [...box.querySelectorAll('a[href*="/api/files/"]')].filter(x => isFile(x) && x.querySelector('img')) : []
+      const all = links.length > 1 ? links.map(item) : null
+      setList(all)
+      setF(all ? all[links.indexOf(a)] : item(a))
     }
     document.addEventListener('click', on)
     return () => document.removeEventListener('click', on)
   }, [])
-  return <Viewer f={f} onClose={() => setF(null)} />
+  return <Viewer f={f} list={list} onNav={setF} onClose={() => { setF(null); setList(null) }} />
 }
