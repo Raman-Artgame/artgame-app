@@ -203,3 +203,13 @@ def test_design_team_from_bitrix_and_expense_cats(client, dz, monkeypatch):
     assert d[1647]["designer"] == "Малика Жұмаділдина"
     cats = [c["code"] for c in client.get("/api/work/dict", headers=hdr(7100)).json()["categories"]]
     assert cats == ["transport", "other"]
+
+
+def test_designer_sees_own_assigned_without_field(client, dz):
+    """HEAD 20.11: дизайнер видит и сделки, где «Ответственный дизайнер» пуст, а ответственный в Битриксе — он."""
+    DEALS["1649"] = {"ID": "1649", "TITLE": "Дизайн салона", "STAGE_ID": "C13:NEW", "CATEGORY_ID": "13", "ASSIGNED_BY_ID": "7001"}
+    DEALS["1650"] = {"ID": "1650", "TITLE": "Чужой", "STAGE_ID": "C13:NEW", "CATEGORY_ID": "13", "ASSIGNED_BY_ID": "7001",
+                     "UF_CRM_ARTGAME_DESIGNER": "7000"}
+    bx._cache.clear()
+    mine = {d["id"] for d in client.get("/api/design/deals", headers=hdr(7100)).json()["deals"]}
+    assert mine == {1648, 1649}   # своё по полю + пустое поле, ответственный — он; назначенное другому — нет

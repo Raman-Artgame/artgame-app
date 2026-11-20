@@ -27,6 +27,32 @@ export function useUnread(tab) {
   return n
 }
 
+// HEAD 20.11: «не могу скопировать сообщение» — в Telegram на iPhone выделение текста в приложении не работает.
+// Долгое нажатие (или правая кнопка) на сообщении → «Скопировать»; копируем через буфер обмена, запасной путь — execCommand.
+export async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true } catch { /* ниже */ }
+  try {
+    const a = document.createElement('textarea'); a.value = t; a.setAttribute('readonly', ''); a.style.position = 'fixed'; a.style.opacity = '0'
+    document.body.appendChild(a); a.select(); a.setSelectionRange(0, t.length); const ok = document.execCommand('copy'); a.remove(); return ok
+  } catch { return false }
+}
+export function Msg({ text }) {
+  const [menu, setMenu] = useState('')   // '' | 'ask' | 'ok' | 'fail'
+  const t = useRef(null), at = useRef(null)
+  const stop = () => { clearTimeout(t.current); t.current = null }
+  const down = e => { const p = e.touches?.[0] || e; at.current = [p.clientX, p.clientY]; stop(); t.current = setTimeout(() => { t.current = null; setMenu('ask') }, 450) }
+  const move = e => { const p = e.touches?.[0] || e; if (at.current && Math.hypot(p.clientX - at.current[0], p.clientY - at.current[1]) > 10) stop() }
+  const copy = async e => { e.stopPropagation(); const ok = await copyText(text); setMenu(ok ? 'ok' : 'fail'); setTimeout(() => setMenu(''), 1500) }
+  useEffect(() => stop, [])
+  return <div className="dmtext" onTouchStart={down} onTouchMove={move} onTouchEnd={stop} onTouchCancel={stop}
+    onContextMenu={e => { e.preventDefault(); setMenu('ask') }}>
+    {text}
+    {menu && <div className="dmcopy" onClick={e => e.stopPropagation()}>
+      {menu === 'ask' ? <><button className="mini" onClick={copy}>⧉ Скопировать</button><button className="ghost mini" onClick={() => setMenu('')}>✕</button></>
+        : <span className="small">{menu === 'ok' ? '✓ Скопировано' : 'Не получилось скопировать'}</span>}</div>}
+  </div>
+}
+
 function Bubbles({ items, mine, names }) {
   const end = useRef(null)
   useEffect(() => { end.current?.scrollIntoView?.({ block: 'end' }) }, [items.length])
@@ -34,7 +60,7 @@ function Bubbles({ items, mine, names }) {
   return <div className="dmlist">
     {items.map(m => <div key={m.id} className={'dmb ' + (mine(m) ? 'me' : 'them')}>
       {m.broadcast && <span className="dmcast">📣 объявление</span>}
-      <div className="dmtext">{m.text}</div>
+      <Msg text={m.text} />
       <span className="dmmeta">{m.from_head && (names || !mine(m)) ? m.author + ' · ' : ''}{when(m.created_at)}{m.via === 'tg' ? ' · из Telegram' : ''}</span>
     </div>)}
     <div ref={end} />
@@ -184,7 +210,7 @@ function HeadInbox({ back }) {
       {d.broadcasts.length > 0 && <div className="card dm"><h3>Объявления</h3>
         {d.broadcasts.map(b => <div key={b.id} className="dmcastrow">
           <div className="small muted">{when(b.created_at)} · {b.author} · {b.roles?.length ? b.roles.map(r => d.roles.find(x => x.code === r)?.title || r).join(', ') : 'всем'} · получили {b.sent} · в боте {b.in_bot}</div>
-          <div className="dmtext">{b.text}</div></div>)}
+          <Msg text={b.text} /></div>)}
       </div>}
     </>}
   </>
@@ -255,7 +281,7 @@ export function ProjChat({ id, back, backText = '‹ Все чаты' }) {
     {d.items.length ? <div className="dmlist">
       {d.items.map(m => <div key={m.id} className={'dmb ' + (m.mine ? 'me' : 'them')}>
         {m.photo && <a href={m.photo.url} target="_blank" rel="noreferrer"><img loading="lazy" className="dmpic" src={m.photo.thumb} alt="" /></a>}
-        {m.text && <div className="dmtext">{m.text}</div>}
+        {m.text && <Msg text={m.text} />}
         <span className="dmmeta">{m.mine ? '' : m.name + (m.head ? ' · HEAD' : '') + ' · '}{when(m.created_at)}</span>
       </div>)}
     </div> : <p className="small muted dmempty">Сообщений пока нет. Напиши первым — увидит вся команда проекта.</p>}

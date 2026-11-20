@@ -113,7 +113,9 @@ def deals(fresh: int = 0, p: dict = Depends(active)):
     bxn = {u["id"]: u["name"] for u in bx_designers()} if any(int(d.get(F_DESIGNER) or 0) not in people for d in rows if d.get(F_DESIGNER)) else {}
     for d in rows:
         uid = int(d.get(F_DESIGNER) or 0) or None
-        if p["role_code"] not in ALL and uid != me_bx:
+        # дизайнер видит свои сделки; «Ответственный дизайнер» пуст — и те, где он ответственный в Битриксе (HEAD 20.11:
+        # «в Предложенных видны не все сделки, где я участвовала» — у 6 из 7 поле дизайнера не заполнено)
+        if p["role_code"] not in ALL and uid != me_bx and (uid or int(d.get("ASSIGNED_BY_ID") or 0) != me_bx):
             continue
         size = _size(d, local)
         out.append({"id": int(d["ID"]), "title": d.get("TITLE") or "", "stage": d.get("STAGE_ID"),

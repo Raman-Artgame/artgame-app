@@ -12,7 +12,7 @@ const call = async (id, path, body) => (await fetch(API + path, { method: body ?
 const shots = process.env.SHOTS || '/var/tmp'
 
 async function open(b, id) {
-  const ctx = await b.newContext({ viewport: { width: 375, height: 740 }, deviceScaleFactor: 2 })
+  const ctx = await b.newContext({ viewport: { width: 375, height: 740 }, deviceScaleFactor: 2, permissions: ['clipboard-read', 'clipboard-write'] })
   const pg = await ctx.newPage()
   const d = sign(id)
   await pg.addInitScript(d => { window.Telegram = { WebApp: { initData: d, initDataUnsafe: { user: { first_name: 'Т' } }, ready() {} } } }, d)
@@ -67,6 +67,14 @@ async function open(b, id) {
   await al.locator('.dmhq').click()
   await al.locator('.dmrow:not(.dmhq)', { hasText: 'Данияр Сапаров' }).click()
   assert.equal(await al.getByText('во сколько завтра выезд').count(), 0)
+  // HEAD 20.11: «не могу скопировать сообщение» — долгое нажатие / правая кнопка → «Скопировать»
+  const q = al.locator('.dmb.them .dmtext', { hasText: 'закончилась белая краска' })
+  await q.click({ button: 'right' })
+  await q.getByRole('button', { name: /Скопировать/ }).waitFor()
+  await al.screenshot({ path: `${shots}/chat-copy.png` })
+  await q.getByRole('button', { name: /Скопировать/ }).click()
+  await q.getByText('✓ Скопировано').waitFor()
+  assert.match(await al.evaluate(() => navigator.clipboard.readText()), /закончилась белая краска/)
   await al.locator('.dm textarea').fill('Да, купи и внеси чек в «Расход».')
   await al.getByRole('button', { name: 'Отправить' }).click()
   await al.locator('.dmb.me').waitFor()
