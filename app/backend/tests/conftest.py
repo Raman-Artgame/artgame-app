@@ -42,3 +42,13 @@ def client():
 
 def hdr(tg_id: int, **extra):
     return {"X-Telegram-Init-Data": make_init_data({"id": tg_id, "first_name": "T", **extra})}
+
+
+@pytest.fixture(autouse=True)
+def no_telegram(monkeypatch):
+    """Бот в тестах никуда не пишет (регистрация, траты сверх лимита); test_notify подменяет SEND сам."""
+    from artgame import notify
+    monkeypatch.setattr(notify, "SEND", lambda tg, text: None)
+    from artgame import dm
+    monkeypatch.setattr(dm, "SEND", lambda tg, text: None)
+    monkeypatch.setattr(dm, "BOT", lambda m, **p: {"message_id": 1})

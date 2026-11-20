@@ -1,0 +1,49 @@
+# Автовыкладка на test.app.artgame.world: пуш с изменениями в app/ → сервер ставит этот коммит.
+# Нужен секрет TEST_DEPLOY_KEY (ключ пользователя artgame-ci, см. app/deploy/setup_ci_deploy.sh).
+# Ключ умеет только «deploy <коммит>» — ничего другого на сервере им не сделать.
+# Ветки: main и общая ветка интегратора claude/project-thread-54ahqn (HEAD 06.11); другие треды шлют ему ветки или патчи. Prod не трогается.
+name: Deploy test
+on:
+  push:
+    branches: [main, 'claude/project-thread-54ahqn']   # HEAD 06.11: на test выкладывает только интегратор (тред МОП)
+    paths: ['app/**', '.github/workflows/deploy-test.yml']
+  workflow_dispatch:
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+env:
+  HOST: 109.235.116.40
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Deploy
+        env:
+          KEY: ${{ secrets.TEST_DEPLOY_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "::warning::Нет секрета TEST_DEPLOY_KEY — выкладка на test пропущена"; exit 0; fi
+          install -d -m 700 ~/.ssh
+          # ключ могли вставить одной строкой или с переносами Windows — собираем обратно в формат OpenSSH
+          python3 - <<'PY'
+          import os, re
+          k = os.environ["KEY"].replace("\r", "").strip()
+          if "-----BEGIN" not in k and re.sub(r"\s+", "", k).startswith("b3BlbnNzaC1rZXktdjE"):   # вставили без строк BEGIN/END
+              k = f"-----BEGIN OPENSSH PRIVATE KEY-----\n{k}\n-----END OPENSSH PRIVATE KEY-----"
+          m = re.search(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", k, re.S)
+          if not m:
+              kind = ("открытый ключ (ssh-…), а нужен закрытый" if k.startswith(("ssh-", "command=")) else
+                      "отпечаток сервера, а нужен ключ" if "SHA256:" in k else
+                      "ссылка" if k.startswith("http") else f"текст длиной {len(k)} символов без BEGIN/END")
+              raise SystemExit(f"::error::TEST_DEPLOY_KEY: в секрете {kind}. Вставьте всё от -----BEGIN до -----END из вывода setup_ci_deploy.sh")
+          body = re.sub(r"\s+", "", m.group(2))
+          lines = [body[i:i + 70] for i in range(0, len(body), 70)]
+          out = f"-----BEGIN {m.group(1)}-----\n" + "\n".join(lines) + f"\n-----END {m.group(1)}-----\n"
+          path = os.path.expanduser("~/.ssh/key")
+          open(path, "w").write(out)
+          os.chmod(path, 0o600)
+          PY
+          ssh-keygen -y -f ~/.ssh/key > ~/.ssh/key.pub || { echo "::error::TEST_DEPLOY_KEY повреждён — вставьте ключ из setup_ci_deploy.sh заново"; exit 1; }
+          echo "Ключ в секрете (отпечаток, не секрет): $(ssh-keygen -lf ~/.ssh/key.pub)"
+          ssh-keyscan -t ed25519 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/key -o BatchMode=yes -o ConnectTimeout=20 "artgame-ci@$HOST" "deploy $GITHUB_SHA"

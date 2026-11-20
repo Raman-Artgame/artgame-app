@@ -1,8 +1,0 @@
-[Unit]
-Description=ARTGAME: ночная копия базы на Google Диск
-
-[Service]
-Type=oneshot
-User=artgame-app
-EnvironmentFile=/etc/artgame-app/backup.env
-ExecStart=/srv/artgame-app/prod/deploy/backup.sh

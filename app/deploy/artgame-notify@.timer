@@ -1,0 +1,9 @@
+[Unit]
+Description=ARTGAME: уведомления МОП в Telegram каждые 15 минут (%i)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target

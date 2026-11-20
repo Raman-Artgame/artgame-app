@@ -1,0 +1,9 @@
+[Unit]
+Description=ARTGAME: уведомления МОП в Telegram — новые заявки, КП без ответа, задачи, возврат к отложенным (%i)
+
+[Service]
+Type=oneshot
+User=artgame-app
+WorkingDirectory=/srv/artgame-app/%i/backend
+EnvironmentFile=/etc/artgame-app/%i.env
+ExecStart=/srv/artgame-app/%i/venv/bin/python -m artgame.notify

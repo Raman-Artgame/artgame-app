@@ -16,7 +16,8 @@ def setup_people(client):
         client.post(f"/api/people/{pid}", json={"role_code": role, "zones": zones}, headers=hdr(1000))
         ids[tg] = pid
     with db.pool.connection() as c:
-        c.execute("INSERT INTO objects (id, title, city, gip_person_id) VALUES (731, 'Кафе', 'Астана', %s)", (ids[5000],))
+        c.execute("INSERT INTO objects (id, title, city, gip_person_id, bitrix_stage) VALUES (731, 'Кафе', 'Астана', %s, 'UC_AV00QK')", (ids[5000],))
+        c.execute("INSERT INTO objects (id, title, city, bitrix_stage) VALUES (732, 'Ждёт договора', 'Астана', 'FINAL_INVOICE')")
     return ids
 
 
@@ -28,7 +29,7 @@ def test_pending_cannot_submit(client):
 def test_shift_flow(client):
     setup_people(client)
     d = client.get("/api/work/dict", headers=hdr(2000)).json()
-    assert {o["id"] for o in d["objects"]} == {0, 731} and len(d["categories"]) == 10
+    assert {o["id"] for o in d["objects"]} == {0, 731} and len(d["categories"]) == 11   # + «Докупка на объект» (022)
     body = {"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural",
             "started_at": T0, "ended_at": T1, "area_m2": 12.5, "complexity": "medium"}
     s1 = client.post("/api/shifts", json=body, headers=hdr(2000)).json()
@@ -40,10 +41,17 @@ def test_shift_flow(client):
     # мастер печати не видит роспись, главный художник видит
     assert client.get("/api/review", headers=hdr(4000)).json()["shifts"] == []
     assert [x["id"] for x in client.get("/api/review", headers=hdr(3000)).json()["shifts"]] == [s1["id"]]
-    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": True}, headers=hdr(4000)).status_code == 403
+    assert client.post(f"/api/shift/{s1['id']}/rate", json={"stars": 5}, headers=hdr(4000)).status_code == 403
+    # HEAD 11.11: куратор оценивает (1–2 — с комментарием), утверждает только HEAD
+    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": True}, headers=hdr(3000)).status_code == 403
+    assert client.post(f"/api/shift/{s1['id']}/rate", json={"stars": 2}, headers=hdr(3000)).status_code == 400
+    assert client.post(f"/api/shift/{s1['id']}/rate", json={"stars": 2, "note": "грязно"}, headers=hdr(3000)).json()["ok"]
+    assert client.post(f"/api/shift/{s1['id']}/rate", json={"stars": 5}, headers=hdr(3000)).status_code == 403   # второй раз — нет
     # отказ без причины — нельзя
-    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": False}, headers=hdr(3000)).status_code == 400
-    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": True}, headers=hdr(3000)).json()["status"] == "approved"
+    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": False}, headers=hdr(1000)).status_code == 400
+    assert client.post(f"/api/shift/{s1['id']}/review", json={"approve": True}, headers=hdr(1000)).json()["status"] == "approved"
+    mine = client.get("/api/my", headers=hdr(2000)).json()["shifts"][0]
+    assert mine["cur_stars"] == 2 and mine["cur_note"] == "грязно"
     # после проверки отменить нельзя
     assert client.post(f"/api/shift/{s1['id']}/cancel", headers=hdr(2000)).status_code == 409
     assert len(client.get("/api/my", headers=hdr(2000)).json()["shifts"]) == 1
@@ -55,7 +63,9 @@ def test_expense_flow_gip_and_payout(client):
                                            "category": "paint", "amount": 15000}, headers=hdr(2000)).json()
     # ГИП объекта 731 видит расход
     assert [x["id"] for x in client.get("/api/review", headers=hdr(5000)).json()["expenses"]] == [e["id"]]
-    client.post(f"/api/expense/{e['id']}/review", json={"approve": True}, headers=hdr(5000))
+    assert client.post(f"/api/expense/{e['id']}/rate", json={"ok": False}, headers=hdr(5000)).status_code == 400   # вопрос — с текстом
+    assert client.post(f"/api/expense/{e['id']}/rate", json={"ok": True}, headers=hdr(5000)).json()["ok"]
+    client.post(f"/api/expense/{e['id']}/review", json={"approve": True}, headers=hdr(1000))
     assert client.get("/api/my", headers=hdr(2000)).json()["expenses"][0]["payout_status"] == "to_pay"
     # своё отменить можно, пока не проверено; запись остаётся
     e2 = client.post("/api/expenses", json={"client_uid": str(uuid.uuid4()), "object_id": 0, "zone_code": "mural",
@@ -70,25 +80,28 @@ def test_expense_flow_gip_and_payout(client):
 def test_receipt_to_drive(client, monkeypatch):
     from artgame import drive
     calls = []
-    monkeypatch.setattr(drive, "save_photo", lambda conn, obj, name, data, kind="receipt": calls.append((obj["id"], name, kind)) or "drv-receipt-1")
+    monkeypatch.setattr(drive, "save_receipt", lambda conn, dept, name, data, deal_id=None: calls.append((deal_id, name, dept)) or "drv-receipt-1")
     setup_people(client)
     body = {"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "category": "paint",
             "amount": 2500, "receipt": "data:image/jpeg;base64,/9j/AA=="}
     e = client.post("/api/expenses", json=body, headers=hdr(2000)).json()
-    assert e["receipt_url"].startswith(f"/api/files/{e['receipt_file_id']}/content?") and calls[0] == (731, calls[0][1], "receipt") and "P2000" in calls[0][1]
+    assert e["receipt_url"].startswith(f"/api/files/{e['receipt_file_id']}/content?") and calls[0] == (731, calls[0][1], "mural") and "P2000" in calls[0][1]
     assert client.get("/api/my", headers=hdr(2000)).json()["expenses"][0]["receipt_url"]
     # повтор из очереди не грузит чек второй раз
     client.post("/api/expenses", json=body, headers=hdr(2000))
     assert len(calls) == 1
-    bad = {**body, "client_uid": str(uuid.uuid4()), "receipt": "data:text/html;base64,AA=="}
+    # тот же расход с новым client_uid (форму открыли заново и нажали ещё раз) — дубль не создаётся
+    again = client.post("/api/expenses", json={**body, "client_uid": str(uuid.uuid4())}, headers=hdr(2000)).json()
+    assert again["id"] == e["id"] and len(calls) == 1 and len(client.get("/api/my", headers=hdr(2000)).json()["expenses"]) == 1
+    bad = {**body, "client_uid": str(uuid.uuid4()), "amount": 2501, "receipt": "data:text/html;base64,AA=="}
     assert client.post("/api/expenses", json=bad, headers=hdr(2000)).status_code == 400
 
 
 def test_receipt_drive_down_is_retryable(client, monkeypatch):
     from artgame import drive
-    def boom(*a):
+    def boom(*a, **k):
         raise RuntimeError("down")
-    monkeypatch.setattr(drive, "save_photo", boom)
+    monkeypatch.setattr(drive, "save_receipt", boom)
     setup_people(client)
     body = {"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "category": "paint",
             "amount": 1, "receipt": "data:image/jpeg;base64,/9j/AA=="}

@@ -1,6 +1,7 @@
 /* ARTGAME: замена window.claude для рабочих мест внутри приложения.
    db → /api/p/<место>/<ссылка>/_db, downloads → файл через сервер (в Telegram — downloadFile),
-   user.canEdit → редактор места. sample (ИИ), mcp (Битрикс), permissions пока нет — страница сама прячет эти кнопки. */
+   user.canEdit → редактор места. mcp → сделки Битрикса через сервер (только чтение, только свои сделки; места МОП и Калькулятор).
+   sample (ИИ) и permissions пока нет — страница сама прячет эти кнопки. */
 (function () {
   var P = window.ARTGAME_PLACE || {}
   var m = location.pathname.match(/^(\/api\/p\/[^/]+\/[^/]+)\//)
@@ -61,6 +62,7 @@
       return fetch(BASE + '/_dl?name=' + encodeURIComponent(name), { method: 'POST', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob })
         .then(function (r) { if (!r.ok) throw Object.assign(new Error('download'), { code: 'unavailable' }); return r.json() })
         .then(function (d) {
+          try { if (window.ARTGAME_ON_DOWNLOAD) window.ARTGAME_ON_DOWNLOAD({ name: name, fid: d.url.split('/').pop() }) } catch (e) {}
           var url = location.origin + d.url
           var tg = null
           try { tg = window.parent && window.parent.Telegram && window.parent.Telegram.WebApp } catch (e) {}
@@ -75,8 +77,68 @@
     },
   }
   var user = { canEdit: function () { return Promise.resolve(!!P.editor) } }
+  // Битрикс: страница КП зовёт callTool(сервер, 'crm_get' | 'crm_fields', args) — отвечает наш сервер через шлюз ARTGAME.
+  function bx(tool, args) {
+    return fetch(BASE + '/_bx/' + tool, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args || {}) })
+      .then(function (r) {
+        return r.json().catch(function () { return {} }).then(function (d) {
+          if (!r.ok) { var e = new Error(d.detail || String(r.status)); e.code = r.status >= 500 ? 'upstream_error' : 'tool_error'; throw e }
+          return d
+        })
+      })
+  }
+  var mcp = { callTool: function (server, tool, args) { return bx(tool, args).then(function (d) { return { structuredContent: d } }) } }
+  window.ARTGAME_BX = bx
   var caps = { db: db, downloads: downloads, user: user }
+  if (P.bx) caps.mcp = mcp
   window.claude = { use: function (n) { return Promise.resolve(caps[n] || null) } }
+
+  // «Учёба» (HEAD 07.11): приложение открывает место с ?hide=pay,grow — эти разделы скрыты (вкладки, плитки, ссылки),
+  // переход на скрытый раздел ведёт на ?home= (по умолчанию первый видимый). Страницу места не перепаковываем.
+  var qp = new URLSearchParams(location.search)
+  var HIDE = (qp.get('hide') || '').split(',').filter(function (x) { return /^[a-z]+$/.test(x) })
+  if (HIDE.length) {
+    var css = HIDE.map(function (h) { return 'a[href="#' + h + '"],a[href^="#' + h + '-"],[data-v="' + h + '"]' }).join(',') + '{display:none!important}'
+    var st = document.createElement('style'); st.textContent = css
+    document.head ? document.head.appendChild(st) : document.documentElement.appendChild(st)
+    var HOME = /^[a-z]+$/.test(qp.get('home') || '') ? qp.get('home') : ''
+    var guard = function () {
+      var h = decodeURIComponent(location.hash.slice(1)).split(/[-=/]/)[0]
+      if (h && HIDE.indexOf(h) >= 0) location.replace('#' + (HOME || ''))
+    }
+    guard()
+    window.addEventListener('hashchange', guard, true)
+  }
+
+  // Саппорту калькулятор «Карточки объекта» в «Выезде» не нужен (HEAD 08.11): ?nocalc=1 прячет его, чек-листы остаются.
+  if (qp.get('nocalc') === '1') {
+    var st2 = document.createElement('style'); st2.textContent = '.calc{display:none!important}'
+    document.head ? document.head.appendChild(st2) : document.documentElement.appendChild(st2)
+  }
+
+  // Разделы места — чипами приложения (HEAD 08.11): ?notabs=1 прячет свои вкладки места, поиск остаётся.
+  if (qp.get('notabs') === '1') {
+    var st4 = document.createElement('style'); st4.textContent = '#tabs{display:none!important}'
+    document.head ? document.head.appendChild(st4) : document.documentElement.appendChild(st4)
+  }
+
+  // Тёмный стиль приложения (HEAD 08.11): ?dark=1 — палитра места в тон приложению. Страницы мест не перепаковываем.
+  if (qp.get('dark') === '1') {
+    var st3 = document.createElement('style')
+    // текст светлый (--ink), а «чернильные» блоки (герои, карточки, таблицы), что красились тем же --ink, — графитовые
+    var INKBG = '.hero,.mhero,.btn.dark,.mcard,th,.call .bx,.chip,.kinds button.on,.card,.dots i.c,.steps a,.qs button,.alert,.calc .out,.uhero,.ucim'
+    st3.textContent = ':root{--paper:#0B0B0D!important;--card:#151418!important;--alt:#1C1A20!important;--ink:#F1F0EC!important;' +
+      '--ink2:#2A2530!important;--mut:#A9A3AE!important;--line:#2C2832!important;--on-ink:#F1F0EC!important;--on-ink-mut:#A9A3AE!important;' +
+      '--ok:#3DDC97!important;--okbg:#12301F!important;--nobg:#3A1020!important;color-scheme:dark!important}' +
+      INKBG + '{background-color:#1E1B22!important}.top img{filter:invert(1) hue-rotate(180deg)}' +
+      'input,select,textarea{background:#1C1A20;color:#F1F0EC;border-color:#2C2832}' +
+      // HEAD 14.11: учебник и бланк договора/КП — тоже тёмные; сам лист документа (как бумага) остаётся белым
+      'body{background:var(--paper)!important;color:var(--ink)!important}.dpaste,.dprev{background:#1C1A20!important}' +
+      '.dnote,.beta{background:#2E2510!important;border-color:#5A4512!important;color:#F0D9A0!important}' +
+      'label.f input.dempty{background:#3A1020!important;border-color:#7A2A44!important}'
+    document.head ? document.head.appendChild(st3) : document.documentElement.appendChild(st3)
+    document.documentElement.setAttribute('data-theme', 'dark')   // у генератора документов (#kpgen) своя тёмная палитра
+  }
 
   // Ссылки на другие артефакты → открыть место в приложении.
   document.addEventListener('click', function (e) {
