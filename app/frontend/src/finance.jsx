@@ -322,11 +322,12 @@ function Monday({ d, onPaid }) {
     {e && <p className="small why">{e}</p>}
     {w && w.rows.length > 0 && bank.length > 1 && <select value={acc} onChange={x => setAcc(x.target.value)}>{bank.map(a => <option key={a.code} value={a.code}>Со счёта: {a.title}</option>)}</select>}
     {!w ? <p className="muted small">Загрузка…</p> : !w.rows.length ? <p className="small muted">Всё выплачено.</p> :
-      w.rows.map(r => <div key={r.payee_id} className="row">
+      w.rows.map(r => <div key={r.payee_id} className="row" style={{ flexWrap: "wrap" }}>
         <div><b>{r.name}</b> · {money(r.total)}
           <div className="small muted">{r.lines.map(x => `${x.what} за ${x.ym.slice(5)}.${x.ym.slice(0, 4)}: ${money(x.amount)}`).join(' · ')}{r.checks ? ` · чеков ${r.checks}` : ''}</div>
           <WeeklyDetail id={r.payee_id} /></div>
         {rc?.payee_id === r.payee_id ? null : <button className="mini" onClick={() => setRc({ payee_id: r.payee_id, receipt: '', cash: false })}>Выплачено</button>}
+        {rc?.payee_id !== r.payee_id && <div style={{ flexBasis: '100%' }}><Earlier r={r} d={d} done={() => { load(); onPaid && onPaid() }} /></div>}
         {rc?.payee_id === r.payee_id && <div className="dealedit" style={{ flexBasis: '100%' }}>
           <div className="seg"><button className={rc.cash ? 'ghost' : ''} onClick={() => setRc({ ...rc, cash: false })}>Переводом</button>
             {hasCash && <button className={rc.cash ? '' : 'ghost'} onClick={() => setRc({ ...rc, cash: true, receipt: '' })}>Наличными</button>}</div>
@@ -338,6 +339,35 @@ function Monday({ d, onPaid }) {
       {w.paid.map(x => <div key={x.id} className="row"><div><b>{x.name}</b> · {money(+x.amount)}
         <div className="small muted">{new Date(x.op_date + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} · {x.account} · за {x.period}{x.account_code === 'cash' ? (x.ack_at ? ' · получил ' + new Date(x.ack_at).toLocaleDateString('ru-RU') : ' · ждёт «Получил»')
           : x.receipt_url ? <> · <a href={x.receipt_url}>чек</a></> : ' · без чека'}</div></div></div>)}</details>}
+  </div>
+}
+
+// HEAD 20.11: «оплату произвели ещё в понедельник, но саппортам накинулись деньги за смены» — выплата мимо приложения:
+// своя дата и сумма, закрывает самое старое; остаток — на следующий понедельник
+const lastMonday = () => { const x = new Date(); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x.toLocaleDateString('sv-SE') }
+function Earlier({ r, d, done }) {
+  const [v, setV] = useState(null)
+  const [e, setE] = useState('')
+  const [busy, setBusy] = useState(false)
+  const hasCash = d.accounts.some(a => a.code === 'cash')
+  const bank = d.accounts.filter(a => a.code !== 'cash')
+  if (!v) return <a className="small" onClick={() => setV({ amount: '', op_date: lastMonday(), cash: false, receipt: '', acc: (bank[0] || d.accounts[0])?.code })}>Уже платил раньше?</a>
+  const go = () => { setBusy(true); setE('')
+    api('/fin/weekly/pay', { method: 'POST', body: { client_uid: uuid(), payee_id: r.payee_id, account: v.cash ? 'cash' : v.acc, op_date: v.op_date, amount: +v.amount,
+      earlier: true, receipt: v.cash ? null : v.receipt || null } }).then(() => { setV(null); done() }, err(setE)).finally(() => setBusy(false)) }
+  const rest = Math.max(0, Math.round(r.total - (+v.amount || 0)))
+  return <div className="dealedit earlier">
+    <p className="small muted">Выплата, которую сделали мимо приложения. Закроет самое старое; остаток останется к выплате.</p>
+    <input type="date" value={v.op_date} max={today()} onChange={x => setV({ ...v, op_date: x.target.value })} />
+    <input inputMode="numeric" value={v.amount} onChange={x => setV({ ...v, amount: x.target.value.replace(/\D/g, '') })} placeholder={`Сколько заплатили, ₸ (не больше ${money(r.total)})`} />
+    {+v.amount > 0 && <p className="small">Останется к выплате: <b>{money(rest)}</b></p>}
+    <div className="seg"><button className={v.cash ? 'ghost' : ''} onClick={() => setV({ ...v, cash: false })}>Переводом</button>
+      {hasCash && <button className={v.cash ? '' : 'ghost'} onClick={() => setV({ ...v, cash: true, receipt: '' })}>Наличными</button>}</div>
+    {!v.cash && bank.length > 1 && <select value={v.acc} onChange={x => setV({ ...v, acc: x.target.value })}>{bank.map(a => <option key={a.code} value={a.code}>Со счёта: {a.title}</option>)}</select>}
+    {!v.cash && <Receipt value={v.receipt} pick={async f => setV({ ...v, receipt: await shrink(f) })} />}
+    {e && <p className="small why">{e}</p>}
+    <div className="seg"><button disabled={busy || !(+v.amount > 0) || +v.amount > r.total + 0.5} onClick={go}>Внести выплату</button>
+      <button className="ghost" onClick={() => setV(null)}>Отмена</button></div>
   </div>
 }
 

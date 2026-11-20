@@ -157,3 +157,33 @@ def test_kpi_tiles_detail(client, team, monkeypatch):
     assert client.get("/api/fin/kpi/cash_in", headers=hdr(1000)).json()["items"] == []
     assert client.get("/api/fin/kpi/nope", headers=hdr(1000)).status_code == 404
     assert client.get("/api/fin/kpi/debt", headers=hdr(5000)).status_code == 403
+
+
+def test_weekly_paid_earlier(client, team):  # noqa: F811
+    """HEAD 20.11: в понедельник заплатили мимо приложения, потом добавились смены — вносим прошлую выплату, остаток — на следующий."""
+    for _ in range(2):
+        s = _shift(client, 2000, "mural", 3)
+        client.post(f"/api/shift/{s['id']}/review", json={"approve": True}, headers=hdr(1000))
+    e1, e2 = [client.post("/api/expenses", json={"client_uid": str(uuid.uuid4()), "object_id": 731, "zone_code": "mural", "category": "paint",
+                                                  "amount": a, "paid_by": "own"}, headers=hdr(5000)).json() for a in (3000, 1500)]
+    for x in (e1, e2):
+        client.post(f"/api/expense/{x['id']}/review", json={"approve": True}, headers=hdr(1000))
+    w = client.get("/api/fin/weekly", headers=hdr(1000)).json()
+    rows = {r["person_id"]: r for r in w["rows"]}
+    sup, art = rows[team[2000]], rows[team[5000]]
+    shift = VALS["pay.support.shift"]
+    body = {"client_uid": str(uuid.uuid4()), "payee_id": sup["payee_id"], "account": "kaspi", "op_date": "2026-11-16", "earlier": True}
+    assert client.post("/api/fin/weekly/pay", json={**body, "amount": 2 * shift + 1}, headers=hdr(1000)).status_code == 409   # больше, чем к выплате
+    assert client.post("/api/fin/weekly/pay", json={**body, "amount": shift}, headers=hdr(1000)).json()["paid"] == shift
+    w = client.get("/api/fin/weekly", headers=hdr(1000)).json()
+    assert next(r for r in w["rows"] if r["person_id"] == team[2000])["total"] == shift          # осталось за вторую смену
+    assert any("внесено позже" in (x["note"] or "") and str(x["op_date"]) == "2026-11-16" for x in w["paid"])
+    # не саппорт: только чеки целиком, от старых к новым
+    ab = {"client_uid": str(uuid.uuid4()), "payee_id": art["payee_id"], "account": "kaspi", "op_date": "2026-11-16", "earlier": True}
+    r = client.post("/api/fin/weekly/pay", json={**ab, "amount": 2000}, headers=hdr(1000))
+    assert r.status_code == 409 and "3 000" in r.json()["detail"]
+    assert client.post("/api/fin/weekly/pay", json={**ab, "amount": 3000}, headers=hdr(1000)).json()["paid"] == 3000
+    mine = {x["id"]: x["payout_status"] for x in client.get("/api/my", headers=hdr(5000)).json()["expenses"]}
+    assert mine[e1["id"]] == "paid" and mine[e2["id"]] == "to_pay"
+    w = client.get("/api/fin/weekly", headers=hdr(1000)).json()
+    assert next(r for r in w["rows"] if r["person_id"] == team[5000])["total"] == 1500

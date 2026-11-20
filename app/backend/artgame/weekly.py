@@ -145,6 +145,37 @@ class WeeklyPayIn(BaseModel):
     op_date: date
     amount: float = Field(gt=0)    # сколько HEAD видел на экране — сверяем, чтобы не заплатить «не то»
     receipt: str | None = Field(default=None, max_length=8_000_000)   # чек перевода (скриншот из галереи), HEAD 10.11
+    # HEAD 20.11: «оплату произвели ещё в понедельник, но саппортам накинулись деньги за смены» — выплата, сделанная раньше
+    # мимо приложения: сумма меньше «к выплате», своя дата. Закрывает самое старое: прошлый месяц раньше текущего, чеки по дате внесения.
+    earlier: bool = False
+
+
+def _allocate(r: dict, amount: float, conn) -> list[dict]:
+    """Выплата задним числом: по строкам (месяцам) от старых к новым. Саппорт — любая сумма (смены считаются «начислено − выплачено»);
+    остальным к выплате только чеки — сумма должна закрывать чеки целиком, от старых к новым."""
+    left, out = round(amount, 2), []
+    for x in r["lines"]:
+        if left < 1:
+            break
+        take = min(left, x["amount"])
+        ids = []
+        if x["expense_ids"]:
+            rows = conn.execute("SELECT id, amount FROM expenses WHERE id = ANY(%s) ORDER BY created_at, id", (x["expense_ids"],)).fetchall()
+            acc = 0.0
+            for e in rows:
+                if acc + float(e["amount"]) > take + 0.5:
+                    break
+                acc += float(e["amount"]); ids.append(e["id"])
+            if not r["weekly"] and abs(acc - take) >= 1:
+                sums, a = [], 0.0
+                for e in rows:
+                    a += float(e["amount"]); sums.append(f"{a:,.0f}".replace(",", " "))
+                raise HTTPException(409, f"Сумма не совпадает с чеками за {x['ym']}: можно {', '.join(sums[:6])} ₸ — чеки закрываются целиком, от старых к новым")
+            if r["weekly"] and take < x["amount"] - 0.5:
+                ids = []   # месяц саппорта закрыт не весь — чеки остаются «к выплате», сумма вычтется из «осталось»
+        out.append({**x, "amount": round(take, 2), "expense_ids": ids})
+        left = round(left - take, 2)
+    return out
 
 
 @router.post("/fin/weekly/pay")
@@ -158,7 +189,13 @@ def weekly_pay(b: WeeklyPayIn, p: dict = Depends(require_head)):
         if not rows:
             raise HTTPException(409, "к выплате ничего нет — уже выплачено?")
         r = rows[0]
-        if abs(r["total"] - b.amount) >= 1:
+        if b.earlier:
+            if b.amount > r["total"] + 0.5:
+                raise HTTPException(409, f"Больше, чем к выплате ({r['total']:,.0f} ₸)".replace(",", " "))
+            if b.op_date > datetime.now(TZ).date():
+                raise HTTPException(400, "Дата выплаты — не позже сегодня")
+            r = {**r, "lines": _allocate(r, b.amount, conn), "total": round(b.amount, 2)}
+        elif abs(r["total"] - b.amount) >= 1:
             raise HTTPException(409, f"сумма изменилась: сейчас к выплате {r['total']:,.0f} ₸ — обновите экран".replace(",", " "))
         with conn.transaction():
             fid = _receipt(conn, p, f"Выплата {b.op_date} {r['name']} {r['total']:.0f}", b.receipt) if b.receipt else None
@@ -167,7 +204,8 @@ def weekly_pay(b: WeeklyPayIn, p: dict = Depends(require_head)):
                 uid = b.client_uid if i == 0 else uuid.uuid5(b.client_uid, x["ym"])
                 row = add_ledger(conn, p, client_uid=uid, op_date=b.op_date, account=b.account, direction="out", amount=x["amount"],
                                  article="payroll", period=x["ym"], payee_id=r["payee_id"],
-                                 note=f"Понедельник: {r['name']}, {x['what']} за {x['ym']}", source="app", receipt_file_id=fid)
+                                 note=f"{'Выплачено ' + b.op_date.strftime('%d.%m') + ' (внесено позже)' if b.earlier else 'Понедельник'}: {r['name']}, {x['what']} за {x['ym']}",
+                                 source="app", receipt_file_id=fid)
                 ids.append(row["id"])
                 if x["expense_ids"]:
                     conn.execute("UPDATE expenses SET payout_status='paid' WHERE payout_status='to_pay' AND id = ANY(%s)", (x["expense_ids"],))
