@@ -256,11 +256,27 @@ export function Closing({ initial }) {
       {d.sent.map(x => row(x, 's', `${tg(x.amount)} · ${x.sent_by || 'МОП'} · ${dm(x.sent_at)}`))}</div>
     {d.bypass.length > 0 && <div className="card bypass"><h3>Закрыты мимо вас · {d.bypass.length}</h3>
       <p className="small muted">Перевели в «Оплата получена» прямо в Битриксе. Назад сами не двигаются: откройте паспорт. Принять можно, только когда выполнены все пункты, иначе — вернуть.</p>
-      {d.bypass.map(x => row(x, 'b', `${tg(x.amount)} · ${dm(x.moved)}${x.moved_by ? ' · перевёл ' + x.moved_by : ''}`, 'hot'))}</div>}
+      {d.bypass.map(x => <BypassRow key={'b' + x.deal_id} x={x} open={() => setOpen(x.deal_id)} />)}</div>}
     <div className="card"><h3>Закрытые</h3>
       {!d.closed.length && <p className="small muted">Пока ни одной.</p>}
       {d.closed.map(x => row(x, 'c', `${tg(x.amount)} · ${dm(x.decided_at)}${x.result?.margin != null ? ` · маржа ${pct(x.result.margin)}` : ''}${x.via === 'bitrix' ? ' · мимо паспорта' : ''}`))}</div>
   </>
+}
+
+// HEAD 20.11: «по этим проектам не загружаются, какие именно пункты не выполнены» — пункты сразу в строке, без входа в паспорт
+function BypassRow({ x, open }) {
+  const [c, setC] = useState(null)
+  const [e, setE] = useState('')
+  useEffect(() => { api(`/bx/deals/${x.deal_id}/close`).then(setC, er => setE(er.message || 'не загрузилось')) }, [x.deal_id])
+  const bad = (c?.checks || []).filter(k => !k.ok)
+  return <div className="qrow hot" onClick={open}>
+    <div className="qmain"><b>№ {x.deal_id} · {cleanTitle(x.title, x.deal_id)}</b>
+      <div className="small why">{tg(x.amount)} · {dm(x.moved)}{x.moved_by ? ' · перевёл ' + x.moved_by : ''}</div>
+      {e ? <div className="small why">Пункты не загрузились: {e}</div>
+        : !c ? <div className="small muted">Проверяю пункты…</div>
+        : bad.length ? <div className="bymiss"><span className="small">Не выполнено {bad.length} из {c.checks.length}:</span>{bad.map(k => <span key={k.key} className="miss">{k.short || k.title}</span>)}</div>
+        : <div className="small okmark">Все {c.checks.length} пунктов выполнены — можно принять</div>}</div>
+    <span className="muted">›</span></div>
 }
 
 // Для Пульта: заявки на закрытие и закрытые мимо паспорта

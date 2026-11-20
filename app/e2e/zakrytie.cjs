@@ -303,7 +303,12 @@ async function closeStep(p) {
   await e2e('/consts', { ...VALS, vat: 16, 'pay.trip_food': 3000 })
   // закрытая мимо паспорта: HEAD видит красным; пункты не выполнены — принять нельзя, только вернуть на «Оплата+закрывающие» (HEAD 12.11)
   await h.locator('a.back').click()
-  await h.locator('.card.bypass .qrow', { hasText: '№ 1720' }).click()
+  // HEAD 20.11: невыполненные пункты видны прямо в строке «Закрыты мимо вас»
+  const brow = h.locator('.card.bypass .qrow', { hasText: '№ 1720' })
+  await brow.locator('.bymiss', { hasText: /Не выполнено \d+ из 12/ }).waitFor()
+  assert.ok(await brow.locator('.miss', { hasText: 'Продакшн' }).count(), 'в строке — какие пункты')
+  await h.locator('.card.bypass').screenshot({ path: `${process.env.SHOTS || '/var/tmp'}/close-bypass-list.png` })
+  await brow.click()
   await h.locator('.passhero .tag.hott', { hasText: 'закрыта в Битриксе мимо паспорта' }).waitFor()
   assert.ok(!/норм|модел/i.test(await h.locator('.passhero').textContent()), 'без нормы маржи — ни сравнения, ни пояснения')
   const dc = h.locator('.card.decide')
