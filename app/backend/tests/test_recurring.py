@@ -67,7 +67,9 @@ def test_pay_with_receipt_and_cash(client, monkeypatch):
     lst = client.get("/api/fin/recurring", headers=hdr(1000)).json()
     tel = next(x for x in lst["items"] if x["id"] == rid)
     assert tel["status"] in ("paid", "later", "soon") and tel["last_paid"]["amount"] == 17500
-    assert lst["paid"][0]["title"] == "Баланс телефонии" and lst["paid"][0]["receipt_url"]
+    # не [0]: в день автосписания другой оплаты (20-го — Claude) её строка той же даты встаёт выше
+    paid = next(x for x in lst["paid"] if x["title"] == "Баланс телефонии")
+    assert paid["receipt_url"]
     # наличными — без чека можно
     with db.pool.connection() as c:
         rid2 = c.execute("SELECT id FROM fin_recurring WHERE title='Аренда студии, Астана'").fetchone()["id"]
