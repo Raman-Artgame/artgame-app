@@ -59,3 +59,22 @@ def test_sales_expenses(bxc, monkeypatch):  # noqa: F811
     # Диск недоступен — 502, трата не записана (телефон повторит)
     monkeypatch.setattr(drive, "save_receipt", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
     assert c.post("/api/sales/expenses", json=body(100), headers=hdr(6100)).status_code == 502
+
+
+def test_sales_expense_morning_digest(bxc, monkeypatch):  # noqa: F811
+    """HEAD 20.11: «Почему приходят уведомления в бот? Это не сильно важная история» — по одной не шлём, утром одна сводка."""
+    from datetime import datetime
+    from artgame import notify
+    from artgame.notify import TZ
+    c, ids = bxc
+    sent = []
+    monkeypatch.setattr(notify, "SEND", lambda tg, text: sent.append((tg, text)))
+    monkeypatch.setattr(drive, "save_receipt", lambda conn, dept, name, data, deal_id=None: "drv-1")
+    limit(0)
+    for a in (1430, 780):
+        assert c.post("/api/sales/expenses", json=body(a), headers=hdr(6000)).json()["auto"] is False
+    assert sent == []                                                        # по одной — не шлём
+    assert notify.head_approvals(datetime(2026, 11, 20, 8, 30, tzinfo=TZ)) == 0   # до 9:00 молчим
+    assert notify.head_approvals(datetime(2026, 11, 20, 9, 5, tzinfo=TZ)) == 1
+    assert sent[0][0] == 1000 and "2 на 2 210 ₸" in sent[0][1] and "Проверка" in sent[0][1]
+    assert notify.head_approvals(datetime(2026, 11, 20, 12, 0, tzinfo=TZ)) == 0   # раз в день

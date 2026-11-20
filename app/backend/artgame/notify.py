@@ -151,6 +151,34 @@ def head_recurring(now: datetime | None = None) -> int:
     return sent
 
 
+def head_approvals(now: datetime | None = None) -> int:
+    """Траты отдела продаж на одобрение (HEAD 20.11): не по одной, а одной строкой утром — сколько ждёт и на какую сумму."""
+    now = (now or datetime.now(timezone.utc)).astimezone(TZ)
+    if not DIGEST_HOUR <= now.hour < HOURS[1]:
+        return 0
+    key = f"approvals:{now.date().isoformat()}"
+    sent = 0
+    with db.pool.connection() as conn:
+        r = conn.execute("""SELECT count(*) AS n, coalesce(sum(amount),0) AS s, count(DISTINCT person_id) AS who FROM expenses
+                            WHERE zone_code='sales' AND status='submitted'""").fetchone()
+        if not r["n"]:
+            return 0
+        for h in conn.execute("SELECT id, tg_id FROM people WHERE status='active' AND role_code='head' AND tg_id IS NOT NULL").fetchall():
+            if conn.execute("SELECT 1 FROM notices WHERE person_id=%s AND key=%s", (h["id"], key)).fetchone():
+                continue
+            who = f" от {r['who']} сотрудников" if r["who"] > 1 else ""
+            try:
+                SEND(h["tg_id"], f"💳 Траты отдела продаж ждут одобрения: {r['n']} на {_fmt(float(r['s']))}"
+                                 f"{who}. Вкладка «Проверка».")
+            except Exception as ex:  # noqa: BLE001
+                print(f"head {h['id']}: telegram {ex}")
+                continue
+            conn.execute("INSERT INTO notices (person_id, key) VALUES (%s, %s) ON CONFLICT DO NOTHING", (h["id"], key))
+            db.audit(conn, h["id"], "notify", data={"keys": [key], "n": r["n"]})
+            sent += 1
+    return sent
+
+
 def main():
     if not settings.bot_token:
         print("ARTGAME_BOT_TOKEN не задан — пропуск")
@@ -161,6 +189,10 @@ def main():
         print(f"recurring={head_recurring()}")
     except Exception as ex:  # noqa: BLE001 — не мешаем уведомлениям МОП
         print(f"recurring: {ex}")
+    try:
+        print(f"approvals={head_approvals()}")
+    except Exception as ex:  # noqa: BLE001
+        print(f"approvals: {ex}")
 
 
 if __name__ == "__main__":

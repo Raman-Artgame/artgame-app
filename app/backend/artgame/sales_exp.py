@@ -97,14 +97,8 @@ def add(e: SalesExpenseIn, p: dict = Depends(active)):
              datetime.now(TZ) if ok else None, "в пределах лимита" if ok else None)).fetchone()
         row = self_approve(conn, p, row)
         db.audit(conn, p["id"], "sales_expense_add", "expenses", row["id"], {"over_limit": not ok, "deal": e.deal_id})
-    if not ok and settings.head_tg_id and settings.bot_token and p["role_code"] != "head":
-        try:
-            from . import notify
-            why = f"сверх лимита {limit:,.0f} ₸ (уже {spent:,.0f} ₸)".replace(",", " ") if limit else "лимит в «Значениях» ещё не задан"
-            notify.SEND(settings.head_tg_id, f"💳 Трата отдела продаж на одобрение: {p['full_name']}, {cat['title']}, "
-                                             f"{e.amount:,.0f} ₸ — {why}. Вкладка «Проверка».".replace(",", " "))
-        except Exception as ex:  # noqa: BLE001
-            print("sales expense notify:", ex)
+    # HEAD 20.11: «Почему приходят уведомления в бот? Это не сильно важная история» — по одной трате в бот не шлём;
+    # ждут во вкладке «Проверка», утром одна сводка (notify.head_approvals)
     return {**with_receipt(row), "auto": row["status"] == "approved"}
 
 
