@@ -187,3 +187,14 @@ def test_weekly_paid_earlier(client, team):  # noqa: F811
     assert mine[e1["id"]] == "paid" and mine[e2["id"]] == "to_pay"
     w = client.get("/api/fin/weekly", headers=hdr(1000)).json()
     assert next(r for r in w["rows"] if r["person_id"] == team[5000])["total"] == 1500
+
+
+def test_payees_archive(client, team):  # noqa: F811
+    """HEAD 20.11: «этих можно убрать, оставить только актуальных» — пачкой в архив, ничего не удаляется."""
+    a = client.post("/api/fin/payees", json={"name": "Радослав", "grp": "core", "scheme": "manual", "pay_rule": "month"}, headers=hdr(1000)).json()
+    rows = {x["id"]: x for x in client.get("/api/fin/payees", headers=hdr(1000)).json()}
+    assert rows[a["id"]]["status"] == "active" and rows[a["id"]]["person_active"] is None
+    assert client.post("/api/fin/payees/archive", json={"ids": [a["id"]]}, headers=hdr(5000)).status_code == 403
+    assert client.post("/api/fin/payees/archive", json={"ids": [a["id"]]}, headers=hdr(1000)).json()["archived"] == 1
+    rows = {x["id"]: x for x in client.get("/api/fin/payees", headers=hdr(1000)).json()}
+    assert rows[a["id"]]["status"] == "archived"

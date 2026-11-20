@@ -420,9 +420,31 @@ function Payees({ d }) {
       <div className="dealbtns"><button disabled={v.name.trim().length < 2} onClick={save}>Сохранить</button>
         {v.id && <button className="ghost" onClick={() => { set({ ...v, status: v.status === 'active' ? 'archived' : 'active' }) }}>{v.status === 'active' ? 'В архив' : 'Вернуть'}</button>}
         <button className="ghost" onClick={() => set(null)}>Отмена</button></div></div>}
-    {rows?.map(x => <div key={x.id} className="row" onClick={() => set({ ...x, amount: x.amount ?? '' })} style={{ cursor: 'pointer', opacity: x.status === 'active' ? 1 : .5 }}>
-      <span>{x.name}<div className="small muted">{d.groups[x.grp]} · {SCHEME[x.scheme]}{x.amount ? ' ' + money(+x.amount) : x.amount_key ? ' · ' + x.amount_key : ''}</div></span>
-      <span className="small muted">{x.person_id ? 'в приложении' : ''}</span></div>)}
+    <Tidy rows={rows} reload={load} />
+    {rows?.filter(x => x.status === 'active').map(x => <PayeeLine key={x.id} x={x} d={d} pick={() => set({ ...x, amount: x.amount ?? '' })} />)}
+    {rows?.some(x => x.status !== 'active') && <details className="paidlog"><summary className="small">Архив · {rows.filter(x => x.status !== 'active').length}</summary>
+      <p className="small muted">Не в списках выплат. Нажми на человека → «Вернуть», если снова работает.</p>
+      {rows.filter(x => x.status !== 'active').map(x => <PayeeLine key={x.id} x={x} d={d} pick={() => set({ ...x, amount: x.amount ?? '' })} />)}</details>}
+  </div>
+}
+
+const PayeeLine = ({ x, d, pick }) => <div className="row" onClick={pick} style={{ cursor: 'pointer', opacity: x.status === 'active' ? 1 : .5 }}>
+  <span>{x.name}<div className="small muted">{d.groups[x.grp]} · {SCHEME[x.scheme]}{x.amount ? ' ' + money(+x.amount) : x.amount_key ? ' · ' + x.amount_key : ''}</div></span>
+  <span className="small muted">{x.person_id ? (x.role_code ? 'в приложении' : 'нет в команде') : ''}</span></div>
+
+// HEAD 20.11: «этих можно убрать, оставить только актуальных» — кого нет в команде приложения: список с галочками → в архив
+function Tidy({ rows, reload }) {
+  const old = (rows || []).filter(x => x.status === 'active' && (x.person_id ? !x.role_code || x.person_active === false : x.grp === 'core'))
+  const [on, setOn] = useState(null)
+  const [e, setE] = useState('')
+  if (!old.length) return null
+  if (!on) return <p className="small"><a onClick={() => setOn(old.map(x => x.id))}>Убрать в архив тех, кого нет в команде · {old.length}</a></p>
+  const go = () => api('/fin/payees/archive', { method: 'POST', body: { ids: on } }).then(() => { setOn(null); reload() }, err(setE))
+  return <div className="dealedit tidy">
+    <p className="small muted">Их нет в команде приложения. В архиве они не пропадут: история выплат сохранится, вернуть можно в любой момент.</p>
+    {old.map(x => <label key={x.id} className="check"><input type="checkbox" checked={on.includes(x.id)} onChange={() => setOn(on.includes(x.id) ? on.filter(i => i !== x.id) : [...on, x.id])} /> {x.name}</label>)}
+    {e && <p className="small why">{e}</p>}
+    <div className="seg"><button disabled={!on.length} onClick={go}>В архив · {on.length}</button><button className="ghost" onClick={() => setOn(null)}>Отмена</button></div>
   </div>
 }
 

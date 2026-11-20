@@ -274,7 +274,7 @@ def sync_payees(conn) -> int:
 def payees(p: dict = Depends(require_head)):
     with db.pool.connection() as conn, conn.transaction():
         sync_payees(conn)
-        return conn.execute("""SELECT f.*, pe.role_code FROM fin_payees f LEFT JOIN people pe ON pe.id=f.person_id
+        return conn.execute("""SELECT f.*, pe.role_code, pe.status = 'active' AS person_active FROM fin_payees f LEFT JOIN people pe ON pe.id=f.person_id
                                ORDER BY f.status, f.grp, f.name""").fetchall()
 
 
@@ -294,6 +294,19 @@ def payee_add(b: PayeeIn, p: dict = Depends(require_head)):
                            (b.name.strip(), b.grp, b.scheme, b.amount, b.amount_key, b.pay_rule, b.note)).fetchone()
         db.audit(conn, p["id"], "fin_payee_add", "fin_payees", row["id"], b.model_dump())
         return row
+
+
+class ArchiveIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+@router.post("/fin/payees/archive")
+def payees_archive(b: ArchiveIn, p: dict = Depends(require_head)):
+    """HEAD 20.11: «этих можно убрать, оставить только актуальных» — в архив пачкой (ничего не удаляется, «Вернуть» — в карточке)."""
+    with db.pool.connection() as conn, conn.transaction():
+        rows = conn.execute("UPDATE fin_payees SET status='archived' WHERE id = ANY(%s) AND status='active' RETURNING id, name", (b.ids,)).fetchall()
+        db.audit(conn, p["id"], "fin_payee_archive", "fin_payees", None, {"ids": [r["id"] for r in rows]})
+    return {"archived": len(rows)}
 
 
 @router.post("/fin/payees/{payee_id}")

@@ -170,6 +170,16 @@ async function tab(p, name) {
   await h.locator('.row', { hasText: 'Мастерская холстов' }).getByText(/12\s000/).waitFor()
   await h.screenshot({ path: `${shots}/fin-summary.png`, fullPage: true })
 
+  // HEAD 20.11: «этих можно убрать, оставить только актуальных» — кого нет в команде, в архив пачкой
+  for (const n of ['Радослав', 'Захар']) await call(1000, '/fin/payees', { name: n, grp: 'core', scheme: 'manual', pay_rule: 'month' })
+  await h.locator('.segf').getByRole('button', { name: 'Люди' }).click()
+  await h.getByText(/Убрать в архив тех, кого нет в команде · 2/).click()
+  await h.locator('.tidy label', { hasText: 'Захар' }).waitFor()
+  await h.locator('.tidy').screenshot({ path: `${shots}/fin-arhiv.png` })
+  await h.locator('.tidy').getByRole('button', { name: 'В архив · 2' }).click()
+  await h.locator('summary', { hasText: 'Архив · 2' }).waitFor()
+  assert.equal(await h.locator('.card > .row', { hasText: 'Радослав' }).count(), 0, 'архивные — не в основном списке')
+
   // 6. Плотник видит «Мои выплаты»: выплачено 12 000, чужих сумм нет
   await tab(w, 'Кабинет')
   await w.getByText('Мои выплаты').waitFor()
