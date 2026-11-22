@@ -8,3 +8,4 @@ google-auth==2.37.0
 requests==2.32.3
 cryptography==44.0.0
 anthropic==2.6.0
+pillow==11.1.0

@@ -45,7 +45,14 @@ class FakeDrive:
         return i
 
     def resumable(self, parent, name, mime, size, origin):
-        PENDING["next"] = {"parents": [parent], "size": str(size), "mimeType": mime, "data": b"x" * size}
+        data = b"x" * size
+        if "@100x" in name:   # эскиз-PNG, которому Диск не дал миниатюру (HEAD 22.11): настоящая картинка, миниатюру делает приложение
+            from io import BytesIO
+            from PIL import Image, ImageDraw
+            im = Image.new("RGBA", (2400, 1400), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+            d.ellipse((300, 150, 2100, 1250), fill=(230, 0, 65, 255)); d.rectangle((900, 500, 1500, 900), fill=(20, 20, 30, 255))
+            buf = BytesIO(); im.save(buf, "PNG"); data = buf.getvalue()
+        PENDING["next"] = {"parents": [parent], "size": str(size), "mimeType": mime, "data": data, "name": name}
         return "https://upload.example/session"
 
     def meta(self, fid):
@@ -67,7 +74,7 @@ class FakeDrive:
             a, b = map(int, rng.split("=")[1].split("-"))
             d = d[a:b + 1]
         yield d
-    def thumbnail(self, fid): return STORE[fid]["data"]
+    def thumbnail(self, fid): return None if "@100x" in STORE[fid].get("name", "") else STORE[fid]["data"]
 
     def pdf_from_html(self, parent, name, html):   # паспорт сделки (closing.save_pdf): PDF — в «ДОКУМЕНТЫ» сделки
         return self.upload(parent, name, html.encode(), "application/pdf")

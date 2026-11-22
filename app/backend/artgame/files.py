@@ -9,6 +9,8 @@ import hmac
 import os
 import tempfile
 import re
+import sys
+import threading
 import time
 from pathlib import Path
 from urllib.parse import quote
@@ -303,7 +305,42 @@ def content(file_id: int, exp: int, sig: str, request: Request, dl: int = 0):
 THUMBS = Path(os.environ.get("ARTGAME_THUMB_DIR") or Path(tempfile.gettempdir()) / "artgame-thumbs")
 
 
-def _thumb_cached(drive_id: str) -> bytes | None:
+OWN_MAX_BYTES = 40 * 1024 * 1024    # своя миниатюра: файл не больше 40 МБ
+OWN_MAX_PIXELS = 60_000_000         # и не больше 60 млн точек (иначе серверу не хватит памяти) — тогда на экране значок файла
+_own_lock = threading.Lock()        # по одной картинке за раз: большой PNG в памяти — сотни МБ
+
+
+def _own_thumb(drive_id: str, size: int | None) -> bytes | None:
+    """Диск миниатюру не дал (HEAD 22.11: PNG эскизов в карточке проекта — значок «?») — делаем сами из файла."""
+    if size and size > OWN_MAX_BYTES:
+        return None
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+        Image.MAX_IMAGE_PIXELS = OWN_MAX_PIXELS
+        with _own_lock:
+            raw = b"".join(drive.Drive().stream(drive_id))
+            if len(raw) > OWN_MAX_BYTES:
+                return None
+            im = Image.open(BytesIO(raw))
+            if im.width * im.height > OWN_MAX_PIXELS:
+                return None
+            im.thumbnail((480, 480))
+            if im.mode in ("RGBA", "LA", "P"):   # прозрачный фон — на белый, как у миниатюр Диска
+                im = im.convert("RGBA")
+                bg = Image.new("RGB", im.size, (255, 255, 255))
+                bg.paste(im, mask=im.split()[-1])
+                im = bg
+            out = BytesIO()
+            im.convert("RGB").save(out, "JPEG", quality=82)
+            return out.getvalue()
+    except Exception as e:  # noqa: BLE001 — не картинка, слишком большая, Диск недоступен: будет значок файла
+        print("own thumb:", drive_id, e, file=sys.stderr)
+        return None
+
+
+def _thumb_cached(drive_id: str, mime: str | None = None, size: int | None = None) -> bytes | None:
     """Миниатюра с Диска — один раз, дальше с диска сервера (HEAD 16.11 «приложение зависает»: галерея каждый раз
     дёргала Диск дважды на каждое фото). Файл на Диске не меняется — id тот же, миниатюра та же."""
     p = THUMBS / (re.sub(r"[^A-Za-z0-9_-]", "", drive_id) + ".jpg")
@@ -313,6 +350,8 @@ def _thumb_cached(drive_id: str) -> bytes | None:
     except OSError:
         pass
     data = drive.Drive().thumbnail(drive_id)
+    if not data and (mime or "").startswith("image/"):
+        data = _own_thumb(drive_id, size)
     if data:
         try:
             THUMBS.mkdir(parents=True, exist_ok=True)
@@ -328,7 +367,7 @@ def _thumb_cached(drive_id: str) -> bytes | None:
 def thumb(file_id: int, exp: int, sig: str):
     check_sig(file_id, "thumb", exp, sig)
     f = _ready(file_id)
-    data = _thumb_cached(f["drive_id"])
+    data = _thumb_cached(f["drive_id"], f.get("mime"), f.get("size"))
     if data is None:
         raise HTTPException(404, "no thumbnail")
     return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})

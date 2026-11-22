@@ -227,3 +227,27 @@ def test_photo_upload_does_not_hold_db(client, fake, monkeypatch):
     client.post("/api/objects/731/photos", json={"client_uid": uid, "data": JPEG}, headers=hdr(2000))
     client.post("/api/objects/731/photos", json={"client_uid": uid, "data": JPEG}, headers=hdr(2000))
     assert len(seen) == 3
+
+
+def test_own_thumb_when_drive_has_none(client, fake, monkeypatch, tmp_path):
+    """HEAD 22.11: PNG эскизов в карточке проекта — значок «?»: Диск не дал миниатюру. Делаем сами; слишком большой — честный 404."""
+    import base64
+    from io import BytesIO
+
+    from PIL import Image
+    from artgame import files as files_mod
+    monkeypatch.setattr(files_mod, "THUMBS", tmp_path)
+    monkeypatch.setattr(FakeDrive, "thumbnail", lambda self, fid: None)
+    setup_people(client)
+    buf = BytesIO()
+    Image.new("RGBA", (1600, 900), (230, 0, 65, 0)).save(buf, "PNG")   # прозрачный PNG, как эскиз
+    png = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    f = client.post("/api/objects/731/photos", json={"client_uid": str(uuid.uuid4()), "data": png}, headers=hdr(2000)).json()
+    r = client.get(f["thumb"])
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    im = Image.open(BytesIO(r.content))
+    assert im.size == (480, 270) and im.getpixel((5, 5))[0] > 240   # уменьшено, прозрачное — на белом
+    # слишком много точек — миниатюры нет, экран покажет значок файла
+    monkeypatch.setattr(files_mod, "OWN_MAX_PIXELS", 1000)
+    f2 = client.post("/api/objects/731/photos", json={"client_uid": str(uuid.uuid4()), "data": png + "A"}, headers=hdr(2000)).json()
+    assert client.get(f2["thumb"]).status_code == 404

@@ -103,6 +103,14 @@ function MoveFile({ f, from, onMoved }) {
 }
 
 // Галерея проекта (HEAD 08.11, «Проекты» и «Объекты» — один раздел): эскизы, фото с объекта, видео, продакшн, документы.
+// Миниатюра файла; не загрузилась (HEAD 22.11: у PNG эскизов был значок «?») — аккуратный значок с типом файла
+function Thumb({ f }) {
+  const [bad, setBad] = useState(false)
+  if (f.thumb && !bad) return <img src={f.thumb} alt="" loading="lazy" onError={() => setBad(true)} />
+  const ext = (f.name || '').split('.').pop()
+  return <span className={f.thumb ? 'mext' : ''}>{isVideo(f) ? '▶' : f.thumb && ext.length <= 4 ? ext.toUpperCase() : '📄'}</span>
+}
+
 export function Gallery({ obj, me, start = 'design', only, skip = [], bare = false, top = null }) {
   const [kind, setKind] = useState(start)
   const [list, setList] = useState(null)
@@ -152,7 +160,7 @@ export function Gallery({ obj, me, start = 'design', only, skip = [], bare = fal
     {!list ? <p className="muted">Загрузка…</p> : !list.length ? <p className="muted small">{empty[kind] || 'Пока пусто.'}</p> : <>
       {pics.length > 0 && <div className="grid">{pics.map(f => <button key={f.id} className="gpic" onClick={() => setOpen(f)}><img src={f.thumb} alt={f.name} loading="lazy" /></button>)}</div>}
       {list.filter(f => !grid || !f.thumb).map(f => <div key={f.id} className="mitem">
-        <button className="mthumb" onClick={() => setOpen(f)}>{f.thumb ? <img src={f.thumb} alt="" loading="lazy" /> : <span>{isVideo(f) ? '▶' : '📄'}</span>}</button>
+        <button className="mthumb" onClick={() => setOpen(f)}><Thumb f={f} /></button>
         <div className="mbody"><a onClick={() => setOpen(f)}><b>{f.media_type === 'reels' ? '🎬 ' : f.media_type === 'video' ? '▶ ' : ''}{f.name}</b></a>{kind === 'design' && /утвержд/i.test(f.note || '') && <i className="okmark small"> ✓ утверждён</i>}<br />
           <span className="muted small">{f.size ? size(f.size) + ' · ' : ''}{f.by} · {new Date(f.created_at).toLocaleDateString('ru-RU')}{kind === 'video' && f.review === 'approved' ? ' · в Продакшн' : ''}</span></div>
         <button className="ghost mini" aria-label="Скачать" onClick={() => download(f)}>⬇</button>
