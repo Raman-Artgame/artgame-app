@@ -695,3 +695,26 @@ def test_alina_table_payments(client, monkeypatch):
     with db.pool.connection() as conn, conn.transaction():
         assert fin_bx.import_payments(conn) == {"deals": 1, "added": 0, "changed": 0}
     assert dm.card(deal(1091, stage="UC_BMKDS4", opp=22_160_000, **late))["received"] == 22_160_000
+    # HEAD 22.11 «я подтверждаю»: 075 отмечает ноябрьские оплаты по таблице Алины сверенными; сверенную HEAD сам — не трогает
+    sql75 = (Path(__file__).parents[1] / "migrations" / "075_alina_nov_checked.sql").read_text()
+    alina = [x for x in client.get("/api/fin/payments/check", headers=hdr(1000)).json() if "по таблице Алины" in x["note"]]
+    assert sorted((x["deal_id"], x["op_date"], x["amount"]) for x in alina) == [
+        (981, "2026-11-03", 100000), (981, "2026-11-05", 100000), (981, "2026-11-09", 100000), (981, "2026-11-10", 100000),
+        (981, "2026-11-12", 50000), (1091, "2026-11-16", 5260000), (1693, "2026-11-12", 150000)]
+    own = next(x["id"] for x in alina if x["deal_id"] == 1693)
+    assert client.post(f"/api/fin/ledger/{own}/check", headers=hdr(1000)).json() == {"ok": True}
+    q_log = "SELECT count(*) AS n FROM audit_log WHERE action='client_payment_check' AND person_id IS NULL"
+    with db.pool.connection() as conn:
+        was = conn.execute("SELECT checked_at, checked_by FROM fin_ledger WHERE id=%s", (own,)).fetchone()
+        conn.execute(sql75)
+        assert conn.execute(q_log).fetchone()["n"] == 6   # 981 ×5 и 1091; 833 и 1273 в этой базе нет
+        assert conn.execute("SELECT checked_at, checked_by FROM fin_ledger WHERE id=%s", (own,)).fetchone() == was
+        snap = conn.execute("SELECT id, status, checked_at FROM fin_ledger ORDER BY id").fetchall()
+        conn.execute(sql75)   # повторно — ничего
+        assert conn.execute("SELECT id, status, checked_at FROM fin_ledger ORDER BY id").fetchall() == snap
+        assert conn.execute(q_log).fetchone()["n"] == 6
+    assert [x for x in client.get("/api/fin/payments/check", headers=hdr(1000)).json() if "по таблице Алины" in x["note"]] == []
+    c = dm.card(deal(1091, stage="UC_BMKDS4", opp=22_160_000, **late))
+    assert (c["received"], c["on_check"]) == (22_160_000, 0)
+    c = dm.card(deal(981, stage="UC_BMKDS4", opp=5_650_000, **{A1: "5645000|KZT", D1: "2026-08-01T03:00:00+03:00"}))
+    assert (c["received"], c["debt"], c["on_check"]) == (5_125_000, 525_000, 0)
