@@ -179,6 +179,41 @@ def head_approvals(now: datetime | None = None) -> int:
     return sent
 
 
+def design_wait_remind(now: datetime | None = None) -> int:
+    """«Ждём клиента» в дизайне (HEAD 22.11): через 7 дней ожидания МОП сделки получает одно напоминание.
+    МОП не нашёлся в приложении или без Telegram — напоминание HEAD."""
+    from .design import WAIT_REMIND_DAYS
+    now = (now or datetime.now(timezone.utc)).astimezone(TZ)
+    if not HOURS[0] <= now.hour < HOURS[1]:
+        return 0
+    sent = 0
+    with db.pool.connection() as conn:
+        rows = conn.execute("""SELECT * FROM design_wait WHERE ended_at IS NULL AND reminded_at IS NULL
+                               AND (started_at AT TIME ZONE 'Asia/Almaty')::date <= %s""",
+                            (now.date() - timedelta(days=WAIT_REMIND_DAYS),)).fetchall()
+        heads = conn.execute("SELECT id, tg_id FROM people WHERE status='active' AND role_code='head' AND tg_id IS NOT NULL ORDER BY id").fetchall()
+        for w in rows:
+            mop = conn.execute("SELECT id, tg_id FROM people WHERE status='active' AND tg_id IS NOT NULL AND bitrix_user_id=%s",
+                               (w["mop_bx"],)).fetchone() if w["mop_bx"] else None
+            to = [mop] if mop else heads[:1]
+            days = (now.date() - w["started_at"].astimezone(TZ).date()).days
+            text = (f"⏸ Дизайн ждёт клиента {days} дн: {_title({'id': w['deal_id'], 'title': w['title']})}.\n"
+                    f"Причина: {w['reason']}.\nНапомни клиенту в Битриксе; ответил — дизайнер жмёт «Клиент ответил».")
+            ok = False
+            for r in to:
+                try:
+                    SEND(r["tg_id"], text)
+                    ok = True
+                except Exception as ex:  # noqa: BLE001
+                    print(f"design wait {w['id']}: telegram {ex}")
+            if ok:
+                conn.execute("UPDATE design_wait SET reminded_at=now() WHERE id=%s", (w["id"],))
+                db.audit(conn, to[0]["id"], "notify", "design_wait", w["id"], {"keys": [f"design_wait:{w['id']}"]})
+                conn.commit()
+                sent += 1
+    return sent
+
+
 def main():
     if not settings.bot_token:
         print("ARTGAME_BOT_TOKEN не задан — пропуск")
@@ -193,6 +228,10 @@ def main():
         print(f"approvals={head_approvals()}")
     except Exception as ex:  # noqa: BLE001
         print(f"approvals: {ex}")
+    try:
+        print(f"design_wait={design_wait_remind()}")
+    except Exception as ex:  # noqa: BLE001
+        print(f"design_wait: {ex}")
 
 
 if __name__ == "__main__":

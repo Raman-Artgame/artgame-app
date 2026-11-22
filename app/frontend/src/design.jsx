@@ -56,8 +56,11 @@ const today = () => new Date(new Date().toDateString())
 const daysLeft = s => s ? Math.round((new Date(s) - today()) / 864e5) : null
 // «Горит» (HEAD 09.11) — только срок и срочность: просрочено, сегодня, завтра, «Срочный заказ», второй круг правок.
 // Нет дизайнера, размера или срока — не «горит», а «Назначить» (у Главного дизайнера и HEAD).
+// «Ждём клиента» (HEAD 22.11): сделка не горит, срок — с учётом дней ожидания (deadline_eff).
+const dl = x => x.deadline_eff || x.deadline
 function hot(x) {
-  const d = daysLeft(x.deadline), r = []
+  if (x.wait) return []
+  const d = daysLeft(dl(x)), r = []
   if (d != null && d < 0) r.push('срок прошёл')
   else if (d === 0) r.push('срок сегодня')
   else if (d === 1) r.push('срок завтра')
@@ -88,6 +91,7 @@ function Deals() {
   if (e) return <div className="card muted">{e}</div>
   if (!d) return <div className="card muted">Загрузка…</div>
   const fire = d.deals.map(x => ({ x, why: hot(x) })).filter(f => f.why.length)
+  const waiting = d.deals.filter(x => x.wait).sort((a, b) => b.wait.days - a.wait.days)
   const todo = d.can_assign ? d.deals.map(x => ({ x, why: lacks(x) })).filter(f => f.why.length) : []
   const stages = d.stages.filter(s => code(s.id) !== 'WON')
   const v = view || (fire.length ? 'fire' : 'stages')
@@ -95,14 +99,15 @@ function Deals() {
   const Card = ({ x, why, need }) => { const g = GUIDE[code(x.stage)] || {}
     const i = stages.findIndex(s => s.id === x.stage)
     return <div className="dzcard" style={{ '--sc': g.color || 'var(--line)' }} onClick={() => setOpen(x)}>
-      <div className="dztop"><span className="tag">№ {x.id}</span><Due s={x.deadline} /></div>
+      <div className="dztop"><span className="tag">№ {x.id}</span>{x.wait ? <span className="due wait">⏳ ждём {x.wait.days} дн</span> : <Due s={dl(x)} />}</div>
       <b className="dztitle">{x.title || 'Сделка ' + x.id}</b>
       <div className="small muted">{[x.designer || 'дизайнер не назначен', x.size ? x.size.toUpperCase() + ' · ' + String(x.units).replace('.', ',') + ' ед.' : '', x.city].filter(Boolean).join(' · ')}</div>
+      {x.wait && <div className="small dzwait">{x.wait.reason}</div>}
       {(why?.length || need?.length) ? <div>{(why || []).map(w => <span key={w} className="miss hotm">{w}</span>)}{(need || []).map(w => <span key={w} className="miss">{w}</span>)}</div> : null}
       <div className="dzst"><span className="dzdots">{stages.map((s, k) => <i key={s.id} className={k < i ? 'done' : k === i ? 'on' : ''} />)}</span>
         <span className="small muted">{stages[i]?.name || x.stage_name}</span></div>
     </div> }
-  const tabs = [['fire', '🔥 Горит', fire.length], ...(d.can_assign ? [['todo', 'Назначить', todo.length]] : []), ['stages', 'По стадиям', d.deals.length]]
+  const tabs = [['fire', '🔥 Горит', fire.length], ...(d.can_assign ? [['todo', 'Назначить', todo.length]] : []), ['wait', '⏳ Ждём клиента', waiting.length], ['stages', 'По стадиям', d.deals.length]]
   return <>
     <div className="card dzhero">
       <div className="head"><h2>Воронка «Дизайн РК»</h2><button className="ghost mini" onClick={() => { setD(null); load(1) }}>Обновить</button></div>
@@ -113,6 +118,9 @@ function Deals() {
     {v === 'fire' && <div className="card dzfire"><h3>🔥 Горит · {fire.length}</h3>
       <p className="small muted">Срок прошёл, сегодня или завтра, срочный заказ, второй круг правок. Берётся первым.</p>
       {fire.length ? <div className="dzgrid">{fire.map(f => <Card key={f.x.id} x={f.x} why={f.why} />)}</div> : <p className="small muted">Ничего не горит.</p>}</div>}
+    {v === 'wait' && <div className="card dzwaitc"><h3>⏳ Ждём клиента · {waiting.length}</h3>
+      <p className="small muted">Клиент не отвечает — сделка не горит и просрочка не копится. Через 7 дней МОП получает напоминание. Ответил — открой сделку и нажми «Клиент ответил»: срок сдвинется на дни ожидания.</p>
+      {waiting.length ? <div className="dzgrid">{waiting.map(x => <Card key={x.id} x={x} />)}</div> : <p className="small muted">Никого не ждём.</p>}</div>}
     {v === 'todo' && <div className="card dztodo"><h3>Назначить · {todo.length}</h3>
       <p className="small muted">Не хватает дизайнера, размера или срока. Нажми на сделку и заполни.</p>
       {todo.length ? <div className="dzgrid">{todo.map(f => <Card key={f.x.id} x={f.x} need={f.why} />)}</div> : <p className="small muted">Все сделки назначены.</p>}</div>}
@@ -153,6 +161,9 @@ function DealSheet({ x, d, team, onClose, onDone }) {
     setBusy(true)
     api(`/design/deals/${x.id}`, { method: 'POST', body: b }).then(onDone, ex => { setMsg(ex.message); setBusy(false) })
   }
+  const [why, setWhy] = useState(null)
+  const act = (path, body) => { setBusy(true); setMsg('')
+    api(`/design/deals/${x.id}/${path}`, { method: 'POST', body }).then(onDone, ex => { setMsg(ex.message); setBusy(false) }) }
   const won = d.stages.find(s => s.name.toUpperCase() === 'УТВЕРЖДЕНО')?.id
   const bxu = bxLink(portal, 'deal', x.id)
   return <Sheet title={x.title || 'Сделка ' + x.id} onClose={onClose}>
@@ -160,6 +171,18 @@ function DealSheet({ x, d, team, onClose, onDone }) {
     {bxu && <div className="dealbtns dzcontact">
       <a className="btn" href={bxu} target="_blank" rel="noreferrer">Связаться с клиентом · звонок и WhatsApp в Битриксе</a></div>}
     {bxu && <p className="small muted">Звонок и переписка идут из карточки Битрикса — так всё остаётся в сделке.</p>}
+    {x.wait ? <div className="dzwaitbox">
+      <b>⏳ Ждём клиента {x.wait.days} дн</b> <span className="small muted">с {dmy(x.wait.since)}</span>
+      <div className="small">{x.wait.reason}</div>
+      <button disabled={busy} onClick={() => act('resume')}>Клиент ответил — вернуть в работу</button>
+      {x.wait.days > 0 && <p className="small muted">Срок сдвинется на {x.wait.days} дн.</p>}</div>
+      : x.stage !== won && (why == null
+        ? <button className="ghost" disabled={busy} onClick={() => setWhy('')}>⏳ Ждём клиента</button>
+        : <div className="dzwaitbox"><label className="muted">Чего ждём от клиента?</label>
+          <input autoFocus value={why} placeholder="например: молчит по эскизу, ждём размеры стены" onChange={e => setWhy(e.target.value)} />
+          <div style={{ display: 'flex', gap: 8 }}><button style={{ flex: 2 }} disabled={busy || why.trim().length < 3} onClick={() => act('wait', { reason: why.trim() })}>Ждём клиента</button>
+            <button className="ghost" style={{ flex: 1 }} onClick={() => setWhy(null)}>Отмена</button></div>
+          <p className="small muted">Сделка уйдёт из «Горит» в «Ждём клиента», просрочка не копится. Через 7 дней МОП получит напоминание.</p></div>)}
     <label className="muted">Стадия</label>
     <select value={v.stage} onChange={e => set({ ...v, stage: e.target.value })}>{d.stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
     {v.stage === won && v.stage !== x.stage && <p className="small why">Перед «УТВЕРЖДЕНО» нужны размер, дизайнер и ссылка на утверждённый эскиз.</p>}
@@ -174,6 +197,7 @@ function DealSheet({ x, d, team, onClose, onDone }) {
       onClick={() => set({ ...v, size: s.code })}>{s.title} · {String(s.units).replace('.', ',')}</button>)}</div>
     <label className="muted">Срок дизайна</label>
     <input type="date" value={v.deadline} onChange={e => set({ ...v, deadline: e.target.value })} />
+    {x.waited_days > 0 && x.deadline_eff && <p className="small muted">С учётом ожидания клиента (+{x.waited_days} дн): до {dmy(x.deadline_eff)}.</p>}
     <label className="muted">Папка проекта</label>
     <input value={v.folder} placeholder="ссылка на Диск" onChange={e => set({ ...v, folder: e.target.value })} />
     <label className="muted">Утверждённый эскиз</label>
