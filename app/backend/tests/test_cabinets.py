@@ -213,3 +213,39 @@ def test_designer_sees_own_assigned_without_field(client, dz):
     bx._cache.clear()
     mine = {d["id"] for d in client.get("/api/design/deals", headers=hdr(7100)).json()["deals"]}
     assert mine == {1648, 1649}   # своё по полю + пустое поле, ответственный — он; назначенное другому — нет
+
+
+def test_design_wait_client(client, dz, monkeypatch):
+    """HEAD 22.11: «Ждём клиента» — из «Горит» в отдельный блок, через 7 дней МОП напоминание, «Клиент ответил» сдвигает срок."""
+    from datetime import date, datetime, timedelta, timezone
+    from artgame import notify
+    ids, calls = dz
+    DEALS["1648"]["UF_CRM_ARTGAME_DESIGN_DEADLINE"] = (date.today() - timedelta(days=1)).isoformat()
+    bx._cache.clear()
+    # чужую сделку дизайнер не ставит на ожидание; причина обязательна
+    assert client.post("/api/design/deals/1647/wait", json={"reason": "молчит"}, headers=hdr(7100)).status_code == 403
+    assert client.post("/api/design/deals/1648/wait", json={"reason": ""}, headers=hdr(7100)).status_code == 422
+    assert client.post("/api/design/deals/1648/wait", json={"reason": "клиент молчит по эскизу"}, headers=hdr(7100)).json()["ok"]
+    assert client.post("/api/design/deals/1648/wait", json={"reason": "ещё раз"}, headers=hdr(7100)).status_code == 409
+    x = next(d for d in client.get("/api/design/deals", headers=hdr(7100)).json()["deals"] if d["id"] == 1648)
+    assert x["wait"]["reason"] == "клиент молчит по эскизу" and x["wait"]["days"] == 0
+    assert not calls   # в Битрикс ничего не пишем
+    # ждём 8 дней: МОП (Битрикс 4565) получает одно напоминание
+    mop = client.post("/api/register", json={"full_name": "МОП"}, headers=hdr(4565)).json()["id"]
+    client.post(f"/api/people/{mop}", json={"role_code": "mop", "bitrix_user_id": 4565}, headers=hdr(1000))
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE design_wait SET started_at = now() - interval '8 days' WHERE deal_id=1648")
+    sent = []
+    monkeypatch.setattr(notify, "SEND", lambda tg, text: sent.append((tg, text)))
+    noon = datetime.now(timezone.utc).replace(hour=7)   # 12:00 Алматы
+    assert notify.design_wait_remind(noon) == 1 and sent[0][0] == 4565 and "клиент молчит" in sent[0][1]
+    assert notify.design_wait_remind(noon) == 0   # один раз
+    x = next(d for d in client.get("/api/design/deals", headers=hdr(7000)).json()["deals"] if d["id"] == 1648)
+    assert x["wait"]["days"] == 8
+    # клиент ответил — снова в работе, срок сдвинут на 8 дней
+    r = client.post("/api/design/deals/1648/resume", headers=hdr(7100)).json()
+    assert r["days"] == 8 and r["total"] == 8
+    assert client.post("/api/design/deals/1648/resume", headers=hdr(7100)).status_code == 409
+    x = next(d for d in client.get("/api/design/deals", headers=hdr(7100)).json()["deals"] if d["id"] == 1648)
+    assert x["wait"] is None and x["waited_days"] == 8
+    assert x["deadline_eff"] == (date.today() + timedelta(days=7)).isoformat() and x["deadline"] == (date.today() - timedelta(days=1)).isoformat()

@@ -8,7 +8,8 @@
 - Каталог референсов: 1–2 исполнителя → HEAD «утверждаю» → pay.design.catalog, двоим пополам (начисление в ФОТ месяца).
 Запись в Битрикс — тем же вебхуком, что у МОП (bxw.CALL), только поля дизайна, каждая запись в audit_log и сверяется.
 """
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -84,6 +85,27 @@ def sync_units(conn, rows: list[dict], v: dict, local: dict, people: dict) -> in
     return added
 
 
+TZ = ZoneInfo("Asia/Almaty")
+WAIT_REMIND_DAYS = 7
+
+
+def _day(t) -> date:
+    return t.astimezone(TZ).date()
+
+
+def _waits(conn, ids: list[int]) -> dict:
+    """«Ждём клиента» (HEAD 22.11): {deal_id: {"open": открытое ожидание или None, "days": всего дней ожидания}}.
+    Дни ожидания сдвигают срок дизайна в приложении; в Битриксе срок не трогаем."""
+    out: dict = {}
+    today = datetime.now(TZ).date()
+    for r in conn.execute("SELECT * FROM design_wait WHERE deal_id = ANY(%s) ORDER BY started_at", (ids,)).fetchall():
+        w = out.setdefault(r["deal_id"], {"open": None, "days": 0})
+        w["days"] += ((_day(r["ended_at"]) if r["ended_at"] else today) - _day(r["started_at"])).days
+        if not r["ended_at"]:
+            w["open"] = r
+    return out
+
+
 def month_start(ym: str | None = None) -> date:
     t = date.today() if not ym else date(int(ym[:4]), int(ym[5:7]), 1)
     return t.replace(day=1)
@@ -109,6 +131,7 @@ def deals(fresh: int = 0, p: dict = Depends(active)):
         local = {r["deal_id"]: r["size"] for r in conn.execute("SELECT deal_id, size FROM design_sizes WHERE deal_id = ANY(%s)", (ids,)).fetchall()}
         sync_units(conn, won, v, local, people)
         rounds = _rounds(conn, ids)
+        waits = _waits(conn, ids)
     out = []
     bxn = {u["id"]: u["name"] for u in bx_designers()} if any(int(d.get(F_DESIGNER) or 0) not in people for d in rows if d.get(F_DESIGNER)) else {}
     for d in rows:
@@ -118,12 +141,19 @@ def deals(fresh: int = 0, p: dict = Depends(active)):
         if p["role_code"] not in ALL and uid != me_bx and (uid or int(d.get("ASSIGNED_BY_ID") or 0) != me_bx):
             continue
         size = _size(d, local)
+        w = waits.get(int(d["ID"])) or {"open": None, "days": 0}
+        dl = _date(d.get(F_DEADLINE))
+        wo = w["open"]
         out.append({"id": int(d["ID"]), "title": d.get("TITLE") or "", "stage": d.get("STAGE_ID"),
                     "stage_name": (st.get(d.get("STAGE_ID")) or {}).get("name", d.get("STAGE_ID")),
                     "designer_bx": uid, "designer": (people.get(uid) or {}).get("full_name") or bxn.get(uid), "size": size,
                     "units": unit_of(v, size), "deadline": _date(d.get(F_DEADLINE)), "folder": d.get(F_FOLDER) or "",
                     "layout": d.get(F_LAYOUT) or "", "rounds": rounds.get(int(d["ID"]), 0), "city": bx.city_name(d.get(bx.CITY)),
-                    "manager_bx": int(d.get("ASSIGNED_BY_ID") or 0)})
+                    "manager_bx": int(d.get("ASSIGNED_BY_ID") or 0),
+                    "wait": {"since": _day(wo["started_at"]).isoformat(), "reason": wo["reason"],
+                             "days": (datetime.now(TZ).date() - _day(wo["started_at"])).days} if wo else None,
+                    "waited_days": w["days"],
+                    "deadline_eff": (date.fromisoformat(dl) + timedelta(days=w["days"])).isoformat() if dl and w["days"] else dl})
     stages = sorted([{"id": k, "name": s["name"], "sort": s["sort"]} for k, s in st.items()
                      if k.startswith(f"C{CAT}:") and (s["semantic"] == "process" or k == WON)], key=lambda x: x["sort"])
     return {"deals": out, "stages": stages, "sizes": [{"code": s, "title": s.upper(), "units": unit_of(v, s)} for s in SIZES],
@@ -168,7 +198,7 @@ def update(deal_id: int, b: DealIn, p: dict = Depends(active)):
         raise HTTPException(404, "Это не сделка воронки «Дизайн РК»")
     lead = p["role_code"] in ALL
     cur_uid = int(d.get(F_DESIGNER) or 0) or None
-    if not lead and cur_uid != bx.bx_id(p):
+    if not lead and cur_uid != bx.bx_id(p) and (cur_uid or int(d.get("ASSIGNED_BY_ID") or 0) != bx.bx_id(p)):
         raise HTTPException(403, "Это задача другого дизайнера")
     if not lead and (b.designer_bx is not None or b.size is not None):
         raise HTTPException(403, "Дизайнера и размер назначает Главный дизайнер")
@@ -243,6 +273,55 @@ def update(deal_id: int, b: DealIn, p: dict = Depends(active)):
     if log["bx"] == "error":
         raise HTTPException(502, "Битрикс: " + log.get("error", "ошибка"))
     return {"ok": True, "bx": log["bx"], "round": log.get("round")}
+
+
+def _deal_for(deal_id: int, p: dict) -> dict:
+    """Сделка воронки дизайна, которую этот человек может вести: Главный дизайнер и HEAD — любую; дизайнер — свою
+    (по полю, а при пустом поле — где он ответственный)."""
+    need(p)
+    j = bx.read("crm.deal.get", {"id": deal_id}, fresh=True)
+    d = j.get("result", j) if isinstance(j, dict) else None
+    if not d or int(d.get("CATEGORY_ID") or -1) != CAT:
+        raise HTTPException(404, "Это не сделка воронки «Дизайн РК»")
+    if p["role_code"] not in ALL:
+        me, uid = bx.bx_id(p), int(d.get(F_DESIGNER) or 0) or None
+        if uid != me and (uid or int(d.get("ASSIGNED_BY_ID") or 0) != me):
+            raise HTTPException(403, "Это задача другого дизайнера")
+    return d
+
+
+class WaitIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=300)
+
+
+@router.post("/design/deals/{deal_id}/wait")
+def wait(deal_id: int, b: WaitIn, p: dict = Depends(active)):
+    """«Ждём клиента»: сделка уходит из «Горит», просрочка не копится, дни ожидания потом добавятся к сроку."""
+    d = _deal_for(deal_id, p)
+    if d.get("STAGE_ID") == WON:
+        raise HTTPException(409, "Сделка уже утверждена")
+    with db.pool.connection() as conn, conn.transaction():
+        if conn.execute("SELECT 1 FROM design_wait WHERE deal_id=%s AND ended_at IS NULL", (deal_id,)).fetchone():
+            raise HTTPException(409, "Уже ждём клиента")
+        row = conn.execute("""INSERT INTO design_wait (deal_id, title, mop_bx, reason, started_by) VALUES (%s,%s,%s,%s,%s) RETURNING id""",
+                           (deal_id, d.get("TITLE"), int(d.get("ASSIGNED_BY_ID") or 0) or None, b.reason.strip(), p["id"])).fetchone()
+        db.audit(conn, p["id"], "design_wait", "deal", deal_id, {"reason": b.reason.strip(), "wait_id": row["id"]})
+    return {"ok": True}
+
+
+@router.post("/design/deals/{deal_id}/resume")
+def resume(deal_id: int, p: dict = Depends(active)):
+    """«Клиент ответил»: сделка снова в работе, срок сдвигается на дни ожидания."""
+    _deal_for(deal_id, p)
+    with db.pool.connection() as conn, conn.transaction():
+        r = conn.execute("UPDATE design_wait SET ended_at=now(), ended_by=%s WHERE deal_id=%s AND ended_at IS NULL RETURNING started_at",
+                         (p["id"], deal_id)).fetchone()
+        if not r:
+            raise HTTPException(409, "Сделка и так в работе")
+        days = (datetime.now(TZ).date() - _day(r["started_at"])).days
+        total = _waits(conn, [deal_id]).get(deal_id, {}).get("days", 0)
+        db.audit(conn, p["id"], "design_resume", "deal", deal_id, {"days": days, "total": total})
+    return {"ok": True, "days": days, "total": total}
 
 
 @router.get("/design/units")
