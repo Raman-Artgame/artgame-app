@@ -305,39 +305,62 @@ def content(file_id: int, exp: int, sig: str, request: Request, dl: int = 0):
 THUMBS = Path(os.environ.get("ARTGAME_THUMB_DIR") or Path(tempfile.gettempdir()) / "artgame-thumbs")
 
 
-OWN_MAX_BYTES = 40 * 1024 * 1024    # своя миниатюра: файл не больше 40 МБ
-OWN_MAX_PIXELS = 60_000_000         # и не больше 60 млн точек (иначе серверу не хватит памяти) — тогда на экране значок файла
-_own_lock = threading.Lock()        # по одной картинке за раз: большой PNG в памяти — сотни МБ
+OWN_MAX_BYTES = 60 * 1024 * 1024    # своя миниатюра: файл не больше 60 МБ
+OWN_WAIT = 20                       # ждём очередь не дольше 20 с — иначе сейчас значок файла, превью подтянется позже
+NONE_TTL = 6 * 3600                 # «превью сделать нельзя» помним 6 часов, чтобы не качать файл при каждом показе
+_own_lock = threading.Lock()        # по одной картинке за раз
 
 
-def _own_thumb(drive_id: str, size: int | None) -> bytes | None:
-    """Диск миниатюру не дал (HEAD 22.11: PNG эскизов в карточке проекта — значок «?») — делаем сами из файла."""
+def _own_thumb(drive_id: str, size: int | None, p: Path) -> bytes | None:
+    """Диск миниатюру не дал (HEAD 22.11: PNG эскизов «@100x» на 470 млн точек — пусто) — делаем сами отдельным процессом
+    (artgame.thumb_worker). Не вышло — ставим отметку, чтобы не повторять при каждом показе карточки."""
+    import subprocess
+    none = p.with_suffix(".none")
+    try:
+        if time.time() - none.stat().st_mtime < NONE_TTL:
+            return None
+    except OSError:
+        pass
     if size and size > OWN_MAX_BYTES:
         return None
-    try:
-        from io import BytesIO
-
-        from PIL import Image
-        Image.MAX_IMAGE_PIXELS = OWN_MAX_PIXELS
-        with _own_lock:
-            raw = b"".join(drive.Drive().stream(drive_id))
-            if len(raw) > OWN_MAX_BYTES:
-                return None
-            im = Image.open(BytesIO(raw))
-            if im.width * im.height > OWN_MAX_PIXELS:
-                return None
-            im.thumbnail((480, 480))
-            if im.mode in ("RGBA", "LA", "P"):   # прозрачный фон — на белый, как у миниатюр Диска
-                im = im.convert("RGBA")
-                bg = Image.new("RGB", im.size, (255, 255, 255))
-                bg.paste(im, mask=im.split()[-1])
-                im = bg
-            out = BytesIO()
-            im.convert("RGB").save(out, "JPEG", quality=82)
-            return out.getvalue()
-    except Exception as e:  # noqa: BLE001 — не картинка, слишком большая, Диск недоступен: будет значок файла
-        print("own thumb:", drive_id, e, file=sys.stderr)
+    if not _own_lock.acquire(timeout=OWN_WAIT):
         return None
+    try:
+        try:
+            if p.stat().st_size:   # пока ждали очередь, соседний запрос уже сделал
+                return p.read_bytes()
+        except OSError:
+            pass
+        THUMBS.mkdir(parents=True, exist_ok=True)
+        src, dst = p.with_suffix(f".{os.getpid()}.src"), p.with_suffix(f".{os.getpid()}.out.jpg")
+        try:
+            n = 0
+            with src.open("wb") as fh:
+                for chunk in drive.Drive().stream(drive_id):
+                    n += len(chunk)
+                    if n > OWN_MAX_BYTES:
+                        raise ValueError("file too big")
+                    fh.write(chunk)
+            r = subprocess.run([sys.executable, "-m", "artgame.thumb_worker", str(src), str(dst)], capture_output=True, timeout=120,
+                               cwd=str(Path(__file__).resolve().parent.parent), env={**os.environ, "VIPS_CONCURRENCY": "1"})
+            if r.returncode or not dst.is_file() or not dst.stat().st_size:
+                raise ValueError((r.stderr or r.stdout or b"").decode(errors="replace")[-300:] or "no output")
+            return dst.read_bytes()
+        except Exception as e:  # noqa: BLE001 — не картинка, слишком большая, Диск недоступен: будет значок файла
+            print("own thumb:", drive_id, e, file=sys.stderr)
+            try:
+                none.write_bytes(b"")
+            except OSError:
+                pass
+            return None
+        finally:
+            for t in (src, dst):
+                try:
+                    t.unlink()
+                except OSError:
+                    pass
+    finally:
+        _own_lock.release()
 
 
 def _thumb_cached(drive_id: str, mime: str | None = None, size: int | None = None) -> bytes | None:
@@ -349,9 +372,16 @@ def _thumb_cached(drive_id: str, mime: str | None = None, size: int | None = Non
             return p.read_bytes()
     except OSError:
         pass
+    own = (mime or "").startswith("image/")
+    try:
+        skip = own and time.time() - p.with_suffix(".none").stat().st_mtime < NONE_TTL
+    except OSError:
+        skip = False
+    if skip:
+        return None
     data = drive.Drive().thumbnail(drive_id)
-    if not data and (mime or "").startswith("image/"):
-        data = _own_thumb(drive_id, size)
+    if not data and own:
+        data = _own_thumb(drive_id, size, p)
     if data:
         try:
             THUMBS.mkdir(parents=True, exist_ok=True)

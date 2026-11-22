@@ -105,10 +105,12 @@ function MoveFile({ f, from, onMoved }) {
 // Галерея проекта (HEAD 08.11, «Проекты» и «Объекты» — один раздел): эскизы, фото с объекта, видео, продакшн, документы.
 // Миниатюра файла; не загрузилась (HEAD 22.11: у PNG эскизов был значок «?») — аккуратный значок с типом файла
 function Thumb({ f }) {
-  const [bad, setBad] = useState(false)
-  if (f.thumb && !bad) return <img src={f.thumb} alt="" loading="lazy" onError={() => setBad(true)} />
+  const [st, setSt] = useState('')   // '' — грузится, 'ok', 'bad'
   const ext = (f.name || '').split('.').pop()
-  return <span className={f.thumb ? 'mext' : ''}>{isVideo(f) ? '▶' : f.thumb && ext.length <= 4 ? ext.toUpperCase() : '📄'}</span>
+  const badge = <span className={f.thumb ? 'mext' : ''}>{isVideo(f) ? '▶' : f.thumb && ext.length <= 4 ? ext.toUpperCase() : '📄'}</span>
+  if (!f.thumb || st === 'bad') return badge
+  // пока превью грузится (большой файл сервер готовит несколько секунд) — значок типа, а не пустой квадрат
+  return <>{st !== 'ok' && badge}<img src={f.thumb} alt="" style={st === 'ok' ? null : { position: 'absolute', opacity: 0 }} onLoad={() => setSt('ok')} onError={() => setSt('bad')} /></>
 }
 
 export function Gallery({ obj, me, start = 'design', only, skip = [], bare = false, top = null }) {

@@ -666,7 +666,7 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .viewer .vbtns { display: flex; gap: 8px; }
 .gabout { margin: 6px 0 10px; }
 .grid .gpic { padding: 0; border: 0; background: none; width: 100%; } .grid .gpic img { width: 100%; display: block; }
-.mitem .mthumb { padding: 0; border: 0; flex: none; }
+.mitem .mthumb { padding: 0; border: 0; flex: none; position: relative; }
 /* графики «Финансы → Обзор» (HEAD 09.11) */
 .chart { width: 100%; height: auto; display: block; }
 .chart .grid { stroke: var(--line2); stroke-width: 1; }

@@ -247,7 +247,17 @@ def test_own_thumb_when_drive_has_none(client, fake, monkeypatch, tmp_path):
     assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
     im = Image.open(BytesIO(r.content))
     assert im.size == (480, 270) and im.getpixel((5, 5))[0] > 240   # уменьшено, прозрачное — на белом
-    # слишком много точек — миниатюры нет, экран покажет значок файла
-    monkeypatch.setattr(files_mod, "OWN_MAX_PIXELS", 1000)
-    f2 = client.post("/api/objects/731/photos", json={"client_uid": str(uuid.uuid4()), "data": png + "A"}, headers=hdr(2000)).json()
+    # огромный PNG (120 млн точек, как «@100x» от дизайнеров): делается отдельным процессом, без гигабайтов памяти
+    import pyvips
+    big = pyvips.Image.black(12000, 10000, bands=3).new_from_image([230, 0, 65]).cast("uchar").copy(interpretation="srgb").pngsave_buffer()
+    f3 = client.post("/api/objects/731/photos", json={"client_uid": str(uuid.uuid4()),
+                                                      "data": "data:image/png;base64," + base64.b64encode(big).decode()}, headers=hdr(2000)).json()
+    r3 = client.get(f3["thumb"])
+    assert r3.status_code == 200 and Image.open(BytesIO(r3.content)).size == (480, 400)
+    # битый файл — миниатюры нет, экран покажет значок; отказ запомнен: второй показ файл с Диска не качает
+    bad = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"junk" * 20).decode()
+    f2 = client.post("/api/objects/731/photos", json={"client_uid": str(uuid.uuid4()), "data": bad}, headers=hdr(2000)).json()
     assert client.get(f2["thumb"]).status_code == 404
+    calls = []
+    monkeypatch.setattr(FakeDrive, "stream", lambda self, fid, rng=None: calls.append(fid) or iter([b""]))
+    assert client.get(f2["thumb"]).status_code == 404 and not calls
