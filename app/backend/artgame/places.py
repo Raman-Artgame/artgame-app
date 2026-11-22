@@ -118,7 +118,10 @@ def token(pid: int, code: str, now: float | None = None) -> str:
 
 def allowed(p: dict, code: str) -> bool:
     """Роль — текущая или любая из своих (две роли, HEAD 08.11): ссылка места живёт без заголовка «Я сейчас»."""
-    mine = {p["role_code"], *(p.get("roles") or []), *(p.get("extra_roles") or [])}
+    # и.о. (HEAD 22.11: у и.о. Главного «Книга главного» открывалась белым экраном) — по ссылке места человек приходит
+    # без «и.о.» (load_person), поэтому исполняемую роль учитываем здесь
+    act = p.get("acting_role")
+    mine = {p["role_code"], *(p.get("roles") or []), *(p.get("extra_roles") or []), *([act] if act and act != "head" else [])}
     return p["status"] == "active" and bool(mine & PLACES[code]["roles"])
 
 
@@ -332,8 +335,19 @@ def inject(html: bytes, code: str, p: dict) -> bytes:
 
 @router.get("/p/{code}/{tok}/{path:path}")
 def place_file(code: str, tok: str, path: str):
-    p = person_by_token(code, tok)
     path = path or "index.html"
+    try:
+        p = person_by_token(code, tok)
+    except HTTPException as e:
+        if path != "index.html" or e.status_code != 403:
+            raise
+        # вместо пустого белого экрана во фрейме (iPhone не показывает ответ-ошибку) — понятная страница
+        why = "Ссылка устарела." if e.detail == "link expired" else "Этот раздел не открыт для твоей роли."
+        return Response(('<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                         '</head><body style="margin:0;background:#0B0B0D;color:#F1F0EC;font:16px/1.5 system-ui,sans-serif;padding:24px">'
+                         f'<p><b>Раздел не открылся</b></p><p style="color:#A9A3AE">{why} Закрой приложение и открой заново. '
+                         'Не помогло — напиши в «Кабинет» → «Написать обращение».</p></body></html>').encode(),
+                        status_code=403, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
     if ".." in path.split("/") or path.startswith("_"):
         raise HTTPException(404)
     f = ROOT / code / (path + ".enc")
