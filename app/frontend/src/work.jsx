@@ -632,7 +632,8 @@ export function AppealView({ a }) {
       : a.kind === 'shift_late' ? <div className="small">с {d.start_time}, {fv('hours', d.hours)}{d.area_m2 ? ` · ${d.area_m2} м²` : ''}{d.workshop ? ` · ${d.workshop}` : ''} · {d.work_done}</div>
       : <div className="small">{money(d.amount)} · {a.category_title || d.category} · {d.paid_by === 'own' ? 'свои' : 'компании'}{d.note ? ` · ${d.note}` : ''}
         {a.receipt_url ? <> · <a href={a.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</div>}
-    {a.photo_url && <div className="pair"><a href={a.photo_full} target="_blank" rel="noreferrer"><img src={a.photo_url} alt="фото" /></a></div>}
+    {a.photos?.length > 0 ? <div className="pics">{a.photos.map((x, i) => <span key={i}><a href={x.full} target="_blank" rel="noreferrer"><img src={x.url} alt="фото" /></a></span>)}</div>
+      : a.photo_url && <div className="pair"><a href={a.photo_full} target="_blank" rel="noreferrer"><img src={a.photo_url} alt="фото" /></a></div>}
   </>
 }
 
@@ -677,6 +678,7 @@ function LateAppeal({ d, done, close }) {
     workshop: '', amount: '', category: d.categories[0]?.code, paid_by: 'own', note: '' })
   const [why, setWhy] = useState('')
   const [pic, setPic] = useState(null)
+  const [pics, setPics] = useState([])   // HEAD 22.11: к забытой смене — несколько фото, а не одно
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const shop = kind === 'shift_late' && !!v.workshop
@@ -687,7 +689,7 @@ function LateAppeal({ d, done, close }) {
     setBusy(true); setErr('')
     const base = { client_uid: uuid(), kind, why, day: v.day, object_id: shop ? 0 : v.object_id, zone_code: shop ? d.workshop_zone || 'print' : v.zone_code }
     const body = kind === 'shift_late' ? { ...base, start_time: v.start_time, hours: +v.hours, area_m2: v.area_m2 === '' || shop ? null : +v.area_m2, work_done: v.work_done,
-      workshop: shop ? v.workshop : null, photo: shop ? null : pic } : { ...base, amount: +v.amount, category: v.category, paid_by: v.paid_by, note: v.note, receipt: pic }
+      workshop: shop ? v.workshop : null, photos: shop ? [] : pics } : { ...base, amount: +v.amount, category: v.category, paid_by: v.paid_by, note: v.note, receipt: pic }
     try { await api('/appeals', { method: 'POST', body }); done('Обращение ушло: сначала куратору, потом HEAD.') } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }
   }
   return <div className="fixbox">
@@ -706,8 +708,7 @@ function LateAppeal({ d, done, close }) {
         <div><label className="muted small">Часов (до 48)</label><input inputMode="decimal" value={v.hours} onChange={e => set({ ...v, hours: num(e.target.value) })} /></div></div>
       {!shop && <><label className="muted small">Сделано, м²</label><input inputMode="decimal" value={v.area_m2} onChange={e => set({ ...v, area_m2: num(e.target.value) })} /></>}
       <label className="muted small">Что сделал</label><textarea rows={2} value={v.work_done} onChange={e => set({ ...v, work_done: e.target.value })} />
-      {!shop && <label className="photo snap add"><span>{pic ? '✓ Фото выбрано' : '🖼 Фото работы (по возможности)'}</span>
-        <input type="file" accept="image/*" hidden onChange={async e => { const f = e.target.files[0]; e.target.value = ''; f && setPic(await shrink(f)) }} /></label>}
+      {!shop && <MultiPick pics={pics} setPics={setPics} label="Фото работы (по возможности)" />}
     </> : <>
       <label className="muted small">Категория</label>
       <select value={v.category} onChange={e => set({ ...v, category: e.target.value })}>{d.categories.map(c => <option key={c.code} value={c.code}>{c.title}</option>)}</select>

@@ -172,3 +172,18 @@ def test_head_stars_for_lead_and_pro(client, monkeypatch):
     r = client.post(f"/api/appeals/{a['id']}/decide", json={"approve": True, "stars": 4}, headers=hdr(1000)).json()
     s = [x for x in client.get("/api/my", headers=hdr(3000)).json()["shifts"] if x["id"] == r["result_id"]][0]
     assert s["cur_stars"] == 4
+
+
+def test_late_shift_many_photos(client, monkeypatch):
+    """HEAD 22.11 (Ангелина): к забытой смене — несколько фото; после утверждения все они у смены."""
+    from artgame import drive
+    from test_files import JPEG, FakeDrive
+    ids = setup(client, monkeypatch)
+    monkeypatch.setattr(finance, "now_ym", lambda: "2026-11")
+    monkeypatch.setattr(drive, "Drive", FakeDrive)
+    a = late_shift(client, 2000, photos=[JPEG, JPEG, JPEG]).json()
+    assert len(a["photos"]) == 3 and a["photo_url"]
+    r = client.post(f"/api/appeals/{a['id']}/decide", json={"approve": True}, headers=hdr(1000)).json()
+    with db.pool.connection() as c:
+        s = c.execute("SELECT photo_after FROM shifts WHERE id=%s", (r["result_id"],)).fetchone()
+        assert s["photo_after"] and c.execute("SELECT count(*) AS n FROM shift_photos WHERE shift_id=%s", (r["result_id"],)).fetchone()["n"] == 2

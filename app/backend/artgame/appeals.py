@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from . import db, drive
 from .work import (DIRECT_SQL, HAS_CUR_SQL, SHOP, TZ, WORKSHOP_TITLE, check_workshop, Decision, RateIn, active, cats_for,
-                   STAR_ROLES, check_rate, check_zone, head_rate, is_trip, overlap, review_filter, shift_role, stage_of, _photo)
+                   STAR_ROLES, check_rate, check_zone, head_rate, _pre, is_trip, overlap, review_filter, shift_role, stage_of, _photo)
 
 router = APIRouter(prefix="/api")
 MAX_DAYS = 60
@@ -39,6 +39,7 @@ class AppealIn(BaseModel):
     area_m2: float | None = Field(default=None, ge=0)
     work_done: str | None = Field(default=None, max_length=2000)
     photo: str | None = Field(default=None, max_length=8_000_000)
+    photos: list[str] = Field(default_factory=list, max_length=12)   # HEAD 22.11: «можно добавить только 1 картинку» — несколько фото
     amount: float | None = Field(default=None, gt=0, le=100_000_000)
     category: str | None = None
     paid_by: Literal["own", "company"] = "own"
@@ -100,6 +101,14 @@ def _save_receipt(conn, p: dict, zone: str, object_id: int, amount: float, data_
 @router.post("/appeals")
 def add_appeal(b: AppealIn, p: dict = Depends(active)):
     from psycopg.types.json import Jsonb
+    pics = [x for x in ([b.photo] if b.photo else []) + b.photos if x and len(x) >= 30]
+    pres = []
+    if b.kind == "shift_late" and pics and b.object_id and not b.workshop:   # фото — на Диск до транзакции (16.11: база не ждёт Google)
+        with db.pool.connection() as conn:
+            fresh = not conn.execute("SELECT 1 FROM appeals WHERE client_uid=%s", (b.client_uid,)).fetchone()
+        if fresh:
+            pres = [_pre(p, b.object_id, b.client_uid, "appeal" if i == 0 else f"appeal{i}", x, "по обращению", zone=b.zone_code or "", past=True)
+                    for i, x in enumerate(pics)]
     with db.pool.connection() as conn, conn.transaction():
         dup = conn.execute("SELECT * FROM appeals WHERE client_uid=%s", (b.client_uid,)).fetchone()
         if dup:
@@ -155,8 +164,12 @@ def add_appeal(b: AppealIn, p: dict = Depends(active)):
                 raise HTTPException(409, "Такое обращение уже подано — дождись решения")
             data = {"start_time": f"{h}:{m:02d}", "hours": b.hours, "area_m2": None if shop else b.area_m2, "work_done": b.work_done.strip(),
                     "workshop": b.workshop.strip() if shop else None, "role": shift_role(p, zone, b.role)}
-            if b.photo and not shop:
-                data["photo_id"] = _photo(conn, p, obj, b.client_uid, "appeal", b.photo, "по обращению")
+            if pics and not shop:
+                fids = [_photo(conn, p, obj, b.client_uid, "appeal" if i == 0 else f"appeal{i}", x, "по обращению",
+                               pre=pres[i] if i < len(pres) else None) for i, x in enumerate(pics)]
+                data["photo_id"] = fids[0]
+                if fids[1:]:
+                    data["photo_ids"] = fids[1:]
         else:   # expense_late
             day = _check_day(b.day)
             obj, zone = b.object_id, b.zone_code or ""
@@ -189,6 +202,7 @@ def out(conn, a: dict) -> dict:
         a["object_title"] = WORKSHOP_TITLE.get(a["zone_code"], SHOP) + (f" · {d['workshop']}" if d.get("workshop") else "")
     a["photo_url"] = sign(d["photo_id"], "thumb") if d.get("photo_id") else None
     a["photo_full"] = sign(d["photo_id"], "content") if d.get("photo_id") else None
+    a["photos"] = [{"url": sign(i, "thumb"), "full": sign(i, "content")} for i in [d.get("photo_id"), *(d.get("photo_ids") or [])] if i]
     a["receipt_url"] = sign(d["receipt_file_id"], "content") if d.get("receipt_file_id") else None
     if d.get("category"):
         c = conn.execute("SELECT title FROM expense_categories WHERE code=%s", (d["category"],)).fetchone()
@@ -286,6 +300,8 @@ def decide(aid: int, d: Decision, p: dict = Depends(active)):
                  x.get("area_m2"), x.get("work_done"), x.get("photo_id"), False if shop else is_trip(conn, a["person_id"], a["object_id"]),
                  x.get("role"), "workshop" if shop else "work", x.get("workshop"), a["submitted_at"], a["cur_by"], a["cur_at"], a["cur_stars"],
                  a["cur_note"], p["id"], note, pay_ym, aid)).fetchone()["id"]
+            for fid in x.get("photo_ids") or []:
+                conn.execute("INSERT INTO shift_photos (shift_id, file_id) VALUES (%s,%s) ON CONFLICT DO NOTHING", (result, fid))
         elif a["kind"] == "expense_late":
             own = x.get("paid_by", "own") == "own"
             result = conn.execute(
