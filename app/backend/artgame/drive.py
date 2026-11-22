@@ -53,6 +53,8 @@ API = "https://www.googleapis.com/drive/v3/files"
 UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 ALL = {"supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
 FOLDER = "application/vnd.google-apps.folder"
+F_FOLDER, F_FOLDER_URL = "UF_CRM_ARTGAME_PROJECT_FOLDER_ID", "UF_CRM_ARTGAME_PROJECT_URL"   # поля папки в сделке (как у DRIVE01)
+FOLDER_URL = "https://drive.google.com/drive/folders/"
 
 
 # 12.11 (Владимир, «drive: TransportError»): токен брали заново на каждый файл, и разовый сбой связи с Google
@@ -137,14 +139,14 @@ class Drive:
         _CHILD[k] = (time.time(), fid)
         return fid
 
-    def _child(self, parent: str, name: str) -> str:
+    def _child(self, parent: str, name: str, props: dict | None = None) -> str:
         # регистр не важен: DRIVE01 создаёт «ДИЗАЙН», приложение искало «Дизайн» и плодило вторую папку
         found = [f for f in self.ls(parent) if f.get("mimeType") == FOLDER and f["name"].casefold() == name.casefold()]
         found.sort(key=lambda f: f["name"] != name)   # точное имя (утверждённое) — первым, «Дизайн» рядом с «ДИЗАЙН» не берём
         if found:
             return found[0]["id"]
         r = _retry(httpx.post, API, headers=self.h, timeout=30, params={"supportsAllDrives": "true"},
-                       json={"name": name, "mimeType": FOLDER, "parents": [parent]})
+                       json={"name": name, "mimeType": FOLDER, "parents": [parent], **({"appProperties": props} if props else {})})
         r.raise_for_status()
         return r.json()["id"]
 
@@ -157,7 +159,10 @@ class Drive:
         year = self.child(PROJECTS_ROOT_ID, str(now.year))
         month = self.child(year, f"{now.month:02d} {MONTHS[now.month - 1]}")
         name = f"{obj['id']} · {obj['title'].upper()}" + (f" — {obj['city'].upper()}" if obj.get("city") else "")
-        return self.child(month, name)
+        # DRIVE01-BIND (22.11): метка робота DRIVE01 — он считает папку своей и не встаёт на сделке («чужая папка»
+        # 1709 остановила всю очередь робота). ID и ссылку в сделку пишет робот или bind_deal (под флагом).
+        props = {"managedBy": "DRIVE01", "dealId": str(obj["id"]), "homeParentId": month, "year": str(now.year)}
+        return self._child(month, name, props)
 
     def upload(self, parent: str, name: str, data: bytes, mime: str) -> str:
         meta = {"name": name, "parents": [parent]}
@@ -228,6 +233,29 @@ class Drive:
         return r.content if r.status_code == 200 else None
 
 
+def bind_deal(conn, deal_id: int, folder: str) -> str:
+    """Папку сделки, которую нашло или сделало приложение, пишем в сделку: ID и ссылка. Только при ARTGAME_DRIVE_BIND=1
+    (по умолчанию выключено — запись в Битрикс включают после «да» HEAD); иначе папку привяжет робот DRIVE01 по метке.
+    Уже указана другая папка — не трогаем. Сбой записи не мешает загрузке файла: он в audit_log."""
+    from . import bxw
+    if not (settings.drive_bind and bxw.enabled()):
+        return "off"   # без флага папку привяжет робот DRIVE01: метка в appProperties уже стоит
+    url = FOLDER_URL + folder
+    try:
+        d = bxw.CALL("crm.deal.get", {"id": deal_id})["result"]
+        if d.get(F_FOLDER):
+            return "kept"
+        bxw.CALL("crm.deal.update", {"id": deal_id, "fields": {F_FOLDER: folder, F_FOLDER_URL: url}})
+        back = bxw.CALL("crm.deal.get", {"id": deal_id})["result"]
+        res = "ok" if back.get(F_FOLDER) == folder and back.get(F_FOLDER_URL) == url else "error"
+    except Exception as ex:  # noqa: BLE001
+        log.warning("bind_deal %s: %s", deal_id, ex)
+        res = "error"
+    from . import db
+    db.audit(conn, None, "bx_write", "deal", deal_id, {"what": "папка сделки", "fields": {F_FOLDER: folder, F_FOLDER_URL: url}, "bx": res})
+    return res
+
+
 def ensure_folders(conn, obj: dict, d: Drive | None = None) -> dict:
     """Папка сделки и подпапки; создаёт недостающие, запоминает ID в базе. Объект 0 «Офис» папки не имеет."""
     if obj["id"] == 0:
@@ -239,6 +267,8 @@ def ensure_folders(conn, obj: dict, d: Drive | None = None) -> dict:
         return folders
     d = d or Drive()
     root = obj.get("drive_folder") or d.project_folder(obj)
+    if not obj.get("drive_folder"):
+        bind_deal(conn, obj["id"], root)
     for k, name in SUBFOLDERS.items():
         if k not in folders:
             parent = root

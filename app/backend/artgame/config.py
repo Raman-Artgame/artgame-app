@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     bitrix_webhook: str = ""           # входящий вебхук Битрикса (права CRM): запись из приложения, решение HEAD 05.11
     pay_push: bool = False             # ARTGAME_PAY_PUSH=1: итоги оплат сделок пишет приложение (deal_money, HEAD 10.11) —
                                        # только в одной среде и только когда робот FIN03 на сервере выключен
+    drive_bind: bool = False           # ARTGAME_DRIVE_BIND=1: папку сделки, найденную/созданную приложением, пишем в сделку (drive.bind_deal, 22.11; включать только после «да» HEAD)
     drive_inbox: str = ""              # устарело: чеки без сделки — drive.RECEIPTS_ROOT_ID / drive_receipts
     drive_receipts: str = ""           # запасной ID папки «10 ФИНАНСЫ / Расходы чеки» (если RECEIPTS_ROOT_ID пуст)
     google_sa_file: str = ""            # путь к JSON сервисного аккаунта на сервере
