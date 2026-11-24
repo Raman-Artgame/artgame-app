@@ -80,6 +80,8 @@ def links(f: dict) -> dict:
     if f["status"] == "ready":
         out["url"] = sign(f["id"], "content")
         out["thumb"] = sign(f["id"], "thumb") if (f["mime"] or "").startswith("image/") else None
+        # кадр видео (HEAD 24.11, «Продакшн»): Диск делает его сам через несколько минут после загрузки; нет — на экране значок ▶
+        out["poster"] = sign(f["id"], "thumb") if (f["mime"] or "").startswith("video/") or f.get("media_type") in ("video", "reels") else None
     return out
 
 
@@ -373,8 +375,8 @@ def _thumb_cached(drive_id: str, mime: str | None = None, size: int | None = Non
     except OSError:
         pass
     own = (mime or "").startswith("image/")
-    try:
-        skip = own and time.time() - p.with_suffix(".none").stat().st_mtime < NONE_TTL
+    try:   # видео: кадра у Диска ещё нет — не спрашиваем его при каждом показе, только раз в 10 минут
+        skip = time.time() - p.with_suffix(".none").stat().st_mtime < (NONE_TTL if own else 600)
     except OSError:
         skip = False
     if skip:
@@ -382,6 +384,12 @@ def _thumb_cached(drive_id: str, mime: str | None = None, size: int | None = Non
     data = drive.Drive().thumbnail(drive_id)
     if not data and own:
         data = _own_thumb(drive_id, size, p)
+    elif not data:
+        try:
+            THUMBS.mkdir(parents=True, exist_ok=True)
+            p.with_suffix(".none").touch()
+        except OSError:
+            pass
     if data:
         try:
             THUMBS.mkdir(parents=True, exist_ok=True)

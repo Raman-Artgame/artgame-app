@@ -162,14 +162,12 @@ async function tab(p, name) {
   await l.screenshot({ path: `${shots}/prod-zagruzka.png`, fullPage: true })
   await l.locator('label.photo input[type=file]').setInputFiles({ name: 'Рилс кафе.mp4', mimeType: 'video/mp4', buffer: Buffer.from('MP4-DATA') })
   await l.locator('.mitem', { hasText: 'Рилс кафе.mp4' }).getByText('у HEAD').waitFor()
-  await l.screenshot({ path: `${shots}/prod-moe.png`, fullPage: true })
 
   // 4. HEAD: Пульт зовёт утвердить, «Продакшн» → «Утверждаю» → копия в МЕДИА/Продакшн
   const h = await open(b, 1000)
   await h.getByText('Материал с объектов на утверждение: 1').waitFor()
   await tab(h, 'Продакшн')
-  await h.locator('.mitem', { hasText: 'Рилс кафе.mp4' }).waitFor()
-  await h.screenshot({ path: `${shots}/prod-head.png`, fullPage: true })
+  await h.locator('.rvtile', { hasText: 'Рилс кафе.mp4' }).waitFor()
   await h.getByRole('button', { name: 'Утверждаю' }).click()
   await h.getByText('Всё утверждено.').waitFor()
   const mine = await call(3000, '/media?scope=mine')
@@ -191,6 +189,47 @@ async function tab(p, name) {
   await dz.locator('label.photo input[type=file]').setInputFiles({ name: 'Рилс дизайнера.mp4', mimeType: 'video/mp4', buffer: Buffer.from('MP4-DATA') })
   await dz.locator('.mitem', { hasText: 'Рилс дизайнера.mp4' }).getByText('у HEAD').waitFor()
   assert.ok((await call(1000, '/media?scope=review')).items.some(x => x.name === 'Рилс дизайнера.mp4'))
+  // HEAD 24.11: фото и видео одной кнопкой, очередь с полосками; у HEAD — плитки по проекту, просмотр, «Вернуть» с причиной, «Утвердить все»
+  let big = 100
+  await l.unroute('https://upload.example/**')
+  await l.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000' + (big++) }) }))
+  await tab(l, 'Продакшн')
+  await l.locator('.segf').getByRole('button', { name: 'Загрузить' }).click()
+  await l.locator('label.photo input[type=file]').setInputFiles([
+    { name: 'Фасад готов.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('JPG-1') }, { name: 'Вход.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('JPG-22') },
+    { name: 'Таймлапс.mp4', mimeType: 'video/mp4', buffer: Buffer.from('MP4-333') }, { name: 'Смета.pdf', mimeType: 'application/pdf', buffer: Buffer.from('PDF') }])
+  await l.locator('.upi.err', { hasText: 'Смета.pdf' }).getByText('не фото и не видео').waitFor()
+  await l.locator('.upi.ok').nth(2).waitFor()
+  await l.getByText('Загружено 3 из 4').waitFor()
+  await l.locator('.upq').scrollIntoViewIfNeeded(); await l.screenshot({ path: `${shots}/prod-ochered.png` })
+  const types = (await call(3000, '/media?scope=mine')).items.filter(x => x.review === 'pending').map(x => x.media_type).sort()
+  assert.deepStrictEqual(types, ['photo', 'photo', 'video', 'video'])   // + «Процесс кафе.mp4»
+  await h.locator('nav button').first().click()
+  await tab(h, 'Продакшн')
+  const grp = h.locator('.rvgroup', { hasText: '№731' }); await grp.waitFor()
+  assert.strictEqual(await grp.locator('.rvtile').count(), 5)
+  await h.screenshot({ path: `${shots}/prod-head.png`, fullPage: true })
+  await grp.locator('.rvtile', { hasText: 'Вход.jpg' }).locator('.rvpv').click()
+  await h.locator('.viewer .vextra').getByText('Главный Ержан').waitFor()
+  await h.screenshot({ path: `${shots}/prod-head-prosmotr.png` })
+  await h.locator('.viewer .vextra').getByRole('button', { name: 'Вернуть' }).click()
+  const sh = h.locator('.sheetbox'); await sh.getByText('Причину увидит автор').waitFor()
+  assert.ok(await sh.getByRole('button', { name: '↩ Вернуть' }).isDisabled())
+  await sh.getByRole('button', { name: 'Тёмное' }).click()
+  await h.screenshot({ path: `${shots}/prod-head-vernut.png` })
+  await sh.getByRole('button', { name: '↩ Вернуть' }).click()
+  await grp.locator('.rvtile', { hasText: 'Вход.jpg' }).waitFor({ state: 'detached' })
+  await h.locator('.viewer .vbtns').getByRole('button', { name: 'Закрыть' }).click()
+  psql("UPDATE files SET drive_id=(SELECT drive_id FROM files WHERE name='Таймлапс.mp4') WHERE name='Процесс кафе.mp4'")   // у вставленного напрямую нет файла на фейковом Диске
+  await grp.getByRole('button', { name: '✓ Утвердить все 4 по проекту' }).click()
+  await grp.getByRole('button', { name: 'Точно утвердить все 4?' }).click()
+  await h.getByText('Всё утверждено.').waitFor()
+  const mine2 = (await call(3000, '/media?scope=mine')).items
+  assert.strictEqual(mine2.find(x => x.name === 'Вход.jpg').review_note, 'Тёмное')
+  assert.strictEqual(mine2.filter(x => x.review === 'approved').length, 4)
+  await l.locator('.upq').getByRole('button', { name: 'Смотреть «Моё»' }).click()
+  await l.locator('.mitem', { hasText: 'Вход.jpg' }).getByText('HEAD: Тёмное').waitFor()
+  await l.screenshot({ path: `${shots}/prod-moe.png`, fullPage: true })
   // 6. Командировка в карточке проекта (HEAD 10.11): Главный художник ставит «Да, выезд» → пункты расходов, вносит проживание
   psql("INSERT INTO objects (id, title, city, bitrix_stage) VALUES (1700, 'Школа — Шымкент', 'Шымкент', 'UC_AV00QK') ON CONFLICT (id) DO NOTHING")   // синк сделки «Выполнение проекта»
   await tab(l, 'Проекты')

@@ -389,9 +389,24 @@ def done_get(oid: int, p: dict = Depends(active)):
             raise HTTPException(404, "объекта ещё нет в приложении")
         last = conn.execute("""SELECT max((started_at AT TIME ZONE 'Asia/Almaty')::date) AS d FROM shifts
                                WHERE object_id=%s AND status IN ('submitted','approved')""", (oid,)).fetchone()["d"]
+        pr = prod_state(conn, oid)
         return {"done_on": o["done_on"].isoformat() if o.get("done_on") else "", "done_by": o.get("done_by") or "",
                 "closed": bool(o.get("closed_at")), "can_edit": _can_done(conn, p, oid) and not o.get("closed_at"),
-                "last_shift": last.isoformat() if last else ""}
+                "last_shift": last.isoformat() if last else "", "prod": pr,
+                "need_prod": not pr["has"] and p["role_code"] != "head"}
+
+
+NO_PROD = ("Сначала загрузите Продакшн: фото и видео готового объекта («Продакшн» → «Загрузить» — у Главного художника, "
+           "Художника-Про, Мастера печати и Главного дизайнера). Без материала сдачу отмечает только HEAD.")
+
+
+def prod_state(conn, oid: int) -> dict:
+    """Что загружено в «Продакшн» по объекту (не считая возвращённого HEAD): для «Работы сданы» и карточки проекта."""
+    r = conn.execute("""SELECT count(*) FILTER (WHERE coalesce(media_type,'photo')='photo') AS photo,
+                               count(*) FILTER (WHERE media_type='video') AS video, count(*) FILTER (WHERE media_type='reels') AS reels,
+                               count(*) FILTER (WHERE review='pending') AS wait, count(*) FILTER (WHERE review='approved') AS approved
+                        FROM files WHERE object_id=%s AND kind='media' AND status='ready' AND review IS DISTINCT FROM 'rejected'""", (oid,)).fetchone()
+    return {**r, "has": bool(r["photo"] or r["video"] or r["reels"])}
 
 
 @router.post("/objects/{oid}/done")
@@ -407,6 +422,9 @@ def done_set(oid: int, b: DoneIn, p: dict = Depends(active)):
             raise HTTPException(403, "сдачу отмечают ГИП объекта, МОП и HEAD")
         if o.get("closed_at"):
             raise HTTPException(409, "сделка закрыта HEAD — дату не меняем")
+        # HEAD 24.11: «как ребята завершают проекты, если не загрузили продакшн» — без материала в «Продакшн» сдачу отмечает только HEAD
+        if b.day and p["role_code"] != "head" and not prod_state(conn, oid)["has"]:
+            raise HTTPException(409, NO_PROD)
         conn.execute("UPDATE objects SET done_on=%s, done_by=%s WHERE id=%s", (b.day, p["id"] if b.day else None, oid))
         db.audit(conn, p["id"], "object_done", "objects", oid, {"day": b.day.isoformat() if b.day else None})
     return done_get(oid, p)

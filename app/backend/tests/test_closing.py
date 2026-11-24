@@ -101,8 +101,22 @@ def test_close_flow(client, monkeypatch):
                                                           "receipt": JPG}, headers=hdr(6000))
     assert pay.status_code == 200, pay.text
     assert client.post("/api/objects/1700/done", json={"day": "2026-11-10"}, headers=hdr(2000)).status_code == 403   # не ГИП
+    # HEAD 24.11: без материала в «Продакшн» ГИП сдачу не отметит (HEAD — может); возвращённое HEAD не считается
+    r = client.post("/api/objects/1700/done", json={"day": "2026-11-10"}, headers=hdr(3000))
+    assert r.status_code == 409 and "Продакшн" in r.json()["detail"]
+    assert client.get("/api/objects/1700/done", headers=hdr(3000)).json()["need_prod"] is True
+    assert client.get("/api/objects/1700/done", headers=hdr(1000)).json()["need_prod"] is False
+    with db.pool.connection() as conn:
+        mid = conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, drive_id, status, uploaded_by, media_type, review)
+                              VALUES (gen_random_uuid(), 1700, 'media', 'брак.mp4', 'video/mp4', 'drv-bad', 'ready', %s, 'video', 'rejected')
+                              RETURNING id""", (ids[3000],)).fetchone()["id"]
+    assert client.post("/api/objects/1700/done", json={"day": "2026-11-10"}, headers=hdr(3000)).status_code == 409
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE files SET review='pending', name='процесс.mp4' WHERE id=%s", (mid,))
     done = client.post("/api/objects/1700/done", json={"day": "2026-11-10"}, headers=hdr(3000)).json()
-    assert done["done_on"] == "2026-11-10" and done["done_by"] == "P3000"
+    assert done["done_on"] == "2026-11-10" and done["done_by"] == "P3000" and done["prod"]["video"] == 1 and done["prod"]["wait"] == 1
+    with db.pool.connection() as conn:   # дальше тест идёт, как раньше: материала в «Продакшн» нет
+        conn.execute("DELETE FROM files WHERE id=%s", (mid,))
     with db.pool.connection() as conn:
         conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, drive_id, status, uploaded_by)
                         VALUES (gen_random_uuid(), 1700, 'photo', 'после.jpg', 'image/jpeg', 'drv-ph', 'ready', %s)""", (ids[2000],))

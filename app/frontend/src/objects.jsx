@@ -17,17 +17,57 @@ const DOC_ROLES = new Set(['head', 'mop', 'mop_vip', 'artist_pro', 'lead_artist'
 const size = b => b > 1e6 ? (b / 1e6).toFixed(1) + ' МБ' : Math.ceil(b / 1e3) + ' КБ'
 
 // Большой файл грузится с телефона прямо в Google; сервер только выдаёт ссылку и проверяет результат.
+// Большой файл — прямо в Google, частями (HEAD 24.11: «видео не загружаются»). Раньше файл шёл одним куском: на телефоне
+// любой обрыв связи на видео в сотни мегабайт рвал загрузку целиком. Теперь части по 8 МБ: обрыв — ждём, спрашиваем у Google,
+// сколько уже принято, и продолжаем с этого места (до 8 попыток подряд). Экран на время загрузки не гаснет, где это возможно.
+const CHUNK = 8 * 1024 * 1024   // кратно 256 КБ — требование Google
+const wait = ms => new Promise(r => setTimeout(r, ms))
+const put = (url, body, headers = {}, onLoaded = null) => new Promise((ok, fail) => {
+  const x = new XMLHttpRequest()
+  x.open('PUT', url)
+  for (const [k, v] of Object.entries(headers)) x.setRequestHeader(k, v)
+  if (onLoaded) x.upload.onprogress = e => onLoaded(e.loaded)
+  x.onload = () => ok(x)
+  x.onerror = x.onabort = x.ontimeout = () => fail(new Error('нет сети'))
+  x.send(body)
+})
+const accepted = (x, fallback) => { let r = null; try { r = x.getResponseHeader('Range') } catch { /* заголовок не отдан */ } const m = /-(\d+)$/.exec(r || ''); return m ? +m[1] + 1 : fallback }
+async function sendToGoogle(url, file, onProgress) {
+  if (file.size <= CHUNK) {   // маленький файл — одним запросом, как раньше
+    for (let t = 0; ; t++) {
+      try {
+        const x = await put(url, file, {}, n => onProgress(n / file.size))
+        if (x.status < 300) return JSON.parse(x.responseText)
+        if (x.status < 500 && x.status !== 429) throw Object.assign(new Error('Google ' + x.status), { fatal: true })
+      } catch (e) { if (e.fatal || t >= 4) throw e }
+      await wait(1500 * (t + 1))
+    }
+  }
+  let off = 0, tries = 0
+  for (;;) {
+    const end = Math.min(file.size, off + CHUNK)
+    let x = null
+    try { x = await put(url, file.slice(off, end), { 'Content-Range': `bytes ${off}-${end - 1}/${file.size}` }, n => onProgress(Math.min(1, (off + n) / file.size))) } catch { /* обрыв — ниже */ }
+    if (x && x.status < 300) return JSON.parse(x.responseText)
+    if (x && x.status === 308) { off = accepted(x, end); tries = 0; continue }
+    if (x && [400, 401, 403, 404, 410].includes(x.status)) throw new Error(x.status === 404 || x.status === 410 ? 'загрузка устарела — выбери файл ещё раз' : 'Google ' + x.status)
+    if (++tries > 8) throw new Error('нет сети')
+    await wait(Math.min(30000, 1000 * 2 ** tries))
+    try {   // сколько Google уже принял
+      const q = await put(url, null, { 'Content-Range': `bytes */${file.size}` })
+      if (q.status < 300) return JSON.parse(q.responseText)
+      if (q.status === 308) off = accepted(q, 0)
+    } catch { /* сети всё ещё нет — следующая попытка */ }
+  }
+}
 export function uploadBig(objectId, kind, file, onProgress, extra = {}) {
+  let lock = null
+  try { navigator.wakeLock?.request('screen').then(l => { lock = l }, () => {}) } catch { /* не поддерживается */ }
   return api(`/objects/${objectId}/uploads`, { method: 'POST',
     body: { client_uid: uuid(), kind, name: file.name, mime: file.type || 'application/octet-stream', size: file.size, ...extra } })
-    .then(r => r.done ? r : new Promise((ok, fail) => {
-      const x = new XMLHttpRequest()
-      x.open('PUT', r.upload_url)
-      x.upload.onprogress = e => onProgress(e.loaded / e.total)
-      x.onload = () => x.status < 300 ? ok(JSON.parse(x.responseText)) : fail(new Error('Google ' + x.status))
-      x.onerror = () => fail(new Error('нет сети'))
-      x.send(file)
-    }).then(g => api(`/files/${r.file_id}/done`, { method: 'POST', body: { drive_id: g.id } })))
+    .then(r => r.done ? r : sendToGoogle(r.upload_url, file, onProgress)
+      .then(g => api(`/files/${r.file_id}/done`, { method: 'POST', body: { drive_id: g.id } })))
+    .finally(() => { try { lock?.release() } catch { /* уже отпущен */ } })
 }
 
 const isVideo = f => (f.mime || '').startsWith('video/') || f.media_type === 'video' || f.media_type === 'reels'

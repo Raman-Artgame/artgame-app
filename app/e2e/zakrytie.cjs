@@ -120,6 +120,16 @@ async function closeStep(p) {
   const box = g.locator('.card', { has: g.locator('h3', { hasText: 'Сдача объекта' }) })
   await box.waitFor()
   assert.strictEqual(await box.locator('input[type=date]').inputValue(), day(-2), 'по умолчанию — день последней смены')
+  // HEAD 24.11: пока в «Продакшн» по объекту пусто, ГИП сдачу не отметит
+  await box.getByText('Продакшн не загружен.', { exact: false }).waitFor()
+  assert.ok(await box.getByRole('button', { name: 'Работы сданы' }).isDisabled(), 'без Продакшна сдача закрыта')
+  assert.strictEqual((await req(3000, '/objects/1710/done', { day: day(-1) })).status, 409)
+  await shot(g, 'close-gip-net-prodakshna')
+  const vid = psql(`INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by, status, media_type, review)
+                    SELECT gen_random_uuid(), 1710, 'media', 'Процесс школа.mp4', 'video/mp4', 9000000, drive_id, ${people[3000]}, 'ready', 'video', 'pending'
+                    FROM files WHERE object_id=1710 AND kind='photo' ORDER BY id LIMIT 1 RETURNING id`)
+  await g.reload(); await tab(g, 'Проекты'); await g.locator('.pcard', { hasText: '№ 1710' }).click(); await box.waitFor()
+  await box.getByText('Продакшн: видео 1 · ждут HEAD: 1').waitFor()
   await box.locator('input[type=date]').fill(day(-1))
   await box.getByRole('button', { name: 'Работы сданы' }).click()
   await box.locator('b', { hasText: dmy(day(-1)) }).waitFor()
@@ -129,9 +139,6 @@ async function closeStep(p) {
   assert.strictEqual((await req(2000, '/objects/1710/done', { day: day(-1) })).status, 403, 'художник сдачу не отмечает')
 
   // Продакшн: ГИП загрузил видео с объекта («Продакшн» → «Загрузить») — ждёт «Утверждаю» HEAD (файл на фейковом Диске — от фото с объекта)
-  const vid = psql(`INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, uploaded_by, status, media_type, review)
-                    SELECT gen_random_uuid(), 1710, 'media', 'Процесс школа.mp4', 'video/mp4', 9000000, drive_id, ${people[3000]}, 'ready', 'video', 'pending'
-                    FROM files WHERE object_id=1710 AND kind='photo' ORDER BY id LIMIT 1 RETURNING id`)
   // МОП переводит на «Оплата+закрывающие документы»: «На закрытие» закрыт — долг, АВР, Продакшн не утверждён, смена на проверке
   await e2e('/deal/1710', { STAGE_ID: 'UC_BMKDS4' })
   psql("UPDATE objects SET bitrix_stage='UC_BMKDS4' WHERE id=1710")

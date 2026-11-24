@@ -43,8 +43,12 @@ export function DoneBox({ id, onSaved, compact }) {
   const body = <>
     {d.done_on ? <p className="small">Работы сданы <b>{dm(d.done_on)}</b>{d.done_by ? ` · отметил ${d.done_by}` : ''}</p>
       : <p className="small muted">Дата сдачи ещё не отмечена{d.last_shift ? ` · последняя смена ${dm(d.last_shift)}` : ''}.</p>}
+    {d.prod && (d.can_edit || compact) && <p className={'small ' + (d.prod.has ? 'muted' : 'why')}>{d.prod.has
+      ? `Продакшн: ${[d.prod.photo && `фото ${d.prod.photo}`, d.prod.video && `видео ${d.prod.video}`, d.prod.reels && `рилс ${d.prod.reels}`].filter(Boolean).join(', ')}${d.prod.wait ? ` · ждут HEAD: ${d.prod.wait}` : ''}${d.prod.approved ? ` · утверждено: ${d.prod.approved}` : ''}`
+      : d.need_prod ? 'Продакшн не загружен. Сначала фото и видео готового объекта: «Продакшн» → «Загрузить» (Главный художник, Про, Мастер печати, Главный дизайнер). Без него сдачу отмечает только HEAD.'
+        : 'Продакшн по объекту не загружен.'}</p>}
     {d.can_edit && <div className="donerow"><input type="date" value={day} max={today()} onChange={e => setDay(e.target.value)} aria-label="Дата сдачи" />
-      <button className="mini" disabled={!day || day === d.done_on} onClick={() => save(day)}>{d.done_on ? 'Изменить' : 'Работы сданы'}</button></div>}
+      <button className="mini" disabled={!day || day === d.done_on || (d.need_prod && !d.done_on)} onClick={() => save(day)}>{d.done_on ? 'Изменить' : 'Работы сданы'}</button></div>}
     {msg && <p className="small muted">{msg}</p>}
   </>
   return compact ? body : <div className="card"><h3>Сдача объекта</h3>{body}
