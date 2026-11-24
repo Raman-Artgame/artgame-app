@@ -1246,3 +1246,8 @@ button.btnlike { padding: 12px 10px; font-size: 13px; font-weight: 600; margin: 
 .lightbox.viewer ~ .sheet { z-index: 55; }   /* «Вернуть» поверх просмотра */
 .upi .upn b { color: var(--text); }
 .viewer .vextra .rvbtns button, .viewer .vextra .rvbtns button.ghost { flex: 1 1 0; }
+/* Meta и Instagram в «Рекламе» (HEAD 24.11) */
+.metabox { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line2); display: grid; gap: 8px; }
+.metabox .mktadh { margin-bottom: 0; } .metabox p { margin: 0; }
+.metatop { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; text-decoration: none; color: inherit; padding: 6px 0; border-top: 1px solid var(--line2); }
+.metatop span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .metatop b { white-space: nowrap; }

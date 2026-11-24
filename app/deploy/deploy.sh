@@ -46,7 +46,7 @@ chmod 755 /srv/artgame-app "$DST"; chmod -R a+rX "$DST/web"   # Caddy читае
 
 install -m 644 "$SRC"/deploy/artgame-*.service "$SRC"/deploy/artgame-*.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now "artgame-api@$ENV" "artgame-constants@$ENV.timer" "artgame-objects@$ENV.timer" "artgame-notify@$ENV.timer" "artgame-finexport@$ENV.timer"
+systemctl enable --now "artgame-api@$ENV" "artgame-constants@$ENV.timer" "artgame-objects@$ENV.timer" "artgame-notify@$ENV.timer" "artgame-finexport@$ENV.timer" "artgame-meta@$ENV.timer"
 systemctl restart "artgame-api@$ENV"
 # Ночная копия базы — для каждого окружения (команда работает на test с 09.11). Старый общий таймер только для prod убран.
 systemctl disable --now artgame-backup.timer 2>/dev/null || true

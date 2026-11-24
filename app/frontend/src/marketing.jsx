@@ -175,8 +175,9 @@ function Ads() {
       </div>)}
       {d.can_edit && <div className="seg"><button className="ghost" onClick={() => setEdit({ paid: true, active: true })}>+ Площадка</button>
         {d.wa_phone && <button className="ghost" onClick={() => setPhone(d.wa_phone)}>Номер WhatsApp</button>}</div>}
-      <p className="small muted">Заявки и сделки берутся из Битрикса. Расход по Instagram подтянется сам после подключения рекламного кабинета, по остальным площадкам вносится раз в месяц.</p>
+      <p className="small muted">Заявки и сделки берутся из Битрикса. Расход «Таргет Instagram» приходит из Meta сам каждую ночь, по остальным площадкам вносится раз в месяц.</p>
     </>}
+    <MetaBox ym={ym} onChange={load} />
     {msg && <p className="small muted">{msg}</p>}
     {edit && <AdSheet x={edit} ym={ym} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load() }} />}
     {phone !== null && <Sheet title="Номер WhatsApp для заявок" onClose={() => setPhone(null)}>
@@ -184,6 +185,40 @@ function Ads() {
       <input inputMode="tel" placeholder="7 705 123 45 67" value={phone} onChange={e => setPhone(e.target.value)} />
       <button onClick={() => api('/mkt/wa_phone', { method: 'POST', body: { phone } }).then(() => { setPhone(null); load() }, e => setMsg(e.message))}>Сохранить</button>
     </Sheet>}
+  </div>
+}
+
+// Meta напрямую (HEAD 24.11): расход кабинета и статистика Instagram, собирается ночью и по кнопке.
+const num = n => n == null ? '—' : Math.round(n).toLocaleString('ru-RU')
+const when = iso => new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+function MetaBox({ ym, onChange }) {
+  const [m, setM] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const load = () => api(`/mkt/meta?ym=${ym}`).then(setM, () => setM(null))
+  useEffect(() => { load() }, [ym])
+  if (!m) return null
+  const run = (url, ok) => { setBusy(true); setMsg(''); api(url, { method: 'POST' }).then(r => { setMsg(r.errors?.length ? '' : ok); load(); onChange() }, e => setMsg(e.message)).finally(() => setBusy(false)) }
+  const kzt = m.ads.find(a => a.currency === 'KZT'), other = m.ads.filter(a => a.currency !== 'KZT')
+  const w = m.ig.week
+  return <div className="metabox">
+    <div className="mktadh"><b>Meta и Instagram</b>{m.last && <span className={'badge ' + (m.last.ok && !m.last.errors.length ? 'ok' : 'warn')}>{m.last.ok && !m.last.errors.length ? 'собрано' : 'собрано не всё'}</span>}</div>
+    {!m.on ? <p className="small why">Токен Meta на сервере не найден, цифры не обновляются.</p> : !m.last && <p className="small muted">Ещё ни разу не собиралось. Первый сбор пройдёт ночью.</p>}
+    {m.last && <p className="small muted">Обновлено {when(m.last.at)}</p>}
+    {(m.last?.errors || []).map((e, i) => <p key={i} className="small why">{e}</p>)}
+    {kzt && <><div className="mktadn"><div><b>{tg(kzt.spend)}</b><span>расход в Meta</span></div><div><b>{num(kzt.impressions)}</b><span>показы</span></div>
+      <div><b>{num(kzt.clicks)}</b><span>клики</span></div><div><b>{kzt.clicks ? tg(kzt.spend / kzt.clicks) : '—'}</b><span>цена клика</span></div></div>
+      <p className="small muted">За {monthName(ym)}, данные по {kzt.upto.slice(8)}-е число.</p></>}
+    {other.map(a => <p key={a.currency} className="small why">Кабинет в валюте {a.currency || '?'}: {a.spend.toLocaleString('ru-RU')} {a.currency}. В расход в тенге не добавлено.</p>)}
+    {m.manual && <p className="small why">За этот месяц расход «Таргет Instagram» внесён руками, Meta его не меняет.
+      {m.can_edit && <> <a onClick={() => run(`/mkt/meta/take?ym=${ym}`, 'Расход взят из Meta.')}>Взять из Meta</a></>}</p>}
+    {m.ig.followers != null && <div className="mktadn"><div><b>{num(m.ig.followers)}</b><span>подписчики{m.ig.delta7 != null ? ` (${m.ig.delta7 >= 0 ? '+' : ''}${m.ig.delta7} за 7 дн.)` : ''}</span></div>
+      <div><b>{num(w.reach)}</b><span>охват, {w.days || 0} дн.</span></div><div><b>{num(w.views)}</b><span>просмотры</span></div><div><b>{num(w.profile_views)}</b><span>в профиль</span></div></div>}
+    {m.ig.top.length > 0 && <><p className="small muted">Лучшее за 30 дней по просмотрам</p>
+      {m.ig.top.map(t => <a key={t.id} className="metatop" href={t.permalink} target="_blank" rel="noreferrer">
+        <span>{t.kind === 'REELS' ? 'Рилс' : 'Пост'} · {(t.caption || 'без подписи').slice(0, 40)}</span><b>{num(t.views)}</b></a>)}</>}
+    {m.can_edit && m.on && <button className="ghost" disabled={busy} onClick={() => run('/mkt/meta/sync', 'Обновлено.')}>{busy ? 'Собираю, до минуты…' : 'Обновить сейчас'}</button>}
+    {msg && <p className="small muted">{msg}</p>}
   </div>
 }
 
