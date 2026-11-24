@@ -90,14 +90,12 @@ def api_channels(p: dict = Depends(active)):
         return channels(conn)
 
 
-@router.get("/mkt/ads")
-def ads(ym: str | None = None, fresh: int = 0, p: dict = Depends(active)):
-    _see(p)
-    ym, t0, t1 = _month(ym)
+def bx_by_channel(t0: date, t1: date, fresh: bool = False) -> tuple[dict, int, str]:
+    """Заявки (лиды Битрикса) за период и что из них стало сделками — по площадкам. Ключ None — площадка не отмечена."""
     err = ""
     try:
         leads = bx.read_all("crm.lead.list", {"filter": {">=DATE_CREATE": f"{t0}T00:00:00+05:00", "<DATE_CREATE": f"{t1}T00:00:00+05:00"},
-                                              "select": ["ID", "STATUS_ID"]}, fresh=bool(fresh))
+                                              "select": ["ID", "STATUS_ID"]}, fresh=fresh)
     except HTTPException as e:
         leads, err = [], f"Битрикс не ответил ({e.detail}) — заявки и сделки не посчитаны"
     ids = [int(l["ID"]) for l in leads]
@@ -107,14 +105,11 @@ def ads(ym: str | None = None, fresh: int = 0, p: dict = Depends(active)):
         try:
             for i in range(0, len(conv), 50):
                 deals += bx.read_all("crm.deal.list", {"filter": {"LEAD_ID": conv[i:i + 50]},
-                                                       "select": ["ID", "LEAD_ID", "OPPORTUNITY", "STAGE_SEMANTIC_ID"]}, fresh=bool(fresh))
+                                                       "select": ["ID", "LEAD_ID", "OPPORTUNITY", "STAGE_SEMANTIC_ID"]}, fresh=fresh)
         except HTTPException as e:
             err = f"Битрикс не отдал сделки ({e.detail})"
     with db.pool.connection() as conn:
-        chans = channels(conn, only_active=False)
         org = {r["lead_id"]: r["channel_id"] for r in conn.execute("SELECT lead_id, channel_id FROM lead_origin WHERE lead_id = ANY(%s)", (ids,)).fetchall()}
-        spend = {r["channel_id"]: r for r in conn.execute("SELECT * FROM mkt_spend WHERE ym=%s", (ym,)).fetchall()}
-        wa = _wa(conn)
     by: dict = {}
     for i in ids:
         by.setdefault(org.get(i), {"leads": 0, "deals": 0, "won": 0, "won_sum": 0.0})["leads"] += 1
@@ -124,6 +119,18 @@ def ads(ym: str | None = None, fresh: int = 0, p: dict = Depends(active)):
         if d.get("STAGE_SEMANTIC_ID") == "S":
             b["won"] += 1
             b["won_sum"] += bx._num(d.get("OPPORTUNITY"))
+    return by, len(ids), err
+
+
+@router.get("/mkt/ads")
+def ads(ym: str | None = None, fresh: int = 0, p: dict = Depends(active)):
+    _see(p)
+    ym, t0, t1 = _month(ym)
+    by, n_leads, err = bx_by_channel(t0, t1, bool(fresh))
+    with db.pool.connection() as conn:
+        chans = channels(conn, only_active=False)
+        spend = {r["channel_id"]: r for r in conn.execute("SELECT * FROM mkt_spend WHERE ym=%s", (ym,)).fetchall()}
+        wa = _wa(conn)
     rows = []
     for c in chans:
         s, b = spend.get(c["id"]), by.get(c["id"], {"leads": 0, "deals": 0, "won": 0, "won_sum": 0.0})
@@ -137,7 +144,7 @@ def ads(ym: str | None = None, fresh: int = 0, p: dict = Depends(active)):
                      "cpl": round(amount / b["leads"]) if amount and b["leads"] else None, "verdict": verdict,
                      "link": f"https://wa.me/{wa}?text={quote(c['phrase'])}" if wa and c["phrase"] else None})
     unknown = by.get(None, {"leads": 0, "deals": 0, "won": 0, "won_sum": 0.0})
-    return {"ym": ym, "items": rows, "unknown": unknown, "total": {"leads": len(ids), "spend": sum(r["spend"] for r in rows)},
+    return {"ym": ym, "items": rows, "unknown": unknown, "total": {"leads": n_leads, "spend": sum(r["spend"] for r in rows)},
             "wa_phone": wa, "can_edit": p["role_code"] == "head" or p.get("mkt_job") in EDIT_JOBS, "err": err}
 
 

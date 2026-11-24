@@ -94,7 +94,46 @@ def sync_ads(conn, since: date, until: date) -> dict:
                           _int(r.get("clicks"))))
             days += 1
     months = push_spend(conn, since, until)
-    return {"accounts": [a["name"] for a in accs], "days": days, "months": months}
+    ads_n, errs = 0, []
+    for a in accs:      # по объявлениям — отдельно: не ответит, общий расход уже сохранён
+        try:
+            ads_n += sync_ad_level(conn, a, since, until)
+        except MetaError as e:
+            errs.append(f"объявления: {e}")
+    return {"accounts": [a["name"] for a in accs], "days": days, "months": months, "ad_rows": ads_n, "errors": errs}
+
+
+def _actions(r: dict) -> tuple[int, int]:
+    """Из «действий» Meta: начатые переписки и лиды с форм. Одно и то же Meta отдаёт под разными именами — берём наибольшее."""
+    msg = lead = 0
+    for a in r.get("actions") or []:
+        t, v = a.get("action_type") or "", _int(a.get("value"))
+        if t.startswith("onsite_conversion.messaging_conversation_started"):
+            msg = max(msg, v)
+        elif t in ("lead", "onsite_conversion.lead_grouped", "leadgen_grouped"):
+            lead = max(lead, v)
+    return msg, lead
+
+
+def sync_ad_level(conn, a: dict, since: date, until: date) -> int:
+    rows = get_all(f"{a['id']}/insights", {"fields": "campaign_id,campaign_name,adset_name,ad_id,ad_name,spend,impressions,reach,clicks,actions,account_currency",
+                                           "level": "ad", "time_increment": 1, "limit": 200,
+                                           "time_range": {"since": str(since), "until": str(until)}}, limit=60)
+    for r in rows:
+        msg, lead = _actions(r)
+        conn.execute("""INSERT INTO mkt_meta_ad_day (ad_id, day, account, ad_name, adset_name, campaign_id, campaign_name, spend, currency,
+                                                     impressions, reach, clicks, messages, leads)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (ad_id, day) DO UPDATE SET ad_name=EXCLUDED.ad_name, adset_name=EXCLUDED.adset_name, campaign_id=EXCLUDED.campaign_id,
+                        campaign_name=EXCLUDED.campaign_name, spend=EXCLUDED.spend, currency=EXCLUDED.currency, impressions=EXCLUDED.impressions,
+                        reach=EXCLUDED.reach, clicks=EXCLUDED.clicks, messages=EXCLUDED.messages, leads=EXCLUDED.leads, fetched_at=now()""",
+                     (r["ad_id"], r["date_start"], a["id"], r.get("ad_name"), r.get("adset_name"), r.get("campaign_id"), r.get("campaign_name"),
+                      float(r.get("spend") or 0), r.get("account_currency") or a["currency"], _int(r.get("impressions")), _int(r.get("reach")),
+                      _int(r.get("clicks")), msg, lead))
+    for r in get_all(f"{a['id']}/insights", {"fields": "ad_id,frequency", "level": "ad", "date_preset": "last_7d", "limit": 200}, limit=10):
+        conn.execute("""INSERT INTO mkt_meta_ad7 (ad_id, frequency) VALUES (%s,%s)
+                        ON CONFLICT (ad_id) DO UPDATE SET frequency=EXCLUDED.frequency, fetched_at=now()""", (r["ad_id"], float(r.get("frequency") or 0)))
+    return len(rows)
 
 
 def push_spend(conn, since: date, until: date) -> list[str]:
@@ -201,6 +240,11 @@ def sync(today: date | None = None, by: int | None = None) -> dict:
             except MetaError as e:
                 res["ok"] = False
                 res["errors"].append(str(e))
+        try:
+            from . import adrules
+            res["hints"] = adrules.run(today)
+        except Exception as e:  # noqa: BLE001 — подсказки не должны ронять сбор
+            res["errors"].append(f"подсказки: {type(e).__name__}")
     with db.pool.connection() as conn, conn.transaction():
         conn.execute("INSERT INTO mkt_settings (key, value) VALUES ('meta_last', %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
                      (json.dumps(res, ensure_ascii=False),))

@@ -150,7 +150,7 @@ function Shelf({ k, sources, onBack }) {
 // «Реклама» (HEAD 14.11): по каждой площадке — расход, заявки, сделки, цена заявки; что работает, а что сливает бюджет.
 const tg = n => Math.round(n || 0).toLocaleString('ru-RU') + ' ₸'
 const VERDICT = { works: ['работает', 'ok'], weak: ['заявки есть, сделок нет', 'warn'], burns: ['сливает бюджет', 'hot'] }
-function Ads() {
+function AdChannels() {
   const [ym, setYm] = useState(ymNow())
   const [d, setD] = useState(null)
   const [edit, setEdit] = useState(null)   // площадка: расход, фраза, ссылка
@@ -185,6 +185,98 @@ function Ads() {
       <input inputMode="tel" placeholder="7 705 123 45 67" value={phone} onChange={e => setPhone(e.target.value)} />
       <button onClick={() => api('/mkt/wa_phone', { method: 'POST', body: { phone } }).then(() => { setPhone(null); load() }, e => setMsg(e.message))}>Сохранить</button>
     </Sheet>}
+  </div>
+}
+
+// «Реклама» целиком (HEAD 24.11: «чтобы у меня всегда была статистика по всем процессам и рекомендации у таргетолога»):
+// сверху подсказки «антислив», ниже — площадки, кампании Meta или отчёт за неделю/месяц.
+function Ads() {
+  const [tab, setTab] = useState('ch')
+  return <>
+    <AdHints />
+    <div className="chips adtabs">{[['ch', 'Площадки'], ['camp', 'Кампании'], ['rep', 'Отчёт']].map(([k, t]) =>
+      <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{t}</button>)}</div>
+    {tab === 'ch' ? <AdChannels /> : tab === 'camp' ? <AdCampaigns /> : <AdReport />}
+  </>
+}
+
+function AdHints() {
+  const [d, setD] = useState(null)
+  const [msg, setMsg] = useState('')
+  const load = () => api('/mkt/adstats?days=7').then(setD, () => setD(null))
+  useEffect(() => { load() }, [])
+  if (!d || (!d.hints.length && !d.missing.length)) return null
+  return <div className="card adhints">
+    {d.hints.length > 0 && <div className="mktadh"><b>Подсказки по рекламе</b><span className="badge hot">{d.hints.length}</span></div>}
+    {d.hints.map(h => <div key={h.id} className="adhint">
+      <div className="mktadh"><b>{h.rule_ru}</b><span className="small muted">{new Date(h.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</span></div>
+      <p className="small">{h.text}</p>
+      <p className="small why">Что сделать: {h.advice}</p>
+      {d.can_edit && <button className="ghost mini" onClick={() => api(`/mkt/adhints/${h.id}/done`, { method: 'POST', body: {} }).then(load, e => setMsg(e.message))}>Сделано</button>}
+    </div>)}
+    {d.missing.length > 0 && <p className="small muted">{d.missing.length === 5 ? 'Подсказки пока молчат' : 'Часть подсказок молчит'}: в листе «Значения» не заданы {d.missing.map(m => m.what).join('; ')}.</p>}
+    {msg && <p className="small why">{msg}</p>}
+  </div>
+}
+
+function AdCampaigns() {
+  const [days, setDays] = useState(7)
+  const [d, setD] = useState(null)
+  const [open, setOpen] = useState(null)
+  useEffect(() => { setD(null); api(`/mkt/adstats?days=${days}`).then(setD, e => setD({ campaigns: [], err: e.message })) }, [days])
+  const nums = x => <div className="mktadn"><div><b>{tg(x.spend)}</b><span>расход</span></div><div><b>{x.results}</b><span>обращения</span></div>
+    <div><b>{x.cpr ? tg(x.cpr) : '—'}</b><span>цена обращения</span></div><div><b>{x.ctr != null ? x.ctr + '%' : '—'}</b><span>CTR</span></div></div>
+  return <div className="card">
+    <div className="chips">{[[1, 'Сегодня'], [7, '7 дней'], [30, '30 дней']].map(([k, t]) => <button key={k} className={days === k ? 'on' : ''} onClick={() => setDays(k)}>{t}</button>)}</div>
+    {!d ? <p className="muted">Загрузка…</p> : <>
+      {d.err && <p className="small why">{d.err}</p>}
+      {d.plan_cpl && <p className="small muted">Плановая цена заявки: {tg(d.plan_cpl)}</p>}
+      {!d.campaigns.length && <p className="muted">За этот период в Meta нет расхода. Данные обновляются каждую ночь.</p>}
+      {d.campaigns.map(c => <div key={c.campaign_id} className="mktad" onClick={() => setOpen(open === c.campaign_id ? null : c.campaign_id)}>
+        <div className="mktadh"><b>{c.name}</b>{c.ads.some(a => a.hint) && <span className="badge hot">есть подсказка</span>}</div>
+        {nums(c)}
+        <div className="small muted">{num(c.impressions)} показов · {num(c.clicks)} кликов · объявлений: {c.ads.length}{open === c.campaign_id ? '' : ' · нажми, чтобы раскрыть'}</div>
+        {open === c.campaign_id && c.ads.map(a => <div key={a.ad_id} className="adrow">
+          <div className="mktadh"><span>{a.ad_name || a.ad_id}</span>{a.hint && <span className="badge hot">проверь</span>}</div>
+          {nums(a)}
+          <div className="small muted">{a.adset_name || ''}{a.frequency ? ` · частота ${a.frequency.toFixed(1)}` : ''} · {num(a.clicks)} кликов</div>
+        </div>)}
+      </div>)}
+      <p className="small muted">Обращения считает сама Meta: начатые переписки и заявки с форм. Заявки и продажи по Битриксу смотри в «Отчёте».</p>
+    </>}
+  </div>
+}
+
+const dm = iso => new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+function AdReport() {
+  const [period, setPeriod] = useState('week')
+  const [shiftN, setShiftN] = useState(0)
+  const [r, setR] = useState(null)
+  useEffect(() => { setR(null); api(`/mkt/report?period=${period}&shift=${shiftN}`).then(setR, e => setR({ err: e.message, channels: [], total: {}, unknown: {}, meta: {}, ig: {} })) }, [period, shiftN])
+  return <div className="card">
+    <div className="chips">{[['week', 'Неделя'], ['month', 'Месяц']].map(([k, t]) => <button key={k} className={period === k ? 'on' : ''} onClick={() => { setPeriod(k); setShiftN(0) }}>{t}</button>)}</div>
+    <div className="mktmonth"><button className="ghost mini" aria-label="Раньше" onClick={() => setShiftN(shiftN - 1)}>‹</button>
+      <b>{r && r.from ? `${dm(r.from)} — ${dm(r.to)}` : '…'}</b><button className="ghost mini" aria-label="Позже" disabled={shiftN >= 0} onClick={() => setShiftN(shiftN + 1)}>›</button></div>
+    {!r ? <p className="muted">Загрузка…</p> : <>
+      {r.err && <p className="small why">{r.err}</p>}
+      <div className="repflow"><div><b>{tg(r.total.spend)}</b><span>потрачено</span></div><i>→</i><div><b>{r.total.leads ?? 0}</b><span>заявок</span></div><i>→</i>
+        <div><b>{r.total.won ?? 0}</b><span>продаж</span></div><i>→</i><div><b>{r.total.cpl ? tg(r.total.cpl) : '—'}</b><span>цена заявки</span></div></div>
+      {r.total.won_sum > 0 && <p className="small muted">Продано на {tg(r.total.won_sum)}</p>}
+      {r.channels.map(c => <div key={c.id} className="mktad static">
+        <div className="mktadh"><b>{c.title}</b>{c.paid && c.spend > 0 && !c.leads && <span className="badge hot">расход без заявок</span>}</div>
+        <div className="mktadn"><div><b>{c.spend ? (c.approx ? '≈ ' : '') + tg(c.spend) : '—'}</b><span>потрачено</span></div><div><b>{c.leads}</b><span>заявок</span></div>
+          <div><b>{c.won}</b><span>продаж</span></div><div><b>{c.cpl ? tg(c.cpl) : '—'}</b><span>цена заявки</span></div></div>
+        {c.won > 0 && <div className="small muted">Продано на {tg(c.won_sum)}{c.cps ? ` · цена продажи ${tg(c.cps)}` : ''}</div>}
+      </div>)}
+      {r.unknown.leads > 0 && <p className="small why">Без площадки: {r.unknown.leads} заявок. Пока МОП не отметит «Откуда клиент», цена заявки по площадкам занижена.</p>}
+      {r.channels.some(c => c.approx) && <p className="small muted">«≈» — расход внесён раз в месяц, на неделю взята его доля по дням.</p>}
+      <div className="mktadh"><b>Meta и Instagram за период</b></div>
+      <div className="mktadn"><div><b>{num(r.meta.impressions)}</b><span>показы рекламы</span></div><div><b>{num(r.meta.clicks)}</b><span>клики</span></div>
+        <div><b>{num(r.meta.results)}</b><span>обращения</span></div><div><b>{r.ig.delta != null ? (r.ig.delta >= 0 ? '+' : '') + r.ig.delta : '—'}</b><span>подписчики</span></div></div>
+      <div className="mktadn"><div><b>{num(r.ig.reach)}</b><span>охват Instagram</span></div><div><b>{num(r.ig.views)}</b><span>просмотры</span></div>
+        <div><b>{num(r.ig.profile_views)}</b><span>в профиль</span></div><div><b>{num(r.ig.followers)}</b><span>всего подписчиков</span></div></div>
+      <p className="small muted">Заявки и продажи — из Битрикса по дате заявки. По понедельникам отчёт за прошлую неделю сам ложится файлом на Диск в «04 ОТЧЁТЫ / Неделя».</p>
+    </>}
   </div>
 }
 
