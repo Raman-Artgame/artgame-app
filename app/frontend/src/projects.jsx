@@ -394,11 +394,11 @@ function TripBox({ id }) {
         {d.can_edit && <button className="ghost mini" onClick={() => setAdd({ item: i.code, amount: '', note: '', paid_by: 'company', receipt: '' })}>+ сумма</button>}</div>)}
       {add && <div className="dealedit"><b>{d.items.find(i => i.code === add.item).title}</b>
         <input inputMode="numeric" placeholder="Сумма, ₸" value={add.amount} onChange={e => setAdd({ ...add, amount: e.target.value.replace(/\D/g, '') })} />
-        <input placeholder="Комментарий (3 ночи, билеты туда-обратно…)" value={add.note} onChange={e => setAdd({ ...add, note: e.target.value })} />
+        <input placeholder="На что: 3 ночи, билеты туда-обратно…" value={add.note} onChange={e => setAdd({ ...add, note: e.target.value })} />
         <div className="seg"><button className={add.paid_by === 'company' ? '' : 'ghost'} onClick={() => setAdd({ ...add, paid_by: 'company' })}>Компании</button>
           <button className={add.paid_by === 'own' ? '' : 'ghost'} onClick={() => setAdd({ ...add, paid_by: 'own' })}>Свои деньги</button></div>
-        <Receipt value={add.receipt} pick={async f => setAdd({ ...add, receipt: await shrink(f) })} />
-        <div className="seg"><button disabled={!(+add.amount > 0)} onClick={save}>Записать</button><button className="ghost" onClick={() => setAdd(null)}>Отмена</button></div></div>}</>}
+        <Receipt need value={add.receipt} pick={async f => setAdd({ ...add, receipt: await shrink(f) })} />
+        <div className="seg"><button disabled={!(+add.amount > 0) || add.note.trim().length < 3 || !add.receipt} onClick={save}>Записать</button><button className="ghost" onClick={() => setAdd(null)}>Отмена</button></div></div>}</>}
     {msg && <p className="small muted">{msg}</p>}
   </div>
 }

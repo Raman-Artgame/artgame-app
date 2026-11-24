@@ -494,10 +494,12 @@ export function ExpenseForm({ done, obj, cancel, head }) {
       <button className={v.paid_by === 'company' ? '' : 'ghost'} onClick={() => set({ ...v, paid_by: 'company' })}>Компании</button>
     </div>
     <p className="small muted">{v.paid_by === 'own' ? 'Свои деньги: после одобрения чек «к выплате», возвращаем в понедельник вместе с выплатами.' : 'Деньги компании: платили картой или наличными компании, тебе возвращать нечего.'}</p>
-    <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
-    <Receipt value={v.receipt} pick={async f => set({ ...v, receipt: await shrink(f) })} />
+    <label className="muted">На что потрачено</label>
+    <input placeholder="Например: краска белая, 2 ведра" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
+    <Receipt need value={v.receipt} pick={async f => set({ ...v, receipt: await shrink(f) })} />
+    {(!v.amount || v.note.trim().length < 3 || !v.receipt) && <p className="small why">Чтобы отправить, нужны: {[!v.amount && 'сумма', v.note.trim().length < 3 && 'на что потрачено', !v.receipt && 'чек'].filter(Boolean).join(', ')}.</p>}
     <div className="seg">{cancel && <button className="ghost" onClick={cancel}>Отмена</button>}
-      <button disabled={!v.amount || busy} onClick={send}>{busy ? 'Отправляю…' : 'Отправить расход'}</button></div>
+      <button disabled={!v.amount || v.note.trim().length < 3 || !v.receipt || busy} onClick={send}>{busy ? 'Отправляю…' : 'Отправить расход'}</button></div>
   </div>
 }
 
@@ -684,7 +686,7 @@ function LateAppeal({ d, done, close }) {
   const shop = kind === 'shift_late' && !!v.workshop
   const num = t => t.replace(',', '.').replace(/[^\d.]/g, '')
   const min = (() => { const t = new Date(); t.setDate(t.getDate() - 60); return t.toISOString().slice(0, 10) })()
-  const ok = v.day && why.trim().length >= 5 && (kind === 'shift_late' ? +v.hours > 0 && +v.hours <= 48 && v.work_done.trim().length >= 3 && (shop || v.object_id) : +v.amount > 0)
+  const ok = v.day && why.trim().length >= 5 && (kind === 'shift_late' ? +v.hours > 0 && +v.hours <= 48 && v.work_done.trim().length >= 3 && (shop || v.object_id) : +v.amount > 0 && v.note.trim().length >= 3 && !!pic)
   const send = async () => {
     setBusy(true); setErr('')
     const base = { client_uid: uuid(), kind, why, day: v.day, object_id: shop ? 0 : v.object_id, zone_code: shop ? d.workshop_zone || 'print' : v.zone_code }
@@ -715,8 +717,9 @@ function LateAppeal({ d, done, close }) {
       <label className="muted small">Сумма, ₸</label><input inputMode="decimal" value={v.amount} onChange={e => set({ ...v, amount: num(e.target.value) })} />
       <div className="segf"><button className={v.paid_by === 'own' ? 'on' : ''} onClick={() => set({ ...v, paid_by: 'own' })}>Свои деньги</button>
         <button className={v.paid_by === 'company' ? 'on' : ''} onClick={() => set({ ...v, paid_by: 'company' })}>Компании</button></div>
-      <input placeholder="Комментарий" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
-      <Receipt value={pic} pick={async f => setPic(await shrink(f))} />
+      <label className="muted small">На что потрачено</label>
+      <input placeholder="Например: краска белая, 2 ведра" value={v.note} onChange={e => set({ ...v, note: e.target.value })} />
+      <Receipt need value={pic} pick={async f => setPic(await shrink(f))} />
     </>}
     <label className="muted small">Почему не внёс вовремя</label><textarea rows={2} value={why} onChange={e => setWhy(e.target.value)} placeholder="Например: не было связи на объекте" />
     {err && <p className="small why">{err}</p>}

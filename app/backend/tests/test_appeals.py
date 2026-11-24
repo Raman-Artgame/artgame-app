@@ -187,3 +187,21 @@ def test_late_shift_many_photos(client, monkeypatch):
     with db.pool.connection() as c:
         s = c.execute("SELECT photo_after FROM shifts WHERE id=%s", (r["result_id"],)).fetchone()
         assert s["photo_after"] and c.execute("SELECT count(*) AS n FROM shift_photos WHERE shift_id=%s", (r["result_id"],)).fetchone()["n"] == 2
+
+
+def test_expense_needs_receipt_and_note(client, monkeypatch):
+    """HEAD 24.11: «без чека расходы не принимать… комментарии обязательны, на что потрачены»."""
+    from conftest import JPG
+    setup(client, monkeypatch)
+    base = {"object_id": 731, "zone_code": "mural", "category": "paint", "amount": 7000, "paid_by": "own"}
+    r = client.post("/api/expenses", json={**base, "client_uid": uid(), "receipt": None, "note": "краска"}, headers=hdr(2000))
+    assert r.status_code == 400 and "чек" in r.json()["detail"].lower()
+    r = client.post("/api/expenses", json={**base, "client_uid": uid(), "receipt": JPG, "note": " "}, headers=hdr(2000))
+    assert r.status_code == 400 and "на что потрачено" in r.json()["detail"]
+    r = client.post("/api/expenses", json={**base, "client_uid": uid(), "receipt": JPG, "note": "краска"}, headers=hdr(1000))
+    assert r.status_code == 200                                                # HEAD — по тому же правилу, с чеком
+    assert client.post("/api/expenses", json={**base, "client_uid": uid(), "receipt": None, "note": "краска"}, headers=hdr(1000)).status_code == 400
+    late = dict(kind="expense_late", day="2026-11-05", object_id=731, zone_code="mural", category="paint", amount=500, why="не было связи")
+    assert ask(client, 2000, **late, receipt=None, note="кисти").status_code == 400
+    assert ask(client, 2000, **late, receipt=JPG, note="").status_code == 400
+    assert ask(client, 2000, **late, receipt=JPG, note="кисти").status_code == 200

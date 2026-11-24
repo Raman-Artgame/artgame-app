@@ -200,7 +200,7 @@ async function tab(p, name) {
   await trip.locator('.row', { hasText: 'Питание' }).waitFor()
   await trip.locator('.row', { hasText: 'Проживание' }).getByRole('button', { name: '+ сумма' }).click()
   await trip.getByPlaceholder('Сумма, ₸').fill('45000')
-  await trip.getByPlaceholder(/Комментарий/).fill('3 ночи')
+  await trip.getByPlaceholder(/На что/).fill('3 ночи')
   await trip.locator('.receipt input').first().setInputFiles(__dirname + '/chek.png')
   await trip.locator('.receipt img').waitFor()
   await trip.getByRole('button', { name: 'Записать' }).click()

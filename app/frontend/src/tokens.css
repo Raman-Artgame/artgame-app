@@ -739,7 +739,15 @@ nav.scroll button { flex: 0 0 auto; min-width: 64px; padding: 7px 8px; scroll-sn
 .card.dmpulse { cursor: pointer; padding: 14px 16px; }
 .dm .dmback { margin-bottom: 12px; }
 /* Чек из галереи или камерой (HEAD 10.11) */
-.receipt { margin: 8px 0; }
+.receipt { margin: 12px 0; padding: 14px; border: 1.5px dashed var(--line); border-radius: var(--r2); background: var(--alt); }
+.receipt.need { border-color: var(--accent); }
+.receipt.has { border-style: solid; border-color: var(--ok); }
+.receipt .rhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.receipt .rhead b { font-size: 20px; font-weight: 800; letter-spacing: .04em; }
+.receipt .rmust { font-size: 13px; font-weight: 700; color: #fff; background: var(--accent); border-radius: 999px; padding: 3px 10px; }
+.receipt .rok { font-size: 13px; font-weight: 700; color: var(--ok); }
+.receipt .btnlike { min-height: 56px; font-size: 17px; }
+.receipt p { margin: 8px 0 0; }
 .receipt img { display: block; width: 100%; max-height: 260px; object-fit: contain; border-radius: 12px; background: var(--alt); margin-bottom: 6px; }
 .receipt .seg { margin: 0; }
 .btnlike { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 12px 10px; border-radius: 12px; font-weight: 600; cursor: pointer;

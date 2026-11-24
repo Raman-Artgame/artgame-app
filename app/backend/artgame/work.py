@@ -675,10 +675,28 @@ def _same_expense(conn, p: dict, e) -> dict | None:
                                            (p["id"], e.object_id, e.category, e.amount, e.paid_by, e.note, bool(e.day))).fetchone()
 
 
+NO_RECEIPT = "Без чека расход не принимается: приложи фото или скриншот чека"
+NO_NOTE = "Напиши в комментарии, на что потрачено"
+
+
+def need_receipt_note(receipt: str | None, note: str | None) -> str:
+    """HEAD 24.11: «без чека расходы не принимать… комментарии обязательны, на что потрачены». Возвращает комментарий."""
+    note = (note or "").strip()
+    if len(note) < 3:
+        raise HTTPException(400, NO_NOTE)
+    if not receipt:
+        raise HTTPException(400, NO_RECEIPT)
+    return note
+
+
 @router.post("/expenses")
 def add_expense(e: ExpenseIn, p: dict = Depends(active)):
     if e.paid_by not in ("own", "company"):
         raise HTTPException(400, "bad paid_by")
+    with db.pool.connection() as conn:   # повтор уже принятой записи (очередь телефона) — не отказ
+        known = conn.execute("SELECT 1 FROM expenses WHERE client_uid=%s", (e.client_uid,)).fetchone()
+    if not known:
+        e.note = need_receipt_note(e.receipt, e.note)
     name = f"Чек {datetime.now():%Y-%m-%d %H-%M} {p['full_name']} {e.amount:.0f}"
     drive_id = None
     if e.receipt:   # чек — на Диск до транзакции (HEAD 16.11, зависания): база не ждёт Google

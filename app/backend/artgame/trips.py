@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from . import constants as consts
 from . import db, drive
 from .gip import GIP_ROLES, can_crew
-from .work import CLOSED, TZ, active, is_trip, self_approve, with_receipt
+from .work import CLOSED, TZ, active, is_trip, need_receipt_note, self_approve, with_receipt
 
 router = APIRouter(prefix="/api")
 ITEMS = [("lodging", "Проживание"), ("trip_road", "Дорога (билеты, бензин)"), ("trip_local", "Транспорт на месте"), ("trip_other", "Прочее")]
@@ -110,6 +110,7 @@ def trip_cost_add(oid: int, b: CostIn, p: dict = Depends(active)):
             raise HTTPException(404, "объекта ещё нет в приложении")
         if o["closed_at"]:
             raise HTTPException(400, CLOSED)
+        b.note = need_receipt_note(b.receipt, b.note)
         fid = None
         if b.receipt:
             if not b.receipt.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")):

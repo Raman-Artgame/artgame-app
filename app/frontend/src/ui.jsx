@@ -82,12 +82,14 @@ export function StatusMark({ status }) {
 export function Receipt({ value, pick, need }) {
   const input = cam => <input type="file" accept="image/*" {...(cam ? { capture: 'environment' } : {})} hidden
     onChange={e => { const f = e.target.files[0]; e.target.value = ''; f && pick(f) }} />
-  return <div className="receipt">
+  // HEAD 24.11: «слово чек выделить и побольше, чтобы удобно нажимать» — рамка, крупный заголовок, высокие кнопки
+  return <div className={'receipt' + (need ? ' need' : '') + (value ? ' has' : '')}>
+    <div className="rhead"><b>🧾 ЧЕК</b>{value ? <span className="rok">✓ приложен</span> : need ? <span className="rmust">обязательно</span> : null}</div>
     {value && <img src={value} alt="чек" />}
     <div className="seg">
       <label className="btnlike">🖼 {value ? 'Другой' : 'Из галереи'}{input(false)}</label>
       <CamLabel className="btnlike ghost" onFiles={f => pick(f[0])}>📷 Снять</CamLabel>
     </div>
-    {!value && <p className="small muted">{need ? 'Фото чека обязательно: ' : ''}скриншот из галереи или снимок камерой.</p>}
+    {!value && <p className="small muted">{need ? 'Без чека расход не принимается. ' : ''}Скриншот из галереи или снимок камерой.</p>}
   </div>
 }

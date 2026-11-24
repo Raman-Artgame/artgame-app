@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import db, drive
-from .work import (DIRECT_SQL, HAS_CUR_SQL, SHOP, TZ, WORKSHOP_TITLE, check_workshop, Decision, RateIn, active, cats_for,
+from .work import (DIRECT_SQL, need_receipt_note, HAS_CUR_SQL, SHOP, TZ, WORKSHOP_TITLE, check_workshop, Decision, RateIn, active, cats_for,
                    STAR_ROLES, check_rate, check_zone, head_rate, _pre, is_trip, overlap, review_filter, shift_role, stage_of, _photo)
 
 router = APIRouter(prefix="/api")
@@ -178,7 +178,7 @@ def add_appeal(b: AppealIn, p: dict = Depends(active)):
                 raise HTTPException(400, "Укажи сумму")
             if b.category not in {c["code"] for c in cats_for(conn, p["role_code"])}:
                 raise HTTPException(400, "bad category")
-            data = {"amount": b.amount, "category": b.category, "paid_by": b.paid_by, "note": (b.note or "").strip() or None}
+            data = {"amount": b.amount, "category": b.category, "paid_by": b.paid_by, "note": need_receipt_note(b.receipt, b.note)}
             if b.receipt:
                 data["receipt_file_id"] = _save_receipt(conn, p, zone, obj, b.amount, b.receipt)
         row = conn.execute("""INSERT INTO appeals (client_uid, person_id, kind, target_id, object_id, zone_code, day, why, data, old)

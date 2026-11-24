@@ -111,6 +111,11 @@ async function tab(p, name) {
   // 3. Расход без сети → очередь → сеть вернулась → ушёл
   await a.getByRole('button', { name: 'Расход' }).click()
   await a.locator('input[inputmode=numeric]').fill('15000')
+  // HEAD 24.11: без чека и без «на что потрачено» кнопка не нажимается
+  assert.ok(await a.getByRole('button', { name: 'Отправить расход' }).isDisabled())
+  await a.getByText('Чтобы отправить, нужны: на что потрачено, чек.').waitFor()
+  await a.screenshot({ path: `${shots}/rashod-bez-cheka.png`, fullPage: true })
+  await a.getByPlaceholder(/Например: краска/).fill('краска белая, 2 ведра')
   await a.locator('.receipt input').first().setInputFiles(__dirname + '/chek.png')   // из галереи (HEAD 10.11)
   await a.locator('.receipt img').waitFor()
   await a.screenshot({ path: `${shots}/rashod-chek.png`, fullPage: true })
