@@ -85,6 +85,65 @@ def sync_units(conn, rows: list[dict], v: dict, local: dict, people: dict) -> in
     return added
 
 
+# HEAD 24.11: «чтобы отображался учёт единиц в соответствии с утверждёнными проектами, которые в работе либо завершены».
+# По факту утверждённая сделка не доходит до «УТВЕРЖДЕНО» воронки дизайна, а уходит в основную воронку — единиц было 0 у всех.
+# Теперь единица — и по сделке основной воронки, где заполнен «Ответственный дизайнер», на этих стадиях:
+WORK = ("UC_AV00QK", "UC_BMKDS4", "WON")   # «Выполнение проекта», «Оплата+закрывающие документы», «Оплата получена»
+WORK_FROM = "UC_AV00QK"
+
+
+def _entered_work(did: int) -> datetime | None:
+    """Когда сделка впервые попала на «Выполнение проекта» (история стадий) — по этому дню единица ложится в месяц."""
+    try:
+        hist = bx._rows(bx.read("crm.stagehistory.list", {"entityTypeId": 2, "filter": {"OWNER_ID": did, "STAGE_ID": WORK_FROM},
+                                                         "order": {"ID": "ASC"}}))
+        return datetime.fromisoformat(hist[0]["CREATED_TIME"]) if hist else None
+    except Exception:  # noqa: BLE001 — истории нет: возьмём сегодняшний день
+        return None
+
+
+def sync_work_units(fresh: bool = False) -> int:
+    """Сделки основной воронки в работе или завершённые, с дизайнером → единица (одна на сделку). Размер появился позже —
+    единицы дописываются. Битрикс недоступен — молча ничего не делаем, экран показывает то, что уже записано."""
+    try:
+        deals = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], "STAGE_ID": list(WORK), "!" + F_DESIGNER: False},
+                                              "select": SELECT, "order": {"ID": "ASC"}}, fresh=fresh)
+    except Exception:  # noqa: BLE001
+        return 0
+    deals = [d for d in deals if d.get("STAGE_ID") in WORK and int(d.get(F_DESIGNER) or 0)]
+    if not deals:
+        return 0
+    ids = [int(d["ID"]) for d in deals]
+    with db.pool.connection() as conn:
+        have = {r["deal_id"]: r for r in conn.execute("SELECT deal_id, size, person_id, status FROM design_units WHERE deal_id = ANY(%s)", (ids,)).fetchall()}
+        # дизайн этого проекта уже засчитан из карточки проекта («+ Дизайн проекта», HEAD 14.11) — второй раз не считаем
+        by_card = {r["object_id"] for r in conn.execute(
+            "SELECT object_id FROM design_extras WHERE object_id = ANY(%s) AND kind='design' AND status IN ('pending','approved')", (ids,)).fetchall()}
+    starts = {i: _entered_work(i) for i in ids if i not in have and i not in by_card}
+    added = 0
+    with db.pool.connection() as conn, conn.transaction():
+        v = consts.latest(conn)
+        people = _people_by_bx(conn)
+        local = {r["deal_id"]: r["size"] for r in conn.execute("SELECT deal_id, size FROM design_sizes WHERE deal_id = ANY(%s)", (ids,)).fetchall()}
+        rounds = _rounds(conn, ids)
+        for d in deals:
+            did, uid, size = int(d["ID"]), int(d[F_DESIGNER]), _size(d, local)
+            pid = (people.get(uid) or {}).get("id")
+            old = have.get(did)
+            if old:   # размер или связь с человеком появились позже
+                if old["status"] == "active" and ((size and not old["size"]) or (pid and not old["person_id"])):
+                    conn.execute("""UPDATE design_units SET size=coalesce(size, %s), units=CASE WHEN size IS NULL THEN %s ELSE units END,
+                                    person_id=coalesce(person_id, %s) WHERE deal_id=%s""", (size, unit_of(v, size), pid, did))
+                continue
+            if did in by_card:
+                continue
+            conn.execute("""INSERT INTO design_units (deal_id, title, person_id, bitrix_user_id, size, units, rounds, approved_at)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (deal_id) DO NOTHING""",
+                         (did, d.get("TITLE"), pid, uid, size, unit_of(v, size), rounds.get(did, 0), starts.get(did) or datetime.now(timezone.utc)))
+            added += 1
+    return added
+
+
 TZ = ZoneInfo("Asia/Almaty")
 WAIT_REMIND_DAYS = 7
 
@@ -328,6 +387,7 @@ def resume(deal_id: int, p: dict = Depends(active)):
 def units(ym: str | None = None, p: dict = Depends(active)):
     """Единицы за месяц: свои; Главный дизайнер и HEAD — все. Норма и доплата — из «Значений» (если норма задана)."""
     need(p)
+    sync_work_units()
     start = month_start(ym)
     end = date(start.year + start.month // 12, start.month % 12 + 1, 1)
     with db.pool.connection() as conn:
@@ -341,7 +401,8 @@ def units(ym: str | None = None, p: dict = Depends(active)):
         wait = designobj.pending(conn) if p["role_code"] in ALL else []
     mine = sum(float(r["units"]) for r in rows if r["status"] == "active" and r["person_id"] == p["id"]) \
         + sum(float(x["units"]) for x in extras if x["person_id"] == p["id"])
-    return {"month": f"{start:%Y-%m}", "rows": rows, "extras": extras, "wait": wait, "mine": mine, "sizes": {z: unit_of(v, z) for z in SIZES}, "norm": v.get("pay.design.norm_units"),
+    nosize = sum(1 for r in rows if r["status"] == "active" and not r["size"])
+    return {"month": f"{start:%Y-%m}", "rows": rows, "extras": extras, "wait": wait, "mine": mine, "nosize": nosize, "sizes": {z: unit_of(v, z) for z in SIZES}, "norm": v.get("pay.design.norm_units"),
             "unit_over": v.get("pay.design.unit_over"), "can_cancel": p["role_code"] == "head"}
 
 

@@ -87,6 +87,10 @@ STAGES = [("C13:NEW", "Свежие заказы", 10, None), ("C13:PREPARATION"
 def fake(method, params):
     if method == "crm.deal.list":
         f = params["filter"]
+        if "STAGE_ID" in f:   # сделки основной воронки в работе с дизайнером (единицы, HEAD 24.11)
+            rows = [d for d in DEALS.values() if int(d["CATEGORY_ID"]) in f["CATEGORY_ID"] and d["STAGE_ID"] in f["STAGE_ID"]
+                    and d.get("UF_CRM_ARTGAME_DESIGNER")]
+            return {"result": rows, "total": len(rows)}
         sem = lambda d: "S" if d["STAGE_ID"].endswith("WON") else "F" if d["STAGE_ID"].endswith("LOSE") else "P"  # noqa: E731
         rows = [d for d in DEALS.values() if sem(d) == f["STAGE_SEMANTIC_ID"] and int(d["CATEGORY_ID"]) in f["CATEGORY_ID"]]
         if ">=CLOSEDATE" in f:
@@ -100,7 +104,41 @@ def fake(method, params):
         return {"result": [{"STATUS_ID": s, "NAME": n, "SORT": str(o), **({"EXTRA": {"SEMANTICS": e}} if e else {})} for s, n, o, e in STAGES]}
     if method == "crm.deal.fields":
         return {"result": {}}
+    if method == "crm.stagehistory.list":
+        h = HIST.get(str(params["filter"]["OWNER_ID"]))
+        return {"result": {"items": [{"CREATED_TIME": h}] if h else []}}
     raise AssertionError(method)
+
+
+HIST = {}
+
+
+def test_design_units_from_work_deals(client, dz):
+    """HEAD 24.11: единицы — по утверждённым проектам, которые в работе либо завершены (сделка основной воронки с дизайнером)."""
+    ids, _ = dz
+    today = __import__("datetime").date.today()
+    HIST.clear(); HIST.update({"1701": f"{today:%Y-%m}-03T10:00:00+03:00", "1557": "2026-01-15T10:00:00+03:00"})
+    DEALS.update({
+        "1701": {"ID": "1701", "TITLE": "Колледж", "STAGE_ID": "UC_AV00QK", "CATEGORY_ID": "0", "UF_CRM_ARTGAME_DESIGNER": "7001",
+                 "UF_CRM_ARTGAME_DESIGN_COMPLEXITY": "43345"},                                   # в работе, M = 2 ед.
+        "1557": {"ID": "1557", "TITLE": "Детский сад", "STAGE_ID": "WON", "CATEGORY_ID": "0", "UF_CRM_ARTGAME_DESIGNER": "7001",
+                 "UF_CRM_ARTGAME_DESIGN_COMPLEXITY": "43343"},                                   # завершён в январе
+        "1703": {"ID": "1703", "TITLE": "Щиток", "STAGE_ID": "UC_BMKDS4", "CATEGORY_ID": "0", "UF_CRM_ARTGAME_DESIGNER": "7000"},   # без размера
+        "1687": {"ID": "1687", "TITLE": "Отложено", "STAGE_ID": "UC_VCP4VO", "CATEGORY_ID": "0", "UF_CRM_ARTGAME_DESIGNER": "7001"},
+        "1429": {"ID": "1429", "TITLE": "Отказ", "STAGE_ID": "LOSE", "CATEGORY_ID": "0", "UF_CRM_ARTGAME_DESIGNER": "7001"}})
+    bx._cache.clear()
+    u = client.get("/api/design/units", headers=hdr(7100)).json()
+    assert u["mine"] == 2 and [r["deal_id"] for r in u["rows"]] == [1701]
+    assert client.get("/api/design/units?ym=2026-01", headers=hdr(7100)).json()["mine"] == 1      # по дню входа в «Выполнение»
+    lead = client.get("/api/design/units", headers=hdr(7000)).json()                              # Главный видит всех; свой без размера = 0
+    assert {r["deal_id"] for r in lead["rows"]} == {1701, 1703} and lead["mine"] == 0 and lead["nosize"] == 1
+    # размер поставили позже — единицы дописались; повторное чтение не дублирует
+    DEALS["1703"]["UF_CRM_ARTGAME_DESIGN_COMPLEXITY"] = "43343"
+    bx._cache.clear()
+    lead = client.get("/api/design/units", headers=hdr(7000)).json()
+    assert lead["mine"] == 1 and len(lead["rows"]) == 2 and lead["nosize"] == 0
+    for k in ("1701", "1557", "1703", "1687", "1429"):
+        DEALS.pop(k)
 
 
 @pytest.fixture

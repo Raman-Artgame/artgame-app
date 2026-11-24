@@ -138,6 +138,7 @@ async function tab(p, name) {
   await dz.locator('.dztodo .dzcard', { hasText: 'Дизайн кафе' }).getByText('нет дизайнера').waitFor()
   await dz.screenshot({ path: `${shots}/kab-dizain-naznachit.png`, fullPage: true })
   await dz.locator('.dztabs button', { hasText: 'По стадиям' }).click()
+  assert.strictEqual(await dz.locator('.dztabs button', { hasText: 'Горит' }).count(), 0, 'вкладку «Горит» убрали (HEAD 24.11)')
   await dz.getByRole('button', { name: /Подсказки/ }).click()
   await dz.locator('.dzguide').first().getByText('Что делать').waitFor()
   await dz.screenshot({ path: `${shots}/kab-dizain.png`, fullPage: true })

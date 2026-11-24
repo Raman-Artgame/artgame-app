@@ -90,11 +90,10 @@ function Deals() {
   useEffect(() => { load() }, [])
   if (e) return <div className="card muted">{e}</div>
   if (!d) return <div className="card muted">Загрузка…</div>
-  const fire = d.deals.map(x => ({ x, why: hot(x) })).filter(f => f.why.length)
   const waiting = d.deals.filter(x => x.wait).sort((a, b) => b.wait.days - a.wait.days)
   const todo = d.can_assign ? d.deals.map(x => ({ x, why: lacks(x) })).filter(f => f.why.length) : []
   const stages = d.stages.filter(s => code(s.id) !== 'WON')
-  const v = view || (fire.length ? 'fire' : 'stages')
+  const v = view || 'stages'   // вкладку «Горит» убрали (HEAD 24.11); срок и срочность видны меткой на карточке сделки
   const toggle = () => { setGuide(!guide); try { localStorage.setItem('artgame.dzguide', guide ? '0' : '1') } catch { /* без памяти */ } }
   const Card = ({ x, why, need }) => { const g = GUIDE[code(x.stage)] || {}
     const i = stages.findIndex(s => s.id === x.stage)
@@ -107,19 +106,16 @@ function Deals() {
       <div className="dzst"><span className="dzdots">{stages.map((s, k) => <i key={s.id} className={k < i ? 'done' : k === i ? 'on' : ''} />)}</span>
         <span className="small muted">{stages[i]?.name || x.stage_name}</span></div>
     </div> }
-  const tabs = [['fire', '🔥 Горит', fire.length], ...(d.can_assign ? [['todo', 'Назначить', todo.length]] : []), ['wait', '⏳ Ждём клиента', waiting.length], ['stages', 'По стадиям', d.deals.length]]
+  const tabs = [...(d.can_assign ? [['todo', 'Назначить', todo.length]] : []), ['wait', '⏳ Ждём клиента', waiting.length], ['stages', 'По стадиям', d.deals.length]]
   return <>
     <div className="card dzhero">
       <div className="head"><h2>Воронка «Дизайн РК»</h2><button className="ghost mini" onClick={() => { setD(null); load(1) }}>Обновить</button></div>
-      <p className="small muted">Единица — на «УТВЕРЖДЕНО». Связь с клиентом — кнопкой в карточке сделки, через Битрикс. Готовые эскизы — в «ДИЗАЙН/Утвержденные дизайны».</p>
+      <p className="small muted">Единица — когда проект с твоим дизайном ушёл в работу. Связь с клиентом — кнопкой в карточке сделки, через Битрикс. Готовые эскизы — в «ДИЗАЙН/Утвержденные дизайны».</p>
       {!d.bx && <p className="small why">Запись в Битрикс выключена — изменения пишутся только в журнал.</p>}
       <div className="segf dztabs">{tabs.map(([k, t, n]) => <button key={k} className={v === k ? 'on' : ''} onClick={() => { setView(k); setOnly('') }}>{t}<b>{n}</b></button>)}</div>
     </div>
-    {v === 'fire' && <div className="card dzfire"><h3>🔥 Горит · {fire.length}</h3>
-      <p className="small muted">Срок прошёл, сегодня или завтра, срочный заказ, второй круг правок. Берётся первым.</p>
-      {fire.length ? <div className="dzgrid">{fire.map(f => <Card key={f.x.id} x={f.x} why={f.why} />)}</div> : <p className="small muted">Ничего не горит.</p>}</div>}
     {v === 'wait' && <div className="card dzwaitc"><h3>⏳ Ждём клиента · {waiting.length}</h3>
-      <p className="small muted">Клиент не отвечает — сделка не горит и просрочка не копится. Через 7 дней МОП получает напоминание. Ответил — открой сделку и нажми «Клиент ответил»: срок сдвинется на дни ожидания.</p>
+      <p className="small muted">Клиент не отвечает — просрочка не копится. Через 7 дней МОП получает напоминание. Ответил — открой сделку и нажми «Клиент ответил»: срок сдвинется на дни ожидания.</p>
       {waiting.length ? <div className="dzgrid">{waiting.map(x => <Card key={x.id} x={x} />)}</div> : <p className="small muted">Никого не ждём.</p>}</div>}
     {v === 'todo' && <div className="card dztodo"><h3>Назначить · {todo.length}</h3>
       <p className="small muted">Не хватает дизайнера, размера или срока. Нажми на сделку и заполни.</p>
@@ -182,7 +178,7 @@ function DealSheet({ x, d, team, onClose, onDone }) {
           <input autoFocus value={why} placeholder="например: молчит по эскизу, ждём размеры стены" onChange={e => setWhy(e.target.value)} />
           <div style={{ display: 'flex', gap: 8 }}><button style={{ flex: 2 }} disabled={busy || why.trim().length < 3} onClick={() => act('wait', { reason: why.trim() })}>Ждём клиента</button>
             <button className="ghost" style={{ flex: 1 }} onClick={() => setWhy(null)}>Отмена</button></div>
-          <p className="small muted">Сделка уйдёт из «Горит» в «Ждём клиента», просрочка не копится. Через 7 дней МОП получит напоминание.</p></div>)}
+          <p className="small muted">Сделка уйдёт в «Ждём клиента», просрочка не копится. Через 7 дней МОП получит напоминание.</p></div>)}
     <label className="muted">Стадия</label>
     <select value={v.stage} onChange={e => set({ ...v, stage: e.target.value })}>{d.stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
     {v.stage === won && v.stage !== x.stage && <p className="small why">Перед «УТВЕРЖДЕНО» нужны размер, дизайнер и ссылка на утверждённый эскиз.</p>}
@@ -230,10 +226,12 @@ function Units() {
     <div className="head"><h2>Единицы</h2><input type="month" value={m} onChange={e => setM(e.target.value)} style={{ width: 'auto' }} /></div>
     {u && <><div className="kv"><div><span className="muted small">Мои за месяц</span><b>{String(u.mine).replace('.', ',')}</b></div>
       <div><span className="muted small">Норма</span><b>{u.norm != null ? u.norm : 'ждёт решения HEAD'}</b></div></div>
+      <p className="small muted">Единица засчитывается, когда проект с твоим дизайном ушёл в работу или завершён: сделка на «Выполнении проекта», «Оплата+закрывающие» или «Оплата получена», и в ней ты — ответственный дизайнер. Месяц — по дню, когда проект ушёл в работу.</p>
+      {u.nosize > 0 && <p className="small why">Без размера (XS–XL): {u.nosize} — единицы по ним 0, пока Главный дизайнер или HEAD не поставит сложность в карточке проекта.</p>}
       {u.unit_over && <p className="small muted">Сверх нормы — {money(u.unit_over)} за единицу (Главный дизайнер). Правки — счётчик кругов, без доплаты.</p>}
       {u.rows.map(r => <div key={r.deal_id} className="row">
         <div><b>{r.title || 'Сделка ' + r.deal_id}</b>
-          <div className="small muted">{[r.full_name || 'дизайнер не связан', (r.size || '—').toUpperCase(), dmy(r.approved_at), r.rounds ? `кругов правок: ${r.rounds}` : 'без правок',
+          <div className="small muted">{[r.full_name || 'дизайнер не связан', r.size ? r.size.toUpperCase() : 'размер не указан', dmy(r.approved_at), r.rounds ? `кругов правок: ${r.rounds}` : 'без правок',
             r.status === 'cancelled' && 'снято: ' + r.reason].filter(Boolean).join(' · ')}</div></div>
         <div className="qbtns"><b className={r.status === 'cancelled' ? 'muted' : ''}>{String(+r.units).replace('.', ',')}</b>
           {u.can_cancel && r.status === 'active' && <button className="ghost mini" onClick={() => cancel(r)}>Снять</button>}</div>
@@ -243,7 +241,7 @@ function Units() {
           <div className="small muted">{[x.kind === 'fix' ? 'правка / докидка' : 'дизайн проекта', x.person_name, x.size.toUpperCase(), dmy(x.decided_at), x.note].filter(Boolean).join(' · ')}</div></div>
         <div className="qbtns"><b>{String(+x.units).replace('.', ',')}</b></div>
       </div>)}
-      {!u.rows.length && !(u.extras || []).length && <p className="small muted">Утверждённых макетов за месяц нет.</p>}</>}
+      {!u.rows.length && !(u.extras || []).length && <p className="small muted">За этот месяц проектов, ушедших в работу, нет. Посмотри прошлые месяцы.</p>}</>}
   </div></>
 }
 
