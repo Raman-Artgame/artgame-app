@@ -21,6 +21,8 @@ GRAPH = "https://graph.facebook.com"
 CHANNEL = "Таргет Instagram"
 DAYS_BACK = 35          # ночью пересобираем месяц с запасом: Meta уточняет расход задним числом
 IG_DAYS = 7
+IG_HISTORY = 30         # первый запуск: Instagram по дням отдаёт примерно месяц назад
+ADS_HISTORY = 36 * 30   # первый запуск: реклама за три года (Meta хранит 37 месяцев)
 MEDIA_DAYS = 30
 
 
@@ -78,13 +80,24 @@ def ad_accounts() -> list[dict]:
             for a in get_all("me/adaccounts", {"fields": "id,name,currency", "limit": 50})]
 
 
+def _windows(since: date, until: date, step: int = 31):
+    """Длинный период — кусками по месяцу: так Meta отвечает быстро и не обрывает."""
+    a = since
+    while a <= until:
+        b = min(a + timedelta(days=step - 1), until)
+        yield a, b
+        a = b + timedelta(days=1)
+
+
 def sync_ads(conn, since: date, until: date) -> dict:
     accs = ad_accounts()
     days = 0
     for a in accs:
-        rows = get_all(f"{a['id']}/insights", {"fields": "spend,impressions,reach,clicks,account_currency", "level": "account",
-                                               "time_increment": 1, "limit": 100,
-                                               "time_range": {"since": str(since), "until": str(until)}})
+        rows = []
+        for w0, w1 in _windows(since, until):
+            rows += get_all(f"{a['id']}/insights", {"fields": "spend,impressions,reach,clicks,account_currency", "level": "account",
+                                                    "time_increment": 1, "limit": 100,
+                                                    "time_range": {"since": str(w0), "until": str(w1)}})
         for r in rows:
             cur = r.get("account_currency") or a["currency"]
             conn.execute("""INSERT INTO mkt_meta_day (account, day, spend, currency, impressions, reach, clicks) VALUES (%s,%s,%s,%s,%s,%s,%s)
@@ -116,9 +129,11 @@ def _actions(r: dict) -> tuple[int, int]:
 
 
 def sync_ad_level(conn, a: dict, since: date, until: date) -> int:
-    rows = get_all(f"{a['id']}/insights", {"fields": "campaign_id,campaign_name,adset_name,ad_id,ad_name,spend,impressions,reach,clicks,actions,account_currency",
-                                           "level": "ad", "time_increment": 1, "limit": 200,
-                                           "time_range": {"since": str(since), "until": str(until)}}, limit=60)
+    rows = []
+    for w0, w1 in _windows(since, until):
+        rows += get_all(f"{a['id']}/insights", {"fields": "campaign_id,campaign_name,adset_name,ad_id,ad_name,spend,impressions,reach,clicks,actions,account_currency",
+                                                "level": "ad", "time_increment": 1, "limit": 200,
+                                                "time_range": {"since": str(w0), "until": str(w1)}}, limit=60)
     for r in rows:
         msg, lead = _actions(r)
         conn.execute("""INSERT INTO mkt_meta_ad_day (ad_id, day, account, ad_name, adset_name, campaign_id, campaign_name, spend, currency,
@@ -174,7 +189,7 @@ def _total(d: dict, name: str):
     return None
 
 
-def sync_ig(conn, today: date) -> dict:
+def sync_ig(conn, today: date, history: bool = False) -> dict:
     ig = ig_account()
     if not ig:
         raise MetaError("Instagram не найден: у токена нет страницы со связанным профилем")
@@ -182,7 +197,7 @@ def sync_ig(conn, today: date) -> dict:
     prof = get(ig["id"], {"fields": "username,followers_count,media_count"})
     conn.execute("""INSERT INTO mkt_ig_day (day, followers) VALUES (%s,%s)
                     ON CONFLICT (day) DO UPDATE SET followers=EXCLUDED.followers, fetched_at=now()""", (today, prof.get("followers_count")))
-    for i in range(1, IG_DAYS + 1):          # вчера и раньше: за закрытые дни цифры уже не меняются
+    for i in range(1, (IG_HISTORY if history else IG_DAYS) + 1):          # вчера и раньше: за закрытые дни цифры уже не меняются
         d = today - timedelta(days=i)
         since = int(datetime(d.year, d.month, d.day, tzinfo=timezone(timedelta(hours=5))).timestamp())
         vals = {}
@@ -202,9 +217,9 @@ def sync_ig(conn, today: date) -> dict:
     n = 0
     edge = datetime.now(timezone.utc) - timedelta(days=MEDIA_DAYS)
     for m in get_all(f"{ig['id']}/media", {"fields": "id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count",
-                                           "limit": 50}, limit=3):
+                                           "limit": 50}, limit=4 if history else 2):
         ts = datetime.strptime(m["timestamp"], "%Y-%m-%dT%H:%M:%S%z") if m.get("timestamp") else None
-        if ts and ts < edge:
+        if ts and ts < edge and not history:
             continue
         ins = {}
         try:
@@ -225,14 +240,21 @@ def sync_ig(conn, today: date) -> dict:
 
 
 # ---------- запуск ----------
-def sync(today: date | None = None, by: int | None = None) -> dict:
-    """Весь сбор. Возвращает итог и пишет его в mkt_settings('meta_last') — его показывает «Реклама»."""
+def sync(today: date | None = None, by: int | None = None, history: bool | None = None) -> dict:
+    """Весь сбор. Возвращает итог и пишет его в mkt_settings('meta_last') — его показывает «Реклама».
+
+    history: дозагрузить прошлое (реклама за 3 года, Instagram за месяц). По умолчанию — сам, если в базе ещё пусто:
+    HEAD 24.11 — не ждать неделю, пока накопится."""
     today = today or (datetime.now(timezone.utc) + timedelta(hours=5)).date()
-    res = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ok": True, "errors": []}
+    if history is None:
+        with db.pool.connection() as conn:
+            history = not conn.execute("SELECT 1 FROM mkt_meta_ad_day LIMIT 1").fetchone()
+    back = ADS_HISTORY if history else DAYS_BACK
+    res = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ok": True, "errors": [], "history": history}
     if not token():
         res.update(ok=False, errors=["На сервере нет токена Meta (META_TOKEN)"])
     else:
-        for key, fn in (("ads", lambda c: sync_ads(c, today - timedelta(days=DAYS_BACK), today)), ("ig", lambda c: sync_ig(c, today))):
+        for key, fn in (("ads", lambda c: sync_ads(c, today - timedelta(days=back), today)), ("ig", lambda c: sync_ig(c, today, history))):
             try:
                 with db.pool.connection() as conn, conn.transaction():
                     res[key] = fn(conn)
@@ -287,7 +309,7 @@ def meta_sync(p: dict = Depends(active)):
     ads._edit(p)
     if not token():
         raise HTTPException(409, "На сервере нет токена Meta")
-    return sync(by=p["id"])
+    return sync(by=p["id"], history=False)       # кнопка — быстрый сбор; история грузится ночным запуском
 
 
 @router.post("/mkt/meta/take")

@@ -15,7 +15,8 @@ def fake_meta(calls, broken=()):
         if path == "me/adaccounts":
             return {"data": [{"id": "act_1", "name": "Artgame.kz Ads", "currency": "KZT"}, {"id": "act_2", "name": "USD", "currency": "USD"}]}
         if path == "act_1/insights" and params.get("level") == "account":
-            assert params["time_increment"] == 1 and params["time_range"]["until"] == "2026-11-24"
+            if params["time_range"]["until"] != "2026-11-24":
+                return {"data": []}       # прошлые месяцы истории
             return {"data": [{"date_start": "2026-10-31", "spend": "1000", "impressions": "10", "reach": "9", "clicks": "1", "account_currency": "KZT"},
                              {"date_start": "2026-11-01", "spend": "5000.50", "impressions": "900", "reach": "700", "clicks": "30", "account_currency": "KZT"}],
                     "paging": {"next": "https://graph.facebook.com/next1"}}
@@ -23,6 +24,8 @@ def fake_meta(calls, broken=()):
             return {"data": [{"date_start": "2026-11-02", "spend": "7000", "impressions": "1100", "reach": "800", "clicks": "45", "account_currency": "KZT"}]}
         if path == "act_1/insights" and params.get("level") == "ad" and params.get("date_preset"):
             return {"data": [{"ad_id": "a1", "frequency": "3.6"}, {"ad_id": "a2", "frequency": "1.2"}]}
+        if path == "act_1/insights" and params.get("level") == "ad" and params["time_range"]["until"] != "2026-11-24":
+            return {"data": []}
         if path == "act_1/insights" and params.get("level") == "ad":
             base = {"campaign_id": "c1", "campaign_name": "Роспись Астана", "adset_name": "Ж 25-45", "account_currency": "KZT"}
             return {"data": [{**base, "ad_id": "a1", "ad_name": "Рилс кафе", "date_start": d, "spend": "9000", "impressions": "2000", "reach": "600", "clicks": "10"}
@@ -33,6 +36,8 @@ def fake_meta(calls, broken=()):
         if path == "act_2/insights" and params.get("level") == "ad":
             return {"data": []}
         if path == "act_2/insights":
+            if params["time_range"]["until"] != "2026-11-24":
+                return {"data": []}
             return {"data": [{"date_start": "2026-11-02", "spend": "20", "impressions": "5", "reach": "5", "clicks": "1", "account_currency": "USD"}]}
         if path == "me/accounts":
             return {"data": [{"name": "Artgame.kz", "instagram_business_account": {"id": "178", "username": "artgame.kz"}}]}
@@ -44,6 +49,8 @@ def fake_meta(calls, broken=()):
             return {"data": [{"id": "m1", "caption": "Роспись кафе", "media_type": "VIDEO", "media_product_type": "REELS", "permalink": "https://instagram.com/reel/1",
                               "timestamp": "2026-11-20T10:00:00+0000", "like_count": 50, "comments_count": 4},
                              {"id": "old", "media_type": "IMAGE", "media_product_type": "FEED", "timestamp": "2025-01-01T10:00:00+0000"}]}
+        if path == "old/insights":
+            return {"data": []}
         if path == "m1/insights":
             return {"data": [{"name": "views", "values": [{"value": 12000}]}, {"name": "reach", "values": [{"value": 8000}]},
                              {"name": "saved", "values": [{"value": 30}]}, {"name": "shares", "values": [{"value": 12}]}]}
@@ -60,8 +67,9 @@ def test_meta_loader(client, monkeypatch):
     calls = []
     monkeypatch.setattr(meta, "get", fake_meta(calls))
     r = meta.sync(today=date(2026, 11, 24))
+    assert r["history"] and sum(1 for c in calls if c == "act_1/insights") > 60 and sum(1 for c in calls if c == "178/insights") == 120
     assert r["ok"] and r["errors"] == [] and r["ads"]["days"] == 4 and set(r["ads"]["months"]) == {"2026-10", "2026-11"}
-    assert r["ig"]["followers"] == 3600 and r["ig"]["media"] == 1
+    assert r["ig"]["followers"] == 3600 and r["ig"]["media"] == 2
     d = client.get("/api/mkt/meta?ym=2026-11", headers=hdr(1000)).json()
     kzt = [a for a in d["ads"] if a["currency"] == "KZT"][0]
     assert (kzt["spend"], kzt["impressions"], kzt["clicks"], kzt["upto"]) == (12000.5, 2000, 75, "2026-11-02")
@@ -75,7 +83,8 @@ def test_meta_loader(client, monkeypatch):
         ch = row["channel_id"]
     # руками поправили — ночной сбор не затирает, пока не нажмут «Взять из Meta»
     assert client.post("/api/mkt/spend", json={"channel_id": ch, "ym": "2026-11", "amount": 99}, headers=hdr(1000)).status_code == 200
-    meta.sync(today=date(2026, 11, 24))
+    calls.clear()
+    assert not meta.sync(today=date(2026, 11, 24))["history"] and len(calls) < 50       # второй раз — обычный короткий сбор
     d = client.get("/api/mkt/meta?ym=2026-11", headers=hdr(1000)).json()
     assert d["manual"]
     with db.pool.connection() as c:

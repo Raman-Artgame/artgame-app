@@ -6,7 +6,7 @@ from . import adrules, db, meta
 
 def main():
     db.open_pool()
-    r = meta.sync()
+    r = meta.sync(history=True if "--history" in sys.argv else None)
     print(f"ok={r['ok']} ads={r.get('ads')} ig={r.get('ig')} hints={r.get('hints')} errors={r['errors']}")
     today = adrules._today()
     if today.weekday() == 0:        # понедельник: отчёт за прошлую неделю файлом на Диск
