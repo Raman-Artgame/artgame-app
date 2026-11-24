@@ -204,30 +204,52 @@ function Ledger({ m, d }) {
   </div></>
 }
 
+// HEAD 24.11: «Блок ФОТ коряво, не понятно, что уже выплачивали, что осталось» — у человека сразу видно «осталось N» или
+// «✓ выплачено», полоска «выплачено из начисленного»; внутри — за что начислено, каждая выплата с датой и чеком, и «Выплатить».
+const dshort = t => new Date(String(t).slice(0, 10) + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 function PayRow({ r, m, d, reload }) {
   const [open, setOpen] = useState(false)
+  const left = Math.round(r.left)
   const [v, set] = useState({ amount: '', account: d.accounts[0]?.code, op_date: today(), adj: '', detail: '' })
   const [e, setE] = useState('')
+  const flip = () => { if (!open) set({ ...v, amount: left > 0 ? String(left) : '' }); setOpen(!open) }
   const pay = () => api(`/fin/payroll/${m}/pay`, { method: 'POST', body: { client_uid: uuid(), payee_id: r.id, amount: +v.amount, account: v.account, op_date: v.op_date } })
     .then(() => { setOpen(false); reload() }, err(setE))
   const adj = () => api(`/fin/payroll/${m}/accrual`, { method: 'POST', body: { payee_id: r.id, amount: +v.adj, detail: v.detail } }).then(reload, err(setE))
   const drop = id => api(`/fin/accruals/${id}/cancel`, { method: 'POST' }).then(reload, err(setE))
-  return <div className="row payrow" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-    <div className="head" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
-      <span>{r.name} <span className="small muted">{r.group}{r.pay_rule === 'weekly' ? ' · еженедельно' : ''}</span></span>
-      <span className="small">{money(r.accrued)} · <span className={r.left > 0 ? 'why' : 'muted'}>{r.left > 0 ? 'осталось ' + money(r.left) : r.accrued ? 'выплачено' : '—'}</span></span></div>
+  const pct = r.accrued > 0 ? Math.max(0, Math.min(100, r.paid / r.accrued * 100)) : 0
+  const payForm = <>
+    <input inputMode="numeric" value={v.amount} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder={`Выплата, ₸ (осталось ${Math.max(0, left)})`} />
+    <div className="segf accs">{d.accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>
+    <input type="date" value={v.op_date} onChange={e => set({ ...v, op_date: e.target.value })} />
+    <button disabled={!(+v.amount > 0)} onClick={pay}>Отметить выплату{+v.amount > 0 ? ' ' + money(+v.amount) : ''}</button></>
+  return <div className={'row payrow' + (left >= 1 ? ' owe' : '')} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+    <div className="head" onClick={flip} style={{ cursor: 'pointer' }}>
+      <span className="payname"><b>{r.name}</b><span className="small muted">{r.group}{r.pay_rule === 'weekly' ? ' · еженедельно' : ''}</span></span>
+      {left >= 1 ? <span className="paystate owe"><span className="small">осталось</span><b>{money(left)}</b></span>
+        : left <= -1 ? <span className="paystate over"><span className="small">переплата</span><b>{money(-left)}</b></span>
+        : r.accrued ? <span className="paystate done">✓ выплачено</span> : <span className="paystate muted">—</span>}
+    </div>
+    {r.accrued > 0 && <div className="bar paybar" onClick={flip}><i style={{ width: pct + '%' }} /></div>}
+    <div className="small muted paysub" onClick={flip}>{r.accrued || r.paid ? <>начислено {r.accrued ? money(r.accrued) : '0 ₸'} · отдали {r.paid ? money(r.paid) : '0 ₸'}{r.last_paid ? ' · ' + dshort(r.last_paid) : ''}</> : 'за месяц начислений нет'} {open ? '▴' : '▾'}</div>
     {open && <div className="dealedit">
-      {r.lines.map(a => <div key={a.id} className="small row"><span>{a.detail || a.kind}</span>
-        <span>{money(+a.amount)} {a.kind === 'manual' && <a onClick={() => drop(a.id)}>убрать</a>}</span></div>)}
-      {r.pending?.map(a => <div key={a.id} className="small row muted"><span>{a.detail}</span><span>{money(+a.amount)}</span></div>)}
-      <p className="small muted">Выплачено {money(r.paid)}{r.last_paid ? ', последняя ' + new Date(r.last_paid).toLocaleDateString('ru-RU') : ''}.</p>
-      <input inputMode="numeric" value={v.amount} onChange={e => set({ ...v, amount: e.target.value.replace(/\D/g, '') })} placeholder={`Выплата, ₸ (осталось ${Math.max(0, Math.round(r.left))})`} />
-      <div className="segf accs">{d.accounts.map(a => <button key={a.code} className={v.account === a.code ? 'on' : ''} onClick={() => set({ ...v, account: a.code })}>{a.title}</button>)}</div>
-      <input type="date" value={v.op_date} onChange={e => set({ ...v, op_date: e.target.value })} />
-      <button disabled={!(+v.amount > 0)} onClick={pay}>Отметить выплату</button>
-      <input value={v.adj} onChange={e => set({ ...v, adj: e.target.value.replace(/[^\d-]/g, '') })} placeholder="Доплата / удержание, ₸ (минус — удержание)" />
-      <input value={v.detail} onChange={e => set({ ...v, detail: e.target.value })} placeholder="За что" />
-      <button className="ghost" disabled={!+v.adj || v.detail.trim().length < 2} onClick={adj}>Добавить начисление</button>
+      <div className="paysec">За что начислено<b>{money(r.accrued)}</b></div>
+      {r.lines.map(a => <div key={a.id} className="small wline"><span>{a.detail || a.kind}</span>
+        <span className="nowrap">{money(+a.amount)} {a.kind === 'manual' && <a onClick={() => drop(a.id)}>убрать</a>}</span></div>)}
+      {!r.lines.length && <p className="small muted">Начислений за месяц нет.</p>}
+      {r.pending?.map(a => <div key={a.id} className="small wline muted"><span>{a.detail} · после конца месяца</span><span className="nowrap">{money(+a.amount)}</span></div>)}
+      <div className="paysec">Что уже выплачено<b>{money(r.paid)}</b></div>
+      {(r.payments || []).map(x => <div key={x.id} className="small wline"><span>{dshort(x.op_date)} · {x.account}{x.advance ? ' · аванс' : ''}
+        {x.account_code === 'cash' ? (x.ack_at ? ' · получил ' + dshort(x.ack_at) : ' · ждёт «Получил»') : x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</span>
+        <span className="nowrap">{money(+x.amount)}</span></div>)}
+      {!(r.payments || []).length && <p className="small muted">Выплат за этот месяц ещё не было.</p>}
+      {left >= 1 ? <><div className="paysec owe">Осталось выплатить<b>{money(left)}</b></div>{payForm}</>
+        : <><p className="small ok">{left <= -1 ? `Выплачено больше начисленного на ${money(-left)}.` : r.accrued ? '✓ За этот месяц всё выплачено.' : 'Выплачивать нечего.'}</p>
+          <details className="paymore"><summary className="small">Внести ещё одну выплату</summary>{payForm}</details></>}
+      <details className="paymore"><summary className="small">Доплата или удержание</summary>
+        <input value={v.adj} onChange={e => set({ ...v, adj: e.target.value.replace(/[^\d-]/g, '') })} placeholder="Сумма, ₸ (минус — удержание)" />
+        <input value={v.detail} onChange={e => set({ ...v, detail: e.target.value })} placeholder="За что" />
+        <button className="ghost" disabled={!+v.adj || v.detail.trim().length < 2} onClick={adj}>Добавить начисление</button></details>
       {e && <p className="small why">{e}</p>}
     </div>}
   </div>
@@ -237,18 +259,35 @@ function Payroll({ m, d }) {
   const [p, setP] = useState(null)
   const [e, setE] = useState('')
   const [busy, setBusy] = useState(false)
+  const [f, setF] = useState(null)   // left | done | all; пока не выбрано — «осталось», если есть кому платить
   const load = () => api('/fin/payroll/' + m).then(setP, err(setE))
   useEffect(() => { setP(null); load() }, [m])
   const compute = () => { setBusy(true); setE(''); api(`/fin/payroll/${m}/compute`, { method: 'POST' }).then(r => { setP(r); setE((r.warn || []).join('; ')) }, err(setE)).finally(() => setBusy(false)) }
-  return <><Monday d={d} onPaid={load} /><Advance d={d} onPaid={load} /><div className="card">
-    <div className="head"><h3>ФОТ</h3><button className="mini" disabled={busy} onClick={compute}>{busy ? 'Считаю…' : 'Пересчитать'}</button></div>
-    {p && <div className="kv"><div><span className="muted small">Начислено</span><b>{money(p.accrued)}</b></div>
-      <div><span className="muted small">Выплачено</span><b>{money(p.paid)}</b></div><div><span className="muted small">Осталось</span><b>{money(p.left)}</b></div></div>}
+  const rows = p?.rows || []
+  const owe = rows.filter(r => r.left >= 1).sort((a, b) => b.left - a.left)
+  const done = rows.filter(r => r.left < 1 && (r.accrued > 0 || r.paid > 0))
+  const over = rows.filter(r => r.left <= -1)
+  const oweSum = owe.reduce((s, r) => s + r.left, 0)
+  const tab = f || (owe.length ? 'left' : 'all')
+  const shown = tab === 'left' ? owe : tab === 'done' ? done : [...owe, ...rows.filter(r => r.left < 1).sort((a, b) => (b.accrued > 0 || b.paid > 0) - (a.accrued > 0 || a.paid > 0))]
+  const pct = p?.accrued > 0 ? Math.max(0, Math.min(100, p.paid / p.accrued * 100)) : 0
+  return <><Monday d={d} onPaid={load} /><Advance d={d} onPaid={load} /><div className="card fot">
+    <div className="head"><h3>ФОТ за месяц</h3><button className="mini" disabled={busy} onClick={compute}>{busy ? 'Считаю…' : 'Пересчитать'}</button></div>
+    {p && <><div className="fotsum">
+      <div className="fotbig"><span className="small muted">Осталось выплатить</span><b className={oweSum >= 1 ? 'owe' : 'done'}>{oweSum >= 1 ? money(oweSum) : '✓ всё выплачено'}</b>
+        {owe.length > 0 && <span className="small muted">{owe.length} чел.</span>}</div>
+      <div className="bar"><i style={{ width: pct + '%' }} /></div>
+      <div className="fotkv"><span>Начислено <b>{money(p.accrued)}</b></span><span>Выплачено <b>{money(p.paid)}</b></span></div>
+      {over.length > 0 && <p className="small why">Переплата у {over.length} чел.: {money(-over.reduce((s, r) => s + r.left, 0))} — видно во вкладке «Выплачено».</p>}
+    </div>
+    <div className="segf fottabs">{[['left', 'Осталось', owe.length], ['done', 'Выплачено', done.length], ['all', 'Все', rows.length]].map(([k, n, c]) =>
+      <button key={k} className={tab === k ? 'on' : ''} onClick={() => setF(k)}>{n} · {c}</button>)}</div></>}
+    {e && <p className="small why">{e}</p>}
+    {shown.map(r => <PayRow key={r.id} r={r} m={m} d={d} reload={load} />)}
+    {p && !shown.length && <p className="small muted">{tab === 'left' ? 'Платить некому: за этот месяц всем всё выплачено.' : tab === 'done' ? 'Пока никому не выплачено полностью.' : 'Начислений за месяц нет.'}</p>}
     {p?.pending > 0 && <p className="small muted">Доплаты до минимума по итогам месяца: {money(p.pending)} — не входят в «начислено» и «осталось», пока месяц идёт.
       После конца месяца нажми «Пересчитать» — недостающее до минимума начислится.</p>}
-    <p className="small muted">Пересчёт берёт смены, бонусы печати, оклады, % МОП и возмещение чеков «свои деньги». Ручные начисления не трогает.</p>
-    {e && <p className="small why">{e}</p>}
-    {p?.rows.map(r => <PayRow key={r.id} r={r} m={m} d={d} reload={load} />)}
+    <p className="small muted">«Пересчитать» берёт смены, бонусы печати, оклады, % МОП и возмещение чеков «свои деньги». Ручные начисления не трогает.</p>
   </div></>
 }
 

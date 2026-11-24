@@ -1012,6 +1012,30 @@ button.pchatbtn:hover { background: var(--hotbg); }
 
 /* ФОТ: раскрытый сотрудник не шире экрана (HEAD 14.11 — 4 счёта в одну строку выталкивали сумму за край) */
 .payrow, .payrow .dealedit { min-width: 0; max-width: 100%; }
+.fotsum { margin: 12px 0; padding: 14px; border-radius: var(--r2); background: var(--alt); border: 1px solid var(--line); }
+.fotbig { display: grid; gap: 2px; margin-bottom: 10px; }
+.fotbig b { font-size: 28px; line-height: 1.1; font-weight: 800; }
+.fotbig b.owe, .paystate.owe b, .paysec.owe b { color: var(--warn); }
+.fotbig b.done, .paystate.done { color: var(--ok); }
+.fotsum .bar i, .paybar i { background: var(--ok); }
+.fotkv { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+.fotkv b { color: var(--text); white-space: nowrap; }
+.fottabs button { padding-left: 4px; padding-right: 4px; font-size: 14px; white-space: nowrap; }
+.payrow { gap: 6px; padding: 12px 0; }
+.payrow .payname { display: grid; min-width: 0; }
+.payrow .payname b { font-size: 16px; }
+.payrow .paystate { display: grid; justify-items: end; font-weight: 700; white-space: nowrap; }
+.payrow .paystate b { font-size: 17px; }
+.payrow .paystate.over b { color: var(--hot); }
+.payrow .paybar { height: 5px; margin: 0; cursor: pointer; }
+.payrow .paysub { cursor: pointer; }
+.paysec { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line2); font-weight: 700; font-size: 14px; }
+.paysec:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.payrow .wline { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; }
+.payrow .wline > span:first-child { min-width: 0; }
+.paymore { margin-top: 6px; }
+.paymore summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
+.paymore[open] { display: grid; gap: 8px; }
 .payrow .head > span:last-child { flex-shrink: 0; text-align: right; }
 .segf.accs { flex-wrap: wrap; }
 .segf.accs button { flex: 1 0 calc(50% - 4px); white-space: normal; }

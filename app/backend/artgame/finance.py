@@ -546,6 +546,13 @@ def payroll(ym: str, p: dict = Depends(require_head)):
         paid = conn.execute("""SELECT payee_id, coalesce(sum(amount),0) AS s, max(op_date) AS last FROM fin_ledger
                                WHERE period=%s AND article_code='payroll' AND status='active' GROUP BY payee_id""", (ym,)).fetchall()
     paid_by = {r["payee_id"]: r for r in paid}
+    # HEAD 24.11: «не понятно, что уже выплачивали, что осталось» — каждая выплата месяца у человека: дата, счёт, чек
+    with db.pool.connection() as conn:
+        pays_all = [with_receipt(x) for x in conn.execute(
+            """SELECT l.id, l.payee_id, l.op_date, l.amount, l.account_code, a.title AS account, l.ack_at, l.receipt_file_id,
+                      l.note LIKE 'Аванс:%%' AS advance
+               FROM fin_ledger l JOIN fin_accounts a ON a.code=l.account_code
+               WHERE l.period=%s AND l.article_code='payroll' AND l.status='active' ORDER BY l.op_date, l.id""", (ym,)).fetchall()]
     rows = []
     for f in pays:
         lines = [a for a in accs if a["payee_id"] == f["id"]]
@@ -556,6 +563,7 @@ def payroll(ym: str, p: dict = Depends(require_head)):
             continue
         rows.append({"id": f["id"], "name": f["name"], "grp": f["grp"], "group": GROUP_TITLE[f["grp"]], "scheme": f["scheme"],
                      "pay_rule": f["pay_rule"], "lines": lines, "accrued": accrued, "paid": got,
+                     "payments": [x for x in pays_all if x["payee_id"] == f["id"]],
                      "pending": later, "pending_sum": sum(_f(a["amount"]) for a in later),
                      "left": round(accrued - got, 2), "last_paid": paid_by.get(f["id"], {}).get("last")})
     return {"month": ym, "rows": rows, "accrued": sum(r["accrued"] for r in rows), "paid": sum(r["paid"] for r in rows),
