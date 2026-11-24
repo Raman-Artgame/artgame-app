@@ -7,7 +7,7 @@ from datetime import date
 from pydantic import BaseModel, Field
 
 from . import constants as consts
-from . import ads, appeals, brand, closing, marketing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring, advances
+from . import ads, appeals, chatfiles, brand, closing, marketing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring, advances
 from . import bx, bxw, db, deal_money, design, designobj, files, projcard, shiftmove, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
@@ -42,6 +42,7 @@ async def slow_log(request, call_next):
 app.include_router(weekly.router)
 app.include_router(advances.router)   # авансы с 15 по 20 (HEAD 16.11)
 app.include_router(projchat.router)   # чат проекта (HEAD 13.11)
+app.include_router(chatfiles.router)   # вложения чатов (HEAD 24.11)
 app.include_router(recurring.router)   # график постоянных оплат (HEAD 12.11)
 app.include_router(trips.router)
 app.include_router(marketing.router)   # контент-план маркетинга (HEAD 14.11)

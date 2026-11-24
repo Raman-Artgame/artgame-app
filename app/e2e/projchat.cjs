@@ -52,6 +52,11 @@ const noScroll = async pg => assert.ok(await pg.evaluate(() => document.document
   await art.locator('.dm textarea').fill('Стена у входа сырая, грунт завтра после обеда. Краски хватит на 2 дня.')
   await art.getByRole('button', { name: 'Отправить' }).click()
   await art.locator('.dmb.me').waitFor()
+  // HEAD 24.11: файл в чат проекта
+  await art.locator('.dmform input[type=file]').setInputFiles({ name: 'План стен.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 plan') })
+  await art.locator('.dmatt', { hasText: 'План стен.pdf' }).waitFor()
+  await art.getByRole('button', { name: 'Отправить' }).click()
+  await art.locator('.dmb.me .dmfile', { hasText: 'План стен.pdf' }).waitFor()
 
   // МОП и ГИП отвечают через API, HEAD открывает «Чат» → «Проекты»
   await call(7804, '/pchat/1700', { text: 'Клиент просит закончить фасад к пятнице. Успеваем?' })
@@ -60,7 +65,7 @@ const noScroll = async pg => assert.ok(await pg.evaluate(() => document.document
   await head.locator('nav button', { hasText: 'Ещё' }).click()
   await head.locator('button', { hasText: 'Чат' }).first().click()
   await head.locator('.dmproj').first().waitFor()
-  assert.ok((await head.locator('.dmproj .dmcnt').first().innerText()) === '3')
+  assert.ok((await head.locator('.dmproj .dmcnt').first().innerText()) === '4')
   // HEAD 14.11: где пишут — наверху; пустой чат проекта не поднимается
   assert.ok(await head.locator('.card.dm').first().locator('.dmrow').first().evaluate(e => e.classList.contains('dmproj')), 'чат с новыми — не первый')
   assert.strictEqual(await head.locator('.card.dm', { hasText: 'Чаты проектов' }).locator('.dmproj').count(), 1)   // 1701 — ниже, в «Чатах проектов»

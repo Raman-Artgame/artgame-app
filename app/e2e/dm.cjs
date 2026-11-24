@@ -49,6 +49,18 @@ async function open(b, id) {
   await art.locator('.dm textarea').fill('Ангелина, во сколько завтра выезд?')
   await art.getByRole('button', { name: 'Отправить' }).click()
   await art.locator('.dmb.me').waitFor()
+  // HEAD 24.11: файл и фото в чат — фото с подписью, файл без текста
+  await art.locator('.dmform input[type=file]').setInputFiles(__dirname + '/chek.png')
+  await art.locator('.dmatt img').waitFor()
+  await art.locator('.dm textarea').fill('Вот стена, посмотри')
+  await art.screenshot({ path: `${shots}/chat-vlozhenie-0.png` })
+  await art.getByRole('button', { name: 'Отправить' }).click()
+  await art.locator('.dmb.me .dmpic').waitFor()
+  await art.locator('.dmform input[type=file]').setInputFiles({ name: 'Смета фасад.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 smeta') })
+  await art.locator('.dmatt', { hasText: 'Смета фасад.pdf' }).waitFor()
+  await art.getByRole('button', { name: 'Отправить' }).click()
+  await art.locator('.dmb.me .dmfile', { hasText: 'Смета фасад.pdf' }).waitFor()
+  await art.locator('.dmb.me .dmfile').scrollIntoViewIfNeeded()
   await art.screenshot({ path: `${shots}/chat-worker-pm.png` })
   // Ангелина отвечает лично
   const ang = await open(b, 7801)

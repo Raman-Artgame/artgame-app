@@ -33,6 +33,13 @@ def test_project_chat(client, team, monkeypatch):  # noqa: F811
     assert {m["full_name"]: m["why"] for m in d["members"]} == {"HEAD": "head", "P5000": "crew", "МОП Анна": "mop"}
     assert client.get("/api/dm/unread", headers=hdr(5000)).json() == {"n": 0}   # ответил — прочитал
     assert client.get("/api/dm/unread", headers=hdr(7000)).json() == {"n": 1}   # МОП видит фото как новое
+    # HEAD 24.11: файл в чат проекта (не фото) — в базе, виден участникам
+    import base64
+    doc = "data:application/pdf;base64," + base64.b64encode(b"%PDF plan").decode()
+    assert client.post("/api/pchat/731", json={"file": {"name": "План.pdf", "data": doc}}, headers=hdr(5000)).status_code == 200
+    last = client.get("/api/pchat/731", headers=hdr(1000)).json()["items"][-1]
+    assert last["file"]["name"] == "План.pdf" and client.get(last["file"]["url"]).content == b"%PDF plan"
+    assert [c for c in client.get("/api/pchat/list", headers=hdr(1000)).json()["chats"] if c["id"] == 731][0]["last_text"] == "📎 файл"
     # поддержка (не на объекте) не видит
     assert client.get("/api/pchat/731", headers=hdr(2000)).status_code == 404
     # сняли с объекта — выпал; сделка ушла дальше — только чтение

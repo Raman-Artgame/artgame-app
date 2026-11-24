@@ -82,3 +82,41 @@ def test_from_telegram(client, team, monkeypatch):  # noqa: F811
     assert bot[-1][0] == "sendPhoto"
     client.post("/api/tg/hook", json=up(777, "кто я"), headers=h)
     assert bot[-1][0] == "sendPhoto"
+
+
+def test_chat_attachments(client, team):  # noqa: F811
+    """HEAD 24.11: «в чаты нужно добавить функцию прикрепления файлов и фото» — «HEAD», личный чат; видят те же, кто видит чат."""
+    import base64
+    import io
+    import uuid
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (900, 600), (200, 30, 60)).save(buf, "JPEG")
+    jpg = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+    pdf = "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4 smeta").decode()
+    html = "data:text/html;base64," + base64.b64encode(b"<script>alert(1)</script>").decode()
+    uid = str(uuid.uuid4())
+    # личный чат: файл без текста; повтор той же отправки второе сообщение не создаёт
+    for _ in range(2):
+        assert client.post(f"/api/dm/pm/{team[3000]}", json={"file": {"name": "Смета.pdf", "data": pdf}, "client_uid": uid}, headers=hdr(2000)).status_code == 200
+    d = client.get(f"/api/dm/pm/{team[2000]}", headers=hdr(3000)).json()["items"]
+    assert len(d) == 1 and d[0]["text"] == "" and d[0]["file"]["name"] == "Смета.pdf" and d[0]["file"]["thumb"] is None
+    r = client.get(d[0]["file"]["url"])
+    assert r.content == b"%PDF-1.4 smeta" and r.headers["content-type"] == "application/pdf" and r.headers["content-disposition"].startswith("inline")
+    assert client.get(d[0]["file"]["url"].replace("sig=", "sig=0")).status_code == 403            # ссылка подписана
+    assert client.get("/api/dm/list", headers=hdr(3000)).json()["people"][0]["last_text"] == "📎 файл"
+    # «HEAD»: фото с подписью от сотрудника, файл в ответ от HEAD
+    client.post("/api/dm/room/hq", json={"text": "Вот стена", "file": {"name": "стена.jpg", "data": jpg}}, headers=hdr(2000))
+    client.post(f"/api/dm/with/{team[2000]}", json={"file": {"name": "x.html", "data": html}}, headers=hdr(1000))
+    hq = client.get("/api/dm/room/hq", headers=hdr(2000)).json()["items"]
+    assert [(x["text"], x["file"]["name"]) for x in hq] == [("Вот стена", "стена.jpg"), ("", "x.html")]
+    t = client.get(hq[0]["file"]["thumb"])
+    assert t.status_code == 200 and Image.open(io.BytesIO(t.content)).size == (640, 427)
+    h = client.get(hq[1]["file"]["url"])                                                           # html с нашего адреса не открываем
+    assert h.headers["content-disposition"].startswith("attachment") and h.headers["content-type"] == "application/octet-stream"
+    assert client.get("/api/dm/threads", headers=hdr(1000)).json()["group"][0]["last_text"] == "📎 файл"
+    # пустое и слишком большое — отказ
+    assert client.post("/api/dm/room/hq", json={"text": " "}, headers=hdr(2000)).status_code == 400
+    big = "data:application/zip;base64," + base64.b64encode(b"0" * (20 * 1024 * 1024 + 1)).decode()
+    r = client.post("/api/dm/room/hq", json={"file": {"name": "big.zip", "data": big}}, headers=hdr(2000))
+    assert r.status_code == 413 and "20 МБ" in r.json()["detail"]

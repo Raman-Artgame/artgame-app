@@ -60,28 +60,65 @@ function Bubbles({ items, mine, names }) {
   return <div className="dmlist">
     {items.map(m => <div key={m.id} className={'dmb ' + (mine(m) ? 'me' : 'them')}>
       {m.broadcast && <span className="dmcast">📣 объявление</span>}
-      <Msg text={m.text} />
+      <Att file={m.file} />
+      {m.text && <Msg text={m.text} />}
       <span className="dmmeta">{m.from_head && (names || !mine(m)) ? m.author + ' · ' : ''}{when(m.created_at)}{m.via === 'tg' ? ' · из Telegram' : ''}</span>
     </div>)}
     <div ref={end} />
   </div>
 }
 
-function Composer({ send, ph }) {
+// Вложение в сообщении (HEAD 24.11: «в чаты нужно добавить функцию прикрепления файлов и фото»)
+const MAX_FILE = 20 * 1024 * 1024
+const fsize = n => n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' МБ' : Math.max(1, Math.round(n / 1024)) + ' КБ'
+const fext = n => { const m = /\.([A-Za-zА-Яа-я0-9]{1,5})$/.exec(n || ''); return m ? m[1].toUpperCase() : 'ФАЙЛ' }
+const readUrl = f => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => bad(new Error('Файл не прочитался, выбери его ещё раз')); r.readAsDataURL(f) })
+export function Att({ file }) {
+  if (!file) return null
+  if (file.thumb) return <a href={file.url} target="_blank" rel="noreferrer"><img loading="lazy" className="dmpic" src={file.thumb} alt={file.name} /></a>
+  return <a className="dmfile" href={file.url} target="_blank" rel="noreferrer">
+    <span className="dmfic">{fext(file.name)}</span>
+    <span className="dmfname"><b>{file.name}</b><span className="small">{fsize(file.size)} · открыть</span></span></a>
+}
+
+// send(text, file, uid): file — {name, data, img} или null; uid один на отправку, повтор не создаёт второе сообщение.
+// files={false} — только текст (объявление уходит и в бот).
+function Composer({ send, ph, files = true }) {
   const [v, set] = useState('')
+  const [att, setAtt] = useState(null)
+  const [uid, setUid] = useState(uuid)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const inp = useRef(null)
+  const pick = async f => {
+    if (!f) return
+    setErr('')
+    const img = /^image\/(jpeg|png|webp|heic|heif)$/.test(f.type)
+    try {
+      if (img) { const data = await shrink(f).catch(() => null); if (data) return setAtt({ name: f.name.replace(/\.[^.]+$/, '') + '.jpg', data, img: true, size: Math.round(data.length * 0.75) }) }
+      if (f.size > MAX_FILE) return setErr('Файл больше 20 МБ. Большое видео или макет положи в папку проекта и пришли ссылку.')
+      setAtt({ name: f.name, data: await readUrl(f), size: f.size })
+    } catch (e) { setErr(e.message || 'Файл не прочитался') }
+  }
   const go = () => {
-    if (!v.trim()) return
+    if (!v.trim() && !att) return
     setBusy(true); setErr('')
-    send(v.trim()).then(() => set(''), e => setErr(e.message)).finally(() => setBusy(false))
+    send(v.trim(), att, uid).then(() => { set(''); setAtt(null); setUid(uuid()) }, e => setErr(e.message)).finally(() => setBusy(false))
   }
   return <div className="dmform">
     <textarea rows={3} placeholder={ph} value={v} onChange={e => set(e.target.value)} />
-    <button disabled={busy || !v.trim()} onClick={go}>{busy ? 'Отправляю…' : 'Отправить'}</button>
+    {att && <div className="dmatt">{att.img ? <img src={att.data} alt="" /> : <span className="dmfic">{fext(att.name)}</span>}
+      <span className="dmfname"><b>{att.name}</b><span className="small muted">{fsize(att.size)}</span></span>
+      <button className="ghost mini" aria-label="Убрать файл" onClick={() => setAtt(null)}>✕</button></div>}
+    <div className="dmsend">
+      {files && <><input ref={inp} type="file" hidden onChange={e => { pick(e.target.files[0]); e.target.value = '' }} />
+        <button className="ghost dmclip" disabled={busy} onClick={() => inp.current?.click()}>📎 Файл или фото</button></>}
+      <button disabled={busy || (!v.trim() && !att)} onClick={go}>{busy ? 'Отправляю…' : 'Отправить'}</button>
+    </div>
     {err && <p className="small why">{err}</p>}
   </div>
 }
+const body = (text, att, uid) => ({ text, client_uid: uid, file: att ? { name: att.name, data: att.data } : null })
 
 const cnt = n => +n > 0 ? <i className="cnt dmcnt">{n}</i> : null
 const done = () => window.dispatchEvent(new Event(READ))
@@ -159,7 +196,7 @@ function HqRoom({ back }) {
     <h2>HEAD</h2><p className="small muted">Объявления руководства и твои вопросы. Отвечает любой HEAD.</p>
     {items === null ? <p className="small muted">Загрузка…</p> : <Bubbles items={items} mine={m => !m.from_head} names />}
     <p className="small dmwho">Увидит руководство (все HEAD). Другие сотрудники не видят.</p>
-    <Composer ph="Написать руководству" send={text => api('/dm/room/hq', { method: 'POST', body: { text } }).then(load)} />
+    <Composer ph="Написать руководству" send={(t, f, u) => api('/dm/room/hq', { method: 'POST', body: body(t, f, u) }).then(load)} />
   </div>
 }
 
@@ -175,7 +212,7 @@ function Pm({ who, back }) {
       <Bubbles items={d.items} mine={m => m.mine} />
       {d.person.status === 'active' ? <>
         <p className="small dmwho">Увидит только {who.full_name}</p>
-        <Composer ph={`Написать: ${who.full_name}`} send={text => api(`/dm/pm/${who.id}`, { method: 'POST', body: { text } }).then(load)} /></> :
+        <Composer ph={`Написать: ${who.full_name}`} send={(t, f, u) => api(`/dm/pm/${who.id}`, { method: 'POST', body: body(t, f, u) }).then(load)} /></> :
         <p className="small muted">Вход закрыт — написать нельзя.</p>}
     </>}
   </div>
@@ -228,7 +265,7 @@ function HeadDialog({ pid, back }) {
       {d.person.status === 'active' ? <>
         <p className="small dmwho">Ответ увидят {d.person.full_name} и все HEAD</p>
         <Composer ph={`Ответить: ${d.person.full_name}`}
-          send={text => api(`/dm/with/${pid}`, { method: 'POST', body: { text } }).then(load)} /></> :
+          send={(t, f, u) => api(`/dm/with/${pid}`, { method: 'POST', body: body(t, f, u) }).then(load)} /></> :
         <p className="small muted">Вход сотрудника закрыт — написать нельзя.</p>}
     </>}
   </div>
@@ -248,7 +285,7 @@ function Broadcast({ roles, back }) {
       {roles.map(r => <button key={r.code} className={pick.includes(r.code) ? 'on' : ''} onClick={() => flip(r.code)}>{r.title}<span>{r.n}</span></button>)}
     </div>
     {ok ? <><p className="small ok">{ok}</p><button className="ghost" onClick={back}>Готово</button></> :
-      <Composer ph="Текст объявления"
+      <Composer files={false} ph="Текст объявления"
         send={text => api('/dm/broadcast', { method: 'POST', body: { text, roles: pick.length ? pick : null } }).then(r => setOk(`Отправлено: ${r.sent} чел.`))} />}
   </div>
 }
@@ -259,16 +296,10 @@ const WHY = { gip: 'ГИП', mop: 'МОП', head: 'HEAD', crew: '' }
 export function ProjChat({ id, back, backText = '‹ Все чаты' }) {
   const [d, setD] = useState(null)
   const [who, setWho] = useState(false)
-  const [busy, setBusy] = useState('')
-  const pic = useRef(null)
   const load = () => api(`/pchat/${id}`).then(r => { setD(r); done() }, e => setD({ err: e.message }))
   useEffect(() => { load() }, [id])
-  const photo = async f => {
-    if (!f) return
-    setBusy('Отправляю фото…')
-    try { await api(`/pchat/${id}`, { method: 'POST', body: { photo: await shrink(f), client_uid: uuid() } }); await load(); setBusy('') }
-    catch (e) { setBusy(e.message) }
-  }
+  // фото — в папку сделки (МЕДИА / Отчёты), как раньше; другой файл — вложением чата
+  const send = (t, f, u) => api(`/pchat/${id}`, { method: 'POST', body: f?.img ? { text: t, photo: f.data, client_uid: u } : body(t, f, u) }).then(load)
   if (!d) return <div className="card dm"><button className="ghost mini dmback" onClick={back}>{backText}</button><p className="small muted">Загрузка…</p></div>
   if (d.err) return <div className="card dm"><button className="ghost mini dmback" onClick={back}>{backText}</button><p className="small muted">{d.err}</p></div>
   const o = d.object
@@ -281,15 +312,13 @@ export function ProjChat({ id, back, backText = '‹ Все чаты' }) {
     {d.items.length ? <div className="dmlist">
       {d.items.map(m => <div key={m.id} className={'dmb ' + (m.mine ? 'me' : 'them')}>
         {m.photo && <a href={m.photo.url} target="_blank" rel="noreferrer"><img loading="lazy" className="dmpic" src={m.photo.thumb} alt="" /></a>}
+        <Att file={m.file} />
         {m.text && <Msg text={m.text} />}
         <span className="dmmeta">{m.mine ? '' : m.name + (m.head ? ' · HEAD' : '') + ' · '}{when(m.created_at)}</span>
       </div>)}
     </div> : <p className="small muted dmempty">Сообщений пока нет. Напиши первым — увидит вся команда проекта.</p>}
     {o.open ? <>
-      <Composer ph="Написать команде проекта" send={text => api(`/pchat/${id}`, { method: 'POST', body: { text } }).then(load)} />
-      <input ref={pic} type="file" accept="image/*" hidden onChange={e => { photo(e.target.files[0]); e.target.value = '' }} />
-      <button className="ghost mini" onClick={() => pic.current?.click()}>📷 Фото</button>
-      {busy && <p className="small muted">{busy}</p>}
+      <Composer ph="Написать команде проекта" send={send} />
       <p className="small dmwho">Фото ложится в папку сделки. Бот о чате не пишет — новое видно на вкладке «Чат».</p>
     </> : <p className="small muted">Проект ушёл с «Выполнения» — чат только для чтения.</p>}
   </div>

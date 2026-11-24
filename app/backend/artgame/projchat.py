@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import db
+from .chatfiles import COLS, FileIn, pack, save as save_file
 from .viewas import ctx
 from .work import active
 
@@ -46,11 +47,11 @@ def unread(conn, p: dict) -> int:
 def chats(conn, p: dict) -> list[dict]:
     return conn.execute(
         f"""SELECT * FROM (SELECT o.id, o.title, o.city, o.bitrix_stage = ANY(%(open)s) AS open,
-                   l.text AS last_text, l.file_id IS NOT NULL AS last_photo, l.name AS last_name, l.created_at AS last_at,
+                   coalesce(l.text, CASE WHEN l.att_id IS NOT NULL THEN '📎 файл' END) AS last_text, l.file_id IS NOT NULL AS last_photo, l.name AS last_name, l.created_at AS last_at,
                    (SELECT count(*) FROM proj_msg u WHERE u.object_id=o.id AND u.author_id<>%(me)s
                        AND u.id > coalesce((SELECT last_id FROM proj_read r WHERE r.object_id=o.id AND r.person_id=%(me)s), 0)) AS unread
             FROM objects o
-            LEFT JOIN LATERAL (SELECT m.text, m.file_id, m.created_at, pe.full_name AS name FROM proj_msg m
+            LEFT JOIN LATERAL (SELECT m.text, m.file_id, m.att_id, m.created_at, pe.full_name AS name FROM proj_msg m
                                JOIN people pe ON pe.id=m.author_id WHERE m.object_id=o.id
                                ORDER BY m.id DESC LIMIT 1) l ON true
             WHERE {_visible(p)}) t
@@ -89,8 +90,9 @@ def api_chat(oid: int, p: dict = Depends(active)):
     from .files import sign
     with db.pool.connection() as conn:
         o = _obj(conn, oid, p)
-        rows = conn.execute("""SELECT m.id, m.author_id, pe.full_name AS name, pe.role_code, m.text, m.file_id, m.created_at
-                               FROM proj_msg m JOIN people pe ON pe.id=m.author_id WHERE m.object_id=%s ORDER BY m.id""", (oid,)).fetchall()
+        rows = conn.execute(f"""SELECT m.id, m.author_id, pe.full_name AS name, pe.role_code, m.text, m.file_id, m.created_at, {COLS}
+                               FROM proj_msg m JOIN people pe ON pe.id=m.author_id LEFT JOIN chat_files cf ON cf.id=m.att_id
+                               WHERE m.object_id=%s ORDER BY m.id""", (oid,)).fetchall()
         mem = {}
         for m in members(conn, oid):   # один человек может быть и ГИП, и в бригаде — роль в чате берём первую
             mem.setdefault(m["id"], m)
@@ -99,7 +101,7 @@ def api_chat(oid: int, p: dict = Depends(active)):
                             ON CONFLICT (object_id, person_id) DO UPDATE SET last_id=GREATEST(proj_read.last_id, EXCLUDED.last_id)""",
                          (oid, p["id"], rows[-1]["id"]))
     items = [{"id": r["id"], "mine": r["author_id"] == p["id"], "name": r["name"], "head": r["role_code"] == "head",
-              "text": r["text"], "created_at": r["created_at"],
+              "text": r["text"], "created_at": r["created_at"], "file": pack(r)["file"],
               "photo": {"thumb": sign(r["file_id"], "thumb"), "url": sign(r["file_id"], "content")} if r["file_id"] else None}
              for r in rows]
     return {"object": o, "members": list(mem.values()), "items": items}
@@ -108,13 +110,14 @@ def api_chat(oid: int, p: dict = Depends(active)):
 class MsgIn(BaseModel):
     text: str | None = Field(default=None, max_length=MAX)
     photo: str | None = None          # data:image/jpeg;base64,… (сжато на телефоне)
+    file: FileIn | None = None        # любой файл до 20 МБ (HEAD 24.11) — в базе, не в папке сделки
     client_uid: UUID | None = None
 
 
 @router.post("/{oid}")
 def api_write(oid: int, b: MsgIn, p: dict = Depends(active)):
     text = (b.text or "").strip() or None
-    if not text and not b.photo:
+    if not text and not b.photo and not b.file:
         raise HTTPException(400, "пустое сообщение")
     from uuid import uuid4
     uid = b.client_uid or uuid4()
@@ -133,8 +136,13 @@ def api_write(oid: int, b: MsgIn, p: dict = Depends(active)):
         if b.photo:
             from .files import get_object, store_photo
             fid = store_photo(conn, p, get_object(conn, oid), uid, b.photo, "чат проекта", pre=pre)["id"]
-        row = conn.execute("INSERT INTO proj_msg (object_id, author_id, text, file_id) VALUES (%s,%s,%s,%s) RETURNING id, created_at",
-                           (oid, p["id"], text, fid)).fetchone()
+        att = None
+        if b.file:
+            att, dup = save_file(conn, p, b.file, uid)
+            if dup:
+                return conn.execute("SELECT id, created_at FROM proj_msg WHERE att_id=%s", (att,)).fetchone() or {}
+        row = conn.execute("INSERT INTO proj_msg (object_id, author_id, text, file_id, att_id) VALUES (%s,%s,%s,%s,%s) RETURNING id, created_at",
+                           (oid, p["id"], text, fid, att)).fetchone()
         conn.execute("""INSERT INTO proj_read (object_id, person_id, last_id) VALUES (%s,%s,%s)
                         ON CONFLICT (object_id, person_id) DO UPDATE SET last_id=EXCLUDED.last_id""", (oid, p["id"], row["id"]))
         db.audit(conn, p["id"], "proj_msg_add", "proj_msg", row["id"], {"object": oid, "photo": bool(fid)})

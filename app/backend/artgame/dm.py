@@ -7,11 +7,13 @@
 Ничего не удаляется (личные чаты с HEAD до 11.11 из dm скопированы в pm, миграция 045).
 """
 import sys
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import db
+from .chatfiles import COLS, FileIn, pack, save as save_file
 from .config import settings
 from .deps import require_head
 from .viewas import ctx
@@ -103,10 +105,12 @@ def _where(kind: str, hid: int | None) -> tuple[str, tuple]:
 
 def _items(conn, pid: int, kind: str, hid: int | None) -> list[dict]:
     w, a = _where(kind, hid)
-    return conn.execute(
+    rows = conn.execute(
         f"""SELECT d.id, d.from_head, d.text, d.via, d.broadcast_id IS NOT NULL AS broadcast, d.read_at, d.created_at,
-                   a.full_name AS author
-            FROM dm d JOIN people a ON a.id=d.author_id WHERE d.person_id=%s AND {w} ORDER BY d.created_at, d.id""", (pid, *a)).fetchall()
+                   a.full_name AS author, {COLS}
+            FROM dm d JOIN people a ON a.id=d.author_id LEFT JOIN chat_files cf ON cf.id=d.att_id
+            WHERE d.person_id=%s AND {w} ORDER BY d.created_at, d.id""", (pid, *a)).fetchall()
+    return [pack(r) for r in rows]
 
 
 def _read(conn, pid: int, kind: str, hid: int | None, by_head: bool) -> None:
@@ -115,10 +119,10 @@ def _read(conn, pid: int, kind: str, hid: int | None, by_head: bool) -> None:
                  (pid, *a, not by_head))
 
 
-def _add(conn, person_id: int, author: dict, from_head: bool, head_id: int | None, text: str, via: str = "app", bid=None) -> dict:
-    row = conn.execute("""INSERT INTO dm (person_id, from_head, author_id, head_id, text, via, broadcast_id)
-                          VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
-                       (person_id, from_head, author["id"], head_id, text, via, bid)).fetchone()
+def _add(conn, person_id: int, author: dict, from_head: bool, head_id: int | None, text: str, via: str = "app", bid=None, att=None) -> dict:
+    row = conn.execute("""INSERT INTO dm (person_id, from_head, author_id, head_id, text, via, broadcast_id, att_id)
+                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+                       (person_id, from_head, author["id"], head_id, text, via, bid, att)).fetchone()
     if not bid:
         db.audit(conn, author["id"], "dm_add", "dm", row["id"], {"to": person_id if from_head else ("head:" + str(head_id) if head_id else "group"), "via": via})
     return row
@@ -144,6 +148,27 @@ class TextIn(BaseModel):
     text: str = Field(min_length=1, max_length=MAX)
 
 
+class MsgIn(BaseModel):
+    """Сообщение чата: текст, файл или фото (HEAD 24.11), или всё вместе."""
+    text: str = Field(default="", max_length=MAX)
+    file: FileIn | None = None
+    client_uid: UUID | None = None
+
+
+def _msg(conn, p: dict, b: MsgIn) -> tuple[str, int | None, bool]:
+    """(текст, id вложения, повтор ли) — пустое сообщение не принимаем; повтор того же файла второй раз не пишем."""
+    text = b.text.strip()
+    if not text and not b.file:
+        raise HTTPException(400, "пустое сообщение")
+    if not b.file:
+        return text, None, False
+    att, dup = save_file(conn, p, b.file, b.client_uid or uuid4())
+    return text, att, dup
+
+
+LAST = "CASE WHEN {0}.text='' THEN '📎 файл' ELSE {0}.text END"   # в списке чатов у сообщения без текста
+
+
 @router.get("/unread")
 def unread(p: dict = Depends(active)):
     with db.pool.connection() as conn:
@@ -165,19 +190,19 @@ def chat_list(p: dict = Depends(active)):
     with db.pool.connection() as conn:
         if _as_head(p):
             u = _head_unread(conn, me)
-            last = conn.execute("""SELECT d.text, d.created_at, pe.full_name FROM dm d JOIN people pe ON pe.id=d.person_id
+            last = conn.execute(f"""SELECT {LAST.format('d')} AS text, d.created_at, pe.full_name FROM dm d JOIN people pe ON pe.id=d.person_id
                                    WHERE d.broadcast_id IS NULL AND d.head_id IS NULL ORDER BY d.created_at DESC LIMIT 1""").fetchone()
             hq = {"unread": u["group"], "last_text": last and f"{last['full_name']}: {last['text']}", "last_at": last and last["created_at"]}
         else:
-            hq = conn.execute("""SELECT count(*) FILTER (WHERE d.from_head AND d.read_at IS NULL) AS unread,
-                                        (array_agg(d.text ORDER BY d.created_at DESC, d.id DESC))[1] AS last_text, max(d.created_at) AS last_at
+            hq = conn.execute(f"""SELECT count(*) FILTER (WHERE d.from_head AND d.read_at IS NULL) AS unread,
+                                        (array_agg({LAST.format('d')} ORDER BY d.created_at DESC, d.id DESC))[1] AS last_text, max(d.created_at) AS last_at
                                  FROM dm d WHERE d.person_id=%s AND (d.broadcast_id IS NOT NULL OR d.head_id IS NULL)""", (me,)).fetchone()
         people = conn.execute(
-            """SELECT * FROM (SELECT pe.id, pe.full_name, pe.role_code, r.title AS role_title,
+            f"""SELECT * FROM (SELECT pe.id, pe.full_name, pe.role_code, r.title AS role_title,
                       l.text AS last_text, l.sender_id = %(me)s AS last_mine, l.created_at AS last_at,
                       (SELECT count(*) FROM pm u WHERE u.sender_id=pe.id AND u.recipient_id=%(me)s AND u.read_at IS NULL) AS unread
                FROM people pe LEFT JOIN roles r ON r.code=pe.role_code
-               LEFT JOIN LATERAL (SELECT text, sender_id, created_at FROM pm
+               LEFT JOIN LATERAL (SELECT {LAST.format('pm')} AS text, sender_id, created_at FROM pm
                                   WHERE (sender_id=pe.id AND recipient_id=%(me)s) OR (sender_id=%(me)s AND recipient_id=pe.id)
                                   ORDER BY created_at DESC, id DESC LIMIT 1) l ON true
                WHERE pe.status='active' AND pe.id<>%(me)s AND pe.tg_id > 0) t
@@ -201,22 +226,25 @@ def pm_dialog(pid: int, p: dict = Depends(active)):
     me = p["id"]
     with db.pool.connection() as conn:
         who = _peer(conn, pid, me)
-        items = conn.execute("""SELECT m.id, m.sender_id = %(me)s AS mine, m.text, m.via, m.read_at, m.created_at
-                                FROM pm m WHERE (m.sender_id=%(me)s AND m.recipient_id=%(o)s) OR (m.sender_id=%(o)s AND m.recipient_id=%(me)s)
+        items = conn.execute(f"""SELECT m.id, m.sender_id = %(me)s AS mine, m.text, m.via, m.read_at, m.created_at, {COLS}
+                                FROM pm m LEFT JOIN chat_files cf ON cf.id=m.att_id WHERE (m.sender_id=%(me)s AND m.recipient_id=%(o)s) OR (m.sender_id=%(o)s AND m.recipient_id=%(me)s)
                                 ORDER BY m.created_at, m.id""", {"me": me, "o": pid}).fetchall()
         if not ctx():
             conn.execute("UPDATE pm SET read_at=now() WHERE sender_id=%s AND recipient_id=%s AND read_at IS NULL", (pid, me))
-    return {"person": {k: who[k] for k in ("id", "full_name", "role_title", "status")}, "items": items}
+    return {"person": {k: who[k] for k in ("id", "full_name", "role_title", "status")}, "items": [pack(r) for r in items]}
 
 
 @router.post("/pm/{pid}")
-def pm_write(pid: int, b: TextIn, p: dict = Depends(active)):
+def pm_write(pid: int, b: MsgIn, p: dict = Depends(active)):
     me = p["id"]
     with db.pool.connection() as conn, conn.transaction():
         who = _peer(conn, pid, me)
         if who["status"] != "active":
             raise HTTPException(409, "у человека закрыт вход")
-        row = conn.execute("INSERT INTO pm (sender_id, recipient_id, text) VALUES (%s,%s,%s) RETURNING *", (me, pid, b.text.strip())).fetchone()
+        text, att, dup = _msg(conn, p, b)
+        if dup:
+            return conn.execute("SELECT * FROM pm WHERE att_id=%s", (att,)).fetchone() or {}
+        row = conn.execute("INSERT INTO pm (sender_id, recipient_id, text, att_id) VALUES (%s,%s,%s,%s) RETURNING *", (me, pid, text, att)).fetchone()
         conn.execute("UPDATE pm SET read_at=now() WHERE sender_id=%s AND recipient_id=%s AND read_at IS NULL", (pid, me))   # ответил — прочитал
         db.audit(conn, me, "pm_add", "pm", row["id"], {"to": pid})
     return row
@@ -233,14 +261,17 @@ def room(key: str, p: dict = Depends(active)):
 
 
 @router.post("/room/{key}")
-def write_room(key: str, b: TextIn, p: dict = Depends(active)):
+def write_room(key: str, b: MsgIn, p: dict = Depends(active)):
     if _as_head(p):
         raise HTTPException(400, "HEAD пишет сотрудникам в своём «Чате»")
     with db.pool.connection() as conn, conn.transaction():
         kind, hid = _room(conn, key)
         if kind == "news":
             raise HTTPException(400, "в «Объявления» пишет только HEAD")
-        return _add(conn, p["id"], p, False, None if kind == "hq" else hid, b.text.strip())
+        text, att, dup = _msg(conn, p, b)
+        if dup:
+            return conn.execute("SELECT * FROM dm WHERE att_id=%s", (att,)).fetchone() or {}
+        return _add(conn, p["id"], p, False, None if kind == "hq" else hid, text, att=att)
 
 
 # ---------- HEAD (любой HEAD, одинаково) ----------
@@ -250,12 +281,12 @@ def threads(p: dict = Depends(require_head)):
     """Чат «HEAD» у руководства: кто задавал вопросы (непрочитанные сверху), роли для объявлений, отправленные объявления."""
     with db.pool.connection() as conn:
         group = conn.execute(
-            """SELECT * FROM (SELECT pe.id, pe.full_name, r.title AS role_title, l.text AS last_text, l.from_head AS last_from_head,
+            f"""SELECT * FROM (SELECT pe.id, pe.full_name, r.title AS role_title, l.text AS last_text, l.from_head AS last_from_head,
                       l.author AS last_author, l.created_at AS last_at,
                       (SELECT count(*) FROM dm u WHERE u.person_id=pe.id AND u.broadcast_id IS NULL AND u.head_id IS NULL
                          AND NOT u.from_head AND u.read_at IS NULL) AS unread
                FROM people pe LEFT JOIN roles r ON r.code=pe.role_code
-               JOIN LATERAL (SELECT d.text, d.from_head, a.full_name AS author, d.created_at FROM dm d JOIN people a ON a.id=d.author_id
+               JOIN LATERAL (SELECT {LAST.format('d')} AS text, d.from_head, a.full_name AS author, d.created_at FROM dm d JOIN people a ON a.id=d.author_id
                              WHERE d.person_id=pe.id AND d.broadcast_id IS NULL AND d.head_id IS NULL
                              ORDER BY d.created_at DESC, d.id DESC LIMIT 1) l ON true
                WHERE pe.status='active' AND pe.role_code<>'head') t
@@ -295,13 +326,16 @@ def dialog(pid: int, room: str = "hq", p: dict = Depends(require_head)):
 
 
 @router.post("/with/{pid}")
-def write_one(pid: int, b: TextIn, room: str = "hq", p: dict = Depends(require_head)):
+def write_one(pid: int, b: MsgIn, room: str = "hq", p: dict = Depends(require_head)):
     kind, hid = _hroom(room, p)
     with db.pool.connection() as conn, conn.transaction():
         who = _person(conn, pid)
         if who["status"] != "active":
             raise HTTPException(409, "у сотрудника закрыт вход")
-        row = _add(conn, pid, p, True, hid, b.text.strip())
+        text, att, dup = _msg(conn, p, b)
+        if dup:
+            return conn.execute("SELECT * FROM dm WHERE att_id=%s", (att,)).fetchone() or {}
+        row = _add(conn, pid, p, True, hid, text, att=att)
         _read(conn, pid, kind, hid, by_head=True)   # ответил — значит прочитал
     return row
 
