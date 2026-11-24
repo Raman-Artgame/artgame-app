@@ -147,7 +147,7 @@ def test_jobs_lead_checks_first_and_norms(client, team):
     assert client.post(f"/api/mkt/posts/{lead_post['id']}/submit", headers=hdr(2100)).json()["status"] == "pending"   # руководитель — сразу HEAD
     client.post(f"/api/mkt/posts/{p['id']}/published", json={}, headers=hdr(2200))
     norms = {n["kind"]: n for n in client.get("/api/mkt/posts?ym=2026-11", headers=hdr(2300)).json()["norms"]}
-    assert norms["stories"] == {"kind": "stories", "title": "Сторис", "per_month": 70, "planned": 3, "done": 1}
+    assert {k: v for k, v in norms["stories"].items() if k != "behind"} == {"kind": "stories", "title": "Сторис", "per_month": 70, "planned": 3, "done": 1}
     assert norms["reels"]["per_month"] == 8 and norms["reels"]["planned"] == 0
     assert client.post("/api/mkt/norms", json={"kind": "stories", "per_month": 60}, headers=hdr(2100)).status_code == 403
     assert client.post("/api/mkt/norms", json={"kind": "stories", "per_month": 60}, headers=hdr(1000)).status_code == 200

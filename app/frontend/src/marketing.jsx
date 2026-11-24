@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { api, uuid, webToken } from './api.js'
-import { Viewer, download, uploadBig } from './objects.jsx'
+import { Viewer, download, uploadBig, sendToGoogle } from './objects.jsx'
 import { Sheet } from './ui.jsx'
 import { Kit, StoryHome } from './mktkit.jsx'
 
@@ -412,7 +412,7 @@ function Plan({ can, onOpen, onNew }) {
       <div><b>{d.counts.draft + d.counts.rejected}</b><span>черновики</span></div><div><b>{d.counts.pending + (d.counts.check || 0)}</b><span>на утверждении</span></div>
       <div><b>{d.counts.approved}</b><span>к выходу</span></div><div><b>{d.counts.published}</b><span>вышло</span></div></div>}
     {d?.norms?.length > 0 && <div className="mktnorms"><span className="small muted">Объём месяца по договору</span>
-      {d.norms.map(n => <div key={n.kind} className="mktnorm"><div><b>{n.title}</b><span className="small muted">в плане {n.planned} из {n.per_month} · вышло {n.done}</span></div>
+      {d.norms.map(n => <div key={n.kind} className="mktnorm"><div><b>{n.title}{n.behind && <span className="badge hot">отстаёт</span>}</b><span className="small muted">в плане {n.planned} из {n.per_month} · вышло {n.done}</span></div>
         <i><em className={n.planned >= n.per_month ? 'ok' : ''} style={{ width: Math.min(100, n.per_month ? n.planned / n.per_month * 100 : 0) + '%' }} /><u style={{ width: Math.min(100, n.per_month ? n.done / n.per_month * 100 : 0) + '%' }} /></i></div>)}</div>}
     <div className="seg">{can && <button onClick={onNew}>+ Публикация</button>}<button className="ghost" onClick={() => exportCsv(ym)}>⬇ Выгрузить</button></div>
     {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> :
@@ -526,48 +526,95 @@ function Editor({ post, onlyAd, onClose, onSaved }) {
 
 // «Медиа»: весь материал с объектов от команды (кроме возвращённого HEAD); «Лучшее» — только утверждённое HEAD (Продакшн).
 // С onPick — выбор материала для публикации.
+// Исходник от агентства — прямо в рубрику на Диске («02 КОНТЕНТ / рубрика / Исходники / дата название»), частями, с докачкой.
+function uploadSrc(file, where, onProgress) {
+  return api('/mkt/src/uploads', { method: 'POST', body: { client_uid: uuid(), name: file.name, mime: file.type || 'application/octet-stream', size: file.size, ...where } })
+    .then(r => r.done ? r : sendToGoogle(r.upload_url, file, onProgress).then(g => api(`/mkt/src/uploads/${r.file_id}/done`, { method: 'POST', body: { drive_id: g.id } })))
+}
+
 function Media({ picked, onPick, canUp }) {
-  const [up, setUp] = useState(null)   // {obj, type, pct, msg} — загрузка снятого в папку сделки
+  const [up, setUp] = useState(null)   // {mode: obj|rub, obj, rub, title, type, pct, msg}
   const [objsAll, setObjsAll] = useState(null)
   const [type, setType] = useState('reels')
   const [best, setBest] = useState(false)
   const [d, setD] = useState(null)
-  const [obj, setObj] = useState('')
+  const [f, setF] = useState({ q: '', year: '', city: '', tag: '' })    // поиск и фильтры (HEAD 24.11)
+  const [tagsOf, setTagsOf] = useState(null)
   const [open, setOpen] = useState(null)
   const [sel, setSel] = useState(picked || [])
-  useEffect(() => { setD(null); api(`/media?scope=library&type=${type}${best ? '&best=1' : ''}`).then(setD, e => setD({ items: [], err: e.message })) }, [type, best])
-  const objs = d ? [...new Map(d.items.map(x => [x.object_id, `№${x.object_id} ${x.object_title}`])).entries()] : []
-  const items = d ? d.items.filter(x => !obj || x.object_id === +obj) : []
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const qs = new URLSearchParams({ type, ...(best ? { best: 1 } : {}), ...Object.fromEntries(Object.entries(f).filter(([, v]) => v)) })
+      api('/mkt/library?' + qs).then(setD, e => setD({ items: [], err: e.message, rubrics: [], years: [], cities: [] }))
+    }, f.q ? 350 : 0)
+    return () => clearTimeout(t)
+  }, [type, best, f, tick])
+  const items = d ? d.items : []
+  const rname = id => (d?.rubrics || []).find(r => r.id === id)?.title
   const on = x => sel.some(s => s.id === x.id)
   const flip = x => setSel(s => on(x) ? s.filter(y => y.id !== x.id) : [...s, x])
+  const send = async e => {
+    const fs = [...e.target.files]; e.target.value = ''; let msg = ''
+    for (const file of fs) {
+      setUp(u => ({ ...u, pct: 0 }))
+      try {
+        if (up.mode === 'rub') await uploadSrc(file, { rubric_id: +up.rub, title: up.title }, pct => setUp(u => ({ ...u, pct })))
+        else await uploadBig(+up.obj, 'media', file, pct => setUp(u => ({ ...u, pct })), { media_type: up.type })
+      } catch (err) { msg = `${file.name}: ${err.message}` }
+    }
+    setUp(u => ({ ...u, pct: null, msg: msg || `Загружено: ${fs.length}. ${up.mode === 'rub' ? 'Лежит в папке рубрики «Исходники».' : 'Лежит в папке сделки «МЕДИА / Отчёты».'}` }))
+    setType(up.type); setBest(false); setTick(t => t + 1)
+  }
   return <div className={onPick ? '' : 'card'}>
-    {!onPick && <p className="small muted">Материал с объектов от команды. «Лучшее» — то, что HEAD утвердил в «Продакшн».</p>}
-    {!onPick && canUp && !up && <button className="ghost" onClick={() => { setUp({ obj: '', type: 'video', pct: null, msg: '' }); if (!objsAll) api('/objects').then(setObjsAll, () => setObjsAll([])) }}>⬆ Загрузить снятое на объекте</button>}
-    {up && <div className="mktupbox"><label className="muted small">Проект</label>
-      <select value={up.obj} onChange={e => setUp({ ...up, obj: e.target.value })}><option value="">— выбери проект —</option>
-        {(objsAll || []).map(o => <option key={o.id} value={o.id}>№{o.id} {o.title}</option>)}</select>
+    {!onPick && <p className="small muted">Материал с объектов и исходники по рубрикам. Ищи по проекту, городу, году или метке. «Лучшее» — то, что HEAD утвердил в «Продакшн».</p>}
+    {!onPick && canUp && !up && <button className="ghost" onClick={() => { setUp({ mode: 'rub', obj: '', rub: '', title: '', type: 'video', pct: null, msg: '' }); if (!objsAll) api('/objects').then(setObjsAll, () => setObjsAll([])) }}>⬆ Загрузить снятое</button>}
+    {up && <div className="mktupbox">
+      <div className="chips">{[['rub', 'В рубрику'], ['obj', 'На объект']].map(([k, t]) => <button key={k} className={up.mode === k ? 'on' : ''} onClick={() => setUp({ ...up, mode: k, msg: '' })}>{t}</button>)}</div>
+      {up.mode === 'rub' ? <>
+        <label className="muted small">Рубрика</label>
+        <select value={up.rub} onChange={e => setUp({ ...up, rub: e.target.value })}><option value="">— выбери рубрику —</option>
+          {(d?.rubrics || []).filter(r => !r.project).map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select>
+        <label className="muted small">Что снимали</label>
+        <input placeholder="Например: интервью с художником" maxLength={80} value={up.title} onChange={e => setUp({ ...up, title: e.target.value })} />
+      </> : <>
+        <label className="muted small">Проект</label>
+        <select value={up.obj} onChange={e => setUp({ ...up, obj: e.target.value })}><option value="">— выбери проект —</option>
+          {(objsAll || []).map(o => <option key={o.id} value={o.id}>№{o.id} {o.title}</option>)}</select>
+      </>}
       <div className="chips">{[['video', 'Видео'], ['photo', 'Фото']].map(([k, t]) => <button key={k} className={up.type === k ? 'on' : ''} onClick={() => setUp({ ...up, type: k })}>{t}</button>)}</div>
-      {up.obj && <label className={'photo mktup' + (up.pct !== null ? ' busy' : '')}>{up.pct !== null ? `Загрузка… ${Math.round(up.pct * 100)}%` : '⬆ Выбрать файлы'}
-        <input type="file" accept={up.type === 'photo' ? 'image/*' : 'video/*'} multiple hidden disabled={up.pct !== null} onChange={async e => {
-          const fs = [...e.target.files]; e.target.value = ''; let msg = ''
-          for (const f of fs) { setUp(u => ({ ...u, pct: 0 })); try { await uploadBig(+up.obj, 'media', f, pct => setUp(u => ({ ...u, pct })), { media_type: up.type }) } catch (err) { msg = `${f.name}: ${err.message}` } }
-          setUp(u => ({ ...u, pct: null, msg: msg || `Загружено: ${fs.length}. Лежит в папке сделки «МЕДИА / Отчёты».` })); setType(up.type); setBest(false); setD(null)
-          api(`/media?scope=library&type=${up.type}`).then(setD, () => {}) }} /></label>}
+      {(up.mode === 'rub' ? up.rub && up.title.trim() : up.obj) ? <label className={'photo mktup' + (up.pct !== null ? ' busy' : '')}>{up.pct !== null ? `Загрузка… ${Math.round(up.pct * 100)}%` : '⬆ Выбрать файлы'}
+        <input type="file" accept={up.type === 'photo' ? 'image/*' : 'video/*'} multiple hidden disabled={up.pct !== null} onChange={send} /></label>
+        : <p className="small muted">{up.mode === 'rub' ? 'Выбери рубрику и напиши, что снимали: так назовётся папка.' : 'Выбери проект.'}</p>}
       {up.msg && <p className="small muted">{up.msg}</p>}
       <button className="ghost mini" onClick={() => setUp(null)}>Закрыть</button></div>}
-    <div className="seg">{MTYPES.map(([k, t]) => <button key={k} className={type === k ? '' : 'ghost'} onClick={() => { setType(k); setObj('') }}>{t}</button>)}</div>
+    <div className="seg">{MTYPES.map(([k, t]) => <button key={k} className={type === k ? '' : 'ghost'} onClick={() => setType(k)}>{t}</button>)}</div>
+    <input className="mktsearch" type="search" placeholder="Поиск: проект, город, название" value={f.q} onChange={e => setF({ ...f, q: e.target.value })} />
+    <div className="mktfilters">
+      <select aria-label="Рубрика" value={f.tag} onChange={e => setF({ ...f, tag: e.target.value })}><option value="">Рубрика</option>
+        {(d?.rubrics || []).map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select>
+      <select aria-label="Год" value={f.year} onChange={e => setF({ ...f, year: e.target.value })}><option value="">Год</option>
+        {(d?.years || []).map(y => <option key={y} value={y}>{y}</option>)}</select>
+      <select aria-label="Город" value={f.city} onChange={e => setF({ ...f, city: e.target.value })}><option value="">Город</option>
+        {(d?.cities || []).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
     <div className="chips"><button className={best ? '' : 'on'} onClick={() => setBest(false)}>Всё</button><button className={best ? 'on' : ''} onClick={() => setBest(true)}>Лучшее</button></div>
-    {objs.length > 1 && <select value={obj} onChange={e => setObj(e.target.value)}><option value="">Все объекты</option>
-      {objs.map(([id, t]) => <option key={id} value={id}>{t}</option>)}</select>}
     {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> : !items.length ? <p className="muted small">Пока пусто.</p> :
       items.map(x => <div key={x.id} className={'mitem' + (onPick && on(x) ? ' picked' : '')}>
         <button className="mthumb" onClick={() => onPick ? flip(x) : setOpen(x)}>{x.thumb ? <img src={x.thumb} alt="" loading="lazy" /> : <span>{onPick && on(x) ? '✓' : '▶'}</span>}</button>
         <div className="mbody"><a onClick={() => onPick ? flip(x) : setOpen(x)}><b>{x.name}</b></a>
-          <div className="small muted">№{x.object_id} {x.object_title} · {x.by} · {new Date(x.created_at).toLocaleDateString('ru-RU')}{x.review === 'approved' ? ' · в Продакшн' : ''}</div></div>
+          <div className="small muted">{x.kind === 'src' ? `Исходники · ${x.src_folder}` : `№${x.object_id} ${x.object_title}`} · {x.by} · {new Date(x.created_at).toLocaleDateString('ru-RU')}{x.review === 'approved' ? ' · в Продакшн' : ''}</div>
+          {(x.tags.length > 0 || (d.can_tag && !onPick)) && <div className="mtags">{x.tags.map(t => <span key={t}>{rname(t)}</span>)}
+            {d.can_tag && !onPick && <a onClick={() => setTagsOf(x)}>{x.tags.length ? 'изменить' : '+ метка'}</a>}</div>}</div>
         {onPick ? <button className={'mini' + (on(x) ? '' : ' ghost')} aria-label="Выбрать" onClick={() => flip(x)}>{on(x) ? '✓' : '+'}</button>
           : <button className="ghost mini" aria-label="Скачать" onClick={() => download(x)}>⬇</button>}
       </div>)}
     {onPick && <button onClick={() => onPick(sel)}>Готово · выбрано {sel.length}</button>}
+    {tagsOf && <Sheet title="Метки" onClose={() => setTagsOf(null)}>
+      <p className="small muted">{tagsOf.name}</p>
+      <div className="chips">{d.rubrics.map(r => <button key={r.id} className={tagsOf.tags.includes(r.id) ? 'on' : ''}
+        onClick={() => setTagsOf({ ...tagsOf, tags: tagsOf.tags.includes(r.id) ? tagsOf.tags.filter(t => t !== r.id) : [...tagsOf.tags, r.id] })}>{r.title}</button>)}</div>
+      <button onClick={() => api(`/mkt/files/${tagsOf.id}/tags`, { method: 'POST', body: { rubric_ids: tagsOf.tags } }).then(() => { setTagsOf(null); setTick(t => t + 1) })}>Сохранить</button>
+    </Sheet>}
     <Viewer f={open} onClose={() => setOpen(null)} />
   </div>
 }
@@ -597,41 +644,70 @@ async function exportCsv(ym) {
 }
 
 // «Идеи»: сценарии и задумки (по проекту и вне). Взяли в съёмку — «в работе», сняли — «снято».
-const IST = { new: ['новая', 'warn'], work: ['в работе', ''], done: ['снято', 'ok'], dropped: ['отложено', 'hot'] }
+const IST = { new: ['черновик', ''], pending: ['у HEAD', 'warn'], approved: ['утверждено', 'ok'], rejected: ['вернул', 'hot'], work: ['в съёмке', ''], done: ['снято', 'ok'], dropped: ['отложено', ''] }
 function Ideas({ can }) {
   const [d, setD] = useState(null)
   const [edit, setEdit] = useState(null)
   const load = () => api('/mkt/ideas').then(setD, e => setD({ items: [], err: e.message }))
   useEffect(() => { load() }, [])
   return <div className="card">
-    <p className="small muted">Сценарии, задумки, раскадровки. Из идеи потом ставится съёмка и публикация.</p>
+    <p className="small muted">Сценарии и задумки. Путь: черновик → «На утверждение» → HEAD → «В съёмку»: ставится дата и на Диске появляется папка исходников со сценарием.</p>
     {can && <button onClick={() => setEdit({})}>+ Идея</button>}
     {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> : !d.items.length ? <p className="muted small">Идей пока нет.</p> :
-      d.items.map(x => <div key={x.id} className="mktidea" onClick={() => can && setEdit(x)}>
-        <b>{x.title}</b><span className={'badge ' + IST[x.status][1]}>{IST[x.status][0]}</span>
-        <div className="small muted">{d.kinds[x.kind]}{x.object_title ? ` · №${x.object_id} ${x.object_title}` : ' · вне проектов'} · {x.author}</div>
+      d.items.map(x => <div key={x.id} className="mktidea" onClick={() => (can || d.head) && setEdit(x)}>
+        <b>{x.title}</b> <span className={'badge ' + IST[x.status][1]}>{IST[x.status][0]}</span>
+        <div className="small muted">{d.kinds[x.kind]}{x.rubric ? ` · ${x.rubric}` : ''}{x.object_title ? ` · №${x.object_id} ${x.object_title}` : ''} · {x.author}</div>
+        {x.status === 'rejected' && x.review_note && <p className="small why">HEAD: {x.review_note}</p>}
         {x.text && <p className="small mktclip">{x.text}</p>}</div>)}
-    {edit && <IdeaEditor x={edit} kinds={d?.kinds || {}} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load() }} />}
+    {edit && <IdeaEditor x={edit} d={d} can={can} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load() }} />}
   </div>
 }
 
-function IdeaEditor({ x, kinds, onClose, onSaved }) {
-  const [b, setB] = useState({ title: x.title || '', text: x.text || '', kind: x.kind || 'reels', object_id: x.object_id || '', status: x.status || 'new' })
+function IdeaEditor({ x, d, can, onClose, onSaved }) {
+  const kinds = d?.kinds || {}
+  const [b, setB] = useState({ title: x.title || '', text: x.text || '', kind: x.kind || 'reels', object_id: x.object_id || '', rubric_id: x.rubric_id || '' })
   const [objs, setObjs] = useState([])
   const [msg, setMsg] = useState('')
+  const [note, setNote] = useState(null)      // HEAD возвращает: что поправить
+  const [shoot, setShoot] = useState(null)    // «В съёмку»: дата, время, место
   useEffect(() => { api('/objects').then(setObjs, () => {}) }, [])
   const set = (k, v) => setB(s => ({ ...s, [k]: v }))
-  const save = () => b.title.trim() ? api(x.id ? `/mkt/ideas/${x.id}` : '/mkt/ideas', { method: 'POST', body: { ...b, object_id: b.object_id ? +b.object_id : null } })
-    .then(onSaved, e => setMsg(e.message)) : setMsg('Назови идею.')
+  const st = x.status || 'new'
+  const body = () => ({ ...b, object_id: b.object_id ? +b.object_id : null, rubric_id: b.rubric_id ? +b.rubric_id : null })
+  const fail = e => setMsg(e.message)
+  const save = (then) => b.title.trim() ? api(x.id ? `/mkt/ideas/${x.id}` : '/mkt/ideas', { method: 'POST', body: body() }).then(r => then ? then(r.id) : onSaved(), fail) : setMsg('Назови идею.')
+  const submit = () => !b.text.trim() ? setMsg('Напиши сценарий.') : !b.rubric_id ? setMsg('Выбери рубрику.') : save(id => api(`/mkt/ideas/${id}/submit`, { method: 'POST' }).then(onSaved, fail))
+  const review = approve => api(`/mkt/ideas/${x.id}/review`, { method: 'POST', body: { approve, note } }).then(onSaved, fail)
+  const toShoot = () => shoot.shoot_date ? api(`/mkt/ideas/${x.id}/shoot`, { method: 'POST', body: { shoot_date: shoot.shoot_date, at_time: shoot.at_time || null, place: shoot.place || null } })
+    .then(r => r.warn ? setMsg(r.warn) || setShoot({ done: r }) : setShoot({ done: r }), fail) : setMsg('Поставь дату съёмки.')
+  if (shoot?.done) return <Sheet title="Съёмка поставлена" onClose={onSaved}>
+    <p>Папка исходников на Диске:</p><p className="mktcap">{shoot.done.folder}</p>
+    <p className="small muted">Внутри лежит сценарий. Снятое грузи в «Медиа → Загрузить снятое» или прямо в эту папку.</p>
+    {msg && <p className="small why">{msg}</p>}
+    <button onClick={onSaved}>Готово</button></Sheet>
   return <Sheet title={x.id ? 'Идея' : 'Новая идея'} onClose={onClose}>
+    {x.id && <p className="small muted">Статус: {IST[st][0]}{x.author ? ` · ${x.author}` : ''}</p>}
+    {st === 'rejected' && x.review_note && <p className="small why">HEAD вернул: {x.review_note}</p>}
     <input placeholder="Например: говорящая голова — как мы рисуем" value={b.title} onChange={e => set('title', e.target.value)} />
     <div className="chips">{Object.entries(kinds).map(([k, t]) => <button key={k} className={b.kind === k ? 'on' : ''} onClick={() => set('kind', k)}>{t}</button>)}</div>
+    <select aria-label="Рубрика" value={b.rubric_id} onChange={e => set('rubric_id', e.target.value)}><option value="">— рубрика —</option>
+      {(d?.rubrics || []).map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select>
     <textarea rows={7} placeholder="Сценарий: кадры, текст, музыка, кто в кадре" value={b.text} onChange={e => set('text', e.target.value)} />
     <select value={b.object_id} onChange={e => set('object_id', e.target.value)}><option value="">Вне проектов</option>
       {objs.map(o => <option key={o.id} value={o.id}>№{o.id} {o.title}</option>)}</select>
-    {x.id && <div className="chips">{Object.entries(IST).map(([k, [t]]) => <button key={k} className={b.status === k ? 'on' : ''} onClick={() => set('status', k)}>{t}</button>)}</div>}
+    {(st === 'pending' || st === 'approved') && !d?.head && <p className="small muted">Если поменять сценарий, он снова уйдёт в черновики и на утверждение.</p>}
     {msg && <p className="small why">{msg}</p>}
-    <button onClick={save}>Сохранить</button>
+    {d?.head && st === 'pending' ? (note === null ? <div className="seg"><button onClick={() => review(true)}>Утверждаю</button><button className="ghost" onClick={() => setNote('')}>Вернуть</button></div>
+      : <><textarea rows={2} placeholder="Что поправить" value={note} onChange={e => setNote(e.target.value)} />
+        <div className="seg"><button disabled={!note.trim()} onClick={() => review(false)}>Вернуть автору</button><button className="ghost" onClick={() => setNote(null)}>Отмена</button></div></>)
+      : st === 'approved' && d?.can_shoot ? (shoot ? <>
+        <label className="muted small">Дата съёмки</label><input type="date" value={shoot.shoot_date || ''} onChange={e => setShoot({ ...shoot, shoot_date: e.target.value })} />
+        <input placeholder="Время, например 10:00" value={shoot.at_time || ''} onChange={e => setShoot({ ...shoot, at_time: e.target.value })} />
+        <input placeholder="Место" value={shoot.place || ''} onChange={e => setShoot({ ...shoot, place: e.target.value })} />
+        <button onClick={toShoot}>Поставить съёмку</button></> : <button onClick={() => setShoot({})}>В съёмку</button>)
+      : null}
+    {(can || d?.head) && ['new', 'rejected', 'dropped'].includes(st) && <button onClick={submit}>{d?.head ? 'Утвердить и сохранить' : 'На утверждение HEAD'}</button>}
+    {(can || d?.head) && <button className="ghost" onClick={() => save()}>{['new', 'rejected', 'dropped'].includes(st) ? 'Сохранить черновик' : 'Сохранить'}</button>}
   </Sheet>
 }
 

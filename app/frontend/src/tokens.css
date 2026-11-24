@@ -1261,3 +1261,11 @@ button.btnlike { padding: 12px 10px; font-size: 13px; font-weight: 600; margin: 
 .repflow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr; align-items: center; gap: 4px; margin: 10px 0; }
 .repflow div { min-width: 0; text-align: center; } .repflow b { display: block; font-size: 14px; white-space: nowrap; }
 .repflow span { font-size: 11px; color: var(--muted); } .repflow i { color: var(--muted); font-style: normal; }
+/* «Медиа»: поиск, фильтры, метки (HEAD 24.11) */
+.mktsearch { margin: 8px 0 6px; }
+.mktfilters { display: grid; grid-template-columns: 1.5fr 0.9fr 1.1fr; gap: 6px; margin-bottom: 8px; }
+.mktfilters select { min-width: 0; padding-left: 10px; padding-right: 22px; font-size: 13px; }
+.mtags { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 4px; font-size: 11px; align-items: center; }
+.mtags span { padding: 2px 8px; border-radius: 99px; background: var(--alt); border: 1px solid var(--line); }
+.mtags a { color: var(--muted); text-decoration: underline; cursor: pointer; }
+.mktnorm b .badge { margin-left: 6px; font-size: 10px; vertical-align: 1px; }

@@ -32,7 +32,7 @@ const put = (url, body, headers = {}, onLoaded = null) => new Promise((ok, fail)
   x.send(body)
 })
 const accepted = (x, fallback) => { let r = null; try { r = x.getResponseHeader('Range') } catch { /* заголовок не отдан */ } const m = /-(\d+)$/.exec(r || ''); return m ? +m[1] + 1 : fallback }
-async function sendToGoogle(url, file, onProgress) {
+export async function sendToGoogle(url, file, onProgress) {
   if (file.size <= CHUNK) {   // маленький файл — одним запросом, как раньше
     for (let t = 0; ; t++) {
       try {

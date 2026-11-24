@@ -51,7 +51,7 @@ def _files(conn, ids: list[int]) -> list[dict]:
     if not ids:
         return []
     rows = conn.execute("""SELECT f.*, pe.full_name AS by FROM files f JOIN people pe ON pe.id=f.uploaded_by
-                           WHERE f.id = ANY(%s) AND f.kind IN ('media','pub')""", (ids,)).fetchall()
+                           WHERE f.id = ANY(%s) AND f.kind IN ('media','pub','src')""", (ids,)).fetchall()
     by = {r["id"]: r for r in rows}
     return [links(by[i]) for i in ids if i in by]
 
@@ -88,8 +88,11 @@ def _norms(conn, t0: date, t1: date) -> list[dict]:
         """SELECT CASE WHEN kind='carousel' THEN 'post' ELSE kind END AS k, count(*) AS planned,
                   count(*) FILTER (WHERE status='published') AS done
            FROM mkt_posts WHERE status<>'cancelled' AND plan_date >= %s AND plan_date < %s GROUP BY 1""", (t0, t1)).fetchall()}
+    today = date.today()
+    late = t0 <= today < t1 and today.day >= 20       # договор агентства (HEAD 24.11): к 20-му должно выйти две трети объёма
     return [{"kind": n["kind"], "title": n["title"], "per_month": n["per_month"],
-             "planned": got.get(n["kind"], {}).get("planned", 0), "done": got.get(n["kind"], {}).get("done", 0)}
+             "planned": got.get(n["kind"], {}).get("planned", 0), "done": got.get(n["kind"], {}).get("done", 0),
+             "behind": bool(late and got.get(n["kind"], {}).get("done", 0) * 3 < n["per_month"] * 2)}
             for n in conn.execute("SELECT * FROM mkt_norms WHERE per_month > 0 ORDER BY sort").fetchall()]
 
 
@@ -147,7 +150,7 @@ def _check(conn, b: PostIn, p: dict | None = None):
     if p and p["role_code"] != "head" and p.get("mkt_job") == "target" and b.kind != "ad":
         raise HTTPException(403, "таргетолог ставит только рекламу")
     if b.file_ids:
-        ok = conn.execute("SELECT count(*) AS n FROM files WHERE id = ANY(%s) AND kind IN ('media','pub') AND status='ready'", (b.file_ids,)).fetchone()["n"]
+        ok = conn.execute("SELECT count(*) AS n FROM files WHERE id = ANY(%s) AND kind IN ('media','pub','src') AND status='ready'", (b.file_ids,)).fetchone()["n"]
         if ok != len(set(b.file_ids)):
             raise HTTPException(400, "материал не найден в «Медиа»")
 
@@ -232,8 +235,36 @@ def post_review(post_id: int, b: ReviewIn, p: dict = Depends(active)):
         raise HTTPException(403, "утверждает только HEAD")
     if not b.approve and not (b.note or "").strip():
         raise HTTPException(400, "reason required")
-    return _move(post_id, p, ("pending",), "approved" if b.approve else "rejected",
-                 ", reviewed_by=%s, reviewed_at=now(), review_note=%s", (p["id"], b.note), "mkt_post_review", {"approve": b.approve, "note": b.note})
+    out = _move(post_id, p, ("pending",), "approved" if b.approve else "rejected",
+                ", reviewed_by=%s, reviewed_at=now(), review_note=%s", (p["id"], b.note), "mkt_post_review", {"approve": b.approve, "note": b.note})
+    if b.approve and out.get("kind") == "ad":
+        out["ad_saved"] = save_ad_creatives(post_id)
+    return out
+
+
+def save_ad_creatives(post_id: int) -> str | None:
+    """Реклама утверждена HEAD: копии креативов — в «Реклама / ГГГГ-ММ» рядом с вышедшими публикациями (HEAD 24.11).
+    Диск не ответил — утверждение остаётся, в публикации видно, что копия не легла."""
+    with db.pool.connection() as conn:
+        r = conn.execute("SELECT * FROM mkt_posts WHERE id=%s", (post_id,)).fetchone()
+        fs = conn.execute("SELECT id, name, drive_id FROM files WHERE id = ANY(%s) AND status='ready' AND drive_id IS NOT NULL", (r["file_ids"],)).fetchall()
+    if not fs:
+        return None
+    when = r["plan_date"] or date.today()
+    name = f"{when.year}-{when.month:02d}"
+    try:
+        d = drive.Drive()
+        folder = d.child(d.child(drive.MKT_READY_ID, "Реклама"), name)
+        have = {f["name"] for f in d.ls(folder)}
+        for f in fs:
+            if f["name"] not in have:
+                d.copy(f["drive_id"], folder, f["name"])
+        res = f"Реклама / {name}"
+    except Exception as ex:  # noqa: BLE001
+        res = f"не сохранено на Диск: {type(ex).__name__}"
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE mkt_posts SET ad_saved=%s WHERE id=%s", (res, post_id))
+    return res
 
 
 class PublishedIn(BaseModel):
@@ -266,9 +297,12 @@ def review_day(b: DayIn, p: dict = Depends(active)):
         raise HTTPException(403, "утверждает только HEAD")
     with db.pool.connection() as conn, conn.transaction():
         rows = conn.execute("""UPDATE mkt_posts SET status='approved', reviewed_by=%s, reviewed_at=now(), review_note=NULL, updated_at=now()
-                               WHERE status='pending' AND plan_date=%s RETURNING id""", (p["id"], b.plan_date)).fetchall()
+                               WHERE status='pending' AND plan_date=%s RETURNING id, kind""", (p["id"], b.plan_date)).fetchall()
         for r in rows:
             db.audit(conn, p["id"], "mkt_post_review", "mkt_posts", r["id"], {"approve": True, "day": str(b.plan_date)})
+    for r in rows:
+        if r["kind"] == "ad":
+            save_ad_creatives(r["id"])
     return {"approved": len(rows)}
 
 
@@ -384,7 +418,7 @@ def posts_csv(ym: str, p: dict = Depends(active)):
 
 # ---------- идеи и сценарии ----------
 
-IDEA_ST = {"new": "новая", "work": "в работе", "done": "снято", "dropped": "отложено"}
+IDEA_ST = {"new": "черновик", "pending": "у HEAD", "approved": "утверждено", "rejected": "вернул", "work": "в съёмке", "done": "снято", "dropped": "отложено"}
 
 
 class IdeaIn(BaseModel):
@@ -392,17 +426,20 @@ class IdeaIn(BaseModel):
     text: str | None = Field(default=None, max_length=8000)
     kind: str = "reels"
     object_id: int | None = None
-    status: str = Field(default="new", pattern="^(new|work|done|dropped)$")
+    rubric_id: int | None = None
+    status: str | None = Field(default=None, pattern="^(new|work|done|dropped)$")   # None — не менять
 
 
 @router.get("/mkt/ideas")
 def ideas(p: dict = Depends(active)):
     _mkt(p)
     with db.pool.connection() as conn:
-        rows = conn.execute("""SELECT i.*, pe.full_name AS author, o.title AS object_title FROM mkt_ideas i
-                               JOIN people pe ON pe.id=i.author_id LEFT JOIN objects o ON o.id=i.object_id
-                               ORDER BY i.status IN ('done','dropped'), i.updated_at DESC LIMIT 300""").fetchall()
-    return {"items": rows, "statuses": IDEA_ST, "kinds": KINDS}
+        rows = conn.execute("""SELECT i.*, pe.full_name AS author, o.title AS object_title, r.title AS rubric FROM mkt_ideas i
+                               JOIN people pe ON pe.id=i.author_id LEFT JOIN objects o ON o.id=i.object_id LEFT JOIN mkt_rubrics r ON r.id=i.rubric_id
+                               ORDER BY i.status IN ('done','dropped'), i.status<>'pending', i.updated_at DESC LIMIT 300""").fetchall()
+        rub = conn.execute("SELECT id, title FROM mkt_rubrics WHERE NOT project ORDER BY sort").fetchall()
+    return {"items": rows, "statuses": IDEA_ST, "kinds": KINDS, "rubrics": rub, "head": p["role_code"] == "head",
+            "can_shoot": p["role_code"] == "head" or p.get("mkt_job") in SHOOT_JOBS}
 
 
 @router.post("/mkt/ideas")
@@ -413,13 +450,20 @@ def idea_save(b: IdeaIn, idea_id: int | None = None, p: dict = Depends(active)):
         raise HTTPException(400, "bad kind")
     with db.pool.connection() as conn, conn.transaction():
         if idea_id:
-            r = conn.execute("""UPDATE mkt_ideas SET title=%s, text=%s, kind=%s, object_id=%s, status=%s, updated_at=now()
-                                WHERE id=%s RETURNING id""", (b.title.strip(), b.text, b.kind, b.object_id, b.status, idea_id)).fetchone()
-            if not r:
+            cur = conn.execute("SELECT * FROM mkt_ideas WHERE id=%s FOR UPDATE", (idea_id,)).fetchone()
+            if not cur:
                 raise HTTPException(404)
+            st = b.status or cur["status"]
+            # сценарий поменяли после отправки или утверждения — снова черновик: HEAD утверждает то, что реально снимут
+            if cur["status"] in ("pending", "approved") and p["role_code"] != "head" and (b.text or "") != (cur["text"] or ""):
+                st = "new"
+            elif cur["status"] in ("pending", "approved") and b.status in (None, "new", "work", "done"):
+                st = cur["status"]      # утверждение не снимается сменой статуса; «в съёмке» ставит кнопка «В съёмку»
+            r = conn.execute("""UPDATE mkt_ideas SET title=%s, text=%s, kind=%s, object_id=%s, rubric_id=%s, status=%s, updated_at=now()
+                                WHERE id=%s RETURNING id""", (b.title.strip(), b.text, b.kind, b.object_id, b.rubric_id, st, idea_id)).fetchone()
         else:
-            r = conn.execute("""INSERT INTO mkt_ideas (title, text, kind, object_id, status, author_id) VALUES (%s,%s,%s,%s,%s,%s)
-                                RETURNING id""", (b.title.strip(), b.text, b.kind, b.object_id, b.status, p["id"])).fetchone()
+            r = conn.execute("""INSERT INTO mkt_ideas (title, text, kind, object_id, rubric_id, status, author_id) VALUES (%s,%s,%s,%s,%s,%s,%s)
+                                RETURNING id""", (b.title.strip(), b.text, b.kind, b.object_id, b.rubric_id, b.status or "new", p["id"])).fetchone()
         db.audit(conn, p["id"], "mkt_idea_save", "mkt_ideas", r["id"], {"title": b.title, "status": b.status})
     return {"id": r["id"]}
 
