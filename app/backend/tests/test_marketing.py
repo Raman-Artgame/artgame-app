@@ -279,3 +279,23 @@ def test_ads_channels_origin_report(client, team, monkeypatch):
     new = client.post("/api/mkt/channels", json={"title": "Крыша", "phrase": "Пишу с Крыши"}, headers=hdr(1000)).json()["id"]
     assert client.post(f"/api/mkt/channels/{new}", json={"title": "Крыша", "active": False}, headers=hdr(1000)).status_code == 200
     assert "Крыша" not in [c["title"] for c in client.get("/api/mkt/channels", headers=hdr(6000)).json()]
+
+
+def test_ad_labels(client, team):
+    """Метка кампании: своя фраза WhatsApp и ссылка на сайт; заявка по фразе получает площадку и кампанию."""
+    from artgame import ads
+    ch = {c["title"]: c["id"] for c in client.get("/api/mkt/channels", headers=hdr(1000)).json()}
+    client.post("/api/mkt/wa_phone", json={"phone": "77051234567"}, headers=hdr(1000))
+    assert client.post("/api/mkt/labels", json={"channel_id": ch["Таргет Instagram"], "title": "Кафе, декабрь"}, headers=hdr(2000)).status_code == 403
+    lb = client.post("/api/mkt/labels", json={"channel_id": ch["Таргет Instagram"], "title": "Кафе, декабрь"}, headers=hdr(1000)).json()[0]
+    assert lb["phrase"] == f"Здравствуйте! Увидел вашу рекламу в Instagram. Реклама №{lb['id']}." and lb["wa_link"].startswith("https://wa.me/77051234567?text=")
+    assert lb["site_link"] == f"https://artgame.kz/?utm_source=target_instagram&utm_medium=cpc&utm_campaign=ag{lb['id']}"
+    ads.auto_origin(555, lb["phrase"] + " Сколько стоит?")
+    ads.auto_origin(556, "Здравствуйте! Пишу с OLX.")
+    with db.pool.connection() as c:
+        o = c.execute("SELECT channel_id, label_id FROM lead_origin WHERE lead_id=555").fetchone()
+        assert (o["channel_id"], o["label_id"]) == (ch["Таргет Instagram"], lb["id"])
+        assert c.execute("SELECT label_id FROM lead_origin WHERE lead_id=556").fetchone()["label_id"] is None
+    got = client.get(f"/api/mkt/labels?channel_id={ch['Таргет Instagram']}", headers=hdr(2000)).json()
+    assert got[0]["leads"] == 1
+    assert client.post(f"/api/mkt/labels/{lb['id']}", json={"active": False}, headers=hdr(1000)).json()[0]["active"] is False

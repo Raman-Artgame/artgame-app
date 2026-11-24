@@ -1269,3 +1269,5 @@ button.btnlike { padding: 12px 10px; font-size: 13px; font-weight: 600; margin: 
 .mtags span { padding: 2px 8px; border-radius: 99px; background: var(--alt); border: 1px solid var(--line); }
 .mtags a { color: var(--muted); text-decoration: underline; cursor: pointer; }
 .mktnorm b .badge { margin-left: 6px; font-size: 10px; vertical-align: 1px; }
+.adlabels { display: grid; gap: 8px; } .adlabel { padding: 10px 12px; border: 1px solid var(--line2); border-radius: 12px; } .adlabel.off { opacity: .5; }
+.adlabel .mktadh { margin-bottom: 4px; } .adlabel p { margin: 0 0 6px; } .adlabel .seg { margin: 0; } .adlabels > .seg input { flex: 4; } .adlabels > .seg button { flex: 1; }

@@ -314,6 +314,26 @@ function MetaBox({ ym, onChange }) {
   </div>
 }
 
+// Метки кампаний (HEAD 24.11): у каждой кампании своя фраза WhatsApp и ссылка на сайт — видно, какая реклама привела заявку.
+function AdLabels({ channel, onMsg }) {
+  const [list, setList] = useState(null)
+  const [title, setTitle] = useState('')
+  useEffect(() => { api(`/mkt/labels?channel_id=${channel}`).then(setList, () => setList([])) }, [channel])
+  const copy = (t, what) => copyText(t).then(ok => onMsg(ok ? `${what} скопирована.` : 'Выдели и скопируй вручную.'))
+  return <div className="adlabels">
+    <label className="muted small">Метки кампаний</label>
+    {(list || []).map(l => <div key={l.id} className={'adlabel' + (l.active ? '' : ' off')}>
+      <div className="mktadh"><b>№{l.id} {l.title}</b><span className="small muted">заявок: {l.leads}</span></div>
+      <p className="small mktcap">{l.phrase}</p>
+      <div className="seg">{l.wa_link && <button className="ghost mini" onClick={() => copy(l.wa_link, 'Ссылка WhatsApp')}>WhatsApp</button>}
+        <button className="ghost mini" onClick={() => copy(l.site_link, 'Ссылка на сайт')}>Сайт</button>
+        <button className="ghost mini" onClick={() => api(`/mkt/labels/${l.id}`, { method: 'POST', body: { active: !l.active } }).then(setList)}>{l.active ? 'Выключить' : 'Включить'}</button></div>
+    </div>)}
+    <div className="seg"><input placeholder="Новая кампания, например: Кафе, декабрь" value={title} onChange={e => setTitle(e.target.value)} />
+      <button className="ghost mini" disabled={title.trim().length < 2} onClick={() => api('/mkt/labels', { method: 'POST', body: { channel_id: channel, title } }).then(r => { setList(r); setTitle('') }, e => onMsg(e.message))}>+</button></div>
+  </div>
+}
+
 function AdSheet({ x, ym, onClose, onSaved }) {
   const [b, setB] = useState({ title: x.title || '', phrase: x.phrase || '', paid: x.paid !== false, active: x.active !== false, amount: x.spend ? String(x.spend) : '' })
   const [msg, setMsg] = useState('')
@@ -335,6 +355,7 @@ function AdSheet({ x, ym, onClose, onSaved }) {
     <textarea rows={2} placeholder="Здравствуйте! Пишу с …" value={b.phrase} onChange={e => setB({ ...b, phrase: e.target.value })} />
     {x.link && <><label className="muted small">Ссылка для объявления</label><p className="mktcap mktlink">{x.link}</p>
       <button className="ghost" onClick={() => copyText(x.link).then(ok => setMsg(ok ? 'Ссылка скопирована. Поставь её в объявление кнопкой «Написать в WhatsApp».' : 'Выдели ссылку и скопируй вручную.'))}>Скопировать ссылку</button></>}
+    {x.id && <AdLabels channel={x.id} onMsg={setMsg} />}
     {x.id && <label className="small muted check"><input type="checkbox" checked={b.active} onChange={e => setB({ ...b, active: e.target.checked })} /> Площадка работает <span>· выключенная пропадает из списка, история остаётся</span></label>}
     {msg && <p className="small why">{msg}</p>}
     <button onClick={save}>Сохранить</button>

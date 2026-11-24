@@ -53,14 +53,29 @@ def detect(conn, text: str) -> int | None:
     return None
 
 
+SITE = "https://artgame.kz"
+
+
+def label_phrase(lid: int, channel_phrase: str | None) -> str:
+    """Фраза кампании = фраза площадки + номер рекламы: клиент отправляет её как есть, по номеру узнаём кампанию."""
+    return f"{(channel_phrase or 'Здравствуйте!').strip()} Реклама №{lid}."
+
+
+def detect_label(conn, text: str) -> dict | None:
+    m = re.search(r"реклама\s*№\s*(\d+)", (text or "").lower())
+    return conn.execute("SELECT id, channel_id FROM mkt_labels WHERE id=%s", (int(m.group(1)),)).fetchone() if m else None
+
+
 def auto_origin(lead_id: int, text: str) -> None:
     """Вызывается, когда приложение читает переписку лида: узнали площадку по фразе — запомнили. Отметку МОП не трогаем."""
     with db.pool.connection() as conn:
         if conn.execute("SELECT 1 FROM lead_origin WHERE lead_id=%s", (lead_id,)).fetchone():
             return
-        ch = detect(conn, text)
+        lb = detect_label(conn, text)
+        ch = lb["channel_id"] if lb else detect(conn, text)
         if ch:
-            conn.execute("INSERT INTO lead_origin (lead_id, channel_id) VALUES (%s,%s) ON CONFLICT DO NOTHING", (lead_id, ch))
+            conn.execute("INSERT INTO lead_origin (lead_id, channel_id, label_id) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+                         (lead_id, ch, lb["id"] if lb else None))
 
 
 def origin_of(conn, lead_id: int) -> dict | None:
@@ -196,6 +211,55 @@ def channel_save(b: ChannelIn, cid: int | None = None, p: dict = Depends(active)
                              (b.title.strip(), ph, b.paid, b.active)).fetchone()
         db.audit(conn, p["id"], "mkt_channel", "mkt_channels", r["id"], b.model_dump())
     return {"id": r["id"]}
+
+
+class LabelIn(BaseModel):
+    channel_id: int | None = None
+    title: str | None = Field(default=None, min_length=2, max_length=80)
+    active: bool = True
+
+
+def _labels(conn, channel_id: int) -> list[dict]:
+    wa = _wa(conn)
+    ch = conn.execute("SELECT id, title, phrase FROM mkt_channels WHERE id=%s", (channel_id,)).fetchone()
+    if not ch:
+        raise HTTPException(404)
+    src = re.sub(r"[^a-z0-9]+", "_", ch["title"].lower().translate(str.maketrans("абвгдежзийклмнопрстуфхцчшщыэюя", "abvgdegziyklmnoprstufhccss_eua"))).strip("_") or f"ch{ch['id']}"
+    out = []
+    for r in conn.execute("""SELECT l.id, l.title, l.active, (SELECT count(*) FROM lead_origin o WHERE o.label_id=l.id) AS leads
+                             FROM mkt_labels l WHERE l.channel_id=%s ORDER BY l.active DESC, l.id DESC""", (channel_id,)).fetchall():
+        ph = label_phrase(r["id"], ch["phrase"])
+        out.append({**r, "phrase": ph, "wa_link": f"https://wa.me/{wa}?text={quote(ph)}" if wa else None,
+                    "site_link": f"{SITE}/?utm_source={src}&utm_medium=cpc&utm_campaign=ag{r['id']}"})
+    return out
+
+
+@router.get("/mkt/labels")
+def labels_get(channel_id: int, p: dict = Depends(active)):
+    _see(p)
+    with db.pool.connection() as conn:
+        return _labels(conn, channel_id)
+
+
+@router.post("/mkt/labels")
+@router.post("/mkt/labels/{label_id}")
+def label_save(b: LabelIn, label_id: int | None = None, p: dict = Depends(active)):
+    """Метку не удаляем — выключаем: заявки, пришедшие по ней, остаются за кампанией."""
+    _edit(p)
+    with db.pool.connection() as conn, conn.transaction():
+        if label_id:
+            r = conn.execute("UPDATE mkt_labels SET active=%s, title=COALESCE(%s, title) WHERE id=%s RETURNING channel_id", (b.active, b.title, label_id)).fetchone()
+            if not r:
+                raise HTTPException(404)
+        else:
+            if not b.channel_id or not b.title:
+                raise HTTPException(400, "назови кампанию")
+            if not conn.execute("SELECT 1 FROM mkt_channels WHERE id=%s", (b.channel_id,)).fetchone():
+                raise HTTPException(404)
+            r = conn.execute("INSERT INTO mkt_labels (channel_id, title, created_by) VALUES (%s,%s,%s) RETURNING channel_id, id",
+                             (b.channel_id, b.title.strip(), p["id"])).fetchone()
+        db.audit(conn, p["id"], "mkt_label", "mkt_labels", label_id or r["id"], b.model_dump())
+        return _labels(conn, r["channel_id"])
 
 
 class PhoneIn(BaseModel):
