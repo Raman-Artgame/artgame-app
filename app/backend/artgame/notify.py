@@ -287,10 +287,7 @@ def main():
         print(f"design_wait={design_wait_remind()}")
     except Exception as ex:  # noqa: BLE001
         print(f"design_wait: {ex}")
-    try:
-        print(f"stage_outside={stage_outside()}")
-    except Exception as ex:  # noqa: BLE001
-        print(f"stage_outside: {ex}")
+    # stage_outside выключен 25.11: разослал по одному сообщению на старые смены стадий; вернётся сводкой только по новым
 
 
 if __name__ == "__main__":
