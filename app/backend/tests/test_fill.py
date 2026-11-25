@@ -13,6 +13,8 @@ def test_fill_state_and_fields(bxc, monkeypatch):
     calls = []
 
     def fake_call(method, params):
+        if method.startswith("crm.requisite"):
+            return {"result": []}
         calls.append((method, params))
         if method == "crm.deal.update":
             DEALS["1601"].update({k: v for k, v in params["fields"].items() if not isinstance(v, (dict, list))})
@@ -90,6 +92,8 @@ def test_stage_lock(bxc, monkeypatch, tmp_path):
     calls = []
 
     def fake_call(method, params):
+        if method.startswith("crm.requisite"):
+            return {"result": []}
         calls.append((method, params))
         if method == "crm.deal.update":
             DEALS["1601"].update({k: v for k, v in params["fields"].items() if not isinstance(v, (dict, list))})

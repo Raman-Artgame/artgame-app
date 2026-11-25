@@ -65,6 +65,6 @@ export async function api(path, opts = {}, tries = 0) {
     await new Promise(ok => setTimeout(ok, RETRY_WAIT[tries]))
     return api(path, opts, tries + 1)
   }
-  if (!r.ok) throw Object.assign(new Error(errText(data.detail) || r.status), { status: r.status })
+  if (!r.ok) throw Object.assign(new Error(errText(data.detail) || r.status), { status: r.status, detail: data.detail })
   return data
 }

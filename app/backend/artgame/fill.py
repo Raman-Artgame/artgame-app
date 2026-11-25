@@ -27,21 +27,23 @@ STAGE_STEP = {"NEW": 0, "PREPARATION": 2, "UC_VZFPUP": 2, "UC_YV66BV": 2, "UC_1E
               "FINAL_INVOICE": 3, "UC_AV00QK": 5, "UC_BMKDS4": 5, "WON": 5}
 # поле → (подпись, шаг, ключ для POST /fields или None, где заполнить)
 SPEC = [
-    ("name", "Клиент: имя или компания", "client", None, "в карточке клиента в Битриксе"),
-    ("phone", "Телефон клиента", "client", None, "в карточке клиента в Битриксе"),
+    ("name", "Клиент: имя или компания", "client", None, "«Ещё действия» → «Клиент и реквизиты»"),
+    ("phone", "Телефон клиента", "client", None, "«Ещё действия» → «Клиент и реквизиты»"),
     ("city", "Город", "client", "city", ""),
     ("service", "Услуга", "client", "service", ""),
+    # категория проекта (школа, кафе, ТРЦ…) — обязательна с первого шага: по ней «Медиа» и отчёты (HEAD 25.11)
+    ("category", "Категория проекта", "client", None, "«Заполнить карточку» → «Проект» → «Категория»"),
     ("address", "Адрес объекта", "client", "address", ""),
     ("area", "Площадь, м²", "client", "area", ""),
     ("sum", "Сумма сделки", "calc", None, "шаг «Расчёт» → «Записать в сделку»"),
     ("calc", "Расчёт цены и срока", "calc", None, "шаг «Расчёт» → «Записать в сделку»"),
     ("kp", "КП в сделке", "kp", None, "шаг «КП» → скачать PDF"),
-    ("requisites", "Реквизиты клиента (БИН/ИИН)", "docs", None, "в Битриксе или «Договор → Заполнить из текста»"),
+    ("requisites", "Реквизиты клиента (БИН/ИИН)", "docs", None, "шаг «Договор» → «Внести реквизиты клиента»"),
     ("adv", "Аванс, %", "docs", "adv", ""),
     ("days", "Срок по договору, дней", "docs", "days", ""),
     ("warranty", "Гарантия, мес.", "docs", "warranty", ""),
     ("paid", "Аванс поступил", "pay", None, "шаг «Оплата» → «Внести оплату» с фото чека"),
-    ("signed", "Подписанный договор", "pay", None, "файл в поле «Договор подписанный» в Битриксе"),
+    ("signed", "Подписанный договор", "pay", None, "шаг «Оплата» или «Договор» → «Загрузить подписанный договор»"),
     ("start", "Старт работ (факт)", "work", "start", ""),
     ("end", "Сдача (план)", "work", "end", ""),
 ]
@@ -59,6 +61,7 @@ def state(d: dict, card: dict, calc: dict | None) -> dict:
     val = {
         "name": c.get("name"), "phone": c.get("phone"), "city": card.get("city"), "service": card.get("service"),
         "address": card.get("address"), "area": card.get("area"), "sum": card.get("sum"),
+        "category": (card.get("project") or {}).get("category"),
         "calc": bool(calc) or _has((card.get("norm") or {}).get("shifts")),
         "kp": any(t.startswith("КП") for t in files),
         "requisites": True if c.get("type") == "Физлицо" else bool(req and req.get("cbin")),

@@ -9,6 +9,7 @@ import { CallOutcome, Contact, Feed, Skeleton, bxLink, cleanTitle, dt, money, st
 import { leftText } from './projects.jsx'
 import { FillBar, FillSheet, LOCK_DOCS, LOCK_KP, Locked, anketaKey, lockFor, missingFor } from './fill.jsx'
 import { ClosePanel, READY } from './closing.jsx'
+import { ClientSheet, SignedUpload } from './mopforms.jsx'
 
 // Карточка сделки = единственное рабочее поле МОП (HEAD 06.11, вариант А). Тёмная шапка с шагами, нажатие на шаг открывает
 // его панель: Клиент → Расчёт → КП → Договор → Оплата → В работе. Расчёт считает сервер по «Значениям» и пишет в Битрикс;
@@ -427,6 +428,7 @@ export function DealCard({ id, back, place }) {
       </div>
       {moreActs && <div className="dealbtns wrapbtns moreacts">
         <button className="ghost" onClick={() => setSheet({ kind: 'fill' })}>Заполнить карточку</button>
+        <button className="ghost" onClick={() => setSheet({ kind: 'client' })}>Клиент и реквизиты</button>
         <button className="ghost" onClick={() => setSheet({ kind: 'note' })}>Заметка</button>
         <button className="ghost" onClick={() => setSheet({ kind: 'stage' })}>Стадия</button>
         <button className={'ghost' + (cur === 'hist' ? ' on' : '')} onClick={() => setPanel('hist')}>История</button>
@@ -438,6 +440,7 @@ export function DealCard({ id, back, place }) {
       <div className="panelhead"><h3>Клиент</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>
       <div className="hint"><div><b>Шаг 1–3.</b> Ответить в течение 30 минут, узнать помещение, город, площадь и фото стены; назвать ориентир по лестнице цены; договориться о следующем касании.</div></div>
       <Qualify key={d.modified} d={d} onDone={() => load(true)} />
+      <button className="ghost clientbtn" onClick={() => setSheet({ kind: 'client' })}>Клиент и реквизиты: {c.type || 'Физлицо'}{c.name ? ' · ' + c.name : ''}</button>
     </div>}
     {cur === 'calc' && <Calc key={calc?.at || 'new'} d={d} saved={calc} onSaved={t => { loadCalc(); said(t) }} />}
     {cur === 'kp' && <>
@@ -453,10 +456,12 @@ export function DealCard({ id, back, place }) {
     {cur === 'docs' && <>
       <div className="card">
         <div className="panelhead"><h3>Договор, счёт, акт</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>
-        <p className="small muted">{calc ? `Сумма ${money(calc.out.total)} и аванс ${money(calc.out.pay.prepay)} — из расчёта; ` : ''}клиент и реквизиты — из Битрикса (если их там нет, вставьте из анкеты). Скачанный файл ложится в сделку, стадия — «Отправка счёта/договора».</p>
+        <p className="small muted">{calc ? `Сумма ${money(calc.out.total)} и аванс ${money(calc.out.pay.prepay)} — из расчёта; ` : ''}клиент и реквизиты — из карточки клиента. Скачанный файл ложится в сделку, стадия — «Отправка счёта/договора».</p>
+        <button className="ghost mini" onClick={() => setSheet({ kind: 'client' })}>{d.requisites?.cbin || c.type === 'Физлицо' ? 'Клиент и реквизиты' : 'Внести реквизиты клиента'}</button>
         {lockDocs.length ? <Locked what="Договор и счёт" miss={lockDocs} onFill={fillIt} onCalc={() => setPanel('calc')} />
           : <Embed place={place} view="docs" dealId={d.id} ds={ds} onDoc={onDoc} />}
       </div>
+      <SignedUpload d={d} onDone={(r, t) => said(t)} />
       {!!d.files.length && <div className="card"><h3>Документы в сделке</h3>
         {d.files.map((f, i) => <div key={i} className="row"><span>{f.title}</span>{f.url ? <a href={f.url} target="_blank" rel="noreferrer">открыть</a> : <span className="muted small">в Битриксе</span>}</div>)}</div>}
     </>}
@@ -480,6 +485,7 @@ export function DealCard({ id, back, place }) {
           <button className="ghost mini" onClick={say}>Скрипты шага</button>
         </div>
       </div>
+      <SignedUpload d={d} onDone={(r, t) => said(t)} />
       <SalesSpend dealId={d.id} />
     </>}
     {cur === 'work' && <WorkPanel d={d} portal={portal} />}
@@ -496,6 +502,7 @@ export function DealCard({ id, back, place }) {
     {sheet?.kind === 'title' && <TitleSheet d={d} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'wait' && <WaitSheet api={api} path={`/bx/deals/${id}`} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'stage' && <StageSheet d={d} stages={stages} onClose={() => setSheet(null)} onDone={said} onFill={() => setSheet({ kind: 'fill' })} />}
+    {sheet?.kind === 'client' && <ClientSheet dealId={d.id} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'fill' && <FillSheet d={d} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'note' && <NoteSheet d={d} initial={sheet.text} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'pay' && <PaySheet d={d} slot={sheet.slot} onClose={() => setSheet(null)} onDone={said} />}

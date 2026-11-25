@@ -32,6 +32,14 @@ def statuses() -> dict:
     return out
 
 
+def source_names() -> dict:
+    """«Откуда клиент» лида: CALL → «Звонок», WhatsApp, Instagram… — в списке лидов рядом с городом (HEAD 25.11)."""
+    try:
+        return {s["STATUS_ID"]: s["NAME"] for s in bx._rows(bx.read("crm.status.list", {"filter": {"ENTITY_ID": "SOURCE"}}, ttl=bx.TTL_DICT))}
+    except HTTPException:
+        return {}
+
+
 def vacancy(st: dict) -> dict:
     """Статусы «Вакансии…» (соискатели, не клиенты): хранить контакт / убрать. Определяем по названию — коды в Битриксе свои."""
     return {k: v for k, v in st.items() if v["name"].lower().startswith("ваканс")}
@@ -78,7 +86,7 @@ def missing(l: dict, have: dict, extra: "ConvertIn | None" = None) -> list[str]:
     return out
 
 
-def _row(l: dict, st: dict, have: dict, names: dict) -> dict:
+def _row(l: dict, st: dict, have: dict, names: dict, src: dict | None = None) -> dict:
     s = st.get(l.get("STATUS_ID")) or {}
     return {"id": int(l["ID"]), "title": l.get("TITLE") or "", "name": _name(l), "phone": _phone(l),
             "status": l.get("STATUS_ID"), "status_name": s.get("name", l.get("STATUS_ID")), "new": l.get("STATUS_ID") in NEW,
@@ -86,7 +94,8 @@ def _row(l: dict, st: dict, have: dict, names: dict) -> dict:
             "city": _city(_items(L_CITY, have).get(str(l.get(L_CITY) or ""), "")),
             "service": _items(L_SERVICE, have).get(str(l.get(L_SERVICE) or ""), "") if L_SERVICE in have else "",
             "area": bx._num(l.get(L_AREA)), "missing": [m for m in missing(l, have) if m != "объект"],
-            "manager": names.get(int(l.get("ASSIGNED_BY_ID") or 0), "")}
+            "manager": names.get(int(l.get("ASSIGNED_BY_ID") or 0), ""),
+            "source": (src or {}).get(l.get("SOURCE_ID") or "", "")}
 
 
 # ---------- чтение ----------
@@ -100,7 +109,8 @@ def my_leads(p: dict, fresh: bool = False) -> dict:
     st, have = statuses(), fields()
     vac = vacancy(st)   # «Вакансии Астана» — рабочий статус Битрикса, но это не клиент: в очереди МОП не нужен
     names = {u["id"]: u["name"] for u in bx.users()} if uid is None else {}
-    return {"leads": [_row(l, st, have, names) for l in rows if l.get("STATUS_ID") not in vac], "all": uid is None}
+    src = source_names()
+    return {"leads": [_row(l, st, have, names, src) for l in rows if l.get("STATUS_ID") not in vac], "all": uid is None}
 
 
 def _lead(p: dict, lead_id: int, fresh: bool = False) -> dict:
@@ -154,7 +164,7 @@ def lead_full(p: dict, lead_id: int, fresh: bool = False) -> dict:
         db.audit(conn, p["id"], "deal_open", "lead", lead_id, {"title": l.get("TITLE") or ""})
     st, have = statuses(), fields()
     names = {u["id"]: u["name"] for u in bx.users()}
-    row = _row(l, st, have, names)
+    row = _row(l, st, have, names, source_names())
     row.update({"manager": names.get(int(l.get("ASSIGNED_BY_ID") or 0), ""), "comments": l.get("COMMENTS") or "",
                 "city_id": str(l.get(L_CITY) or ""), "service_id": str(l.get(L_SERVICE) or ""),
                 "client_name": " ".join(x.strip() for x in (l.get("NAME"), l.get("LAST_NAME")) if x and x.strip()),
@@ -370,7 +380,29 @@ def api_convert(lead_id: int, body: ConvertIn | None = None, p: dict = Depends(a
         db.audit(conn, p["id"], "bx_write", "lead", lead_id, log)
     if log["bx"] == "error":
         raise HTTPException(502, log["error"] + (f" (сделка № {log['deal']} уже создана)" if log.get("deal") else ""))
+    folder_later(log["deal"], obj, city)
     return {"bx": "ok", "deal": log["deal"]}
+
+
+def folder_later(deal_id: int, obj: str, city: str):
+    """Папку сделки создаёт приложение, а не робот (HEAD 25.11 «давай делаем»): сразу после «В сделку», в фоне — МОП не ждёт
+    Диск. Только при ARTGAME_DRIVE_BIND=1: тогда ID и ссылка папки сразу в сделке, и при «Отправке счёта» объект найдёт её
+    там, а не сделает вторую. Без флага папку, как раньше, делает робот DRIVE01."""
+    from .config import settings
+    if not settings.drive_bind:
+        return
+    import threading
+
+    def run():
+        from . import drive
+        try:
+            fid = drive.Drive().project_folder({"id": deal_id, "title": obj, "city": city.split(" (")[0]})
+            with db.pool.connection() as conn:
+                drive.bind_deal(conn, deal_id, fid)
+        except Exception as ex:  # noqa: BLE001 — Диск не ответил: папку сделает синхронизация объектов
+            with db.pool.connection() as conn:
+                db.audit(conn, None, "drive_folder_error", "deal", deal_id, {"error": f"{type(ex).__name__}: {str(ex)[:200]}"})
+    threading.Thread(target=run, daemon=True).start()
 
 
 # ---------- итог звонка: и для лида, и для сделки ----------

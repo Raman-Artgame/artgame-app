@@ -334,21 +334,30 @@ def requisites(company_id) -> dict | None:
     """Реквизиты компании (crm.requisite.list). Если шлюз не даёт этот метод — None, МОП вводит вручную."""
     if not company_id or str(company_id) == "0":
         return None
+    # шлюз чтения реквизиты не отдаёт (нет в его списке) — тогда тем же вебхуком, что пишет их из «Клиент и реквизиты» (25.11)
+    def rq(method, params):
+        try:
+            return _rows(read(method, params))
+        except Exception:  # noqa: BLE001 — шлюз отказал в методе
+            from . import bxw
+            if not bxw.enabled():
+                raise
+            return _rows(bxw.CALL(method, params))
     try:
-        rows = _rows(read("crm.requisite.list", {"filter": {"ENTITY_TYPE_ID": 4, "ENTITY_ID": int(company_id)}}))
-    except HTTPException:
+        rows = rq("crm.requisite.list", {"filter": {"ENTITY_TYPE_ID": 4, "ENTITY_ID": int(company_id)}, "order": {"ID": "DESC"}})
+    except Exception:  # noqa: BLE001
         return None
     if not rows:
         return {}
-    r = rows[0]
+    r = rows[0]   # последние — те, что МОП внёс в приложении
     out = {"cname": r.get("RQ_COMPANY_NAME") or r.get("RQ_NAME") or "", "cbin": r.get("RQ_BIN") or r.get("RQ_IIN") or "",
-           "signer": r.get("RQ_DIRECTOR") or ""}
+           "signer": r.get("RQ_CEO_NAME") or r.get("RQ_DIRECTOR") or ""}   # в пресетах Казахстана подписант — RQ_CEO_NAME
     try:
-        banks = _rows(read("crm.requisite.bankdetail.list", {"filter": {"ENTITY_ID": int(r["ID"])}}))
+        banks = rq("crm.requisite.bankdetail.list", {"filter": {"ENTITY_ID": int(r["ID"])}, "order": {"ID": "DESC"}})
         if banks:
             b = banks[0]
-            out.update(cbank=b.get("RQ_BANK_NAME") or "", cbik=b.get("RQ_BIK") or "", ciik=b.get("RQ_ACC_NUM") or "")
-    except HTTPException:
+            out.update(cbank=b.get("RQ_BANK_NAME") or "", cbik=b.get("RQ_BIK") or "", ciik=b.get("RQ_IIK") or b.get("RQ_ACC_NUM") or "")
+    except Exception:  # noqa: BLE001
         pass
     return {k: v for k, v in out.items() if v}
 

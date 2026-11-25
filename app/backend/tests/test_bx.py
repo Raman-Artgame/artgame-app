@@ -236,6 +236,8 @@ def test_write_off_and_on(bxc, monkeypatch, tmp_path):
     calls = []
 
     def fake_call(method, params):
+        if method.startswith("crm.requisite"):   # реквизиты читаются через ключ, когда шлюз их не отдаёт
+            return {"result": []}
         calls.append((method, params))
         if method == "crm.deal.update":
             DEALS["1601"].update({k: v for k, v in params["fields"].items() if not isinstance(v, (dict, list))})

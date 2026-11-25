@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { CityPicker, WaitSheet, cityBase } from './ui.jsx'
+import { NewLeadSheet } from './mopforms.jsx'
 
 // Общие куски блока МОП (HEAD 05.11): полоска месяца, связь с клиентом, итог звонка, лента, лиды, «Сегодня» очередью.
 export const money = n => n ? Math.round(n).toLocaleString('ru-RU') + ' ₸' : '—'
@@ -44,7 +45,7 @@ export function Contact({ phone, name, entity, id }) {
   const link = bxLink(portal, entity, id)
   useEffect(() => { try { if (link) localStorage.setItem('artgame.bx.last', JSON.stringify({ entity, id, link, t: Date.now() })) } catch { /* без памяти */ } }, [link])
   return <div className="contact">
-    <div><b>{name || '—'}</b><div className="small muted">{phone || 'телефона нет — добавьте в Битриксе'}</div></div>
+    <div><b>{name || '—'}</b><div className="small muted">{phone || 'телефона нет — добавьте в «Клиент и реквизиты»'}</div></div>
     {/* HEAD 14.11: звонок и WhatsApp — двумя кнопками; обе ведут в карточку Битрикса (телефония и Wazzup там, решение 05.11) */}
     {link && <><div className="dealbtns callbtns">
       <a className="btn ghost" href={link} target="_blank" rel="noreferrer">Позвонить</a>
@@ -180,6 +181,7 @@ export function Leads({ openLead }) {
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
   const [seg, setSeg] = useState(null)   // new | work | all
+  const [add, setAdd] = useState(false)   // «+ Заявка» по звонку (HEAD 25.11)
   const load = fresh => { setBusy(true); setErr(''); return api(`/bx/leads${fresh ? '?fresh=1' : ''}`).then(setD, e => setErr(e.message)).finally(() => setBusy(false)) }
   useEffect(() => { load(false) }, [])
   if (err) return <div className="card"><h2>Лиды</h2><p className="muted">{err}</p></div>
@@ -193,7 +195,8 @@ export function Leads({ openLead }) {
   const list = base.filter(l => !s || (l.name + ' ' + l.title + ' ' + l.phone + ' ' + (l.manager || '')).toLowerCase().includes(s))
   return <>
     <div className="card"><div className="head"><h2>{d.all ? 'Лиды' : 'Мои лиды'}</h2>
-      <button className="ghost mini" disabled={busy} onClick={() => load(true)}>{busy ? '…' : 'Обновить'}</button></div>
+      <div className="dealbtns"><button className="mini" onClick={() => setAdd(true)}>+ Заявка</button>
+        <button className="ghost mini" disabled={busy} onClick={() => load(true)}>{busy ? '…' : 'Обновить'}</button></div></div>
       <div className="segf">
         <button className={cur === 'new' && !s ? 'on' : ''} onClick={() => setSeg('new')}>Новые <span>{news.length}</span></button>
         <button className={cur === 'work' && !s ? 'on' : ''} onClick={() => setSeg('work')}>В работе <span>{work.length}</span></button>
@@ -204,11 +207,12 @@ export function Leads({ openLead }) {
       {list.map(l => <div key={l.id} className="qrow lead" onClick={() => openLead(l.id)}>
         <span className="ic lead">{initial(l.name)}</span>
         <div className="qmain"><div className="qt"><b>{l.name}</b></div>
-          <div className="small muted">{[l.phone, l.city, l.manager].filter(Boolean).join(' · ')}</div>
+          <div className="small muted">{[l.phone, l.city, l.source, l.manager].filter(Boolean).join(' · ')}</div>
           {!!l.missing.length && <div>{l.missing.map(m => <span key={m} className="miss">нет: {m}</span>)}</div>}</div>
         <span className={'badge' + ((l.new ? hours(l) >= (d.new_hours || 4) : ageDays(l.modified) >= 3) ? ' hot' : '')}>{l.new ? (hours(l) ? `ждёт ${hours(l) < 24 ? hours(l) + ' ч' : Math.floor(hours(l) / 24) + ' дн.'}` : 'только что') : `${ageDays(l.modified)} дн.`}</span>
       </div>)}
     </div>
+    {add && <NewLeadSheet onClose={() => setAdd(false)} onDone={id => { setAdd(false); load(true); openLead(id) }} />}
   </>
 }
 

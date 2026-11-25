@@ -93,6 +93,17 @@ CLOSE_STAGES = [{"STATUS_ID": "UC_BMKDS4", "NAME": "Оплата+закрыва�
 
 
 def _read(method, params):
+    # «Заявка по звонку» (HEAD 25.11): дубль ищется по телефону в лидах и контактах; источники лида
+    if method == "crm.lead.list" and "PHONE" in params["filter"]:
+        tail = "".join(ch for ch in params["filter"]["PHONE"] if ch.isdigit())[-10:]
+        return {"result": [l for l in LEADS.values() if l.get("STATUS_ID") not in ("CONVERTED",)
+                           and any(tail and "".join(ch for ch in x.get("VALUE", "") if ch.isdigit()).endswith(tail) for x in l.get("PHONE") or [])]}
+    if method == "crm.contact.list":
+        return {"result": []}
+    if method == "crm.status.list" and params["filter"].get("ENTITY_ID") == "SOURCE":
+        return {"result": [{"STATUS_ID": "CALL", "NAME": "Звонок", "SORT": "10"}, {"STATUS_ID": "3|WZ_WHATSAPP_X", "NAME": "WhatsApp (Wazzup)", "SORT": "20"},
+                           {"STATUS_ID": "WEB", "NAME": "Сайт", "SORT": "30"}, {"STATUS_ID": "REPEAT_SALE", "NAME": "Сарафан", "SORT": "40"},
+                           {"STATUS_ID": "CALLBACK", "NAME": "Холодная база", "SORT": "60"}]}
     r = fake_bx(method, params)
     if method == "crm.status.list" and params["filter"].get("ENTITY_ID") == "DEAL_STAGE":
         r = {"result": sorted(r["result"] + CLOSE_STAGES, key=lambda x: int(x["SORT"]))}
@@ -122,9 +133,31 @@ DEALS["1700"] = {"ID": "1700", "TITLE": "1700 · ШКОЛА — ШЫМКЕНТ",
 BX_CALLS = []
 
 
+REQ, BANK = {}, {}   # реквизиты и банк, которые МОП внёс из «Клиент и реквизиты»
+
+
 def fake_write(method, params):
     BX_CALLS.append({"method": method, "params": {k: v for k, v in params.items() if k != "fields"} | {"fields": {
         k: ("файл" if isinstance(v, (dict, list)) else v) for k, v in (params.get("fields") or {}).items()}}})
+    if method in ("crm.contact.get", "crm.company.get"):
+        return fake_bx(method, params)
+    if method == "crm.requisite.list":
+        f = params["filter"]
+        return {"result": sorted([r for r in REQ.values() if r["ENTITY_TYPE_ID"] == f["ENTITY_TYPE_ID"] and r["ENTITY_ID"] == f["ENTITY_ID"]], key=lambda r: -int(r["ID"]))}
+    if method == "crm.requisite.bankdetail.list":
+        return {"result": [x for x in BANK.values() if x["ENTITY_ID"] == params["filter"]["ENTITY_ID"]]}
+    if method in ("crm.requisite.add", "crm.requisite.bankdetail.add"):
+        n = 800 + len(REQ) + len(BANK)
+        (REQ if method == "crm.requisite.add" else BANK)[str(n)] = {"ID": str(n), **params["fields"]}
+        return {"result": n}
+    if method in ("crm.requisite.update", "crm.requisite.bankdetail.update"):
+        (REQ if method == "crm.requisite.update" else BANK)[str(params["id"])].update(params["fields"])
+        return {"result": True}
+    if method == "crm.lead.add":
+        lid = str(3100 + len(LEADS))
+        LEADS[lid] = {**params["fields"], "ID": lid, "DATE_CREATE": datetime.now(timezone.utc).isoformat(),
+                      "DATE_MODIFY": datetime.now(timezone.utc).isoformat(), "CONTACT_ID": None, "COMPANY_ID": None}
+        return {"result": int(lid)}
     if method == "tasks.task.add":
         return {"result": {"task": {"id": "777"}}}
     if method == "crm.deal.update":
