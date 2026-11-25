@@ -559,7 +559,7 @@ function Media({ picked, onPick, canUp }) {
   const [type, setType] = useState('reels')
   const [best, setBest] = useState(false)
   const [d, setD] = useState(null)
-  const [f, setF] = useState({ q: '', year: '', city: '', tag: '' })    // поиск и фильтры (HEAD 24.11)
+  const [f, setF] = useState({ q: '', year: '', city: '', tag: '', cat: '', sub: '' })    // поиск и фильтры (HEAD 24.11)
   const [tagsOf, setTagsOf] = useState(null)
   const [open, setOpen] = useState(null)
   const [sel, setSel] = useState(picked || [])
@@ -612,6 +612,10 @@ function Media({ picked, onPick, canUp }) {
     <div className="seg">{MTYPES.map(([k, t]) => <button key={k} className={type === k ? '' : 'ghost'} onClick={() => setType(k)}>{t}</button>)}</div>
     <input className="mktsearch" type="search" placeholder="Поиск: проект, город, название" value={f.q} onChange={e => setF({ ...f, q: e.target.value })} />
     <div className="mktfilters">
+      <select aria-label="Категория проекта" value={f.cat} onChange={e => setF({ ...f, cat: e.target.value, sub: '' })}><option value="">Категория проекта</option>
+        {(d?.cats || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+      {f.cat && <select aria-label="Подкатегория" value={f.sub} onChange={e => setF({ ...f, sub: e.target.value })}><option value="">Все подкатегории</option>
+        {((d?.cats || []).find(c => c.id === f.cat)?.subs || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
       <select aria-label="Рубрика" value={f.tag} onChange={e => setF({ ...f, tag: e.target.value })}><option value="">Рубрика</option>
         {(d?.rubrics || []).map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select>
       <select aria-label="Год" value={f.year} onChange={e => setF({ ...f, year: e.target.value })}><option value="">Год</option>
