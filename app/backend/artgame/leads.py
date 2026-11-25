@@ -83,6 +83,8 @@ def missing(l: dict, have: dict, extra: "ConvertIn | None" = None) -> list[str]:
         out.append("услуга")
     if not (extra and (extra.object or "").strip()):
         out.append("объект")
+    if not (l.get("SOURCE_ID") or (extra and extra.source)):   # HEAD 25.11: источник лида обязателен до «В сделку»
+        out.append("источник")
     return out
 
 
@@ -166,7 +168,8 @@ def lead_full(p: dict, lead_id: int, fresh: bool = False) -> dict:
     names = {u["id"]: u["name"] for u in bx.users()}
     row = _row(l, st, have, names, source_names())
     row.update({"manager": names.get(int(l.get("ASSIGNED_BY_ID") or 0), ""), "comments": l.get("COMMENTS") or "",
-                "city_id": str(l.get(L_CITY) or ""), "service_id": str(l.get(L_SERVICE) or ""),
+                "city_id": str(l.get(L_CITY) or ""), "service_id": str(l.get(L_SERVICE) or ""), "source_id": l.get("SOURCE_ID") or "",
+                "sources": [{"id": k, "name": v} for k, v in source_names().items() if "|" not in k],
                 "client_name": " ".join(x.strip() for x in (l.get("NAME"), l.get("LAST_NAME")) if x and x.strip()),
                 "feed": feed("lead", lead_id, names, fresh),
                 "origin": _origin(lead_id),
@@ -291,6 +294,7 @@ class ConvertIn(BaseModel):
     name: str | None = None       # имя клиента, если у лида его нет — запишется и в лид
     city: str | None = None       # ID города ЛИДА, если у лида его нет — запишется и в лид
     sum: float | None = None
+    source: str | None = None     # «Откуда клиент», если у лида его нет — запишется в лид
 
 
 @router.post("/bx/leads/{lead_id}/convert")
@@ -304,6 +308,8 @@ def api_convert(lead_id: int, body: ConvertIn | None = None, p: dict = Depends(a
     have = fields()
     if body.city and body.city not in _items(L_CITY, have):
         raise HTTPException(400, "нет такого города")
+    if body.source and body.source not in source_names():
+        raise HTTPException(400, "нет такого источника")
     l = _lead(p, lead_id, fresh=True)
     miss = missing(l, have, body)
     if miss:
@@ -318,6 +324,8 @@ def api_convert(lead_id: int, body: ConvertIn | None = None, p: dict = Depends(a
             fix["NAME"] = body.name.strip()
         if body.city and str(l.get(L_CITY) or "") != body.city:
             fix[L_CITY] = body.city
+        if body.source and not l.get("SOURCE_ID"):
+            fix["SOURCE_ID"] = body.source
         if body.sum and not bx._num(l.get("OPPORTUNITY")):
             fix["OPPORTUNITY"] = int(round(body.sum))
         if fix:

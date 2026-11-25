@@ -33,6 +33,10 @@ SPEC = [
     ("service", "Услуга", "client", "service", ""),
     # категория проекта (школа, кафе, ТРЦ…) — обязательна с первого шага: по ней «Медиа» и отчёты (HEAD 25.11)
     ("category", "Категория проекта", "client", None, "«Заполнить карточку» → «Проект» → «Категория»"),
+    # HEAD 25.11 «все пункты обязательные, которые мы решили» (список bitrix/obyazatelnye-polya-instrukciya.md + подкатегория)
+    ("subcategory", "Подкатегория проекта", "client", None, "«Заполнить карточку» → «Проект» → «Подкатегория»"),
+    ("object", "Объект (из него название сделки)", "client", None, "карандаш ✎ у названия сделки"),
+    ("entry", "Точка входа", "client", None, "«Заполнить карточку» → «Проект» → «Точка входа»"),
     ("address", "Адрес объекта", "client", "address", ""),
     ("area", "Площадь, м²", "client", "area", ""),
     ("sum", "Сумма сделки", "calc", None, "шаг «Расчёт» → «Записать в сделку»"),
@@ -62,6 +66,8 @@ def state(d: dict, card: dict, calc: dict | None) -> dict:
         "name": c.get("name"), "phone": c.get("phone"), "city": card.get("city"), "service": card.get("service"),
         "address": card.get("address"), "area": card.get("area"), "sum": card.get("sum"),
         "category": (card.get("project") or {}).get("category"),
+        "subcategory": (card.get("project") or {}).get("subcategory"),
+        "entry": (card.get("project") or {}).get("entry"), "object": card.get("object"),
         "calc": bool(calc) or _has((card.get("norm") or {}).get("shifts")),
         "kp": any(t.startswith("КП") for t in files),
         "requisites": True if c.get("type") == "Физлицо" else bool(req and req.get("cbin")),

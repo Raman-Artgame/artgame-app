@@ -248,7 +248,7 @@ export function LeadCard({ id, back, openDeal }) {
   const changed = Object.values(saveBody).some(v => v !== null && v !== '')
   const save = () => say(api(`/bx/leads/${id}`, { method: 'POST', body: saveBody }))
   const svc = l.has.service ? f.service : cv.service
-  const miss = [!f.name.trim() && 'имя клиента', l.missing.includes('телефон') && 'телефон', !f.city && 'город', !svc && 'услуга', !cv.object.trim() && 'объект'].filter(Boolean)
+  const miss = [!f.name.trim() && 'имя клиента', l.missing.includes('телефон') && 'телефон', !f.city && 'город', !svc && 'услуга', !cv.object.trim() && 'объект', !l.source_id && !cv.source && 'источник'].filter(Boolean)
   const req = m => miss.includes(m) ? 'need' : ''
   const preview = cv.object.trim() ? `№ · ${cv.object.trim().toUpperCase()}${f.cityName ? ' — ' + cityBase(f.cityName).toUpperCase() : ''}` : ''
   const convert = async () => {
@@ -256,7 +256,7 @@ export function LeadCard({ id, back, openDeal }) {
     try {
       if (changed) await api(`/bx/leads/${id}`, { method: 'POST', body: saveBody })
       const r = await api(`/bx/leads/${id}/convert`, { method: 'POST', body: { service: l.has.service ? null : cv.service || null,
-        area: l.has.area ? null : +cv.area || null, address: cv.address.trim() || null, object: cv.object.trim() } })
+        area: l.has.area ? null : +cv.area || null, address: cv.address.trim() || null, object: cv.object.trim(), source: l.source_id ? null : cv.source || null } })
       try { localStorage.removeItem(convKey) } catch { /* ок */ }
       openDeal(r.deal)
     } catch (e) { setMsg('Не получилось: ' + e.message); load(true) } finally { setBusy(false) }
@@ -290,6 +290,8 @@ export function LeadCard({ id, back, openDeal }) {
         {l.has.area
           ? <label><span>Площадь, м² <i className="muted small">можно позже</i></span><input type="number" min="1" inputMode="decimal" value={f.area} onChange={e => setF({ ...f, area: e.target.value })} /></label>
           : <label><span>Площадь, м² <i className="muted small">можно позже</i></span><input type="number" min="1" inputMode="decimal" value={cv.area} onChange={e => setC('area', e.target.value)} /></label>}
+        {!l.source_id && <label className={req('источник')}><span>Откуда клиент</span><select value={cv.source || ''} onChange={e => setC('source', e.target.value)}>
+          <option value="">—</option>{(l.sources || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
         <label><span>Адрес объекта</span><input value={cv.address} onChange={e => setC('address', e.target.value)} placeholder="Улица, дом" /></label>
         <label><span>Бюджет, ₸</span><input type="number" min="0" value={f.sum} onChange={e => setF({ ...f, sum: e.target.value })} /></label>
       </div>

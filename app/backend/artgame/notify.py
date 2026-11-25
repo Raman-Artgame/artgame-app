@@ -221,53 +221,77 @@ def app_bx_user() -> int | None:
     return int(m.group(1)) if m else None
 
 
+STAGE_HEAD_HOUR = 20   # HEAD — одна сводка за день вечером
+
+
 def stage_outside(now: datetime | None = None) -> int:
     """Стадии двигаются только из приложения (HEAD 25.11 «давай делаем»): сделку перевели в Битриксе руками или роботом —
-    МОП сделки и HEAD получают одно сообщение, событие в журнале. Сделку не трогаем: вернуть стадию решает человек."""
+    событие в журнале, МОП сделки — одно сообщение со всеми своими сделками за проход, HEAD — одна сводка за день в 20:00.
+    Первый проход только запоминает, что уже было (25.11 рассылка ушла по старым сменам, по одной — HEAD попросил так не делать).
+    Сделку не трогаем: вернуть стадию решает человек."""
     app_user = app_bx_user()
     now = (now or datetime.now(timezone.utc)).astimezone(TZ)
-    if not app_user or not HOURS[0] <= now.hour < HOURS[1]:
+    if not app_user:
         return 0
-    since = (now - timedelta(days=2)).isoformat()
-    rows = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], ">=MOVED_TIME": since},
+    rows = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], ">=MOVED_TIME": (now - timedelta(days=2)).isoformat()},
                                          "select": ["ID", "TITLE", "STAGE_ID", "MOVED_TIME", "MOVED_BY_ID", "ASSIGNED_BY_ID"]}, fresh=True)
     rows = [d for d in rows if int(d.get("MOVED_BY_ID") or 0) not in (0, app_user) and not bx.is_test(d)]
-    if not rows:
-        return 0
-    names = {u["id"]: u["name"] for u in bx.users()}
-    st = bx.stages()
     sent = 0
     with db.pool.connection() as conn:
-        heads = conn.execute("SELECT id, tg_id FROM people WHERE status='active' AND role_code='head' AND tg_id IS NOT NULL ORDER BY id").fetchall()
-        for d in rows:
-            key = f"stage_outside:{d['ID']}:{d.get('MOVED_TIME')}"
-            mop = conn.execute("SELECT id, tg_id FROM people WHERE status='active' AND tg_id IS NOT NULL AND bitrix_user_id=%s",
-                               (int(d.get("ASSIGNED_BY_ID") or 0),)).fetchone()
-            to = [r for r in [mop, *heads] if r]
-            to = [r for i, r in enumerate(to) if r["id"] not in {x["id"] for x in to[:i]}]
-            stage = (st.get(d.get("STAGE_ID")) or {}).get("name") or d.get("STAGE_ID")
-            who = names.get(int(d["MOVED_BY_ID"]), f"пользователь {d['MOVED_BY_ID']}")
-            text = (f"↪️ Стадию сделки {_title({'id': d['ID'], 'title': d.get('TITLE')})} сменили в Битриксе, мимо приложения: "
-                    f"{who} → «{stage}».\nСтадии двигаем только в приложении — там проверка карточки и документов. "
-                    f"Если переход ошибочный, верните стадию в карточке сделки.")
-            first = None
-            for r in to:
-                if conn.execute("SELECT 1 FROM notices WHERE person_id=%s AND key=%s", (r["id"], key)).fetchone():
+        seen = {(r["entity_id"], r["at"]) for r in conn.execute(
+            "SELECT entity_id, data->>'at' AS at FROM audit_log WHERE action='stage_outside' AND at > now() - interval '4 days'").fetchall()}
+        started = conn.execute("SELECT 1 FROM audit_log WHERE action='stage_outside_start'").fetchone()
+        new = [d for d in rows if (str(d["ID"]), str(d.get("MOVED_TIME"))) not in seen]
+        names = {u["id"]: u["name"] for u in bx.users()} if new or started else {}
+        st = bx.stages() if new or started else {}
+        for d in new:
+            db.audit(conn, None, "stage_outside", "deal", int(d["ID"]),
+                     {"stage": d.get("STAGE_ID"), "by": int(d["MOVED_BY_ID"]), "mop": int(d.get("ASSIGNED_BY_ID") or 0),
+                      "title": d.get("TITLE") or "", "at": str(d.get("MOVED_TIME")), "quiet": not started})
+        if not started:
+            db.audit(conn, None, "stage_outside_start", data={"known": len(new)})
+            conn.commit()
+            return 0
+        conn.commit()
+
+        def line(x: dict) -> str:
+            stage = (st.get(x["stage"]) or {}).get("name") or x["stage"]
+            return f"• {_title({'id': x['id'], 'title': x['title']})}: {names.get(x['by'], 'пользователь ' + str(x['by']))} → «{stage}»"
+
+        tail = "\nСтадии двигаем в приложении — там проверка карточки и документов. Ошибочный переход верните в карточке сделки."
+        if HOURS[0] <= now.hour < HOURS[1]:
+            by_mop: dict = {}
+            for d in new:
+                by_mop.setdefault(int(d.get("ASSIGNED_BY_ID") or 0), []).append(
+                    {"id": d["ID"], "title": d.get("TITLE"), "stage": d.get("STAGE_ID"), "by": int(d["MOVED_BY_ID"])})
+            for bxid, items in by_mop.items():
+                mop = conn.execute("SELECT id, tg_id FROM people WHERE status='active' AND tg_id IS NOT NULL AND bitrix_user_id=%s "
+                                   "AND role_code IN ('mop', 'mop_vip')", (bxid,)).fetchone()
+                if not mop:
                     continue
                 try:
-                    SEND(r["tg_id"], text)
+                    SEND(mop["tg_id"], "↪️ Стадию сменили в Битриксе, мимо приложения:\n" + "\n".join(line(x) for x in items[:10])
+                         + (f"\n…и ещё {len(items) - 10}" if len(items) > 10 else "") + tail)
+                    sent += 1
                 except Exception as ex:  # noqa: BLE001
-                    print(f"stage outside {d['ID']}: telegram {ex}")
+                    print(f"stage outside mop {bxid}: telegram {ex}")
+        if now.hour >= STAGE_HEAD_HOUR:
+            key = f"stage_outside_day:{now.date().isoformat()}"
+            day = [dict(r["data"], id=r["entity_id"]) for r in conn.execute(
+                """SELECT entity_id, data FROM audit_log WHERE action='stage_outside' AND data ? 'mop' AND NOT coalesce((data->>'quiet')::bool, false)
+                   AND (at AT TIME ZONE 'Asia/Almaty')::date = %s ORDER BY id""", (now.date(),)).fetchall()]
+            for h in conn.execute("SELECT id, tg_id FROM people WHERE status='active' AND role_code='head' AND tg_id IS NOT NULL").fetchall():
+                if not day or conn.execute("SELECT 1 FROM notices WHERE person_id=%s AND key=%s", (h["id"], key)).fetchone():
                     continue
-                conn.execute("INSERT INTO notices (person_id, key) VALUES (%s, %s) ON CONFLICT DO NOTHING", (r["id"], key))
-                first = first or r
+                try:
+                    SEND(h["tg_id"], f"↪️ За день {len(day)} смен стадий в Битриксе мимо приложения:\n"
+                         + "\n".join(line(x) for x in day[:15]) + (f"\n…и ещё {len(day) - 15}" if len(day) > 15 else ""))
+                except Exception as ex:  # noqa: BLE001
+                    print(f"stage outside head: telegram {ex}")
+                    continue
+                conn.execute("INSERT INTO notices (person_id, key) VALUES (%s, %s) ON CONFLICT DO NOTHING", (h["id"], key))
                 sent += 1
-            if first:
-                db.audit(conn, first["id"], "stage_outside", "deal", int(d["ID"]),
-                         {"stage": d.get("STAGE_ID"), "by": int(d["MOVED_BY_ID"]), "at": str(d.get("MOVED_TIME"))})
-                conn.commit()
     return sent
-
 
 def main():
     if not settings.bot_token:
@@ -287,7 +311,10 @@ def main():
         print(f"design_wait={design_wait_remind()}")
     except Exception as ex:  # noqa: BLE001
         print(f"design_wait: {ex}")
-    # stage_outside выключен 25.11: разослал по одному сообщению на старые смены стадий; вернётся сводкой только по новым
+    try:
+        print(f"stage_outside={stage_outside()}")
+    except Exception as ex:  # noqa: BLE001
+        print(f"stage_outside: {ex}")
 
 
 if __name__ == "__main__":
