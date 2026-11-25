@@ -16,7 +16,7 @@ from . import ads, constants, db, meta, notify
 from .work import active
 
 router = APIRouter(prefix="/api")
-KEYS = {"mkt.cpl_plan": "плановая цена заявки, ₸", "mkt.nolead_x": "во сколько цен заявки объявление может потратить без обращений",
+KEYS = {"mkt.cpl_plan": "плановая цена заявки (в валюте рекламного кабинета)", "mkt.nolead_x": "во сколько цен заявки объявление может потратить без обращений",
         "mkt.cpl_over_pct": "на сколько % цена заявки может быть выше плановой", "mkt.freq_max": "предельная частота показа за 7 дней",
         "mkt.ctr_min_pct": "минимальный CTR, %"}
 MIN_IMPR = 1000         # меньше показов — про CTR судить рано (это не порог HEAD, а здравый минимум выборки)
@@ -30,7 +30,10 @@ def _today() -> date:
     return (datetime.now(timezone.utc) + timedelta(hours=5)).date()
 
 
-def _tg(n) -> str:
+def _tg(n, cur: str | None = "KZT") -> str:
+    """Деньги в валюте кабинета: HEAD 25.11 — рекламу можно оставить в долларах, без пересчёта."""
+    if cur and cur != "KZT":
+        return f"{n:,.2f}".replace(",", " ") + (" $" if cur == "USD" else f" {cur}")
     return f"{round(n):,}".replace(",", " ") + " ₸"
 
 
@@ -38,15 +41,15 @@ def _ad_rows(conn, t0: date, t1: date) -> list[dict]:
     return conn.execute("""SELECT d.ad_id, max(d.ad_name) AS ad_name, max(d.adset_name) AS adset_name, max(d.campaign_id) AS campaign_id,
                                   max(d.campaign_name) AS campaign_name, sum(d.spend)::float AS spend, sum(d.impressions)::bigint AS impressions,
                                   sum(d.clicks)::bigint AS clicks, sum(d.messages)::int AS messages, sum(d.leads)::int AS leads,
-                                  max(f.frequency)::float AS frequency
+                                  max(f.frequency)::float AS frequency, max(d.currency) AS currency
                            FROM mkt_meta_ad_day d LEFT JOIN mkt_meta_ad7 f ON f.ad_id=d.ad_id
-                           WHERE d.day >= %s AND d.day <= %s AND d.currency='KZT' GROUP BY d.ad_id ORDER BY sum(d.spend) DESC""", (t0, t1)).fetchall()
+                           WHERE d.day >= %s AND d.day <= %s GROUP BY d.ad_id ORDER BY sum(d.spend) DESC""", (t0, t1)).fetchall()
 
 
 def _calc(x: dict) -> dict:
     res = (x["messages"] or 0) + (x["leads"] or 0)
     return {**x, "results": res, "ctr": round(x["clicks"] / x["impressions"] * 100, 2) if x["impressions"] else None,
-            "cpc": round(x["spend"] / x["clicks"]) if x["clicks"] else None, "cpr": round(x["spend"] / res) if res else None}
+            "cpc": round(x["spend"] / x["clicks"], 2) if x["clicks"] else None, "cpr": round(x["spend"] / res, 2) if res else None}
 
 
 def find(conn, today: date) -> tuple[list[dict], list[str]]:
@@ -62,7 +65,7 @@ def find(conn, today: date) -> tuple[list[dict], list[str]]:
         where = f"Кампания «{x['campaign_name'] or '—'}», объявление «{name}»"
         if ok("mkt.cpl_plan", "mkt.nolead_x") and not x["results"] and x["spend"] > v["mkt.cpl_plan"] * v["mkt.nolead_x"]:
             out.append({"rule": "nolead", "obj_id": x["ad_id"], "title": name,
-                        "text": f"{where}: за 7 дней потрачено {_tg(x['spend'])} и ни одного обращения. Плановая цена заявки {_tg(v['mkt.cpl_plan'])}."})
+                        "text": f"{where}: за 7 дней потрачено {_tg(x['spend'], x['currency'])} и ни одного обращения. Плановая цена заявки {_tg(v['mkt.cpl_plan'], x['currency'])}."})
         if ok("mkt.freq_max") and (x["frequency"] or 0) > v["mkt.freq_max"]:
             out.append({"rule": "freq", "obj_id": x["ad_id"], "title": name,
                         "text": f"{where}: частота показа {x['frequency']:.1f} за 7 дней, порог {v['mkt.freq_max']}."})
@@ -74,9 +77,10 @@ def find(conn, today: date) -> tuple[list[dict], list[str]]:
         spend, res = sum(x["spend"] for x in d3), sum(x["results"] for x in d3)
         limit = v["mkt.cpl_plan"] * (1 + v["mkt.cpl_over_pct"] / 100)
         if spend > limit and (not res or spend / res > limit):
-            fact = f"цена обращения {_tg(spend / res)}" if res else "обращений нет"
+            cur = d3[0]["currency"] if d3 else "KZT"
+            fact = f"цена обращения {_tg(spend / res, cur)}" if res else "обращений нет"
             out.append({"rule": "cpl3", "obj_id": "meta", "title": "Таргет Instagram",
-                        "text": f"За 3 дня потрачено {_tg(spend)}, {fact}. Плановая цена заявки {_tg(v['mkt.cpl_plan'])}, допуск {v['mkt.cpl_over_pct']}%."})
+                        "text": f"За 3 дня потрачено {_tg(spend, cur)}, {fact}. Плановая цена заявки {_tg(v['mkt.cpl_plan'], cur)}, допуск {v['mkt.cpl_over_pct']}%."})
     return out, missing
 
 
@@ -163,7 +167,7 @@ def adstats(days: int = 7, p: dict = Depends(active)):
         c.update({f: _calc(c)[f] for f in ("results", "ctr", "cpc", "cpr")})
         for a in c["ads"]:
             a["hint"] = a["ad_id"] in flagged
-    return {"days": days, "campaigns": sorted(camps.values(), key=lambda c: -c["spend"]),
+    return {"days": days, "currency": rows[0]["currency"] if rows else None, "campaigns": sorted(camps.values(), key=lambda c: -c["spend"]),
             "hints": [{**h, "rule_ru": RULE_RU.get(h["rule"], h["rule"]), "created_at": h["created_at"].isoformat()} for h in hints],
             "missing": [{"key": key, "what": KEYS[key]} for key in KEYS if not isinstance(k.get(key), (int, float)) or k.get(key) <= 0],
             "plan_cpl": k.get("mkt.cpl_plan") if isinstance(k.get("mkt.cpl_plan"), (int, float)) else None,
@@ -196,8 +200,11 @@ def report(period: str, shift: int = 0, fresh: bool = False, today: date | None 
         m = conn.execute("""SELECT COALESCE(sum(spend),0)::float AS spend, COALESCE(sum(impressions),0)::bigint AS impressions,
                                    COALESCE(sum(clicks),0)::bigint AS clicks, count(*) AS n FROM mkt_meta_day
                             WHERE currency='KZT' AND day >= %s AND day <= %s""", (t0, t1)).fetchone()
-        res = conn.execute("SELECT COALESCE(sum(messages + leads),0)::int AS n FROM mkt_meta_ad_day WHERE currency='KZT' AND day >= %s AND day <= %s",
+        res = conn.execute("SELECT COALESCE(sum(messages + leads),0)::int AS n FROM mkt_meta_ad_day WHERE day >= %s AND day <= %s",
                            (t0, t1)).fetchone()["n"]
+        usd = conn.execute("""SELECT COALESCE(sum(spend),0)::float AS spend, COALESCE(sum(impressions),0)::bigint AS impressions,
+                                     COALESCE(sum(clicks),0)::bigint AS clicks FROM mkt_meta_day
+                              WHERE currency='USD' AND day >= %s AND day <= %s""", (t0, t1)).fetchone()
         # расход, внесённый раз в месяц: на неделю берём долю по дням и помечаем «≈»
         months = conn.execute("""SELECT s.channel_id, s.ym, s.amount::float AS amount, s.source FROM mkt_spend s
                                  WHERE s.ym IN (%s, %s)""", (t0.strftime("%Y-%m"), t1.strftime("%Y-%m"))).fetchall()
@@ -233,7 +240,8 @@ def report(period: str, shift: int = 0, fresh: bool = False, today: date | None 
            "won": sum(b["won"] for b in by.values()), "won_sum": sum(b["won_sum"] for b in by.values())}
     tot["cpl"] = round(tot["spend"] / tot["leads"]) if tot["spend"] and tot["leads"] else None
     return {"period": period, "shift": shift, "from": str(t0), "to": str(t1), "days": days, "channels": rows, "unknown": un, "total": tot, "err": err,
-            "meta": {"spend": m["spend"], "impressions": m["impressions"], "clicks": m["clicks"], "results": res},
+            "meta": {"spend": m["spend"], "spend_usd": usd["spend"], "impressions": m["impressions"] + usd["impressions"],
+                     "clicks": m["clicks"] + usd["clicks"], "results": res},
             "ig": {"reach": ig["reach"], "views": ig["views"], "profile_views": ig["profile_views"],
                    "followers": f1["followers"] if f1 else None, "delta": (f1["followers"] - f0["followers"]) if f1 and f0 else None}}
 
@@ -257,6 +265,8 @@ def report_csv(r: dict) -> bytes:
     t = r["total"]
     w.writerow(["Итого", t["spend"], t["leads"], t["deals"], t["won"], round(t["won_sum"]), t["cpl"] or "", ""])
     w.writerow([])
+    if r["meta"].get("spend_usd"):
+        w.writerow(["Meta: расход кабинета, $", r["meta"]["spend_usd"]])
     w.writerow(["Meta: показы", r["meta"]["impressions"], "клики", r["meta"]["clicks"], "обращения", r["meta"]["results"]])
     w.writerow(["Instagram: охват", r["ig"]["reach"] or "", "просмотры", r["ig"]["views"] or "", "подписчики", r["ig"]["followers"] or "", "прирост", r["ig"]["delta"] if r["ig"]["delta"] is not None else ""])
     return ("﻿" + out.getvalue()).encode()

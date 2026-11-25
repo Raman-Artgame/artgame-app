@@ -118,13 +118,12 @@ def sync_ads(conn, since: date, until: date) -> dict:
             errs.append(f"объявления: {e}")
     rate = to_kzt(conn)
     months = push_spend(conn, since, until)
-    if rate is None and conn.execute("SELECT 1 FROM mkt_meta_day WHERE currency <> 'KZT' LIMIT 1").fetchone():
-        errs.append("кабинет в долларах, а курса в «Значениях» нет (mkt.usd_rate) — расход в тенге не посчитан")
     return {"accounts": [a["name"] for a in accs], "days": days, "months": months, "ad_rows": ads_n, "usd_rate": rate, "errors": errs}
 
 
 def to_kzt(conn) -> float | None:
-    """Кабинет в долларах: расход → тенге по курсу HEAD из «Значений» (mkt.usd_rate). Курса нет — строки остаются в долларах."""
+    """Кабинет в долларах: расход → тенге по курсу HEAD из «Значений» (mkt.usd_rate). Курса нет — строки остаются в долларах,
+    и «Реклама» показывает кампании в долларах (HEAD 25.11: «можно оставить и так в долларах, без конвертации»)."""
     from . import constants
     rate = constants.latest(conn).get("mkt.usd_rate")
     if not isinstance(rate, (int, float)) or rate <= 0:

@@ -70,7 +70,7 @@ def test_meta_loader(client, monkeypatch):
     monkeypatch.setattr(meta, "get", fake_meta(calls))
     r = meta.sync(today=date(2026, 11, 24))
     assert r["history"] and sum(1 for c in calls if c == "act_1/insights") > 60 and sum(1 for c in calls if c == "178/insights") == 120
-    assert r["ok"] and len(r["errors"]) == 1 and "mkt.usd_rate" in r["errors"][0] and r["ads"]["days"] == 4 and set(r["ads"]["months"]) == {"2026-10", "2026-11"}
+    assert r["ok"] and r["errors"] == [] and r["ads"]["days"] == 4 and set(r["ads"]["months"]) == {"2026-10", "2026-11"}
     assert r["ig"]["followers"] == 3600 and r["ig"]["media"] == 2
     d = client.get("/api/mkt/meta?ym=2026-11", headers=hdr(1000)).json()
     kzt = [a for a in d["ads"] if a["currency"] == "KZT"][0]
@@ -104,7 +104,7 @@ def test_meta_part_fails(client, monkeypatch):
     monkeypatch.setenv("META_TOKEN", "t")
     monkeypatch.setattr(meta, "get", fake_meta([], broken=("me/accounts",)))
     r = meta.sync(today=date(2026, 11, 24))
-    assert not r["ok"] and "нет разрешения" in r["errors"][-1] and r["ads"]["days"] == 4 and "ig" not in r
+    assert not r["ok"] and "нет разрешения" in r["errors"][0] and r["ads"]["days"] == 4 and "ig" not in r
     d = client.post("/api/mkt/meta/sync", headers=hdr(1000)).json()
     assert d["errors"] and client.get("/api/mkt/meta?ym=2026-11", headers=hdr(1000)).json()["last"]["ok"] is False
 
@@ -139,10 +139,10 @@ def test_ad_stats_hints_report(client, monkeypatch):
     d = client.get("/api/mkt/adstats?days=7", headers=hdr(2950)).json()
     assert {m["key"] for m in d["missing"]} == set(adrules.KEYS) and d["hints"] == [] and d["can_edit"]
     c = d["campaigns"][0]
-    assert (c["name"], c["spend"], c["impressions"], c["clicks"], c["results"], c["cpr"]) == ("Роспись Астана", 31000.0, 6900, 70, 3, 10333)
+    assert (c["name"], c["spend"], c["impressions"], c["clicks"], c["results"], c["cpr"]) == ("Роспись Астана", 31000.0, 6900, 70, 3, 10333.33)
     a1, a2 = c["ads"]
     assert (a1["ad_name"], a1["spend"], a1["results"], a1["ctr"], a1["frequency"]) == ("Рилс кафе", 27000.0, 0, 0.5, 3.6)
-    assert (a2["results"], a2["cpr"], a2["ctr"]) == (3, 1333, 4.44)          # лид под двумя именами не задвоился
+    assert (a2["results"], a2["cpr"], a2["ctr"]) == (3, 1333.33, 4.44)          # лид под двумя именами не задвоился
     # HEAD задал пороги
     vals = {"mkt.cpl_plan": 5000, "mkt.nolead_x": 2, "mkt.cpl_over_pct": 30, "mkt.freq_max": 3, "mkt.ctr_min_pct": "0,8"}
     with db.pool.connection() as conn:
@@ -215,3 +215,14 @@ def test_paging_keeps_token_and_usd_rate(client, monkeypatch):
         assert (float(r["spend"]), r["currency"], float(r["spend_src"]), r["currency_src"]) == (5200.0, "KZT", 10.0, "USD")
     d = client.get("/api/mkt/meta?ym=2026-11", headers=hdr(1000)).json()
     assert d["ads"][0]["spend"] == 5200.0 and d["ads"][0]["usd"] == 10.0
+    # без курса кампании и подсказки идут в долларах
+    from artgame import adrules
+    monkeypatch.setattr(adrules, "_today", lambda: date(2026, 11, 24))
+    with db.pool.connection() as conn:
+        conn.execute("""INSERT INTO mkt_meta_ad_day (ad_id, day, account, ad_name, campaign_id, campaign_name, spend, currency, impressions, clicks, messages)
+                        VALUES ('u1', '2026-11-23', 'act_1', 'Рилс', 'c9', 'Кампания $', 31.5, 'USD', 1000, 20, 3)""")
+        conn.execute("INSERT INTO mkt_meta_day (account, day, spend, currency, impressions) VALUES ('act_1', '2026-11-23', 31.5, 'USD', 1000)")
+    a = client.get("/api/mkt/adstats?days=7", headers=hdr(1000)).json()
+    assert a["currency"] == "USD" and a["campaigns"][0]["spend"] == 31.5 and a["campaigns"][0]["cpr"] == 10.5
+    assert adrules._tg(1234.5, "USD") == "1 234.50 $" and adrules._tg(1234.5) == "1 234 ₸"
+    assert adrules.report("week", 0, today=date(2026, 11, 24))["meta"]["spend_usd"] == 31.5

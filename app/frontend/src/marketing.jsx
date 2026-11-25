@@ -224,13 +224,16 @@ function AdCampaigns() {
   const [d, setD] = useState(null)
   const [open, setOpen] = useState(null)
   useEffect(() => { setD(null); api(`/mkt/adstats?days=${days}`).then(setD, e => setD({ campaigns: [], err: e.message })) }, [days])
-  const nums = x => <div className="mktadn"><div><b>{tg(x.spend)}</b><span>расход</span></div><div><b>{x.results}</b><span>обращения</span></div>
-    <div><b>{x.cpr ? tg(x.cpr) : '—'}</b><span>цена обращения</span></div><div><b>{x.ctr != null ? x.ctr + '%' : '—'}</b><span>CTR</span></div></div>
+  const usd = d?.currency && d.currency !== 'KZT'      // кабинет в долларах — показываем как есть (HEAD 25.11)
+  const mon = n => usd ? '$' + (+n).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : tg(n)
+  const nums = x => <div className="mktadn"><div><b>{mon(x.spend)}</b><span>расход</span></div><div><b>{x.results}</b><span>обращения</span></div>
+    <div><b>{x.cpr ? mon(x.cpr) : '—'}</b><span>цена обращения</span></div><div><b>{x.ctr != null ? x.ctr + '%' : '—'}</b><span>CTR</span></div></div>
   return <div className="card">
     <div className="chips">{[[1, 'Сегодня'], [7, '7 дней'], [30, '30 дней']].map(([k, t]) => <button key={k} className={days === k ? 'on' : ''} onClick={() => setDays(k)}>{t}</button>)}</div>
     {!d ? <p className="muted">Загрузка…</p> : <>
       {d.err && <p className="small why">{d.err}</p>}
-      {d.plan_cpl && <p className="small muted">Плановая цена заявки: {tg(d.plan_cpl)}</p>}
+      {d.plan_cpl && <p className="small muted">Плановая цена заявки: {mon(d.plan_cpl)}</p>}
+      {usd && <p className="small muted">Рекламный кабинет ведётся в долларах, суммы показаны как в Meta.</p>}
       {!d.campaigns.length && <p className="muted">За этот период в Meta нет расхода. Данные обновляются каждую ночь.</p>}
       {d.campaigns.map(c => <div key={c.campaign_id} className="mktad" onClick={() => setOpen(open === c.campaign_id ? null : c.campaign_id)}>
         <div className="mktadh"><b>{c.name}</b>{c.ads.some(a => a.hint) && <span className="badge hot">есть подсказка</span>}</div>
@@ -271,6 +274,7 @@ function AdReport() {
       {r.unknown.leads > 0 && <p className="small why">Без площадки: {r.unknown.leads} заявок. Пока МОП не отметит «Откуда клиент», цена заявки по площадкам занижена.</p>}
       {r.channels.some(c => c.approx) && <p className="small muted">«≈» — расход внесён раз в месяц, на неделю взята его доля по дням.</p>}
       <div className="mktadh"><b>Meta и Instagram за период</b></div>
+      {r.meta.spend_usd > 0 && <p className="small muted">Расход рекламного кабинета Meta: ${r.meta.spend_usd.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}. В тенге выше он не входит, пока расход «Таргет Instagram» за месяц не внесён.</p>}
       <div className="mktadn"><div><b>{num(r.meta.impressions)}</b><span>показы рекламы</span></div><div><b>{num(r.meta.clicks)}</b><span>клики</span></div>
         <div><b>{num(r.meta.results)}</b><span>обращения</span></div><div><b>{r.ig.delta != null ? (r.ig.delta >= 0 ? '+' : '') + r.ig.delta : '—'}</b><span>подписчики</span></div></div>
       <div className="mktadn"><div><b>{num(r.ig.reach)}</b><span>охват Instagram</span></div><div><b>{num(r.ig.views)}</b><span>просмотры</span></div>
@@ -301,7 +305,7 @@ function MetaBox({ ym, onChange }) {
     {kzt && <><div className="mktadn"><div><b>{tg(kzt.spend)}</b><span>расход в Meta</span></div><div><b>{num(kzt.impressions)}</b><span>показы</span></div>
       <div><b>{num(kzt.clicks)}</b><span>клики</span></div><div><b>{kzt.clicks ? tg(kzt.spend / kzt.clicks) : '—'}</b><span>цена клика</span></div></div>
       <p className="small muted">За {monthName(ym)}, данные по {kzt.upto.slice(8)}-е число.{kzt.usd ? ` В кабинете $${kzt.usd.toLocaleString('ru-RU')}, в тенге по курсу из «Значений».` : ''}</p></>}
-    {other.map(a => <p key={a.currency} className="small why">Кабинет в валюте {a.currency || '?'}: {a.spend.toLocaleString('ru-RU')} {a.currency}. В тенге не посчитано: в «Значениях» нет курса доллара.</p>)}
+    {other.map(a => <p key={a.currency} className="small why">Кабинет в валюте {a.currency || '?'}: {a.spend.toLocaleString('ru-RU')} {a.currency}. В расход площадки в тенге не входит: внеси его за месяц в «Таргет Instagram».</p>)}
     {m.manual && <p className="small why">За этот месяц расход «Таргет Instagram» внесён руками, Meta его не меняет.
       {m.can_edit && <> <a onClick={() => run(`/mkt/meta/take?ym=${ym}`, 'Расход взят из Meta.')}>Взять из Meta</a></>}</p>}
     {m.ig.followers != null && <div className="mktadn"><div><b>{num(m.ig.followers)}</b><span>подписчики{m.ig.delta7 != null ? ` (${m.ig.delta7 >= 0 ? '+' : ''}${m.ig.delta7} за 7 дн.)` : ''}</span></div>

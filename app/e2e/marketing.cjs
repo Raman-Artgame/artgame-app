@@ -300,7 +300,7 @@ const noScroll = async p => assert.ok(await p.evaluate(() => document.documentEl
   await t.locator('.adtabs').getByRole('button', { name: 'Кампании' }).click()
   await t.locator('.mktad', { hasText: 'Роспись Астана' }).click()
   await t.locator('.adrow', { hasText: 'Рилс кафе' }).getByText('проверь').waitFor()
-  await t.locator('.adrow', { hasText: 'Фото офис' }).getByText('1 333 ₸').waitFor()
+  await t.locator('.adrow', { hasText: 'Фото офис' }).getByText('1 333 ₸').or(t.locator('.adrow', { hasText: 'Фото офис' }).getByText('1 333,33 ₸')).waitFor()
   await noScroll(t); await shot(t, 'mkt-30-campaigns')
   await t.locator('.adtabs').getByRole('button', { name: 'Отчёт' }).click()
   await t.locator('.repflow').waitFor()
