@@ -36,6 +36,8 @@ export function Deals({ initial, place }) {
     return <div key={d.id} className="qrow deal" onClick={() => setCard(d.id)}>
       <span className="ic deal">№</span>
       <div className="qmain"><div className="qt"><b>№ {d.id}</b> {cleanTitle(d.title, d.id)}</div>
+        {d.kind || d.subkind ? <div className="small">{[d.kind, d.subkind].filter(Boolean).join(' · ')}</div>
+          : d.category === 0 ? <div className="small muted">категория не указана</div> : null}
         <div className="small muted">{[d.city, d.area ? d.area + ' м²' : '', money(d.sum), data.all ? d.manager : ''].filter(Boolean).join(' · ')}</div></div>
       <span className={'badge' + (age >= IDLE ? ' hot' : '')}>{age ? `${age} дн.` : 'сегодня'}</span>
     </div> }

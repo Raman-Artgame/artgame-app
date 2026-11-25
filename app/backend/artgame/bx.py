@@ -37,7 +37,8 @@ PROJECT = {"UF_CRM_ARTGAME_PROJECT_MODEL": ("model", "enum"), "UF_CRM_ARTGAME_PR
            "UF_CRM_1753292354197": ("contract_no", "text")}
 PROJECT_KEY = {v[0]: k for k, v in PROJECT.items()}
 LIST_SELECT = ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", "OPPORTUNITY", "ASSIGNED_BY_ID", "CONTACT_ID", "COMPANY_ID", "LEAD_ID", OBJECT,
-               "DATE_MODIFY", "DATE_CREATE", "LAST_ACTIVITY_TIME", CITY, AREA]
+               "DATE_MODIFY", "DATE_CREATE", "LAST_ACTIVITY_TIME", CITY, AREA,
+               "UF_CRM_ARTGAME_PROJECT_CATEGORY", "UF_CRM_ARTGAME_PROJECT_SUBCATEGORY"]   # категория в списке сделок (25.11)
 FUNNELS = {0: "Продажи", 13: "Дизайн"}
 TTL, TTL_DICT, MAX_PAGES = 120, 3600, 10
 
@@ -292,6 +293,12 @@ def my_deals(p: dict, fresh: bool = False, manager: int | None = None) -> dict:
     rows = read_all("crm.deal.list", {"filter": flt, "select": LIST_SELECT, "order": {"DATE_MODIFY": "DESC"}}, fresh=fresh)
     st = stages()
     names = {u["id"]: u["name"] for u in users()} if uid is None else {}
+
+    def kind(d: dict, key: str) -> str:   # название категории / подкатегории; справочник недоступен — пусто, список не падает
+        try:
+            return enum_map(PROJECT_KEY[key]).get(str(d.get(PROJECT_KEY[key]) or ""), "")
+        except Exception:  # noqa: BLE001
+            return ""
     deals = [{"id": int(d["ID"]), "title": d.get("TITLE") or "", "stage": d["STAGE_ID"],
               "stage_name": (st.get(d["STAGE_ID"]) or {}).get("name", d["STAGE_ID"]),
               "stage_sort": (st.get(d["STAGE_ID"]) or {}).get("sort", 0),
@@ -299,6 +306,7 @@ def my_deals(p: dict, fresh: bool = False, manager: int | None = None) -> dict:
               "area": _num(d.get(AREA)), "city": city_name(d.get(CITY)), "modified": d.get("DATE_MODIFY"),
               "created": d.get("DATE_CREATE"), "active": d.get("LAST_ACTIVITY_TIME") or d.get("DATE_MODIFY"),
               "manager_id": int(d.get("ASSIGNED_BY_ID") or 0), "lead_id": int(d.get("LEAD_ID") or 0), "object": d.get(OBJECT) or "",
+              "kind": kind(d, "category"), "subkind": kind(d, "subcategory"),
               "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), "") if uid is None else ""} for d in rows]
     return {"deals": deals, "all": uid is None, "updated": time.time(), "funnels": FUNNELS,
             "managers": sorted({(d["manager_id"], d["manager"]) for d in deals if d["manager"]}, key=lambda x: x[1]) if uid is None else []}
