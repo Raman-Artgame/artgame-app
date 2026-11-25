@@ -18,6 +18,7 @@ from .work import active
 
 router = APIRouter(prefix="/api")
 GRAPH = "https://graph.facebook.com"
+API_VERSION = "v27.0"    # сменить можно без выкладки: META_API_VERSION в <env>.env
 CHANNEL = "Таргет Instagram"
 DAYS_BACK = 35          # ночью пересобираем месяц с запасом: Meta уточняет расход задним числом
 IG_DAYS = 7
@@ -37,7 +38,8 @@ class MetaError(Exception):
 def get(path: str, params: dict | None = None) -> dict:
     """Один запрос к Meta. Токен в журнал и в текст ошибки не попадает."""
     import httpx
-    ver = os.environ.get("META_API_VERSION", "").strip("/")
+    # без версии Meta берёт самую старую версию приложения, и рекламный API её отклоняет (первый запуск 24.11: «deprecated… upgrade to v27.0»)
+    ver = (os.environ.get("META_API_VERSION") or API_VERSION).strip("/")
     url = path if path.startswith("http") else f"{GRAPH}/{ver + '/' if ver else ''}{path.lstrip('/')}"
     q = {k: json.dumps(v) if isinstance(v, (dict, list)) else v for k, v in (params or {}).items()}
     if "access_token=" not in url:
