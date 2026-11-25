@@ -45,7 +45,9 @@ def get(path: str, params: dict | None = None) -> dict:
     if "access_token=" not in url:
         q["access_token"] = token()
     try:
-        r = httpx.get(url, params=q, timeout=40)
+        # ссылку «следующая страница» Meta даёт целиком; пустой params у httpx стирает её запрос вместе с токеном —
+        # отсюда «(#200) Provide valid app ID» на длинных списках (25.11)
+        r = httpx.get(url, params=q or None, timeout=40)
         d = r.json()
     except Exception as ex:  # noqa: BLE001 — сеть или не-JSON
         raise MetaError(f"Meta не ответила ({type(ex).__name__})") from None
@@ -108,14 +110,28 @@ def sync_ads(conn, since: date, until: date) -> dict:
                          (a["id"], r["date_start"], float(r.get("spend") or 0), cur, _int(r.get("impressions")), _int(r.get("reach")),
                           _int(r.get("clicks"))))
             days += 1
-    months = push_spend(conn, since, until)
     ads_n, errs = 0, []
     for a in accs:      # по объявлениям — отдельно: не ответит, общий расход уже сохранён
         try:
             ads_n += sync_ad_level(conn, a, since, until)
         except MetaError as e:
             errs.append(f"объявления: {e}")
-    return {"accounts": [a["name"] for a in accs], "days": days, "months": months, "ad_rows": ads_n, "errors": errs}
+    rate = to_kzt(conn)
+    months = push_spend(conn, since, until)
+    if rate is None and conn.execute("SELECT 1 FROM mkt_meta_day WHERE currency <> 'KZT' LIMIT 1").fetchone():
+        errs.append("кабинет в долларах, а курса в «Значениях» нет (mkt.usd_rate) — расход в тенге не посчитан")
+    return {"accounts": [a["name"] for a in accs], "days": days, "months": months, "ad_rows": ads_n, "usd_rate": rate, "errors": errs}
+
+
+def to_kzt(conn) -> float | None:
+    """Кабинет в долларах: расход → тенге по курсу HEAD из «Значений» (mkt.usd_rate). Курса нет — строки остаются в долларах."""
+    from . import constants
+    rate = constants.latest(conn).get("mkt.usd_rate")
+    if not isinstance(rate, (int, float)) or rate <= 0:
+        return None
+    for t in ("mkt_meta_day", "mkt_meta_ad_day"):
+        conn.execute(f"UPDATE {t} SET spend_src=spend, currency_src='USD', spend=round(spend * %s, 2), currency='KZT' WHERE currency='USD'", (rate,))
+    return float(rate)
 
 
 def _actions(r: dict) -> tuple[int, int]:
@@ -285,7 +301,7 @@ def sync(today: date | None = None, by: int | None = None, history: bool | None 
 
 def summary(conn, ym: str) -> dict:
     last = conn.execute("SELECT value FROM mkt_settings WHERE key='meta_last'").fetchone()
-    ad = conn.execute("""SELECT currency, sum(spend) AS spend, sum(impressions) AS impressions, sum(clicks) AS clicks, max(day) AS upto
+    ad = conn.execute("""SELECT currency, sum(spend) AS spend, sum(spend_src)::float AS usd, sum(impressions) AS impressions, sum(clicks) AS clicks, max(day) AS upto
                          FROM mkt_meta_day WHERE to_char(day,'YYYY-MM')=%s GROUP BY 1 ORDER BY 2 DESC""", (ym,)).fetchall()
     ch = conn.execute("""SELECT s.source, s.amount FROM mkt_spend s JOIN mkt_channels c ON c.id=s.channel_id
                          WHERE c.title=%s AND s.ym=%s""", (CHANNEL, ym)).fetchone()

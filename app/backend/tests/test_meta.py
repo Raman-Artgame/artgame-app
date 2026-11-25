@@ -70,7 +70,7 @@ def test_meta_loader(client, monkeypatch):
     monkeypatch.setattr(meta, "get", fake_meta(calls))
     r = meta.sync(today=date(2026, 11, 24))
     assert r["history"] and sum(1 for c in calls if c == "act_1/insights") > 60 and sum(1 for c in calls if c == "178/insights") == 120
-    assert r["ok"] and r["errors"] == [] and r["ads"]["days"] == 4 and set(r["ads"]["months"]) == {"2026-10", "2026-11"}
+    assert r["ok"] and len(r["errors"]) == 1 and "mkt.usd_rate" in r["errors"][0] and r["ads"]["days"] == 4 and set(r["ads"]["months"]) == {"2026-10", "2026-11"}
     assert r["ig"]["followers"] == 3600 and r["ig"]["media"] == 2
     d = client.get("/api/mkt/meta?ym=2026-11", headers=hdr(1000)).json()
     kzt = [a for a in d["ads"] if a["currency"] == "KZT"][0]
@@ -104,7 +104,7 @@ def test_meta_part_fails(client, monkeypatch):
     monkeypatch.setenv("META_TOKEN", "t")
     monkeypatch.setattr(meta, "get", fake_meta([], broken=("me/accounts",)))
     r = meta.sync(today=date(2026, 11, 24))
-    assert not r["ok"] and "нет разрешения" in r["errors"][0] and r["ads"]["days"] == 4 and "ig" not in r
+    assert not r["ok"] and "нет разрешения" in r["errors"][-1] and r["ads"]["days"] == 4 and "ig" not in r
     d = client.post("/api/mkt/meta/sync", headers=hdr(1000)).json()
     assert d["errors"] and client.get("/api/mkt/meta?ym=2026-11", headers=hdr(1000)).json()["last"]["ok"] is False
 
@@ -181,3 +181,37 @@ def test_ad_stats_hints_report(client, monkeypatch):
     mon = client.get("/api/mkt/report?period=month", headers=hdr(2000)).json()
     assert mon["period"] == "month" and "OLX" in adrules.report_csv(rep).decode()
     assert client.get("/api/mkt/report?period=year", headers=hdr(1000)).status_code == 400
+
+
+def test_paging_keeps_token_and_usd_rate(client, monkeypatch):
+    """Вторая страница списка идёт по ссылке Meta как есть; доллары переводятся в тенге по курсу из «Значений»."""
+    import httpx
+    from psycopg.types.json import Jsonb
+    seen = []
+
+    class R:
+        status_code = 200
+
+        def __init__(self, d):
+            self.d = d
+
+        def json(self):
+            return self.d
+
+    def fake_get(url, params=None, timeout=None):
+        seen.append((url, params))
+        return R({"data": [1], "paging": {"next": "https://graph.facebook.com/v27.0/x?access_token=T&after=A"}} if "after=" not in url else {"data": [2]})
+    monkeypatch.setenv("META_TOKEN", "T")
+    monkeypatch.setattr(httpx, "get", fake_get)
+    assert meta.get_all("x", {"limit": 1}) == [1, 2]
+    assert seen[0][1]["access_token"] == "T" and seen[1] == ("https://graph.facebook.com/v27.0/x?access_token=T&after=A", None)
+    client.post("/api/register", json={"full_name": "HEAD"}, headers=hdr(1000))
+    with db.pool.connection() as conn:
+        conn.execute("INSERT INTO mkt_meta_day (account, day, spend, currency) VALUES ('act_1', '2026-11-20', 10, 'USD')")
+        assert meta.to_kzt(conn) is None
+        conn.execute("INSERT INTO constants_versions (checksum, values) VALUES ('u', %s)", (Jsonb({"mkt.usd_rate": {"value": "520", "status": "Утверждено", "who": "маркетинг"}}),))
+        assert meta.to_kzt(conn) == 520.0 and meta.push_spend(conn, date(2026, 11, 1), date(2026, 11, 24)) == ["2026-11"]
+        r = conn.execute("SELECT spend, currency, spend_src, currency_src FROM mkt_meta_day").fetchone()
+        assert (float(r["spend"]), r["currency"], float(r["spend_src"]), r["currency_src"]) == (5200.0, "KZT", 10.0, "USD")
+    d = client.get("/api/mkt/meta?ym=2026-11", headers=hdr(1000)).json()
+    assert d["ads"][0]["spend"] == 5200.0 and d["ads"][0]["usd"] == 10.0

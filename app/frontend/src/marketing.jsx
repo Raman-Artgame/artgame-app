@@ -300,8 +300,8 @@ function MetaBox({ ym, onChange }) {
     {(m.last?.errors || []).map((e, i) => <p key={i} className="small why">{e}</p>)}
     {kzt && <><div className="mktadn"><div><b>{tg(kzt.spend)}</b><span>расход в Meta</span></div><div><b>{num(kzt.impressions)}</b><span>показы</span></div>
       <div><b>{num(kzt.clicks)}</b><span>клики</span></div><div><b>{kzt.clicks ? tg(kzt.spend / kzt.clicks) : '—'}</b><span>цена клика</span></div></div>
-      <p className="small muted">За {monthName(ym)}, данные по {kzt.upto.slice(8)}-е число.</p></>}
-    {other.map(a => <p key={a.currency} className="small why">Кабинет в валюте {a.currency || '?'}: {a.spend.toLocaleString('ru-RU')} {a.currency}. В расход в тенге не добавлено.</p>)}
+      <p className="small muted">За {monthName(ym)}, данные по {kzt.upto.slice(8)}-е число.{kzt.usd ? ` В кабинете $${kzt.usd.toLocaleString('ru-RU')}, в тенге по курсу из «Значений».` : ''}</p></>}
+    {other.map(a => <p key={a.currency} className="small why">Кабинет в валюте {a.currency || '?'}: {a.spend.toLocaleString('ru-RU')} {a.currency}. В тенге не посчитано: в «Значениях» нет курса доллара.</p>)}
     {m.manual && <p className="small why">За этот месяц расход «Таргет Instagram» внесён руками, Meta его не меняет.
       {m.can_edit && <> <a onClick={() => run(`/mkt/meta/take?ym=${ym}`, 'Расход взят из Meta.')}>Взять из Meta</a></>}</p>}
     {m.ig.followers != null && <div className="mktadn"><div><b>{num(m.ig.followers)}</b><span>подписчики{m.ig.delta7 != null ? ` (${m.ig.delta7 >= 0 ? '+' : ''}${m.ig.delta7} за 7 дн.)` : ''}</span></div>
