@@ -39,6 +39,8 @@ def fake_meta(calls, broken=()):
             if params["time_range"]["until"] != "2026-11-24":
                 return {"data": []}
             return {"data": [{"date_start": "2026-11-02", "spend": "20", "impressions": "5", "reach": "5", "clicks": "1", "account_currency": "USD"}]}
+        if path == "me/assigned_pages":
+            return {"data": []}
         if path == "me/accounts":
             return {"data": [{"name": "Artgame.kz", "instagram_business_account": {"id": "178", "username": "artgame.kz"}}]}
         if path == "178":

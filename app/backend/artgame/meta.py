@@ -175,9 +175,16 @@ def ig_account() -> dict | None:
     only = os.environ.get("META_IG_ID", "").strip()
     if only:
         return {"id": only}
-    for pg in get_all("me/accounts", {"fields": "name,instagram_business_account{id,username}", "limit": 50}):
-        if pg.get("instagram_business_account"):
-            return pg["instagram_business_account"]
+    err = None
+    for edge in ("me/accounts", "me/assigned_pages"):      # у системного пользователя страницы лежат в assigned_pages
+        try:
+            for pg in get_all(edge, {"fields": "name,instagram_business_account{id,username}", "limit": 50}):
+                if pg.get("instagram_business_account"):
+                    return pg["instagram_business_account"]
+        except MetaError as e:
+            err = err or e
+    if err:
+        raise err
     return None
 
 
