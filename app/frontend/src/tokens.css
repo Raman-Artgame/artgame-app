@@ -1271,3 +1271,25 @@ button.btnlike { padding: 12px 10px; font-size: 13px; font-weight: 600; margin: 
 .mktnorm b .badge { margin-left: 6px; font-size: 10px; vertical-align: 1px; }
 .adlabels { display: grid; gap: 8px; } .adlabel { padding: 10px 12px; border: 1px solid var(--line2); border-radius: 12px; } .adlabel.off { opacity: .5; }
 .adlabel .mktadh { margin-bottom: 4px; } .adlabel p { margin: 0 0 6px; } .adlabel .seg { margin: 0; } .adlabels > .seg input { flex: 4; } .adlabels > .seg button { flex: 1; }
+
+/* Задачи на дизайн при сделке (HEAD 25.11): блок в карточке сделки и доска во вкладке «Дизайн» */
+.dtrow { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-top: 1px solid var(--line2); }
+.dtrow.click { cursor: pointer; }
+.dtrow .dtmain { flex: 1 1 auto; min-width: 0; }
+.dtrow .dtmain b { display: block; overflow-wrap: anywhere; }
+.dtrow .dtmain span { display: block; }
+.dtrow .tag { flex: none; margin: 0; }
+.dtdeal .head { display: flex; justify-content: space-between; align-items: center; }
+.dtdeal .head h3 { margin: 0; }
+.dtdeal > .dtrow:first-of-type, .dtstage > .dtrow:first-of-type { border-top: 0; }
+.dtcap { font: 700 12px/1 Onest, Inter, system-ui; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; }
+.dtstage.urgent .dtcap { color: var(--hot); }
+.dtstage.done .dtcap { color: var(--ok); }
+.dttwo { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dttwo > div { min-width: 0; }
+.dtacts { margin-top: 10px; }
+.dth { margin-top: 14px; }
+.dtcheck { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--text); }
+.dtcheck input { width: auto; margin: 0; }
+button.okbtn { background: var(--okbg); color: var(--ok); margin-top: 8px; }
+button.okbtn:hover { background: var(--okbg); filter: brightness(1.2); }

@@ -10,6 +10,7 @@ import { leftText } from './projects.jsx'
 import { FillBar, FillSheet, LOCK_DOCS, LOCK_KP, Locked, anketaKey, lockFor, missingFor } from './fill.jsx'
 import { ClosePanel, READY } from './closing.jsx'
 import { ClientSheet, SignedUpload } from './mopforms.jsx'
+import { DealDesign } from './designtasks.jsx'
 
 // Карточка сделки = единственное рабочее поле МОП (HEAD 06.11, вариант А). Тёмная шапка с шагами, нажатие на шаг открывает
 // его панель: Клиент → Расчёт → КП → Договор → Оплата → В работе. Расчёт считает сервер по «Значениям» и пишет в Битрикс;
@@ -435,6 +436,7 @@ export function DealCard({ id, back, place }) {
       </div>}
     </div>
     {msg && <div className="toast">{msg}</div>}
+    <DealDesign dealId={d.id} />
 
     {cur === 'client' && <div className="card">
       <div className="panelhead"><h3>Клиент</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>

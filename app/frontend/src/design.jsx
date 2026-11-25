@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { Sheet } from './ui.jsx'
 import { bxLink, usePortal } from './crm.jsx'
+import { TaskBoard, useTaskCount } from './designtasks.jsx'
 
 // «Дизайн» (HEAD 06–07.11): воронка Битрикса «Дизайн РК», единицы за месяц, каталог референсов.
 // Единица — только при «УТВЕРЖДЕНО» (макет и эскиз утверждены); каждый переход в «Правки» — новый круг, без доплаты.
@@ -14,14 +15,19 @@ const works = n => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'работа' : [2,
 const dmy = s => s ? new Date(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : ''
 
 export function Design({ me, initial }) {
-  const [view, setView] = useState(initial || 'deals')
+  const [pick, setView] = useState(initial || '')
+  const n = useTaskCount(), team = useTeam()
+  // HEAD 25.11: доска задач — в этой же вкладке, новых вкладок нет. Есть открытые задачи — открываем сразу её.
+  const view = pick || (n ? 'tasks' : 'deals')
+  if (!pick && n === null) return <div className="card"><p className="muted">Загружаю…</p></div>
   return <>
     <div className="card"><div className="segf">
+      <button className={view === 'tasks' ? 'on' : ''} onClick={() => setView('tasks')}>Задачи{n ? <span>{n}</span> : null}</button>
       <button className={view === 'deals' ? 'on' : ''} onClick={() => setView('deals')}>Сделки</button>
       <button className={view === 'units' ? 'on' : ''} onClick={() => setView('units')}>Единицы</button>
       <button className={view === 'cat' ? 'on' : ''} onClick={() => setView('cat')}>Каталоги</button>
     </div></div>
-    {view === 'deals' ? <Deals /> : view === 'units' ? <Units /> : <Catalogs me={me} />}
+    {view === 'tasks' ? <TaskBoard team={team} /> : view === 'deals' ? <Deals /> : view === 'units' ? <Units /> : <Catalogs me={me} />}
   </>
 }
 
