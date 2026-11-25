@@ -214,6 +214,61 @@ def design_wait_remind(now: datetime | None = None) -> int:
     return sent
 
 
+def app_bx_user() -> int | None:
+    """Пользователь Битрикса, от которого пишет приложение: его номер — в адресе вебхука (/rest/<id>/<ключ>/)."""
+    import re
+    m = re.search(r"/rest/(\d+)/", settings.bitrix_webhook or "")
+    return int(m.group(1)) if m else None
+
+
+def stage_outside(now: datetime | None = None) -> int:
+    """Стадии двигаются только из приложения (HEAD 25.11 «давай делаем»): сделку перевели в Битриксе руками или роботом —
+    МОП сделки и HEAD получают одно сообщение, событие в журнале. Сделку не трогаем: вернуть стадию решает человек."""
+    app_user = app_bx_user()
+    now = (now or datetime.now(timezone.utc)).astimezone(TZ)
+    if not app_user or not HOURS[0] <= now.hour < HOURS[1]:
+        return 0
+    since = (now - timedelta(days=2)).isoformat()
+    rows = bx.read_all("crm.deal.list", {"filter": {"CATEGORY_ID": [0], ">=MOVED_TIME": since},
+                                         "select": ["ID", "TITLE", "STAGE_ID", "MOVED_TIME", "MOVED_BY_ID", "ASSIGNED_BY_ID"]}, fresh=True)
+    rows = [d for d in rows if int(d.get("MOVED_BY_ID") or 0) not in (0, app_user) and not bx.is_test(d)]
+    if not rows:
+        return 0
+    names = {u["id"]: u["name"] for u in bx.users()}
+    st = bx.stages()
+    sent = 0
+    with db.pool.connection() as conn:
+        heads = conn.execute("SELECT id, tg_id FROM people WHERE status='active' AND role_code='head' AND tg_id IS NOT NULL ORDER BY id").fetchall()
+        for d in rows:
+            key = f"stage_outside:{d['ID']}:{d.get('MOVED_TIME')}"
+            mop = conn.execute("SELECT id, tg_id FROM people WHERE status='active' AND tg_id IS NOT NULL AND bitrix_user_id=%s",
+                               (int(d.get("ASSIGNED_BY_ID") or 0),)).fetchone()
+            to = [r for r in [mop, *heads] if r]
+            to = [r for i, r in enumerate(to) if r["id"] not in {x["id"] for x in to[:i]}]
+            stage = (st.get(d.get("STAGE_ID")) or {}).get("name") or d.get("STAGE_ID")
+            who = names.get(int(d["MOVED_BY_ID"]), f"пользователь {d['MOVED_BY_ID']}")
+            text = (f"↪️ Стадию сделки {_title({'id': d['ID'], 'title': d.get('TITLE')})} сменили в Битриксе, мимо приложения: "
+                    f"{who} → «{stage}».\nСтадии двигаем только в приложении — там проверка карточки и документов. "
+                    f"Если переход ошибочный, верните стадию в карточке сделки.")
+            first = None
+            for r in to:
+                if conn.execute("SELECT 1 FROM notices WHERE person_id=%s AND key=%s", (r["id"], key)).fetchone():
+                    continue
+                try:
+                    SEND(r["tg_id"], text)
+                except Exception as ex:  # noqa: BLE001
+                    print(f"stage outside {d['ID']}: telegram {ex}")
+                    continue
+                conn.execute("INSERT INTO notices (person_id, key) VALUES (%s, %s) ON CONFLICT DO NOTHING", (r["id"], key))
+                first = first or r
+                sent += 1
+            if first:
+                db.audit(conn, first["id"], "stage_outside", "deal", int(d["ID"]),
+                         {"stage": d.get("STAGE_ID"), "by": int(d["MOVED_BY_ID"]), "at": str(d.get("MOVED_TIME"))})
+                conn.commit()
+    return sent
+
+
 def main():
     if not settings.bot_token:
         print("ARTGAME_BOT_TOKEN не задан — пропуск")
@@ -232,6 +287,10 @@ def main():
         print(f"design_wait={design_wait_remind()}")
     except Exception as ex:  # noqa: BLE001
         print(f"design_wait: {ex}")
+    try:
+        print(f"stage_outside={stage_outside()}")
+    except Exception as ex:  # noqa: BLE001
+        print(f"stage_outside: {ex}")
 
 
 if __name__ == "__main__":
