@@ -11,7 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import db, drive
+from . import bx, db, drive
 from .config import settings
 from .files import MAX_BIG, links
 from .marketing import IDEA_JOBS, SHOOT_JOBS, _job, _mkt
@@ -55,9 +55,35 @@ def rubrics_get(p: dict = Depends(active)):
 
 
 # ---------- «Медиа»: поиск, фильтры, метки ----------
+CAT, SUB = "UF_CRM_ARTGAME_PROJECT_CATEGORY", "UF_CRM_ARTGAME_PROJECT_SUBCATEGORY"
+
+
+def categories() -> list[dict]:
+    """Утверждённые категории проекта (поле сделки, по ним делаются каталоги; HEAD 25.11) с подкатегориями.
+    Подкатегория «4.2. Школы и вузы» относится к 4-й категории по порядку списка Битрикса."""
+    try:
+        cats = list(bx.enum_map(CAT).items())
+        subs = list(bx.enum_map(SUB).items())
+    except Exception:
+        return []
+    out = [{"id": k, "name": v, "subs": []} for k, v in cats]
+    for k, v in subs:
+        m = re.match(r"\s*(\d+)\.", v)
+        if m and 0 < int(m.group(1)) <= len(out):
+            out[int(m.group(1)) - 1]["subs"].append({"id": k, "name": v})
+    return out
+
+
+def deals_in(field: str, value: str) -> list[int]:
+    """ID сделок с этой категорией/подкатегорией (папка сделки = objects.id). Кэш как у остальных чтений Битрикса."""
+    rows = bx.read_all("crm.deal.list", {"filter": {field: value}, "select": ["ID"], "order": {"ID": "ASC"}})
+    return [int(r["ID"]) for r in rows if str(r.get("ID", "")).isdigit()]
+
+
 @router.get("/mkt/library")
 def library(type: str | None = None, best: bool = False, q: str | None = None, year: int | None = None, city: str | None = None,
-            tag: int | None = None, object_id: int | None = None, p: dict = Depends(active)):
+            tag: int | None = None, object_id: int | None = None, cat: str | None = None, sub: str | None = None,
+            p: dict = Depends(active)):
     """Весь материал: с объектов (кроме возвращённого HEAD) и исходники рубрик. Поиск — по названию файла, проекту, городу, папке."""
     if p["role_code"] not in ("marketer", "head", "lead_designer"):
         raise HTTPException(403, "медиатека — у Главного дизайнера, маркетинга и HEAD")
@@ -72,6 +98,9 @@ def library(type: str | None = None, best: bool = False, q: str | None = None, y
         cond.append("o.city=%s"); args.append(city)
     if object_id:
         cond.append("f.object_id=%s"); args.append(object_id)
+    if sub or cat:   # категория проекта из сделки — только материал с объектов, исходники рубрик сюда не попадают
+        ids = deals_in(SUB, sub) if sub else deals_in(CAT, cat)
+        cond.append("f.kind='media' AND f.object_id = ANY(%s)"); args.append(ids)
     if tag:
         cond.append("EXISTS (SELECT 1 FROM file_tags t WHERE t.file_id=f.id AND t.rubric_id=%s)"); args.append(tag)
     for w in _n(q or "").split()[:5]:
@@ -89,7 +118,7 @@ def library(type: str | None = None, best: bool = False, q: str | None = None, y
     return {"items": [{**links(f), "object_title": f["object_title"] if f["kind"] == "media" else None, "object_city": f["object_city"],
                        "tags": f["tags"], "src_folder": f["src_folder"]} for f in rows],
             "years": sorted(fac["years"] or [], reverse=True), "cities": sorted(fac["cities"] or []), "rubrics": rub,
-            "can_tag": p["role_code"] in ("marketer", "head")}
+            "cats": categories(), "can_tag": p["role_code"] in ("marketer", "head")}
 
 
 class TagsIn(BaseModel):

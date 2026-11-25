@@ -117,3 +117,20 @@ def test_ad_creative_saved_on_approve(client, team):
     r = client.post(f"/api/mkt/posts/{p['id']}/review", json={"approve": True}, headers=hdr(1000)).json()
     assert r["status"] == "approved" and r["ad_saved"] == "Реклама / 2026-12"
     assert FakeDrive.copied == [("drvban", f"{drive.MKT_READY_ID}/Реклама/2026-12", "Баннер.jpg")]
+
+
+def test_library_project_category(client, team, monkeypatch):
+    """HEAD 25.11: фильтр «Медиа» по утверждённой категории проекта из сделки (подкатегория уточняет)."""
+    from artgame import bx
+    enums = {"UF_CRM_ARTGAME_PROJECT_CATEGORY": {"43253": "Еда и гостеприимство", "43255": "Игры и развлечения", "43257": "Спорт", "43259": "Дети и образование"},
+             "UF_CRM_ARTGAME_PROJECT_SUBCATEGORY": {"43273": "1.2. Рестораны, кафе, фастфуд", "43295": "4.2. Школы и вузы", "43293": "4.1. Детские сады"}}
+    monkeypatch.setattr(bx, "enum_map", lambda code: enums[code])
+    deals = {("UF_CRM_ARTGAME_PROJECT_CATEGORY", "43253"): [731], ("UF_CRM_ARTGAME_PROJECT_CATEGORY", "43259"): [745],
+             ("UF_CRM_ARTGAME_PROJECT_SUBCATEGORY", "43293"): []}
+    monkeypatch.setattr(bx, "read_all", lambda m, prm, fresh=False: [{"ID": str(i)} for i in deals.get(next(iter(prm["filter"].items())), [])])
+    d = client.get("/api/mkt/library", headers=hdr(2000)).json()
+    cats = {c["name"]: c for c in d["cats"]}
+    assert [s["name"] for s in cats["Дети и образование"]["subs"]] == ["4.2. Школы и вузы", "4.1. Детские сады"]
+    assert [s["id"] for s in cats["Еда и гостеприимство"]["subs"]] == ["43273"] and cats["Игры и развлечения"]["subs"] == []
+    q = lambda s: [x["id"] for x in client.get("/api/mkt/library?" + s, headers=hdr(2000)).json()["items"]]  # noqa: E731
+    assert q("cat=43253") == [900] and q("cat=43259") == [901] and q("cat=43259&sub=43293") == [] and q("cat=43255") == []
