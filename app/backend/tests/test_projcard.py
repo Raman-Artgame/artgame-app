@@ -65,3 +65,31 @@ def test_shoot_proposal(client, monkeypatch):
     assert client.post(f"/api/shoots/{s['id']}/accept", headers=hdr(2100)).json()["ok"]
     it = client.get("/api/objects/1812/shoots", headers=hdr(2101)).json()["items"][0]
     assert it["status"] == "planned" and str(it["shoot_date"]) == "2026-11-22" and it["confirmed_name"] == "P2101"
+
+
+def test_shoots_mine(client, monkeypatch):
+    """HEAD 26.11: Куратор ГИП видит съёмки своих объектов в «Проектах»; объект без ГИП — подтверждает HEAD, ему и сообщение."""
+    from datetime import date, timedelta
+    client.post("/api/register", json={"full_name": "HEAD"}, headers=hdr(1000))
+    ids = {}
+    for tg, role in [(2110, "marketer"), (2111, "lead_artist")]:
+        pid = client.post("/api/register", json={"full_name": f"P{tg}"}, headers=hdr(tg)).json()["id"]
+        client.post(f"/api/people/{pid}", json={"role_code": role, "zones": ["marketing" if role == "marketer" else "mural"]}, headers=hdr(1000))
+        ids[tg] = pid
+    with db.pool.connection() as c:
+        c.execute("INSERT INTO objects (id, title, city, bitrix_stage, gip_person_id) VALUES (1813, 'Кафе с ГИП', 'Астана', 'UC_AV00QK', %s)", (ids[2111],))
+        c.execute("INSERT INTO objects (id, title, city, bitrix_stage) VALUES (1814, 'Кафе без ГИП', 'Астана', 'UC_AV00QK')")
+    sent = []
+    from artgame import dm
+    monkeypatch.setattr(dm, "SEND", lambda tg, text: sent.append((tg, text)))
+    d = str(date.today() + timedelta(days=10))
+    a = client.post("/api/objects/1813/shoots", json={"shoot_date": d, "title": "Рилс процесс"}, headers=hdr(2110)).json()
+    b = client.post("/api/objects/1814/shoots", json={"shoot_date": d, "title": "Фото готового"}, headers=hdr(2110)).json()
+    assert sent[-1][0] == 1000 and "Съёмки на моих объектах" in sent[-1][1]
+    gip = client.get("/api/shoots/mine", headers=hdr(2111)).json()
+    assert [x["id"] for x in gip["items"]] == [a["id"]] and gip["waiting"] == 1 and gip["items"][0]["author"] == "P2110"
+    head = client.get("/api/shoots/mine", headers=hdr(1000)).json()
+    assert b["id"] in [x["id"] for x in head["items"]] and a["id"] not in [x["id"] for x in head["items"]]
+    assert client.post(f"/api/shoots/{a['id']}/answer", json={"ok": True}, headers=hdr(2111)).json()["ok"]
+    gip = client.get("/api/shoots/mine", headers=hdr(2111)).json()
+    assert gip["waiting"] == 0 and gip["items"][0]["status"] == "planned"
