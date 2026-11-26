@@ -203,8 +203,10 @@ export function Gallery({ obj, me, start = 'design', only, skip = [], bare = fal
       {pics.length > 0 && <div className="grid">{pics.map(f => <button key={f.id} className="gpic" onClick={() => setOpen(f)}><img src={f.thumb} alt={f.name} loading="lazy" /></button>)}</div>}
       {list.filter(f => !grid || !f.thumb).map(f => <div key={f.id} className="mitem">
         <button className="mthumb" onClick={() => setOpen(f)}><Thumb f={f} /></button>
-        <div className="mbody"><a onClick={() => setOpen(f)}><b>{f.media_type === 'reels' ? '🎬 ' : f.media_type === 'video' ? '▶ ' : ''}{f.name}</b></a>{kind === 'design' && /утвержд/i.test(f.note || '') && <i className="okmark small"> ✓ утверждён</i>}<br />
+        <div className="mbody"><a onClick={() => setOpen(f)}><b>{f.media_type === 'reels' ? '🎬 ' : f.media_type === 'video' ? '▶ ' : ''}{f.name}</b></a>{kind === 'design' && (f.approved_at || /утвержд/i.test(f.note || '')) && <i className="okmark small"> ✓ в работу</i>}<br />
           <span className="muted small">{f.size ? size(f.size) + ' · ' : ''}{f.by} · {new Date(f.created_at).toLocaleDateString('ru-RU')}{kind === 'video' && f.review === 'approved' ? ' · в Продакшн' : ''}</span></div>
+        {kind === 'design' && canBig && !me._view_as && <button className={'mini' + (f.approved_at ? ' ghost' : '')} title="Эстафета: утверждённый эскиз увидят МОП, ГИП и бригада"
+          onClick={() => api(`/design/files/${f.id}/approve`, { method: 'POST', body: { on: !f.approved_at } }).then(load, e => setBusy(e.message))}>{f.approved_at ? 'Снять' : 'В работу'}</button>}
         <button className="ghost mini" aria-label="Скачать" onClick={() => download(f)}>⬇</button>
       </div>)}</>}
     <Viewer f={open} onClose={() => setOpen(null)} list={pics && pics.length > 1 && pics.includes(open) ? pics : null} onNav={setOpen} extra={open && me.role_code === 'head' && !me._view_as && ['photo', 'video', 'media'].includes(kind)

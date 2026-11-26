@@ -11,6 +11,7 @@ import { FillBar, FillSheet, LOCK_DOCS, LOCK_KP, Locked, anketaKey, lockFor, mis
 import { ClosePanel, READY } from './closing.jsx'
 import { ClientSheet, SignedUpload } from './mopforms.jsx'
 import { DealDesign } from './designtasks.jsx'
+import { DealPath, ProductionSheet } from './relay.jsx'
 
 // Карточка сделки = единственное рабочее поле МОП (HEAD 06.11, вариант А). Тёмная шапка с шагами, нажатие на шаг открывает
 // его панель: Клиент → Расчёт → КП → Договор → Оплата → В работе. Расчёт считает сервер по «Значениям» и пишет в Битрикс;
@@ -234,7 +235,7 @@ function Materials({ place, d, portal }) {
   </div>
 }
 
-function WorkPanel({ d, portal }) {
+function WorkPanel({ d, portal, onProd }) {
   const [p, setP] = useState(null)
   useEffect(() => { api('/bx/projects').then(r => setP(r.projects.find(x => x.id === d.id) || false), () => setP(false)) }, [d.id])
   return <div className="card"><h3>В работе</h3>
@@ -249,7 +250,9 @@ function WorkPanel({ d, portal }) {
       </div>
       {p.people.length ? <p className="small">На объекте: {p.people.join(', ')}</p> : <p className="small muted">Смен за последние дни не отмечено.</p>}
     </>}
-    <p className="small muted">Передача куратору — заметкой в сделку; дата старта называется клиенту только после подтверждения загрузки (скрипт С23).</p>
+    {(d.pay.received > 0 || d.pay.on_check > 0 || WORK_ON.has(d.stage)) &&
+      <button className={'mini' + (WORK_ON.has(d.stage) ? ' ghost' : '')} onClick={onProd}>{WORK_ON.has(d.stage) ? 'ГИП и сроки' : 'В производство'}</button>}
+    <p className="small muted">ГИП получает сообщение сам и ставит людей на объект. Дата старта называется клиенту только после подтверждения загрузки (скрипт С23).</p>
   </div>
 }
 
@@ -407,6 +410,7 @@ export function DealCard({ id, back, place }) {
       <a className="back" onClick={back}>← к сделкам</a>
       <h2>№ {d.id} · {cleanTitle(d.title, d.id)} <button className="pencil" aria-label="Изменить название" onClick={() => setSheet({ kind: 'title' })}>✎</button></h2>
       <span className="tag">{d.stage_name}</span>{d.manager && <span className="tag">{d.manager}</span>}
+      <DealPath dealId={d.id} stage={d.stage} reload={d} />
       <div className="kv">
         <div><span className="muted small">Сумма</span><b>{money(d.sum)}</b></div>
         <div><span className="muted small">Площадь</span><b>{d.area ? d.area + ' м²' : '—'}</b></div>
@@ -477,20 +481,20 @@ export function DealCard({ id, back, place }) {
         </div>
         {d.pay.on_check > 0 && <p className="small why">На сверке у HEAD: {money(d.pay.on_check)}{d.pay.count_unchecked ? ' (уже в «Поступило»)' : ' (войдёт в «Поступило» после ✓ HEAD)'}.</p>}
         <Payments pay={d.pay} onDate={x => setSheet({ kind: 'pay', slot: x })} />
-        <p className="small muted">Оплату вносите здесь, с фото чека: чек ляжет в папку сделки «Приходы чеки», HEAD сверит, «Поступило» и «Долг» в Битриксе приложение запишет само. Когда аванс пришёл и договор подписан — переведите сделку в работу и передайте куратору ГИП.</p>
+        <p className="small muted">Оплату вносите здесь, с фото чека: чек ляжет в папку сделки «Приходы чеки», HEAD сверит, «Поступило» и «Долг» в Битриксе приложение запишет само. Когда аванс пришёл и договор подписан — «В производство»: стадия, ГИП и сроки одной кнопкой.</p>
         <div className="dealbtns wrapbtns">
           <button className="mini" onClick={() => setSheet({ kind: 'pay' })}>+ Внести оплату</button>
-          {/* «в работу» и «куратору ГИП» — только когда аванс уже пришёл (HEAD 14.11: без лишних кнопок раньше времени) */}
-          {(d.pay.received > 0 || d.pay.on_check > 0) && <>
-            <button className="ghost mini" onClick={() => setSheet({ kind: 'stage' })}>Перевести в работу</button>
-            <button className="ghost mini" onClick={() => setSheet({ kind: 'note', text: 'Передаю куратору ГИП: аванс получен, договор подписан. Старт — после подтверждения загрузки.' })}>Передать куратору ГИП</button></>}
+          {/* «В производство» — только когда аванс уже пришёл (HEAD 14.11: без лишних кнопок раньше времени); эстафета HEAD 26.11:
+              одна кнопка вместо «Перевести в работу» и «Передать куратору ГИП» */}
+          {(d.pay.received > 0 || d.pay.on_check > 0) && !WORK_ON.has(d.stage) &&
+            <button className="mini" onClick={() => setSheet({ kind: 'prod' })}>В производство</button>}
           <button className="ghost mini" onClick={say}>Скрипты шага</button>
         </div>
       </div>
       <SignedUpload d={d} onDone={(r, t) => said(t)} />
       <SalesSpend dealId={d.id} />
     </>}
-    {cur === 'work' && <WorkPanel d={d} portal={portal} />}
+    {cur === 'work' && <WorkPanel d={d} portal={portal} onProd={() => setSheet({ kind: 'prod' })} />}
     {cur === 'close' && <ClosePanel d={d} onDone={said} />}
     {cur === 'hist' && <>
       {d.comments && <div className="card"><h3>Комментарий сделки</h3><p className="small">{strip(d.comments)}</p></div>}
@@ -506,6 +510,7 @@ export function DealCard({ id, back, place }) {
     {sheet?.kind === 'stage' && <StageSheet d={d} stages={stages} onClose={() => setSheet(null)} onDone={said} onFill={() => setSheet({ kind: 'fill' })} />}
     {sheet?.kind === 'client' && <ClientSheet dealId={d.id} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'fill' && <FillSheet d={d} onClose={() => setSheet(null)} onDone={said} />}
+    {sheet?.kind === 'prod' && <ProductionSheet dealId={d.id} onClose={() => setSheet(null)} onDone={said} onFill={() => setSheet({ kind: 'fill' })} />}
     {sheet?.kind === 'note' && <NoteSheet d={d} initial={sheet.text} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'pay' && <PaySheet d={d} slot={sheet.slot} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'say' && <Scripts codes={codes} algoStep={algo[0]} title={`Скрипты: ${name(cur)}`} onClose={() => setSheet(null)} />}

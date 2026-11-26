@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { DealPath } from './relay.jsx'
 import { Receipt, StatusMark } from './ui.jsx'
 import { api, uuid } from './api.js'
 import { Skeleton, cleanTitle, money } from './crm.jsx'
@@ -91,6 +92,7 @@ function ProjectCard({ x, me, back, openDeal }) {
       <b>💬 Чат проекта{+x.chat.unread > 0 && <i className="cnt dmcnt">{x.chat.unread}</i>}</b>
       <span>{x.chat.open ? 'бригада, ГИП, МОП и HEAD' : 'только чтение'} ›</span></button>}
     <div className="card">
+      {x.id > 0 && !mkt && <DealPath dealId={x.id} />}
       {x.working && <div className={'prog ' + (x.state === 'late' ? 'late' : x.progress >= 100 ? 'ok' : '')}><i style={{ width: pct(x) + '%' }} /></div>}
       <div className="conds light">{COND.map(([k, t]) => <span key={k} className={c[k] ? 'on' : ''}>{c[k] ? '● ' : ''}{t}</span>)}</div>
       {x.address && <a className="route" onClick={() => openUrl(route(x))}>📍 {x.address}<i className="small">Маршрут в 2ГИС ›</i></a>}

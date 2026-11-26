@@ -1295,3 +1295,20 @@ button.okbtn { background: var(--okbg); color: var(--ok); margin-top: 8px; }
 button.okbtn:hover { background: var(--okbg); filter: brightness(1.2); }
 .dtthumb { flex: none; width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: var(--alt); display: grid; place-items: center; }
 .dtcap.dtfiles { margin-top: 14px; }
+
+/* Эстафета сделки (HEAD 26.11): полоска пути из пяти отрезков и окно «В производство» */
+.dpath { margin: 10px 0 2px; }
+.dpbar { display: flex; gap: 3px; }
+.dpbar .dp { flex: 1; height: 6px; border-radius: 3px; background: var(--line); }
+.dpbar .dp.done { background: var(--ok); }
+.dpbar .dp.now { background: var(--accent); }
+.dpbar .dp.skip { background: var(--line2); opacity: .5; }
+.dplbl { display: flex; justify-content: space-between; gap: 2px; font-size: 10px; color: var(--muted); margin-top: 4px; }
+.dplbl span { flex: 1; text-align: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dplbl span:first-child { text-align: left; } .dplbl span:last-child { text-align: right; }
+.dplbl .now { color: var(--text); font-weight: 700; }
+.dplbl .skip { text-decoration: line-through; }
+.dpnow { margin-top: 4px; }
+.prodsk { display: flex; gap: 10px; align-items: center; background: var(--alt); border: 1px solid var(--line); border-radius: var(--r2); padding: 8px; margin: 6px 0; }
+.prodsk img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; flex: 0 0 64px; }
+.prodsk > div { min-width: 0; }

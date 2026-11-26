@@ -638,6 +638,22 @@ def _today(p: dict, fresh: bool = False) -> dict:
             out["idle"].append(d)
             q["later"].append(item("deal", d, ("дизайн: " if not sales else "") + f"без движения {int(age)} дн." +
                                    (" в «Взаимном информировании»" if sales and code == "NEW" else "")))
+    # Эстафета (HEAD 26.11): эскиз утверждён, а сделка ещё в продажах — пора «В производство». Одна строка на сделку.
+    from .relay import APPROVED_STAGE, BEFORE
+    pre = [d for d in deals if d["category"] == 0 and d["stage"].split(":")[-1] in BEFORE]
+    if pre:
+        with db.pool.connection() as conn:
+            ok = {r["id"] for r in conn.execute(
+                """SELECT DISTINCT o.id FROM unnest(%s::bigint[]) AS o(id)
+                   WHERE EXISTS (SELECT 1 FROM files f WHERE f.object_id=o.id AND f.kind='design' AND f.status='ready' AND f.approved_at IS NOT NULL)
+                      OR EXISTS (SELECT 1 FROM design_tasks t WHERE t.deal_id=o.id AND t.status='active' AND t.stage='done')""",
+                ([d["id"] for d in pre],)).fetchall()}
+        for d in pre:
+            hot = any((x["entity"], x["id"]) == ("deal", d["id"]) for x in q["hot"])   # «горит» — не перебиваем
+            if (d["id"] in ok or d["stage"].split(":")[-1] == APPROVED_STAGE) and not hot:
+                for b in (q["today"], q["later"]):
+                    b[:] = [x for x in b if (x["entity"], x["id"]) != ("deal", d["id"])]
+                q["today"].insert(0, item("deal", d, "эскиз утверждён — передай в производство", action="production"))
     try:
         lst = got(f_leads, "лиды не загрузились", {"leads": []})["leads"]
     except HTTPException:

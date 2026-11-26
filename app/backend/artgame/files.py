@@ -77,6 +77,7 @@ def links(f: dict) -> dict:
     out = {k: f.get(k) for k in ("id", "object_id", "kind", "name", "mime", "size", "note", "status", "created_at",
                                  "media_type", "review", "review_note")}
     out["by"] = f.get("by")
+    out["approved_at"] = f["approved_at"].isoformat() if f.get("approved_at") else None   # эскиз «В работу» (эстафета, HEAD 26.11)
     if f["status"] == "ready":
         out["url"] = sign(f["id"], "content")
         out["thumb"] = sign(f["id"], "thumb") if (f["mime"] or "").startswith("image/") else None
@@ -119,7 +120,7 @@ def object_files(object_id: int, kind: str = "photo", p: dict = Depends(active))
                                                   WHERE s.status='cancelled' AND (s.photo_before=f.id OR s.photo_after=f.id OR sp.file_id=f.id))
                                           AND NOT EXISTS (SELECT 1 FROM shifts s LEFT JOIN shift_photos sp ON sp.shift_id=s.id
                                                   WHERE s.status<>'cancelled' AND (s.photo_before=f.id OR s.photo_after=f.id OR sp.file_id=f.id)))
-                               ORDER BY f.created_at DESC""",
+                               ORDER BY (f.approved_at IS NOT NULL) DESC, f.created_at DESC""",
                             (object_id, kind)).fetchall()
     return [links(f) for f in rows]
 

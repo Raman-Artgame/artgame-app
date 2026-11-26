@@ -112,13 +112,16 @@ def checks(conn, d: dict, money: dict, o: dict | None = None) -> list[dict]:
     add("prod", "Продакшн: фото или видео, утверждённые HEAD", bool(got),
         "в Продакшн: " + ", ".join(got) if got else f"ждут HEAD: {pr['wait']}" if pr.get("wait") else "ничего не загружено",
         "«Продакшн» → «Загрузить» фото или видео с объекта, HEAD — «Утверждаю»", "ГИП или Главный дизайнер")
-    ds = conn.execute("""SELECT count(*) AS n, count(*) FILTER (WHERE note ILIKE '%%утвержд%%') AS ok FROM files
-                         WHERE object_id=%s AND status='ready' AND kind='design'""", (did,)).fetchone() if o else {"n": 0, "ok": 0}
-    layout = bool(d.get(F_LAYOUT))
+    # Эстафета (HEAD 26.11): утверждён тот файл, что дизайнер отметил «Утверждено» («В работу»), или «Утвержденные дизайны»
+    # с Диска. Ссылка в поле «Эскиз» (там почти всегда папка) засчитывается только старым сделкам без задач на дизайн.
+    ds = conn.execute("""SELECT count(*) AS n, count(*) FILTER (WHERE approved_at IS NOT NULL OR note ILIKE '%%утвержд%%') AS ok,
+                                (SELECT count(*) FROM design_tasks t WHERE t.deal_id=%s AND t.status='active') AS tasks FROM files
+                         WHERE object_id=%s AND status='ready' AND kind='design'""", (did, did)).fetchone() if o else {"n": 0, "ok": 0, "tasks": 0}
+    layout = bool(d.get(F_LAYOUT)) and not ds["tasks"]
     add("design", "Утверждённый дизайн, если дизайн был", ds["ok"] > 0 or layout,
-        "в «Утверждённых дизайнах»" if ds["ok"] else "«Эскиз» в сделке" if layout else
-        f"эскизов {ds['n']}, утверждённого нет" if ds["n"] else "дизайна по сделке не было",
-        "папка сделки «ДИЗАЙН / Утвержденные дизайны»", "дизайнер", skip=not ds["n"] and not layout)
+        "эскиз «В работу»" if ds["ok"] else "«Эскиз» в сделке" if layout else
+        f"эскизов {ds['n']}, утверждённого нет" if ds["n"] or ds["tasks"] else "дизайна по сделке не было",
+        "дизайнер: задача на доске → «Утверждено»", "дизайнер", skip=not ds["n"] and not layout and not ds["tasks"])
     sh = conn.execute("""SELECT count(*) FILTER (WHERE status='open') AS open, count(*) FILTER (WHERE status='submitted') AS sub
                          FROM shifts WHERE object_id=%s""", (did,)).fetchone()
     add("shifts", "Ни одной открытой или непроверенной смены", not sh["open"] and not sh["sub"],

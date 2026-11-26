@@ -181,6 +181,9 @@ def edit(tid: int, b: TaskEdit, p: dict = Depends(active)):
                          [v for v in upd.values() if v != "now"] + [tid])
             db.audit(conn, p["id"], "design_task_edit", "design_tasks", tid,
                      {k: (v.isoformat() if isinstance(v, date) else v) for k, v in upd.items()})
+            if upd.get("stage") == "done":   # эстафета (HEAD 26.11): утверждённый файл получает метку «В работу»
+                from .relay import mark
+                mark(conn, t["deal_id"], upd.get("file_id") or t["file_id"], p["id"])
         row = conn.execute(SQL + " WHERE t.id=%s", (tid,)).fetchone()
     return {**_out(row), "bitrix": _bitrix(row["deal_id"])}
 

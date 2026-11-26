@@ -37,24 +37,36 @@ class GipIn(BaseModel):
     person_id: int = 0   # 0 — снять
 
 
+def assign(conn, p: dict, oid: int, person_id: int, extra: str = ""):
+    """Назначить (0 — снять) куратора ГИП. Возвращает функцию, которая шлёт сообщение ГИП, — звать после commit."""
+    o = conn.execute("SELECT id, title FROM objects WHERE id=%s", (oid,)).fetchone()
+    if not o or not oid:
+        raise HTTPException(404, "объекта ещё нет в приложении — он появится после синхронизации со сделкой")
+    pe = None
+    if person_id:
+        pe = conn.execute("""SELECT id, tg_id, full_name FROM people WHERE id=%s AND status='active'
+                             AND (role_code = ANY(%s) OR acting_role = ANY(%s))""", (person_id, list(GIP_ROLES), list(GIP_ROLES))).fetchone()
+        if not pe:
+            raise HTTPException(400, "ГИП — Главный художник, Художник-Про или Мастер печати")
+    conn.execute("UPDATE objects SET gip_person_id=%s WHERE id=%s", (pe["id"] if pe else None, oid))
+    db.audit(conn, p["id"], "gip_set", "objects", oid, {"person": pe["id"] if pe else None})
+
+    def send():
+        if pe:
+            _send(pe["tg_id"], f"Ты ГИП проекта № {oid} «{o['title']}». В «Проектах» — вся история объекта, смены по нему принимаешь ты; "
+                               "людей на объект ставишь ты." + extra)
+    send.person = pe
+    return send
+
+
 @router.post("/objects/{oid}/gip")
 def set_gip(oid: int, b: GipIn, p: dict = Depends(active)):
     if p["role_code"] not in ASSIGN or p.get("_view_as"):
         raise HTTPException(403, "назначают HEAD и МОП")
     with db.pool.connection() as conn, conn.transaction():
-        o = conn.execute("SELECT id, title FROM objects WHERE id=%s", (oid,)).fetchone()
-        if not o or not oid:
-            raise HTTPException(404, "объекта ещё нет в приложении — он появится после синхронизации со сделкой")
-        pe = None
-        if b.person_id:
-            pe = conn.execute("""SELECT id, tg_id, full_name FROM people WHERE id=%s AND status='active'
-                                 AND (role_code = ANY(%s) OR acting_role = ANY(%s))""", (b.person_id, list(GIP_ROLES), list(GIP_ROLES))).fetchone()
-            if not pe:
-                raise HTTPException(400, "ГИП — Главный художник, Художник-Про или Мастер печати")
-        conn.execute("UPDATE objects SET gip_person_id=%s WHERE id=%s", (pe["id"] if pe else None, oid))
-        db.audit(conn, p["id"], "gip_set", "objects", oid, {"person": pe["id"] if pe else None})
-    if pe:
-        _send(pe["tg_id"], f"Ты ГИП проекта № {oid} «{o['title']}». В «Проектах» — вся история объекта, смены по нему принимаешь ты.")
+        send = assign(conn, p, oid, b.person_id)
+    send()
+    pe = send.person
     return {"ok": True, "gip_id": pe["id"] if pe else None, "gip_name": pe["full_name"] if pe else None}
 
 

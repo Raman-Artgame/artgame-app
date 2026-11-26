@@ -332,6 +332,9 @@ def update(deal_id: int, b: DealIn, p: dict = Depends(active)):
             v = consts.latest(conn)
             d2 = {**d, "STAGE_ID": WON, F_DESIGNER: fields.get(F_DESIGNER, cur_uid), "CLOSEDATE": datetime.now(timezone.utc)}
             sync_units(conn, [d2], v, {deal_id: size} if size else {}, _people_by_bx(conn))
+            from .relay import mark   # эстафета (HEAD 26.11): последний эскиз сделки — «В работу»
+            if not conn.execute("SELECT 1 FROM files WHERE object_id=%s AND kind='design' AND approved_at IS NOT NULL", (deal_id,)).fetchone():
+                mark(conn, deal_id, None, p["id"])
         db.audit(conn, p["id"], "bx_write", "deal", deal_id, log)
     if log["bx"] == "error":
         raise HTTPException(502, "Битрикс: " + log.get("error", "ошибка"))

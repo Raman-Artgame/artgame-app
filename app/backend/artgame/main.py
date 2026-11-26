@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from . import constants as consts
 from . import ads, adrules, meta, mktlib, appeals, chatfiles, brand, closing, marketing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring, advances
-from . import bx, bxw, db, mopcrm, deal_money, design, designobj, designtasks, files, projcard, shiftmove, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
+from . import bx, bxw, db, relay, mopcrm, deal_money, design, designobj, designtasks, files, projcard, shiftmove, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
 
@@ -43,6 +43,7 @@ app.include_router(weekly.router)
 app.include_router(advances.router)   # авансы с 15 по 20 (HEAD 16.11)
 app.include_router(projchat.router)   # чат проекта (HEAD 13.11)
 app.include_router(chatfiles.router)   # вложения чатов (HEAD 24.11)
+app.include_router(relay.router)    # эстафета сделки: «В производство», метка «В работу», полоска пути (HEAD 26.11)
 app.include_router(mopcrm.router)   # МОП: заявка по звонку, клиент и реквизиты, подписанный договор (HEAD 25.11)
 app.include_router(recurring.router)   # график постоянных оплат (HEAD 12.11)
 app.include_router(trips.router)

@@ -130,9 +130,11 @@ def sketches(conn, object_id: int, limit: int = 12) -> list[dict]:
     rows = conn.execute(
         """SELECT f.*, pe.full_name AS by FROM files f JOIN people pe ON pe.id=f.uploaded_by
            WHERE f.object_id=%s AND f.kind='design' AND f.status='ready' AND (f.mime LIKE 'image/%%' OR f.mime='application/pdf')
-           ORDER BY (coalesce(f.note, '') ILIKE %s) DESC, f.created_at DESC LIMIT %s""",
+           ORDER BY (f.approved_at IS NOT NULL OR coalesce(f.note, '') ILIKE %s) DESC, f.approved_at DESC NULLS LAST, f.created_at DESC LIMIT %s""",
         (object_id, f"%{APPROVED}%", limit)).fetchall()
-    return [{**links(f), "approved": APPROVED in (f["note"] or "").casefold(), "path": (f["note"] or "").removeprefix("Диск: ")} for f in rows]
+    return [{**links(f), "approved": bool(f.get("approved_at")) or APPROVED in (f["note"] or "").casefold(),
+             "approved_at": f["approved_at"].isoformat() if f.get("approved_at") else None,
+             "path": (f["note"] or "").removeprefix("Диск: ")} for f in rows]
 
 
 def progress(conn, object_id: int, area, viewer: dict | None = None) -> dict:

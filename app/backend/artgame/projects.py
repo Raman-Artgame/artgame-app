@@ -73,7 +73,7 @@ def projects(p: dict, fresh: bool = False) -> dict:
             # обложка карточки — последний эскиз (картинка из «Дизайна»), иначе последнее фото с объекта
             for r in conn.execute("""SELECT DISTINCT ON (object_id) object_id, id FROM files
                                      WHERE object_id = ANY(%s) AND status='ready' AND mime LIKE 'image/%%' AND kind IN ('design','photo','media')
-                                     ORDER BY object_id, (kind='design') DESC, (coalesce(note, '') ILIKE '%%утвержд%%') DESC, created_at DESC""", (ids,)).fetchall():
+                                     ORDER BY object_id, (kind='design') DESC, (approved_at IS NOT NULL OR coalesce(note, '') ILIKE '%%утвержд%%') DESC, approved_at DESC NULLS LAST, created_at DESC""", (ids,)).fetchall():
                 cover[r["object_id"]] = sign(r["id"], "thumb")
             for r in conn.execute("""SELECT o.id, o.gip_person_id, pe.full_name, o.site_contact, o.site_phone FROM objects o
                                      LEFT JOIN people pe ON pe.id=o.gip_person_id WHERE o.id = ANY(%s)""", (ids,)).fetchall():
