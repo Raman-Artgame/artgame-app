@@ -158,6 +158,13 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   require('fs').mkdirSync(dl, { recursive: true }); require('fs').writeFileSync(dl + '/e2ekp.bin', '%PDF-1.4 e2e')
   await mopFrame(p).evaluate(() => window.ARTGAME_ON_DOWNLOAD({ name: 'КП 1601 Ромашка.pdf', fid: 'e2ekp' }))
   await p.waitForFunction(() => fetch('/api/_e2e/bx_calls').then(r => r.json()).then(c => c.some(x => x.params.fields?.UF_CRM_1753202415 === 'файл')))
+  // HEAD 26.11: «Клиент согласовал КП» — сумма и нормы закрепляются, пересчёт закрыт до «Снять согласование»
+  await p.getByRole('button', { name: 'Клиент согласовал КП' }).click()
+  await p.locator('.kpagree.on', { hasText: 'Сумма и нормы закреплены' }).waitFor()
+  await p.screenshot({ path: `${shots}/mop-kp-agreed.png` })
+  await step(p, 'Расчёт')
+  await p.locator('.card p.why', { hasText: 'КП согласовано клиентом' }).waitFor()
+  assert.strictEqual(await p.getByRole('button', { name: /Записать .*в сделку/ }).count(), 0, 'пересчёт закрыт')
   // Договор: сумма и аванс из расчёта, клиент из Битрикса; скачанный договор → запись в сделку
   await step(p, 'Договор')
   await p.waitForFunction(() => /заполнено/.test(document.querySelector('.embed iframe')?.contentDocument?.querySelector('#app .agbx-st')?.textContent || ''), null, { timeout: 20000 })

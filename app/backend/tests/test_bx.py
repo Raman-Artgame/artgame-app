@@ -80,14 +80,14 @@ def fake(method, params):
                            "UF_CRM_ARTGAME_NORM_SHIFTS": {"type": "double"}, "UF_CRM_ARTGAME_NORM_CREW": {"type": "integer"},
                            "UF_CRM_ARTGAME_TERM_DAYS": {"type": "integer"}, "UF_CRM_ARTGAME_AREA_M2": {"type": "double"}, "OPPORTUNITY": {"title": "Сумма"},
                            "UF_CRM_ARTGAME_OBJECT": {"type": "string"},
-                           "UF_CRM_ARTGAME_PROJECT_MODEL": {"type": "enumeration", "listLabel": "Модель", "items": [{"ID": "31", "VALUE": "B2B"}, {"ID": "32", "VALUE": "B2C"}]},
+                           "UF_CRM_ARTGAME_PROJECT_MODEL": {"type": "enumeration", "listLabel": "Модель", "items": [{"ID": "31", "VALUE": "B2B"}, {"ID": "32", "VALUE": "B2C"}, {"ID": "33", "VALUE": "B2G"}]},
                            "UF_CRM_ARTGAME_PROJECT_VIP": {"type": "boolean", "listLabel": "VIP"},
                            "UF_CRM_ARTGAME_PROJECT_CATEGORY": {"type": "enumeration", "items": [{"ID": "41", "VALUE": "1. Образование"}, {"ID": "42", "VALUE": "2. Общепит"}]},
                            "UF_CRM_ARTGAME_PROJECT_SUBCATEGORY": {"type": "enumeration", "items": [{"ID": "51", "VALUE": "1.1 Школы"}, {"ID": "52", "VALUE": "2.1 Кафе"}]},
                            "UF_CRM_6AD5EF400C4B9": {"type": "enumeration", "items": [{"ID": "61", "VALUE": "Таргет (реклама)"}, {"ID": "62", "VALUE": "Сарафан"}]},
-                           "UF_CRM_ARTGAME_PROJECT_SIZE": {"type": "enumeration", "items": [{"ID": "71", "VALUE": "Мелкий"}, {"ID": "72", "VALUE": "Средний"}]},
+                           "UF_CRM_ARTGAME_PROJECT_SIZE": {"type": "enumeration", "items": [{"ID": "71", "VALUE": "Мелкий"}, {"ID": "72", "VALUE": "Средний"}, {"ID": "73", "VALUE": "Крупный"}, {"ID": "74", "VALUE": "Огромный"}]},
                            "UF_CRM_ARTGAME_DESIGNER": {"type": "employee"}, "UF_CRM_ARTGAME_DESIGN_DEADLINE": {"type": "date"},
-                           "UF_CRM_ARTGAME_DESIGN_COMPLEXITY": {"type": "enumeration", "items": [{"ID": "81", "VALUE": "S"}, {"ID": "82", "VALUE": "M"}]},
+                           "UF_CRM_ARTGAME_DESIGN_COMPLEXITY": {"type": "enumeration", "items": [{"ID": "80", "VALUE": "XS"}, {"ID": "81", "VALUE": "S"}, {"ID": "82", "VALUE": "M"}, {"ID": "83", "VALUE": "L"}, {"ID": "84", "VALUE": "XL"}]},
                            "UF_CRM_1753292354197": {"type": "string"},
                            "UF_CRM_1753381517": {"type": "employee", "listLabel": "Художники", "isMultiple": True}}}
     if method == "user.get":
@@ -297,6 +297,7 @@ def test_write_off_and_on(bxc, monkeypatch, tmp_path):
     r = bxw.doc_saved({"id": ids[6000], "role_code": "mop", "full_name": "Ануар", "status": "active"}, 1601,
                       "ARTGAME_Dogovor_1601.docx", "", {"total": 600000, "adv": 50, "days": 20, "warr": 6})
     assert "STAGE_ID" not in calls[-2][1]["fields"] and calls[-2][1]["fields"][bxw.F_ADV] == 50
+    assert calls[-2][1]["fields"][bxw.F_CONTRACT_NO] == "1601"   # № договора = № сделки, если поле пустое
     j = c.get("/api/journal", headers=hdr(6000)).json()
     assert [x["data"]["bx"] for x in j["items"] if x["action"] == "bx_write"][:2] == ["ok", "ok"]
     DEALS["1601"]["STAGE_ID"] = "PREPARATION"
@@ -638,7 +639,7 @@ def test_anna_fixes(bxc, monkeypatch):
     # города в карточке сделки — из списка СДЕЛКИ (у лида свои ID)
     dct = c.get("/api/bx/dict", headers=hdr(6000)).json()
     assert dct["cities"] == [{"id": "12077", "name": "Астана"}]
-    assert dct["project"]["model"] == [{"id": "31", "name": "B2B"}, {"id": "32", "name": "B2C"}] and "artists" in dct["project"]["have"]
+    assert dct["project"]["model"] == [{"id": "31", "name": "B2B"}, {"id": "32", "name": "B2C"}, {"id": "33", "name": "B2G"}] and "artists" in dct["project"]["have"]
     # «Жду ответа»: без даты нельзя; с датой — лид не горит, а ждёт в «позже»
     assert any(x["id"] == 3001 for x in c.get("/api/bx/today", headers=hdr(6000)).json()["queue"]["hot"])
     assert c.post("/api/bx/leads/3001/call", json={"result": "wait"}, headers=hdr(6000)).status_code == 400

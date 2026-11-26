@@ -51,44 +51,39 @@ export function FillBar({ fill, onOpen }) {
   </div>
 }
 
-// Окно «Карточка сделки» (HEAD 26.11 «заполнение карточки по всем нашим изменениям, сейчас намешано старое и новое»):
-// все поля карточки по шагам сделки. Нехватающее помечено «нужно» и стоит первым в своём шаге. Имя, телефон и
-// реквизиты — в «Клиент и реквизиты», расчёт — в шаге «Расчёт». Подсказок «куда нажать» нет: всё заполняется здесь.
-// HEAD 26.11: в сделке только «Куратор ГИП» (назначает ГИП объекта); «Ответственный исполнитель» из окна убран, в Битриксе остаётся.
+// Окно «Карточка сделки» (схема HEAD 26.11 «кто что заполняет», «во всём остальном окей, давай попробуем»):
+// каждое значение вводится в одном месте. Здесь МОП вводит только «Клиент и проект». Цена и нормы — из калькулятора,
+// КП — из расчёта, дизайн — из задачи дизайнера, договор — из бланка договора, оплата — с чеком, куратор ГИП, старт
+// и сдача — «В производство», художников ставит куратор ГИП. Всё это видно здесь итогом, с кнопкой «куда идти».
 // Подкатегория — только из своей категории: категория N (по порядку в Битриксе) ↔ подкатегории «N.x».
-const SECTIONS = [
-  ['client', 'Клиент и объект', ['object', 'city', 'service', 'category', 'subcategory', 'entry', 'address', 'area']],
-  ['project', 'Проект', ['model', 'size', 'vip']],
-  ['calc', 'Расчёт и КП', []],
-  ['design', 'Дизайн', ['designer', 'design_level', 'design_deadline']],
-  ['docs', 'Договор', ['contract_no', 'adv', 'days', 'warranty']],
-  ['pay', 'Оплата', []],
-  ['work', 'В работе', ['curator', 'artists', 'start', 'end']],
-]
+const EDIT = ['object', 'city', 'service', 'address', 'area', 'category', 'subcategory', 'entry', 'model', 'size', 'vip']
 const LABEL = { object: 'Объект', city: 'Город', service: 'Услуга', category: 'Категория', subcategory: 'Подкатегория', entry: 'Точка входа',
-  address: 'Адрес объекта', area: 'Площадь, м²', adv: 'Аванс, %', days: 'Срок работ, календарных дней', warranty: 'Гарантия, месяцев',
-  curator: 'Куратор ГИП', start: 'Старт работ (факт)', end: 'Сдача (план)', model: 'Модель', size: 'Размер проекта', vip: 'VIP-клиент',
-  designer: 'Дизайнер', design_level: 'Сложность дизайна', design_deadline: 'Срок дизайна', contract_no: 'Номер договора', artists: 'Художники' }
-const PROJ = ['category', 'subcategory', 'entry', 'model', 'size', 'vip', 'designer', 'design_level', 'design_deadline', 'contract_no', 'artists']
-const CHIPS = ['model', 'size', 'design_level']
+  address: 'Адрес объекта', area: 'Площадь, м²', model: 'Модель', size: 'Размер проекта', vip: 'VIP-клиент' }
+const PROJ = ['category', 'subcategory', 'entry', 'model', 'size', 'vip']
+const CHIPS = ['model', 'size']
 const LEVEL = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный', author: 'Авторский' }
 const fmt = v => v ? Number(v).toLocaleString('ru-RU').replace(/,/g, ' ') + ' ₸' : '—'
-// то, что заполняется не здесь (клиент, расчёт, оплата), — видно в окне строками со своей кнопкой, чтобы карточка была целиком
+const day = v => v ? String(v).slice(0, 10).split('-').reverse().join('.') : ''
+// итог шага: строки только для чтения и кнопка, где это заполняется
 function Info({ rows, children }) {
   return <div className="fillinfo" style={{ gridColumn: '1 / -1' }}>
     {rows.map(([k, v, bad]) => <div key={k} className="row"><span className="muted small">{k}</span><span className={bad ? 'why' : ''}>{v || '—'}</span></div>)}
-    {children}
+    {children && <div className="dealbtns wrapbtns">{children}</div>}
   </div>
+}
+// шаг окна; вне FillSheet, чтобы поля не пересоздавались при каждом вводе (иначе слетает фокус)
+function Sec({ title, n, tag, children }) {
+  return <div className="fillgrid">
+    <h3 className="fillsec">{title}{tag && <i className="srctag">{tag}</i>}{n ? <i className="needtag">нужно {n}</i> : null}</h3>{children}</div>
 }
 export const subsOf = (cats, subs, catId) => {
   const i = (cats || []).findIndex(o => o.id === catId)
   return i < 0 ? [] : (subs || []).filter(o => (o.name || '').trim().startsWith(`${i + 1}.`))
 }
 
-export function FillSheet({ d, onClose, onDone, onClient, onCalc }) {
+export function FillSheet({ d, onClose, onDone, onClient, onStep, onDesign, onProd }) {
   const by = Object.fromEntries((d.fill?.items || []).map(x => [x.key, x]))
-  const [f, setF] = useState({ object: d.object || '', cityName: d.city || '', city: '', service: '', area: d.area || '', address: d.address || '',
-    adv: by.adv?.value || '', days: by.days?.value || '', warranty: by.warranty?.value || '', start: by.start?.value || '', end: by.end?.value || '' })
+  const [f, setF] = useState({ object: d.object || '', cityName: d.city || '', city: '', service: '', area: d.area || '', address: d.address || '' })
   const [pr, setPr] = useState(() => ({ ...(d.project || {}) }))
   const [ai, setAi] = useState({})          // какие поля подставил помощник
   const [dict, setDict] = useState({ cities: [], services: [], project: null })
@@ -96,11 +91,14 @@ export function FillSheet({ d, onClose, onDone, onClient, onCalc }) {
   const [text, setText] = useState(() => { try { return localStorage.getItem(anketaKey(d.id)) || '' } catch { return '' } })
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState('')
+  const [gip, setGip] = useState(null)      // куратор ГИП — только показать (ставит «В производство»)
+  const [dt, setDt] = useState(null)        // задачи на дизайн
   useEffect(() => { api('/bx/dict').then(x => { setDict(x); const s = x.services.find(s => s.name === d.service); setF(v => ({ ...v, service: s?.id || '' })) }, () => {}) }, [])
-  // Куратор ГИП — человек приложения (objects.gip_person_id): только он даёт права ГИП (смены, люди, история объекта)
-  const [gip, setGip] = useState({ id: '', was: '', list: null })
-  useEffect(() => { api(`/bx/deals/${d.id}/gip`).then(r => setGip({ id: String(r.gip_id || ''), was: String(r.gip_id || ''), list: r.candidates }), () => setGip(g => ({ ...g, list: [] }))) }, [d.id])
-  const have = k => k === 'curator' ? gip.list !== null : !PROJ.includes(k) || (dict.project?.have || []).includes(k)
+  useEffect(() => {
+    api(`/bx/deals/${d.id}/gip`).then(r => setGip((r.candidates || []).find(o => o.id === r.gip_id)?.full_name || ''), () => setGip(''))
+    api(`/bx/deals/${d.id}/design-tasks`).then(r => setDt(r.items || []), () => setDt([]))
+  }, [d.id])
+  const have = k => !PROJ.includes(k) || (dict.project?.have || []).includes(k)
   const need = k => by[k]?.need && !by[k]?.ok
   const set = (k, v) => { setF(x => ({ ...x, [k]: v })); setAi(a => ({ ...a, [k]: false })) }
   const parse = () => {
@@ -110,7 +108,7 @@ export function FillSheet({ d, onClose, onDone, onClient, onCalc }) {
       const x = r.fields, put = {}, mark = {}
       if (x.city) { put.city = x.city; put.cityName = x.cityName; mark.city = true }
       if (x.service) { put.service = x.service; mark.service = true }
-      for (const k of ['area', 'address', 'adv', 'days', 'start']) if (x[k]) { put[k] = x[k]; mark[k] = true }
+      for (const k of ['area', 'address']) if (x[k]) { put[k] = x[k]; mark[k] = true }
       setF(v => ({ ...v, ...put })); setAi(mark); setHelper(false)
       setMsg(`Подставлено полей: ${Object.keys(mark).length} — отмечены «ИИ». Проверьте и запишите.` + (r.client && Object.values(r.client).some(Boolean) ? ' Имя, телефон и реквизиты — в «Клиент и реквизиты».' : ''))
     }, e => setMsg(e.message)).finally(() => setBusy(''))
@@ -122,35 +120,31 @@ export function FillSheet({ d, onClose, onDone, onClient, onCalc }) {
   if (f.service && (dict.services.find(s => s.id === f.service)?.name || '') !== (d.service || '')) body.service = f.service
   if (+f.area && +f.area !== (d.area || 0)) body.area = +f.area
   if (f.address && f.address !== (d.address || '')) body.address = f.address
-  for (const k of ['adv', 'days', 'warranty']) if (+f[k] && String(+f[k]) !== String(+by[k]?.value || '')) body[k] = +f[k]
-  for (const k of ['start', 'end']) if (f[k] && f[k] !== (by[k]?.value || '')) body[k] = f[k]
   const p0 = d.project || {}
-  const same = (a, b) => Array.isArray(a) || Array.isArray(b) ? [...(a || [])].sort().join() === [...(b || [])].sort().join() : String(a ?? '') === String(b ?? '')
-  const prj = Object.fromEntries(PROJ.filter(k => have(k) && !same(pr[k], p0[k])).map(k => [k, k === 'vip' ? !!pr[k] : k === 'artists' ? pr[k] || [] : pr[k] || null]))
+  const same = (a, b) => String(a ?? '') === String(b ?? '')
+  const prj = Object.fromEntries(PROJ.filter(k => have(k) && !same(pr[k], p0[k])).map(k => [k, k === 'vip' ? !!pr[k] : pr[k] || null]))
   if (Object.keys(prj).length) body.project = prj
-  const gipNew = gip.id !== gip.was
-  const n = Object.keys(body).length - (body.project ? 1 : 0) + Object.keys(prj).length + (gipNew ? 1 : 0)
+  const n = Object.keys(body).length - (body.project ? 1 : 0) + Object.keys(prj).length
   const save = async () => {
     setBusy('save')
     try {
-      const r = Object.keys(body).length ? await api(`/bx/deals/${d.id}/fields`, { method: 'POST', body }) : null
-      if (gipNew) await api(`/bx/deals/${d.id}/gip`, { method: 'POST', body: { person_id: +gip.id || 0 } })
-      onDone(r?.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : r ? 'Карточка записана в Битрикс.' + (gipNew ? ' Куратор ГИП назначен.' : '') : 'Куратор ГИП назначен.')
+      const r = await api(`/bx/deals/${d.id}/fields`, { method: 'POST', body })
+      onDone(r?.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Карточка записана в Битрикс.')
     } catch (e) { setMsg('Не записалось: ' + e.message); setBusy('') }
   }
 
   const pd = dict.project || {}
   const subs = subsOf(pd.category, pd.subcategory, pr.category)
-  const opts = { category: pd.category || [], subcategory: subs, entry: pd.entry || [], designer: pd.users || [] }
+  const opts = { category: pd.category || [], subcategory: subs, entry: pd.entry || [] }
   const users = pd.users || []
+  const uname = id => users.find(u => u.id === String(id))?.name || ''
+  const ename = (k, id) => (pd[k] || []).find(o => o.id === String(id))?.name || ''
   const setP = (k, v) => setPr(x => {
     const n = { ...x, [k]: v }
     if (k === 'category' && !subsOf(pd.category, pd.subcategory, v).some(o => o.id === x.subcategory)) n.subcategory = ''   // чужая подкатегория — сброс
     return n
   })
   const field = k => {
-    if (k === 'curator') return <label key={k}><span>{LABEL[k]}</span><select value={gip.id} onChange={e => setGip(g => ({ ...g, id: e.target.value }))}>
-      <option value="">—</option>{(gip.list || []).map(o => <option key={o.id} value={String(o.id)}>{o.full_name} · {o.role_title}</option>)}</select></label>
     const filled = PROJ.includes(k) ? pr[k] : k === 'city' ? (f.city || f.cityName) : f[k]
     const cls = (ai[k] ? 'ai ' : '') + (need(k) && !filled ? 'need' : '')
     const lab = <span>{LABEL[k]}{ai[k] && <i className="aitag">ИИ</i>}{need(k) && !filled && <i className="needtag">нужно</i>}</span>
@@ -159,55 +153,69 @@ export function FillSheet({ d, onClose, onDone, onClient, onCalc }) {
     if (CHIPS.includes(k)) return <div key={k} className={'fillchips ' + cls}><span className="cplabel">{lab}</span><div className="chips">
       {(pd[k] || []).map(o => <button key={o.id} className={pr[k] === o.id ? 'on' : ''} onClick={() => setP(k, pr[k] === o.id ? '' : o.id)}>{o.name}</button>)}</div></div>
     if (k === 'vip') return <label key={k} className="check"><span>{LABEL[k]}</span><input type="checkbox" checked={!!pr.vip} onChange={e => setP('vip', e.target.checked)} /></label>
-    if (k === 'design_deadline') return <label key={k} className={cls}>{lab}<input type="date" value={pr[k] || ''} onChange={e => setP(k, e.target.value)} /></label>
-    if (k === 'contract_no') return <label key={k} className={cls}>{lab}<input value={pr[k] || ''} onChange={e => setP(k, e.target.value)} /></label>
-    if (k === 'artists') {
-      const a = pr.artists || [], uname = id => users.find(u => u.id === id)?.name || id
-      return <div key={k} className="fillchips" style={{ gridColumn: '1 / -1' }}><span className="cplabel">{LABEL[k]}</span>
-        <div className="chips">{a.map(id => <button key={id} className="on" onClick={() => setP('artists', a.filter(x => x !== id))}>{uname(id)} ✕</button>)}</div>
-        <select value="" onChange={e => e.target.value && setP('artists', [...a, e.target.value])}><option value="">+ добавить художника</option>
-          {users.filter(u => !a.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.name}{u.position ? ` · ${u.position}` : ''}</option>)}</select></div>
-    }
     if (k === 'subcategory') return <label key={k} className={cls}>{lab}<select value={pr[k] || ''} disabled={!pr.category} onChange={e => setP(k, e.target.value)}>
       <option value="">{pr.category ? '—' : 'сначала категория'}</option>{subs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
     if (PROJ.includes(k)) return <label key={k} className={cls}>{lab}<select value={pr[k] || ''} onChange={e => setP(k, e.target.value)}>
       <option value="">—</option>{opts[k].map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
     if (k === 'service') return <label key={k} className={cls}>{lab}<select value={f.service} onChange={e => set('service', e.target.value)}><option value="">—</option>{dict.services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-    if (k === 'start' || k === 'end') return <label key={k} className={cls}>{lab}<input type="date" value={f[k]} onChange={e => set(k, e.target.value)} /></label>
     if (k === 'object') return <label key={k} className={cls} style={{ gridColumn: '1 / -1' }}>{lab}<input value={f.object} onChange={e => set('object', e.target.value)} placeholder="«Школа №12», «Кофейня Daily» — из него название сделки" /></label>
     if (k === 'address') return <label key={k} className={cls}>{lab}<input value={f.address} onChange={e => set('address', e.target.value)} placeholder="Улица, дом" /></label>
     return <label key={k} className={cls}>{lab}<input type="number" min="0" inputMode="decimal" value={f[k]} onChange={e => set(k, e.target.value)} /></label>
   }
   const miss = (d.fill?.items || []).filter(x => x.need && !x.ok)
-  const c = d.client || {}
+  const c = d.client || {}, ka = d.kp_agreed
+  const nn = keys => keys.filter(need).length
+  const t = (dt || []).slice(-1)[0]
+  const art = (p0.artists || []).map(uname).filter(Boolean).join(', ')
+  const working = ['UC_AV00QK', 'UC_BMKDS4', 'WON'].includes(d.stage)
   return <Sheet title="Карточка сделки" onClose={onClose} wide>
     <div className="fillform">
-      {miss.length ? <p className="small">Не хватает: <b>{miss.length}</b> — {miss.map(x => x.label).join(', ')}. В шагах ниже они отмечены «нужно».</p> : <p className="small ok">Всё нужное заполнено.</p>}
-      <button className="ghost mini" onClick={() => setHelper(!helper)}>{helper ? 'Скрыть помощника' : 'Вставить переписку — помощник заполнит сам'}</button>
-      {helper && <div className="aibox">
-        <textarea rows={5} value={text} onChange={e => setText(e.target.value)} placeholder="Переписка из WhatsApp или анкета клиента: «нужна роспись в детском саду, Астана, Кенесары 40, примерно 45 м²…»" />
-        <button className="mini" disabled={text.trim().length < 10 || !!busy} onClick={parse}>{busy === 'parse' ? 'Разбираю…' : 'Разобрать'}</button>
-      </div>}
-      {msg && <p className="small">{msg}</p>}
-      {SECTIONS.map(([step, title, keys]) => {
-        const ks = keys.filter(have).sort((a, b) => (need(b) ? 1 : 0) - (need(a) ? 1 : 0))
-        const ro = step === 'client' ? ['name', 'phone', 'requisites'] : step === 'calc' ? ['sum', 'calc', 'kp'] : step === 'pay' ? ['paid', 'signed'] : []
-        const nn = ks.filter(need).length + ro.filter(need).length
-        return <div key={step} className="fillgrid">
-          <h3 className="fillsec">{title}{nn ? <i className="needtag">нужно {nn}</i> : null}</h3>
-          {step === 'client' && <Info rows={[['Клиент', c.name ? (c.type && !c.name.startsWith(c.type) ? `${c.type} · ${c.name}` : c.name) : '', need('name')], ['Телефон', c.phone, need('phone')],
-            ['БИН / ИИН', c.type === 'Физлицо' ? 'не нужен' : d.requisites?.cbin, need('requisites')]]}>
-            {onClient && <button className="ghost mini" onClick={onClient}>Клиент и реквизиты</button>}</Info>}
-          {step === 'calc' && <Info rows={[['Сумма сделки', d.sum ? fmt(d.sum) : '', need('sum')], ['Сложность', LEVEL[d.level] || ''],
-            ['Смен / художников по норме', d.norm?.shifts ? `${d.norm.shifts} / ${d.norm.crew || '—'}` : '', need('calc')], ['Срок, рабочих дней', d.norm?.term || ''],
-            ['КП в сделке', by.kp?.ok ? 'есть' : 'нет', need('kp')]]}>
-            {onCalc && <button className="ghost mini" onClick={onCalc}>{d.sum ? 'Пересчитать цену и срок' : 'Посчитать цену и срок'}</button>}</Info>}
-          {step === 'pay' && <Info rows={[['Поступило', fmt(d.pay?.received), need('paid')], ['Долг', d.pay?.debt ? fmt(d.pay.debt) : '0 ₸'],
-            ['Подписанный договор', by.signed?.ok ? 'есть' : 'нет', need('signed')]]} />}
-          {ks.map(field)}
+      {miss.length ? <p className="small">Не хватает: <b>{miss.length}</b> — {miss.map(x => x.label).join(', ')}.</p> : <p className="small ok">Всё нужное заполнено.</p>}
+      <p className="small muted">Здесь вводится только «Клиент и проект». Остальное приходит со своих шагов — ниже видно итог и куда идти.</p>
+      <Sec title="Клиент и проект" n={nn(EDIT.concat(['name', 'phone', 'requisites']))} tag="вводит МОП">
+        <Info rows={[['Клиент', c.name ? (c.type && !c.name.startsWith(c.type) ? `${c.type} · ${c.name}` : c.name) : '', need('name')], ['Телефон', c.phone, need('phone')],
+          ['БИН / ИИН', c.type === 'Физлицо' ? 'не нужен' : d.requisites?.cbin, need('requisites')]]}>
+          {onClient && <button className="ghost mini" onClick={onClient}>Клиент и реквизиты</button>}</Info>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <button className="ghost mini" onClick={() => setHelper(!helper)}>{helper ? 'Скрыть помощника' : 'Вставить переписку — помощник заполнит сам'}</button>
+          {helper && <div className="aibox">
+            <textarea rows={5} value={text} onChange={e => setText(e.target.value)} placeholder="Переписка из WhatsApp или анкета клиента: «нужна роспись в детском саду, Астана, Кенесары 40, примерно 45 м²…»" />
+            <button className="mini" disabled={text.trim().length < 10 || !!busy} onClick={parse}>{busy === 'parse' ? 'Разбираю…' : 'Разобрать'}</button>
+          </div>}
+          {msg && <p className="small">{msg}</p>}
         </div>
-      })}
-      <button disabled={!n || !!busy} onClick={save}>{busy === 'save' ? 'Записываю…' : `Записать в Битрикс${n ? ` (${n})` : ''}`}</button>
+        {EDIT.filter(have).map(field)}
+        <button style={{ gridColumn: '1 / -1' }} disabled={!n || !!busy} onClick={save}>{busy === 'save' ? 'Записываю…' : `Записать в Битрикс${n ? ` (${n})` : ''}`}</button>
+      </Sec>
+      <Sec title="Расчёт и КП" n={nn(['sum', 'calc', 'kp'])} tag="калькулятор">
+        <Info rows={[['Сумма сделки', d.sum ? fmt(d.sum) : '', need('sum')], ['Сложность', LEVEL[d.level] || ''],
+          ['Смен / художников по норме', d.norm?.shifts ? `${d.norm.shifts} / ${d.norm.crew || '—'}` : '', need('calc')], ['Срок, рабочих дней', d.norm?.term || ''],
+          ['КП в сделке', by.kp?.ok ? 'есть' : 'нет', need('kp')], ['Клиент согласовал', ka ? `${day(ka.at)} · ${fmt(ka.total)} · закреплено` : 'нет']]}>
+          {onStep && !ka && <button className="ghost mini" onClick={() => onStep('calc')}>{d.sum ? 'К расчёту' : 'Посчитать цену и срок'}</button>}
+          {onStep && <button className="ghost mini" onClick={() => onStep('kp')}>К КП</button>}</Info>
+      </Sec>
+      <Sec title="Дизайн" n={nn([])} tag="дизайнер">
+        <Info rows={[['Задач на дизайн', dt === null ? '…' : dt.length ? `${dt.length} · ${t.stage_name}` : 'нет'],
+          ['Дизайнер', t?.designer || uname(p0.designer)], ['Сложность дизайна', (t?.size || '').toUpperCase() || ename('design_level', p0.design_level)],
+          ['Срок дизайна', day(t?.deadline || p0.design_deadline)]]}>
+          {onDesign && <button className="ghost mini" onClick={onDesign}>К блоку «Дизайн»</button>}</Info>
+      </Sec>
+      <Sec title="Договор" n={nn(['adv', 'days', 'warranty'])} tag="бланк договора">
+        <Info rows={[['Номер договора', p0.contract_no || ''], ['Аванс', by.adv?.value ? by.adv.value + '%' : '', need('adv')],
+          ['Срок по договору, дней', by.days?.value || '', need('days')], ['Гарантия, мес.', by.warranty?.value || '', need('warranty')]]}>
+          {onStep && <button className="ghost mini" onClick={() => onStep('docs')}>К договору</button>}</Info>
+      </Sec>
+      <Sec title="Оплата" n={nn(['paid', 'signed'])} tag="с чеком">
+        <Info rows={[['Поступило', fmt(d.pay?.received), need('paid')], ['Долг', d.pay?.debt ? fmt(d.pay.debt) : '0 ₸'],
+          ['Подписанный договор', by.signed?.ok ? 'есть' : 'нет', need('signed')]]}>
+          {onStep && <button className="ghost mini" onClick={() => onStep('pay')}>К оплате</button>}</Info>
+      </Sec>
+      <Sec title="Производство" n={nn(['start', 'end'])} tag="«В производство»">
+        <Info rows={[['Куратор ГИП', gip === null ? '…' : gip], ['Старт работ', day(by.start?.value), need('start')], ['Сдача (план)', day(by.end?.value), need('end')],
+          ['Художники', art || (working ? 'ставит куратор ГИП' : '')]]}>
+          {onProd && !working && <button className="ghost mini" onClick={onProd}>В производство</button>}
+          {onStep && working && <button className="ghost mini" onClick={() => onStep('work')}>К проекту</button>}</Info>
+      </Sec>
     </div>
   </Sheet>
 }

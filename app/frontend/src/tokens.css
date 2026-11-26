@@ -1330,3 +1330,9 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
 .prodsk { display: flex; gap: 10px; align-items: center; background: var(--alt); border: 1px solid var(--line); border-radius: var(--r2); padding: 8px; margin: 6px 0; }
 .prodsk img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; flex: 0 0 64px; }
 .prodsk > div { min-width: 0; }
+/* карточка сделки (схема HEAD 26.11): откуда приходит значение шага */
+.fillsec .srctag { font-style: normal; font-size: 11px; font-weight: 600; color: var(--muted); background: var(--dark2); border-radius: 8px; padding: 1px 7px; margin-left: 8px; }
+.fillinfo .dealbtns { margin-top: 4px; } .fillinfo .dealbtns button { margin-top: 0; }
+.kpagree { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding: 10px 12px; border-radius: var(--r2); background: var(--dark2); }
+.kpagree.on { border-left: 3px solid var(--ok, #5fb04a); }
+.kpagree > div:first-child { display: flex; flex-direction: column; gap: 2px; }

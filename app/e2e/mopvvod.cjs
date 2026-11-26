@@ -95,20 +95,27 @@ async function tab(p, name) {
   assert.strictEqual(rq.PRESET_ID, 3); assert.strictEqual(rq.RQ_BIN, '123456789012'); assert.strictEqual(rq.RQ_CEO_NAME, 'Сидоров Самат')
   assert.strictEqual(calls.find(x => x.method === 'crm.requisite.bankdetail.add').params.fields.RQ_IIK, 'KZ123456789012345678')
 
-  // 2б. «Заполнить недостающее» → окно «Карточка сделки» по шагам: нехватающее отмечено «нужно», всё заполняется здесь
+  // 2б. «Заполнить недостающее» → окно «Карточка сделки» (схема HEAD 26.11 «кто что заполняет»): вводится только
+  // «Клиент и проект», остальное — итогом своих шагов с кнопкой «куда идти»
   await p.locator('.fillbar .fb-go').click()
   const fs = p.locator('.sheetbox .fillform')
   await fs.waitFor()
-  await fs.locator('label', { hasText: 'Куратор ГИП' }).waitFor()
   await fs.locator('label', { hasText: 'Подкатегория' }).waitFor()
   await fs.locator('label', { hasText: 'Категория' }).first().locator('select').selectOption({ label: '2. Общепит' })
   assert.deepStrictEqual(await fs.locator('label', { hasText: 'Подкатегория' }).locator('option').allTextContents(), ['—', '2.1 Кафе'], 'подкатегории — своей категории')
+  assert.deepStrictEqual(await fs.locator('.fillchips', { hasText: 'Модель' }).locator('button').allTextContents(), ['B2B', 'B2C', 'B2G'], 'модель — весь список')
+  assert.deepStrictEqual(await fs.locator('.fillchips', { hasText: 'Размер проекта' }).locator('button').allTextContents(), ['Мелкий', 'Средний', 'Крупный', 'Огромный'], 'размер — весь список')
   const txt = await fs.textContent()
   assert.ok(!txt.includes('«Заполнить карточку» →') && !txt.includes('Ответственный исполнитель'), 'без путей и без ответственного исполнителя')
   assert.deepStrictEqual(await fs.locator('h3.fillsec').evaluateAll(h => h.map(x => x.firstChild.textContent)),
-    ['Клиент и объект', 'Проект', 'Расчёт и КП', 'Дизайн', 'Договор', 'Оплата', 'В работе'])
-  for (const t of ['Модель', 'Размер проекта', 'VIP-клиент', 'Дизайнер', 'Сложность дизайна', 'Номер договора', 'Художники', 'Смен / художников по норме', 'Поступило'])
+    ['Клиент и проект', 'Расчёт и КП', 'Дизайн', 'Договор', 'Оплата', 'Производство'])
+  for (const t of ['VIP-клиент', 'Дизайнер', 'Сложность дизайна', 'Номер договора', 'Куратор ГИП', 'Художники', 'Смен / художников по норме', 'Клиент согласовал', 'Поступило'])
     assert.ok(txt.includes(t), 'в окне есть: ' + t)
+  // вводится только первый шаг: дальше ни одного поля ввода, только итог и кнопки
+  assert.strictEqual(await fs.locator('.fillgrid').nth(1).locator('input, select').count(), 0, 'расчёт — только итог')
+  assert.strictEqual(await fs.locator('.fillgrid').nth(5).locator('input, select').count(), 0, 'производство — только итог')
+  for (const b of ['К расчёту', 'К КП', 'К блоку «Дизайн»', 'К договору', 'К оплате', 'В производство'])
+    await fs.getByRole('button', { name: b }).waitFor()
   await noScroll(p)
   await p.waitForTimeout(700)
   await p.screenshot({ path: `${shots}/mopvvod-5-kartochka.png` })

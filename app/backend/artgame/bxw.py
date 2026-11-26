@@ -26,6 +26,7 @@ F_ACTS = "UF_CRM_ARTGAME_DOC05_ACTS"   # «АВР» в блоке «Докуме
 F_ADV, F_DAYS, F_WARR = "UF_CRM_ARTGAME_ADVANCE_PERCENT", "UF_CRM_1753295493279", "UF_CRM_ARTGAME_WARRANTY_MONTHS"
 F_INV_SUM, F_INV_PURPOSE, F_REASON = "UF_CRM_ARTGAME_INVOICE_AMOUNT", "UF_CRM_ARTGAME_INVOICE_PURPOSE", "UF_CRM_1753381316974"
 F_START, F_END = "UF_CRM_ARTGAME_PROJECT_START_ACTUAL", "UF_CRM_ARTGAME_PROJECT_END_PLAN"
+F_CONTRACT_NO = "UF_CRM_1753292354197"   # «Номер договора»
 F_END_FACT = "UF_CRM_ARTGAME_PROJECT_END_ACTUAL"   # «Окончание факт»: пишет приложение при закрытии сделки HEAD (12.11)
 WRITABLE = {"OPPORTUNITY", "STAGE_ID", F_START, F_END, F_END_FACT, bx.AREA, bx.SERVICE, bx.ADDR, bx.CITY, F_ADV, F_DAYS, F_WARR, F_INV_SUM, F_INV_PURPOSE, F_REASON,
             F_KP, F_CONTRACT, F_INVOICES, F_ACTS, F_OTHER, bx.F_LEVEL, bx.F_SHIFTS, bx.F_CREW, bx.F_TERM, "TITLE", bx.OBJECT, *bx.PROJECT}
@@ -201,16 +202,50 @@ def doc_saved(p: dict, deal_id: int, name: str, fid: str, f: dict) -> dict:
         fields.update(nf)
         if r:
             parts.append(f"по норме {r['shifts']:g} смен, {r['crew']} чел., срок {r['client']} дн.")
+    if kind in ("kp", "dogovor") and fields.get("OPPORTUNITY"):
+        from .kpagree import get as kp_agreed
+        a = kp_agreed(deal_id)
+        if a and round(a["total"]) != fields["OPPORTUNITY"]:   # согласованное КП не перезаписываем (HEAD 26.11)
+            for k in ("OPPORTUNITY", bx.AREA, bx.F_LEVEL, bx.F_SHIFTS, bx.F_CREW, bx.F_TERM):
+                fields.pop(k, None)
+            parts = [f"сумма в сделке не изменена: КП согласовано на {_fmt(a['total'])}"]
     if kind == "dogovor":
         fields.update({F_ADV: int(f.get("adv") or 0) or None, F_DAYS: str(f.get("days") or "") or None,
                        F_WARR: int(f.get("warr") or 0) or None, bx.ADDR: f.get("objAddr") or None})
         if f.get("adv"):
             parts.append(f"аванс {int(f['adv'])}%")
+        if not (bx._deal(p, deal_id).get(F_CONTRACT_NO) or "").strip():
+            fields[F_CONTRACT_NO] = str(deal_id)   # № договора = № сделки (решение 03.11)
     if kind == "invoice" and f.get("invSum"):
         fields[F_INV_SUM] = f"{int(round(float(f['invSum'])))}|KZT"
         parts.append("на " + _fmt(float(f["invSum"])))
     comment = f"скачал {KIND_TITLE[kind]} «{name}»" + (": " + ", ".join(parts) if parts else "")
-    return write(p, deal_id, f"{KIND_TITLE[kind]}: {name}", fields, comment, file, stage_for=kind)
+    out = write(p, deal_id, f"{KIND_TITLE[kind]}: {name}", fields, comment, file, stage_for=kind)
+    if file:
+        to_drive(deal_id, path, name)
+    return out
+
+
+def to_drive(deal_id: int, path: Path, name: str) -> None:
+    """Копия документа в папку сделки ДОКУМЕНТЫ (HEAD 26.11: в Битриксе — у сделки, на Диске — полный архив).
+    Только если сделка уже в приложении (есть папка); Диск не ответил — документ всё равно в сделке, пишем в журнал."""
+    from . import drive
+    ext = Path(name).suffix.lower()
+    mime = {".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}.get(ext, "application/octet-stream")
+    try:
+        with db.pool.connection() as conn:
+            obj = conn.execute("SELECT * FROM objects WHERE id=%s AND id<>0", (deal_id,)).fetchone()
+            if not obj:
+                return
+            dv = drive.Drive()
+            folder = drive.ensure_folders(conn, obj, dv)["doc"]
+        fid = dv.upload(folder, name, path.read_bytes(), mime)
+        with db.pool.connection() as conn:
+            db.audit(conn, None, "doc_to_drive", "deal", deal_id, {"name": name, "drive_id": fid})
+    except Exception as ex:  # noqa: BLE001
+        with db.pool.connection() as conn:
+            db.audit(conn, None, "doc_to_drive_error", "deal", deal_id, {"name": name, "error": f"{type(ex).__name__}: {str(ex)[:160]}"})
 
 
 # ---------- стадия и заметка из вкладки «Сделки» ----------
@@ -289,6 +324,9 @@ def api_calc(deal_id: int, body: CalcIn, p: dict = Depends(active)):
     """Расчёт из карточки: площадь и сложность → смены, люди, срок по нормам → в сделку. МОП руками не вводит."""
     if body.area <= 0:
         raise HTTPException(400, "укажите площадь")
+    from .kpagree import get as kp_agreed
+    if kp_agreed(deal_id):
+        raise HTTPException(409, "КП согласовано клиентом: нормы закреплены. Пересчёт — после «Снять согласование» в шаге «КП».")
     fields, r = norm_fields(body.area, body.level, body.service, body.height, body.outdoor)
     if not r:
         raise HTTPException(400, "нечего считать")
