@@ -475,6 +475,9 @@ function PostSheet({ post, head, mine, canResult, onClose, onEdit, onChanged }) 
     {x.caption && <p className="mktcap">{x.caption}</p>}
     {x.files.length > 0 && <div className="mktfiles">{x.files.map(f => <button key={f.id} className="mthumb" onClick={() => setView(f)}>
       {f.thumb ? <img src={f.thumb} alt="" loading="lazy" /> : <span>▶</span>}</button>)}</div>}
+    {[['srcs', 'Исходники'], ['drafts', 'Монтаж']].map(([k, t]) => x[k]?.length > 0 && <div key={k}><p className="small muted">{t} · {x[k].length}</p>
+      <div className="mktfiles">{x[k].map(f => <button key={f.id} className="mthumb" onClick={() => setView(f)}>{f.thumb ? <img src={f.thumb} alt="" loading="lazy" /> : <span>▶</span>}</button>)}</div></div>)}
+    {x.out_saved && <p className={'small ' + (x.out_saved.startsWith('не ') ? 'why' : 'muted')}>Финал: {x.out_saved}</p>}
     {x.review_note && <p className="small why">{x.reviewer || 'HEAD'}: {x.review_note}</p>}
     {x.checked && <p className="small muted">Проверено: {x.checked}</p>}
     {x.url && <p className="small"><a href={x.url} target="_blank" rel="noreferrer">Открыть публикацию ›</a></p>}
@@ -499,15 +502,15 @@ function Editor({ post, onlyAd, onClose, onSaved }) {
   const [d, setD] = useState(null)
   const [objs, setObjs] = useState([])
   const [b, setB] = useState({ title: post.title || '', channel: post.channel || 'instagram', kind: post.kind || (onlyAd ? 'ad' : 'reels'), plan_date: post.plan_date || '',
-    caption: post.caption || '', object_id: post.object_id || '', files: post.files || [] })
-  const [pick, setPick] = useState(false)
+    caption: post.caption || '', object_id: post.object_id || '', files: post.files || [], srcs: post.srcs || [], drafts: post.drafts || [] })
+  const [pick, setPick] = useState(null)   // 'srcs' | 'files' — что выбираем из «Медиа»
   const [msg, setMsg] = useState('')
   const [up, setUp] = useState(null)   // доля загруженного, пока файл идёт на Диск
-  const addReady = async list => {
+  const addReady = async (list, slot) => {   // slot: 'drafts' — монтаж, 'files' — финал
     setMsg('')
     for (const file of list) {
       setUp(0)
-      try { const f = await uploadReady(file, setUp); setB(s => ({ ...s, files: [...s.files, f] })) }
+      try { const f = await uploadReady(file, setUp); setB(s => ({ ...s, [slot]: [...s[slot], f] })) }
       catch (e) { setMsg(`${file.name}: ${e.message}`) }
     }
     setUp(null)
@@ -518,11 +521,15 @@ function Editor({ post, onlyAd, onClose, onSaved }) {
     if (up !== null) return setMsg('Дождись конца загрузки.')
     if (!b.title.trim()) return setMsg('Напиши, что это за публикация.')
     const body = { title: b.title, channel: b.channel, kind: b.kind, plan_date: b.plan_date || null, caption: b.caption || null,
-      object_id: b.object_id ? +b.object_id : null, file_ids: b.files.map(f => f.id) }
+      object_id: b.object_id ? +b.object_id : null, file_ids: b.files.map(f => f.id), src_ids: b.srcs.map(f => f.id), draft_ids: b.drafts.map(f => f.id) }
     api(post.id ? `/mkt/posts/${post.id}` : '/mkt/posts', { method: 'POST', body }).then(onSaved, e => setMsg(e.message))
   }
-  if (pick) return <Sheet title="Материал из «Медиа»" onClose={() => setPick(false)}>
-    <Media picked={b.files} onPick={files => { set('files', files); setPick(false) }} /></Sheet>
+  if (pick) return <Sheet title={pick === 'srcs' ? 'Исходники из «Медиа»' : 'Финал из «Медиа»'} onClose={() => setPick(null)}>
+    <Media picked={b[pick]} onPick={files => { set(pick, files); setPick(null) }} /></Sheet>
+  const row = k => b[k].length > 0 && <div className="mktfiles">{b[k].map(f => <span key={f.id} className="mthumb">{f.thumb ? <img loading="lazy" src={f.thumb} alt="" /> : <span>▶</span>}
+    <button className="mktdel" aria-label="Убрать" onClick={() => set(k, b[k].filter(x => x.id !== f.id))}>×</button></span>)}</div>
+  const upBtn = (slot, text) => <label className={'photo mktup' + (up !== null ? ' busy' : '')}>{up !== null ? `Загрузка… ${Math.round(up * 100)}%` : text}
+    <input type="file" accept="video/*,image/*" multiple hidden disabled={up !== null} onChange={e => { const fs = [...e.target.files]; e.target.value = ''; addReady(fs, slot) }} /></label>
   return <Sheet title={post.id ? 'Правка публикации' : 'Новая публикация'} onClose={onClose}>
     <label className="muted small">Что выходит</label>
     <input placeholder="Например: рилс «Кафе до/после»" value={b.title} onChange={e => set('title', e.target.value)} />
@@ -537,12 +544,19 @@ function Editor({ post, onlyAd, onClose, onSaved }) {
     <label className="muted small">Проект (если про объект)</label>
     <select value={b.object_id} onChange={e => set('object_id', e.target.value)}><option value="">Не про проект</option>
       {objs.map(o => <option key={o.id} value={o.id}>№{o.id} {o.title}</option>)}</select>
-    <label className="muted small">Материал · {b.files.length}</label>
-    {b.files.length > 0 && <div className="mktfiles">{b.files.map(f => <span key={f.id} className="mthumb">{f.thumb ? <img loading="lazy" src={f.thumb} alt="" /> : <span>▶</span>}
-      <button className="mktdel" aria-label="Убрать" onClick={() => set('files', b.files.filter(x => x.id !== f.id))}>×</button></span>)}</div>}
-    <label className={'photo mktup' + (up !== null ? ' busy' : '')}>{up !== null ? `Загрузка… ${Math.round(up * 100)}%` : '⬆ Загрузить готовое (рилс, сторис, баннер)'}
-      <input type="file" accept="video/*,image/*" multiple hidden disabled={up !== null} onChange={e => { const fs = [...e.target.files]; e.target.value = ''; addReady(fs) }} /></label>
-    <button className="ghost" onClick={() => setPick(true)}>🎬 Выбрать из «Медиа»</button>
+    <h3 className="mktpart">1 · Исходники · {b.srcs.length}</h3>
+    <p className="small muted">Из чего монтируешь. В «Медиа» они станут «в работе», после выхода — «вышло».</p>
+    {row('srcs')}
+    <button className="ghost" onClick={() => setPick('srcs')}>🎬 Выбрать исходники из «Медиа»</button>
+    <h3 className="mktpart">2 · Монтаж · {b.drafts.length}</h3>
+    <p className="small muted">Черновые версии. Лежат в «02 КОНТЕНТ / 00 В работе».</p>
+    {row('drafts')}
+    {upBtn('drafts', '⬆ Загрузить черновую версию')}
+    <h3 className="mktpart">3 · Финал · {b.files.length}</h3>
+    <p className="small muted">Что выходит. После «Утверждаю» HEAD файл сам ляжет в «03 ВЫШЛО / год / месяц» с именем «сделка_дата_формат_название».</p>
+    {row('files')}
+    {upBtn('files', '⬆ Загрузить финал (рилс, сторис, баннер)')}
+    <button className="ghost" onClick={() => setPick('files')}>🎬 Финал из «Медиа»</button>
     {msg && <p className="small why">{msg}</p>}
     <button onClick={save}>Сохранить</button>
     <p className="small muted">Сохранится черновиком. На утверждение уйдёт, когда нажмёшь «Отправить на утверждение».</p>
@@ -556,6 +570,8 @@ function uploadSrc(file, where, onProgress) {
   return api('/mkt/src/uploads', { method: 'POST', body: { client_uid: uuid(), name: file.name, mime: file.type || 'application/octet-stream', size: file.size, ...where } })
     .then(r => r.done ? r : sendToGoogle(r.upload_url, file, onProgress).then(g => api(`/mkt/src/uploads/${r.file_id}/done`, { method: 'POST', body: { drive_id: g.id } })))
 }
+
+const MSTATE = { free: ['Свободно', ''], work: ['В работе', 'warn'], out: ['Вышло', 'ok'] }   // статус материала (HEAD 26.11)
 
 function Media({ picked, onPick, canUp, head }) {
   const [sync, setSync] = useState(null)   // HEAD 26.11: подтянуть «МЕДИА» сделок с Диска — {added, left, busy, err}
@@ -577,7 +593,7 @@ function Media({ picked, onPick, canUp, head }) {
   const [type, setType] = useState('reels')
   const [best, setBest] = useState(false)
   const [d, setD] = useState(null)
-  const [f, setF] = useState({ q: '', year: '', city: '', tag: '', cat: '', sub: '' })    // поиск и фильтры (HEAD 24.11)
+  const [f, setF] = useState({ q: '', year: '', city: '', tag: '', cat: '', sub: '', vid: '', state: '' })    // поиск и фильтры (HEAD 24.11; вид и статус — 26.11)
   const [tagsOf, setTagsOf] = useState(null)
   const [open, setOpen] = useState(null)
   const [sel, setSel] = useState(picked || [])
@@ -641,13 +657,17 @@ function Media({ picked, onPick, canUp, head }) {
       <select aria-label="Год" value={f.year} onChange={e => setF({ ...f, year: e.target.value })}><option value="">Год</option>
         {(d?.years || []).map(y => <option key={y} value={y}>{y}</option>)}</select>
       <select aria-label="Город" value={f.city} onChange={e => setF({ ...f, city: e.target.value })}><option value="">Город</option>
-        {(d?.cities || []).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+        {(d?.cities || []).map(c => <option key={c} value={c}>{c}</option>)}</select>
+      <select aria-label="Вид" value={f.vid} onChange={e => setF({ ...f, vid: e.target.value })}><option value="">Сырое и готовое</option>
+        <option value="raw">Сырое</option><option value="ready">Готовое</option></select>
+      <select aria-label="Статус" value={f.state} onChange={e => setF({ ...f, state: e.target.value })}><option value="">Любой статус</option>
+        {Object.entries(MSTATE).map(([k, [t]]) => <option key={k} value={k}>{t}</option>)}</select></div>
     <div className="chips"><button className={best ? '' : 'on'} onClick={() => setBest(false)}>Всё</button><button className={best ? 'on' : ''} onClick={() => setBest(true)}>Лучшее</button></div>
     {!d ? <p className="muted">Загрузка…</p> : d.err ? <p className="small why">{d.err}</p> : !items.length ? <p className="muted small">Пока пусто.</p> :
       items.map(x => <div key={x.id} className={'mitem' + (onPick && on(x) ? ' picked' : '')}>
         <button className="mthumb" onClick={() => onPick ? flip(x) : setOpen(x)}>{x.thumb ? <img src={x.thumb} alt="" loading="lazy" /> : <span>{onPick && on(x) ? '✓' : '▶'}</span>}</button>
         <div className="mbody"><a onClick={() => onPick ? flip(x) : setOpen(x)}><b>{x.name}</b></a>
-          <div className="small muted">{x.kind === 'src' ? `Исходники · ${x.src_folder}` : `№${x.object_id} ${x.object_title}`} · {x.by} · {new Date(x.created_at).toLocaleDateString('ru-RU')}{x.review === 'approved' ? ' · в Продакшн' : ''}</div>
+          <div className="small muted">{x.state && x.state !== 'free' && <span className={'badge ' + MSTATE[x.state][1]} style={{ marginLeft: 0, marginRight: 6 }}>{MSTATE[x.state][0]}</span>}{x.kind === 'src' ? `Исходники · ${x.src_folder}` : x.kind === 'pub' ? 'Готовое · из публикации' : `№${x.object_id} ${x.object_title}`} · {x.by} · {new Date(x.created_at).toLocaleDateString('ru-RU')}{x.review === 'approved' ? ' · в Продакшн' : ''}</div>
           {(x.tags.length > 0 || (d.can_tag && !onPick)) && <div className="mtags">{x.tags.map(t => <span key={t}>{rname(t)}</span>)}
             {d.can_tag && !onPick && <a onClick={() => setTagsOf(x)}>{x.tags.length ? 'изменить' : '+ метка'}</a>}</div>}</div>
         {onPick ? <button className={'mini' + (on(x) ? '' : ' ghost')} aria-label="Выбрать" onClick={() => flip(x)}>{on(x) ? '✓' : '+'}</button>

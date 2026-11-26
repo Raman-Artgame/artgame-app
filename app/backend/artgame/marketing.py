@@ -4,6 +4,7 @@
 Черновик → «Отправить HEAD» → HEAD «Утверждаю» или «Вернуть» с причиной → после выхода — «Опубликовано» со ссылкой.
 Неутверждённую публикацию отметить вышедшей нельзя. Ничего не удаляем: «Отменить» = status cancelled.
 """
+import re
 from datetime import date
 from uuid import UUID
 
@@ -60,7 +61,8 @@ def _out(conn, r: dict) -> dict:
     return {**{k: r[k] for k in ("id", "title", "channel", "kind", "plan_date", "caption", "object_id", "status", "author_id",
                                  "submitted_at", "reviewed_at", "review_note", "url", "published_at", "created_at",
                                  "result", "result_note", "views", "leads", "checked_at")},
-            "author": r.get("author"), "checked": r.get("checked"), "reviewer": r.get("reviewer"), "object_title": r.get("object_title"), "files": _files(conn, list(r["file_ids"] or []))}
+            "author": r.get("author"), "checked": r.get("checked"), "reviewer": r.get("reviewer"), "object_title": r.get("object_title"), "files": _files(conn, list(r["file_ids"] or [])),
+            "srcs": _files(conn, list(r.get("src_ids") or [])), "drafts": _files(conn, list(r.get("draft_ids") or [])), "out_saved": r.get("out_saved")}
 
 
 SQL = """SELECT m.*, pe.full_name AS author, o.title AS object_title, ck.full_name AS checked,
@@ -140,7 +142,9 @@ class PostIn(BaseModel):
     kind: str = "reels"
     plan_date: date | None = None
     caption: str | None = Field(default=None, max_length=4000)
-    file_ids: list[int] = Field(default_factory=list, max_length=20)
+    file_ids: list[int] = Field(default_factory=list, max_length=20)     # финал: что выходит
+    src_ids: list[int] = Field(default_factory=list, max_length=60)      # исходники из «Медиа» (HEAD 26.11): помечаются «в работе» / «вышло»
+    draft_ids: list[int] = Field(default_factory=list, max_length=20)    # монтаж: черновые версии
     object_id: int | None = None
 
 
@@ -149,10 +153,11 @@ def _check(conn, b: PostIn, p: dict | None = None):
         raise HTTPException(400, "bad channel/kind")
     if p and p["role_code"] != "head" and p.get("mkt_job") == "target" and b.kind != "ad":
         raise HTTPException(403, "таргетолог ставит только рекламу")
-    if b.file_ids:
-        ok = conn.execute("SELECT count(*) AS n FROM files WHERE id = ANY(%s) AND kind IN ('media','pub','src') AND status='ready'", (b.file_ids,)).fetchone()["n"]
-        if ok != len(set(b.file_ids)):
-            raise HTTPException(400, "материал не найден в «Медиа»")
+    for ids in (b.file_ids, b.src_ids, b.draft_ids):
+        if ids:
+            ok = conn.execute("SELECT count(*) AS n FROM files WHERE id = ANY(%s) AND kind IN ('media','pub','src') AND status='ready'", (ids,)).fetchone()["n"]
+            if ok != len(set(ids)):
+                raise HTTPException(400, "материал не найден в «Медиа»")
 
 
 @router.post("/mkt/posts")
@@ -160,9 +165,9 @@ def post_add(b: PostIn, p: dict = Depends(active)):
     _job(p, POST_JOBS, "публикации")
     with db.pool.connection() as conn, conn.transaction():
         _check(conn, b, p)
-        r = conn.execute("""INSERT INTO mkt_posts (title, channel, kind, plan_date, caption, file_ids, object_id, author_id)
-                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                         (b.title.strip(), b.channel, b.kind, b.plan_date, b.caption, b.file_ids, b.object_id, p["id"])).fetchone()
+        r = conn.execute("""INSERT INTO mkt_posts (title, channel, kind, plan_date, caption, file_ids, src_ids, draft_ids, object_id, author_id)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                         (b.title.strip(), b.channel, b.kind, b.plan_date, b.caption, b.file_ids, b.src_ids, b.draft_ids, b.object_id, p["id"])).fetchone()
         db.audit(conn, p["id"], "mkt_post_add", "mkt_posts", r["id"], {"title": b.title})
         return _out(conn, _get(conn, r["id"]))
 
@@ -177,9 +182,9 @@ def post_edit(post_id: int, b: PostIn, p: dict = Depends(active)):
         if r["status"] not in EDITABLE:
             raise HTTPException(409, "править можно черновик или возвращённое")
         _check(conn, b, p)
-        conn.execute("""UPDATE mkt_posts SET title=%s, channel=%s, kind=%s, plan_date=%s, caption=%s, file_ids=%s, object_id=%s,
-                        status='draft', updated_at=now() WHERE id=%s""",
-                     (b.title.strip(), b.channel, b.kind, b.plan_date, b.caption, b.file_ids, b.object_id, post_id))
+        conn.execute("""UPDATE mkt_posts SET title=%s, channel=%s, kind=%s, plan_date=%s, caption=%s, file_ids=%s, src_ids=%s, draft_ids=%s,
+                        object_id=%s, status='draft', updated_at=now() WHERE id=%s""",
+                     (b.title.strip(), b.channel, b.kind, b.plan_date, b.caption, b.file_ids, b.src_ids, b.draft_ids, b.object_id, post_id))
         return _out(conn, _get(conn, post_id))
 
 
@@ -239,7 +244,49 @@ def post_review(post_id: int, b: ReviewIn, p: dict = Depends(active)):
                 ", reviewed_by=%s, reviewed_at=now(), review_note=%s", (p["id"], b.note), "mkt_post_review", {"approve": b.approve, "note": b.note})
     if b.approve and out.get("kind") == "ad":
         out["ad_saved"] = save_ad_creatives(post_id)
+    if b.approve:
+        out["out_saved"] = file_finals(post_id)
     return out
+
+
+def final_name(r: dict, f: dict, n: int, total: int) -> str:
+    """Имя финала в «03 ВЫШЛО» (HEAD 26.11: всё по местам, без IMG_1234): «1137_2026-11-28_Рилс_Кафе до-после_02.mp4».
+    Сделка — номер, без проекта «БН»; номер по порядку — только когда файлов несколько."""
+    ext = ("." + f["name"].rsplit(".", 1)[1].lower()) if "." in f["name"] else ""
+    when = r["plan_date"] or date.today()
+    title = re.sub(r"\s+", " ", re.sub(r'[\\/:*?"<>|]+', " ", r["title"])).strip()[:60] or "Без названия"
+    parts = [str(r["object_id"]) if r["object_id"] else "БН", when.isoformat(), KINDS.get(r["kind"], r["kind"]), title]
+    return "_".join(parts) + (f"_{n:02d}" if total > 1 else "") + ext
+
+
+def file_finals(post_id: int) -> str | None:
+    """Утверждено HEAD: финалы, загруженные в приложении, переезжают из «02 КОНТЕНТ / 00 В работе» в «03 ВЫШЛО / ГГГГ / ММ»
+    и получают имя по правилу. Материал, выбранный из «Медиа» (объекты, исходники), остаётся на своём месте.
+    Диск не ответил — утверждение остаётся, в публикации видно, что файл не лёг (повтор — тем же вызовом)."""
+    with db.pool.connection() as conn:
+        r = conn.execute("SELECT * FROM mkt_posts WHERE id=%s", (post_id,)).fetchone()
+        fs = conn.execute("SELECT * FROM files WHERE id = ANY(%s) AND kind='pub' AND status='ready' AND drive_id IS NOT NULL",
+                          (r["file_ids"],)).fetchall()
+    if not fs:
+        return None
+    order = {i: k for k, i in enumerate(r["file_ids"])}
+    fs.sort(key=lambda f: order.get(f["id"], 0))
+    when = r["plan_date"] or date.today()
+    try:
+        d = drive.Drive()
+        folder = _ready_folder(d, when)
+        for n, f in enumerate(fs, 1):
+            name = final_name(r, f, n, len(fs))
+            if folder not in (d.meta(f["drive_id"]).get("parents") or []) or f["name"] != name:
+                d.move(f["drive_id"], folder, name)
+            with db.pool.connection() as conn:
+                conn.execute("UPDATE files SET name=%s, note='final' WHERE id=%s", (name, f["id"]))
+        res = f"03 ВЫШЛО / {when.year} / {when.month:02d} {drive.MONTHS[when.month - 1]}"
+    except Exception as ex:  # noqa: BLE001
+        res = f"не перенесено на Диск: {type(ex).__name__}"
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE mkt_posts SET out_saved=%s WHERE id=%s", (res, post_id))
+    return res
 
 
 def save_ad_creatives(post_id: int) -> str | None:
@@ -303,14 +350,20 @@ def review_day(b: DayIn, p: dict = Depends(active)):
     for r in rows:
         if r["kind"] == "ad":
             save_ad_creatives(r["id"])
+        file_finals(r["id"])
     return {"approved": len(rows)}
 
 
 # ---------- «Загрузить готовое»: рилс / сторис / баннер от агентства — прямо в публикацию (HEAD 14.11) ----------
 
 def _ready_folder(d, when) -> str:
-    """«06 МАРКЕТИНГ / 04 Готовые публикации / ГГГГ / ММ МЕСЯЦ» — по дате начала загрузки."""
+    """«06 МАРКЕТИНГ / 03 ВЫШЛО / ГГГГ / ММ МЕСЯЦ» — по дате выхода; сюда финал попадает только после «Утверждаю» HEAD."""
     return d.child(d.child(drive.MKT_READY_ID, str(when.year)), f"{when.month:02d} {drive.MONTHS[when.month - 1]}")
+
+
+def _work_folder(d, when) -> str:
+    """«06 МАРКЕТИНГ / 02 КОНТЕНТ / 00 В работе / ГГГГ-ММ» — монтаж и финал до утверждения (HEAD 26.11)."""
+    return d.child(d.child(drive.MKT_CONTENT_ID, "00 В работе"), f"{when.year}-{when.month:02d}")
 
 
 class UpIn(BaseModel):
@@ -339,7 +392,7 @@ def upload_start(b: UpIn, request: Request, p: dict = Depends(active)):
                 return {"file_id": f["id"], "done": True, "file": links({**f, "by": p["full_name"]})}
         try:
             d = drive.Drive()
-            url = d.resumable(_ready_folder(d, f["created_at"]), b.name, b.mime, b.size, origin)
+            url = d.resumable(_work_folder(d, f["created_at"]), b.name, b.mime, b.size, origin)
         except Exception as ex:
             raise drive.fail(ex)
         return {"file_id": f["id"], "upload_url": url}
@@ -361,10 +414,10 @@ def upload_done(file_id: int, b: UpDone, p: dict = Depends(active)):
             try:
                 d = drive.Drive()
                 m = d.meta(b.drive_id)
-                folder = _ready_folder(d, f["created_at"])
+                folders = {_work_folder(d, f["created_at"]), _ready_folder(d, f["created_at"])}   # до 26.11 грузили сразу в «Вышло»
             except Exception as ex:
                 raise drive.fail(ex)
-            if folder not in m.get("parents", []) or int(m.get("size", -1)) != f["size"]:
+            if not folders & set(m.get("parents", [])) or int(m.get("size", -1)) != f["size"]:
                 raise HTTPException(400, "file mismatch")
             f = conn.execute("UPDATE files SET drive_id=%s, status='ready', mime=%s WHERE id=%s RETURNING *",
                              (b.drive_id, m.get("mimeType") or f["mime"], file_id)).fetchone()

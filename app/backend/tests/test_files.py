@@ -44,6 +44,11 @@ class FakeDrive:
     def meta(self, fid):
         return FakeDrive.store[fid]
 
+    def move(self, fid, parent, name=None):
+        FakeDrive.store[fid]["parents"] = [parent]
+        if name:
+            FakeDrive.store[fid]["name"] = name
+
     def stream(self, fid, rng=None):
         d = FakeDrive.store[fid]["data"]
         if rng:

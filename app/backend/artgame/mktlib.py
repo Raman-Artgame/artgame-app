@@ -80,14 +80,27 @@ def deals_in(field: str, value: str) -> list[int]:
     return [int(r["ID"]) for r in rows if str(r.get("ID", "")).isdigit()]
 
 
+# Статус материала (HEAD 26.11): «вышло» — в вышедшей публикации; «в работе» — в публикации, которая ещё идёт; иначе свободно.
+_USED = "f.id = ANY(m.src_ids) OR f.id = ANY(m.file_ids) OR f.id = ANY(m.draft_ids)"
+STATE = f"""CASE WHEN EXISTS (SELECT 1 FROM mkt_posts m WHERE m.status='published' AND ({_USED})) THEN 'out'
+                 WHEN EXISTS (SELECT 1 FROM mkt_posts m WHERE m.status NOT IN ('published','cancelled') AND ({_USED})) THEN 'work'
+                 ELSE 'free' END"""
+VID = "CASE WHEN f.kind='pub' OR f.media_type='reels' THEN 'ready' ELSE 'raw' END"   # сырое / готовое
+
+
 @router.get("/mkt/library")
 def library(type: str | None = None, best: bool = False, q: str | None = None, year: int | None = None, city: str | None = None,
             tag: int | None = None, object_id: int | None = None, cat: str | None = None, sub: str | None = None,
-            p: dict = Depends(active)):
-    """Весь материал: с объектов (кроме возвращённого HEAD) и исходники рубрик. Поиск — по названию файла, проекту, городу, папке."""
+            state: str | None = None, vid: str | None = None, p: dict = Depends(active)):
+    """Весь материал: с объектов (кроме возвращённого HEAD), исходники рубрик и готовое из публикаций.
+    Поиск — по названию файла, проекту, городу, папке. state: free | work | out; vid: raw | ready."""
     if p["role_code"] not in ("marketer", "head", "lead_designer"):
         raise HTTPException(403, "медиатека — у Главного дизайнера, маркетинга и HEAD")
-    cond, args = ["f.status='ready'", "(f.kind='src' OR (f.kind='media' AND f.review IS DISTINCT FROM 'rejected'))"], []
+    cond, args = ["f.status='ready'", "(f.kind IN ('src','pub') OR (f.kind='media' AND f.review IS DISTINCT FROM 'rejected'))"], []
+    if state in ("free", "work", "out"):
+        cond.append(f"({STATE})=%s"); args.append(state)
+    if vid in ("raw", "ready"):
+        cond.append(f"({VID})=%s"); args.append(vid)
     if best:
         cond.append("f.review='approved'")
     if type in TYPES:
@@ -107,16 +120,16 @@ def library(type: str | None = None, best: bool = False, q: str | None = None, y
         cond.append("lower(f.name || ' ' || coalesce(o.title,'') || ' ' || coalesce(o.city,'') || ' ' || coalesce(f.src_folder,'') || ' ' || f.object_id::text) LIKE %s")
         args.append(f"%{w}%")
     with db.pool.connection() as conn:
-        rows = conn.execute(f"""SELECT f.*, pe.full_name AS by, o.title AS object_title, o.city AS object_city,
+        rows = conn.execute(f"""SELECT f.*, pe.full_name AS by, o.title AS object_title, o.city AS object_city, {STATE} AS state, {VID} AS vid,
                                        (SELECT coalesce(array_agg(t.rubric_id), '{{}}') FROM file_tags t WHERE t.file_id=f.id) AS tags
                                 FROM files f JOIN people pe ON pe.id=f.uploaded_by JOIN objects o ON o.id=f.object_id
                                 WHERE {' AND '.join(cond)} ORDER BY f.created_at DESC LIMIT 300""", args).fetchall()
         fac = conn.execute("""SELECT array_agg(DISTINCT extract(year FROM f.created_at AT TIME ZONE 'Asia/Almaty')::int) AS years,
                                      array_agg(DISTINCT o.city) FILTER (WHERE o.city IS NOT NULL AND o.city <> '' AND f.kind='media') AS cities
-                              FROM files f JOIN objects o ON o.id=f.object_id WHERE f.status='ready' AND f.kind IN ('media','src')""").fetchone()
+                              FROM files f JOIN objects o ON o.id=f.object_id WHERE f.status='ready' AND f.kind IN ('media','src','pub')""").fetchone()
         rub = rubrics(conn)
     return {"items": [{**links(f), "object_title": f["object_title"] if f["kind"] == "media" else None, "object_city": f["object_city"],
-                       "tags": f["tags"], "src_folder": f["src_folder"]} for f in rows],
+                       "tags": f["tags"], "src_folder": f["src_folder"], "state": f["state"], "vid": f["vid"]} for f in rows],
             "years": sorted(fac["years"] or [], reverse=True), "cities": sorted(fac["cities"] or []), "rubrics": rub,
             "cats": categories(), "can_tag": p["role_code"] in ("marketer", "head")}
 

@@ -94,7 +94,7 @@ def test_ready_upload_and_review_day(client, team, monkeypatch):
     assert client.post("/api/mkt/uploads", json={**up, "mime": "application/pdf"}, headers=hdr(2000)).status_code == 400
     r = client.post("/api/mkt/uploads", json=up, headers=hdr(2000)).json()
     parent, size, mime = FakeDrive.pending
-    assert parent.startswith(drive.MKT_READY_ID)
+    assert parent.startswith(drive.MKT_CONTENT_ID + "/00 В работе/20")      # до утверждения — «02 КОНТЕНТ / 00 В работе / ГГГГ-ММ»
     assert client.post("/api/mkt/posts", json={"title": "x", "file_ids": [r["file_id"]]}, headers=hdr(2000)).status_code == 400   # ещё не долетел
     FakeDrive.store["drvREADY00001"] = {"parents": ["другая"], "size": "8", "mimeType": mime}
     assert client.post(f"/api/mkt/uploads/{r['file_id']}/done", json={"drive_id": "drvREADY00001"}, headers=hdr(2000)).status_code == 400
@@ -112,6 +112,9 @@ def test_ready_upload_and_review_day(client, team, monkeypatch):
     assert client.post("/api/mkt/review_day", json={"plan_date": "2026-11-21"}, headers=hdr(2000)).status_code == 403
     assert client.post("/api/mkt/review_day", json={"plan_date": "2026-11-21"}, headers=hdr(1000)).json() == {"approved": 2}
     assert [x["id"] for x in client.get("/api/mkt/posts?status=pending", headers=hdr(1000)).json()["items"]] == [ids[2]]
+    # утверждено → финал в «03 ВЫШЛО / 2026 / 11 НОЯБРЬ» с именем по правилу (HEAD 26.11)
+    st = FakeDrive.store["drvREADY00001"]
+    assert st["parents"][0].startswith(drive.MKT_READY_ID + "/2026/11 ") and st["name"] == "БН_2026-11-21_Сторис_Сторис 2.mp4"
 
 
 def test_jobs_lead_checks_first_and_norms(client, team):

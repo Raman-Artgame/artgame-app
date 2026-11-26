@@ -48,7 +48,8 @@ DEPTS = {"sales": "01 Продажи", "mural": "02 Роспись", "print": "0
 # в SUBFOLDERS не входит — иначе пустая папка появилась бы в каждой сделке. Сделка без папки → «07 Приходы клиентов».
 INCOME = "ПРИХОДЫ ЧЕКИ"
 # «06 МАРКЕТИНГ / 04 Готовые публикации» на диске ARTGAME.KZ: готовые рилс и сторис, загруженные в публикацию (HEAD 14.11).
-MKT_READY_ID = "1r7tvDN3xFC1NKl1WKkHiusBTZRZxIFIm"
+MKT_READY_ID = "1r7tvDN3xFC1NKl1WKkHiusBTZRZxIFIm"     # «06 МАРКЕТИНГ / 03 ВЫШЛО» (бывшие «04 Готовые публикации»)
+MKT_CONTENT_ID = "1EZ0NkwjOkQbb7fDzshqnZPNxHVubDF75"   # «06 МАРКЕТИНГ / 02 КОНТЕНТ»; в работе — «00 В работе / ГГГГ-ММ»
 API = "https://www.googleapis.com/drive/v3/files"
 UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 ALL = {"supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
@@ -201,11 +202,13 @@ class Drive:
         r.raise_for_status()
         return r.json()["id"]
 
-    def move(self, file_id: str, parent: str) -> None:
-        """Перенести файл в другую папку (смена записана не на тот объект, HEAD 14.11). Файл тот же, ссылки не меняются."""
+    def move(self, file_id: str, parent: str, name: str | None = None) -> None:
+        """Перенести файл в другую папку (смена записана не на тот объект, HEAD 14.11). Файл тот же, ссылки не меняются.
+        name — заодно переименовать (финал публикации в «03 ВЫШЛО», HEAD 26.11)."""
         old = ",".join(self.meta(file_id).get("parents") or [])
         r = _retry(httpx.patch, f"{API}/{file_id}", headers=self.h, timeout=60,
-                   params={"supportsAllDrives": "true", "addParents": parent, "removeParents": old, "fields": "id"})
+                   params={"supportsAllDrives": "true", "addParents": parent, "removeParents": old, "fields": "id"},
+                   **({"json": {"name": name}} if name else {}))
         r.raise_for_status()
 
     def pdf_from_html(self, parent: str, name: str, html: str) -> str:

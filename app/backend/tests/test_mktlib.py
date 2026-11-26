@@ -172,3 +172,20 @@ def test_library_sync_from_drive(client, team, monkeypatch):
     with db.pool.connection() as c:
         c.execute("UPDATE objects SET media_synced_at=NULL")
     assert client.post("/api/mkt/library/sync", headers=hdr(1000)).json()["added"] == 0       # повтор ничего не дублирует
+
+
+def test_post_parts_and_media_state(client, team):
+    """HEAD 26.11: у публикации исходники, монтаж и финал; исходник в «Медиа» — «в работе», после выхода — «вышло»."""
+    st = lambda s: [x["id"] for x in client.get("/api/mkt/library?" + s, headers=hdr(2000)).json()["items"]]  # noqa: E731
+    assert st("state=free") == [900, 901] and st("state=work") == [] and st("vid=raw") == [900, 901] and st("vid=ready") == []
+    assert client.post("/api/mkt/posts", json={"title": "x", "src_ids": [99999]}, headers=hdr(2000)).status_code == 400
+    p = client.post("/api/mkt/posts", json={"title": "Кафе до/после", "kind": "reels", "plan_date": "2026-11-28", "object_id": 731,
+                                             "src_ids": [900], "draft_ids": [901], "file_ids": [901]}, headers=hdr(2000)).json()
+    assert [f["id"] for f in p["srcs"]] == [900] and [f["id"] for f in p["drafts"]] == [901]
+    assert st("state=work") == [900, 901] and st("state=free") == []
+    items = {x["id"]: x for x in client.get("/api/mkt/library", headers=hdr(2000)).json()["items"]}
+    assert items[900]["state"] == "work" and items[900]["vid"] == "raw"
+    client.post(f"/api/mkt/posts/{p['id']}/submit", headers=hdr(2000))
+    client.post(f"/api/mkt/posts/{p['id']}/review", json={"approve": True}, headers=hdr(1000))
+    assert client.post(f"/api/mkt/posts/{p['id']}/published", json={"url": "https://instagram.com/reel/x"}, headers=hdr(2000)).status_code == 200
+    assert st("state=out") == [900, 901] and st("state=work") == []
