@@ -50,6 +50,7 @@ const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Alm
   const giga = card.locator('.brow', { hasText: 'Gigapixel' })
   await giga.locator('.ok', { hasText: 'списано' }).waitFor()          // автосписание записалось само, без чека
   await giga.getByText(/10\s000\s₸\s*\/\s*10\s000/).waitFor()
+  await card.locator('.brow', { hasText: 'Google Workspace' }).getByText(/спишется само|списано/).waitFor()   // автосписание впереди — не «не оплачено»
   await card.scrollIntoViewIfNeeded()
   await card.screenshot({ path: `${shots}/byudzhet-1-stroki.png` })
 

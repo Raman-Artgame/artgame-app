@@ -171,3 +171,21 @@ def test_signed_contract(bxc, monkeypatch):
     f = upd["fields"]["UF_CRM_1753202391"]
     assert f[-1]["fileData"][0] == "Договор подписанный 1601 скан договора.pdf"
     assert base64.b64decode(f[-1]["fileData"][1]) == b"%PDF-1.4 signed"
+
+
+def test_deal_gip(bxc, monkeypatch):
+    """«Куратор ГИП» из карточки сделки (HEAD 26.11): строки объекта ещё нет — заводится early, права ГИП — objects.gip_person_id."""
+    from artgame import designtasks
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    c.post(f"/api/people/{ids[2000]}", json={"role_code": "lead_artist"}, headers=hdr(1000))
+    monkeypatch.setattr(designtasks.bx, "read", lambda m, p, **kw: {"result": {"ID": "1601", "TITLE": "1601 · КАФЕ — АСТАНА", "STAGE_ID": "NEW", "CATEGORY_ID": "0", "ASSIGNED_BY_ID": "4565"}})
+    r = c.get("/api/bx/deals/1601/gip", headers=hdr(6000))
+    r = r.json()
+    assert r["gip_id"] is None and [x["id"] for x in r["candidates"]] == [ids[2000]]
+    assert c.post("/api/bx/deals/1601/gip", json={"person_id": ids[6000]}, headers=hdr(6000)).status_code == 400   # МОП не ГИП
+    assert c.post("/api/bx/deals/1601/gip", json={"person_id": ids[2000]}, headers=hdr(6000)).json()["gip_id"] == ids[2000]
+    with db.pool.connection() as conn:
+        o = conn.execute("SELECT status, gip_person_id FROM objects WHERE id=1601").fetchone()
+    assert o["status"] == "early" and o["gip_person_id"] == ids[2000]
+    assert c.get("/api/bx/deals/1601/gip", headers=hdr(6000)).json()["gip_id"] == ids[2000]

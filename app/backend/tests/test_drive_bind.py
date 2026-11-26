@@ -103,3 +103,14 @@ def test_created_project_folder_marked_for_drive01(monkeypatch):
     assert "appProperties" not in month                      # год/месяц — без метки
     assert project["name"] == "1709 · БЕЛЫЙ ВЕТЕР — АСТАНА" and fid == "N2"
     assert project["appProperties"] == {"managedBy": "DRIVE01", "dealId": "1709", "homeParentId": "N1", "year": project["appProperties"]["year"]}
+
+
+def test_folder_month_from_deal_created(monkeypatch):
+    """Месяц папки — от DATE_CREATE сделки, как у робота DRIVE01 (26.11), а не от сегодняшнего дня."""
+    from datetime import datetime
+    from artgame import bx, drive
+    assert drive._deal_created({"id": 1, "created": "2026-10-31T23:30:00+05:00"}) == datetime(2026, 10, 31, 23, 30)
+    monkeypatch.setattr(bx, "read", lambda m, p, **kw: {"result": {"ID": "1709", "DATE_CREATE": "2026-09-02T10:00:00+05:00"}})
+    assert drive._deal_created({"id": 1709}).month == 9
+    monkeypatch.setattr(bx, "read", lambda m, p, **kw: (_ for _ in ()).throw(RuntimeError("нет Битрикса")))
+    assert drive._deal_created({"id": 1709}).date() == datetime.now().date()

@@ -102,8 +102,9 @@ def fake(method, params):
         if params["filter"]["ENTITY_ID"] != "DEAL_STAGE_13":
             return {"result": []}
         return {"result": [{"STATUS_ID": s, "NAME": n, "SORT": str(o), **({"EXTRA": {"SEMANTICS": e}} if e else {})} for s, n, o, e in STAGES]}
-    if method == "crm.deal.fields":
-        return {"result": {}}
+    if method == "crm.deal.fields":   # список «Сложность дизайна» как в Битриксе после BX-DESIGN-SIZE-2611
+        return {"result": {"UF_CRM_ARTGAME_DESIGN_COMPLEXITY": {"type": "enumeration", "items": [
+            {"ID": str(80 + i), "VALUE": v} for i, v in enumerate(["XS", "S", "M", "L", "XL"])]}}}
     if method == "crm.stagehistory.list":
         h = HIST.get(str(params["filter"]["OWNER_ID"]))
         return {"result": {"items": [{"CREATED_TIME": h}] if h else []}}

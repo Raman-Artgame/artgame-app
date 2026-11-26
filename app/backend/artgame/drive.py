@@ -155,7 +155,8 @@ class Drive:
         for f in self.find(f"name contains '{_q(prefix)}' and mimeType = '{FOLDER}'"):
             if f["name"].startswith(prefix):
                 return f["id"]
-        now = datetime.now()
+        # месяц — по дате создания СДЕЛКИ (DATE_CREATE), как у робота DRIVE01: иначе на стыке месяцев робот перенесёт папку (26.11)
+        now = _deal_created(obj)
         year = self.child(PROJECTS_ROOT_ID, str(now.year))
         month = self.child(year, f"{now.month:02d} {MONTHS[now.month - 1]}")
         name = f"{obj['id']} · {obj['title'].upper()}" + (f" — {obj['city'].upper()}" if obj.get("city") else "")
@@ -254,6 +255,22 @@ def bind_deal(conn, deal_id: int, folder: str) -> str:
     from . import db
     db.audit(conn, None, "bx_write", "deal", deal_id, {"what": "папка сделки", "fields": {F_FOLDER: folder, F_FOLDER_URL: url}, "bx": res})
     return res
+
+
+def _deal_created(obj: dict) -> datetime:
+    """Дата создания сделки: из obj["created"] или из Битрикса; не вышло — сегодня."""
+    v = obj.get("created")
+    if not v:
+        try:
+            from . import bx
+            j = bx.read("crm.deal.get", {"id": int(obj["id"])})
+            v = ((j.get("result", j) if isinstance(j, dict) else None) or {}).get("DATE_CREATE")
+        except Exception:  # noqa: BLE001 — без Битрикса папка в текущем месяце, как раньше
+            v = None
+    try:
+        return datetime.fromisoformat(str(v)[:19]) if v else datetime.now()
+    except ValueError:
+        return datetime.now()
 
 
 def ensure_folders(conn, obj: dict, d: Drive | None = None) -> dict:

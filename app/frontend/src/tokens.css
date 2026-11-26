@@ -319,6 +319,12 @@ button.catitem b { white-space: nowrap; text-align: right; font-weight: 600; }
 .aitag, .needtag { font-style: normal; font-size: 10px; font-weight: 700; margin-left: 6px; padding: 1px 6px; border-radius: 99px; vertical-align: middle; }
 .aitag { background: var(--dark); color: #fff; } .needtag { background: var(--accent); color: #fff; }
 .fillother { margin: 6px 0 12px; } .fillother .row { gap: 10px; }
+.fillbar .fb-go { margin-top: 8px; }
+.fillform > p, .fillform > .dealbtns, .fillform > button.ghost { margin: 0 0 10px; }
+.fillform .fillsec .needtag { margin-left: 8px; }
+.fillinfo { background: var(--dark2); border-radius: var(--r2); padding: 8px 12px; }
+.fillinfo .row { gap: 10px; padding: 4px 0; } .fillinfo .row > span:last-child { text-align: right; }
+.fillinfo button { margin-top: 6px; }
 .warnbox { background: var(--warnbg); border: 1px solid #6B4A1C; border-radius: var(--r2); padding: 10px 12px; font-size: 13px; margin: 8px 0; }
 .warnbox .small { display: block; color: var(--muted); margin-top: 4px; }
 .lockbox { background: var(--dark); color: var(--dark-text); border-radius: var(--r2); padding: 12px; font-size: 13px; margin: 8px 0; }
@@ -1328,3 +1334,9 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
 /* Бюджет: строка нажимается; неоплаченное в этом месяце — с красной меткой слева (HEAD 26.11) */
 .row.brow { cursor: pointer; }
 .row.brow.unpaid { border-left: 3px solid var(--hot); padding-left: 10px; margin-left: -13px; }
+/* карточка сделки (схема HEAD 26.11): откуда приходит значение шага */
+.fillsec .srctag { font-style: normal; font-size: 11px; font-weight: 600; color: var(--muted); background: var(--dark2); border-radius: 8px; padding: 1px 7px; margin-left: 8px; }
+.fillinfo .dealbtns { margin-top: 4px; } .fillinfo .dealbtns button { margin-top: 0; }
+.kpagree { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding: 10px 12px; border-radius: var(--r2); background: var(--dark2); }
+.kpagree.on { border-left: 3px solid var(--ok, #5fb04a); }
+.kpagree > div:first-child { display: flex; flex-direction: column; gap: 2px; }

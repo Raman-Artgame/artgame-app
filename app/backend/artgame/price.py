@@ -225,6 +225,8 @@ def api_price_save(deal_id: int, body: PriceIn, p: dict = Depends(active)):
     r = compute(body, bx._vals())
     if not r["total"]:
         raise HTTPException(400, "нечего записывать")
+    from .kpagree import guard
+    guard(deal_id, r["total"])   # согласованное клиентом КП не перезаписываем (HEAD 26.11)
     fields = {"OPPORTUNITY": int(r["total"])}
     parts = [f"{SERVICES[body.service]} — {_fmt(r['total'])}" + (" без НДС" if r["no_vat"] else " с НДС")]
     if body.area and body.service in ("mural", "print", "bulk"):

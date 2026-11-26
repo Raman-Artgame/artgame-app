@@ -5,7 +5,8 @@
 - Дизайнер видит свои и ещё не разобранные задачи; Главный дизайнер и HEAD — все и назначают исполнителя.
 - Эскиз — файлом прямо в карточке: ложится в папку сделки ДИЗАЙН (HEAD 26.11: ссылок руками нет).
 - Единиц задачи не дают: единица одна за весь проект (design_units), считается как раньше.
-- В Битрикс ничего не пишем и в бот не шлём: новое видно цифрой на доске и в карточке сделки.
+- В бот не шлём: новое видно цифрой на доске и в карточке сделки. В Битрикс (HEAD 26.11) — только дизайнер, сложность и
+  срок дизайна в поля сделки (to_deal), стадии сделки не трогаем.
 """
 from datetime import date
 
@@ -185,7 +186,40 @@ def edit(tid: int, b: TaskEdit, p: dict = Depends(active)):
                 from .relay import mark
                 mark(conn, t["deal_id"], upd.get("file_id") or t["file_id"], p["id"])
         row = conn.execute(SQL + " WHERE t.id=%s", (tid,)).fetchone()
+    if {"designer_id", "size", "deadline"} & upd.keys():
+        to_deal(row, p["id"])
     return {**_out(row), "bitrix": _bitrix(row["deal_id"])}
+
+
+DESIGNER, LEVEL, DEADLINE = "UF_CRM_ARTGAME_DESIGNER", "UF_CRM_ARTGAME_DESIGN_COMPLEXITY", "UF_CRM_ARTGAME_DESIGN_DEADLINE"
+
+
+def to_deal(t: dict, by: int) -> None:
+    """Схема HEAD 26.11 «кто что заполняет»: дизайнер, сложность (XS–XL) и срок дизайна МОП руками не вводит —
+    они идут в поля сделки из задачи дизайнера. Пустое в задаче поле сделки не стирает. Битрикс не ответил — задача
+    всё равно сохранена, ошибка в журнале."""
+    fields: dict = {}
+    if t["designer_id"]:
+        with db.pool.connection() as conn:
+            u = conn.execute("SELECT bitrix_user_id FROM people WHERE id=%s", (t["designer_id"],)).fetchone()
+        if u and u["bitrix_user_id"]:
+            fields[DESIGNER] = u["bitrix_user_id"]
+    if t["size"]:
+        ids = {v.strip().upper(): k for k, v in bx.enum_map(LEVEL).items()}
+        if t["size"].upper() in ids:
+            fields[LEVEL] = ids[t["size"].upper()]
+    if t["deadline"]:
+        fields[DEADLINE] = t["deadline"].isoformat()
+    if not fields or not bxw.enabled():
+        return
+    log = {"task": t["id"], "fields": {k: str(v) for k, v in fields.items()}}
+    try:
+        bxw.CALL("crm.deal.update", {"id": t["deal_id"], "fields": fields})
+        log["bx"] = "ok"
+    except Exception as ex:  # noqa: BLE001
+        log.update(bx="error", error=f"{type(ex).__name__}: {str(ex)[:160]}")
+    with db.pool.connection() as conn:
+        db.audit(conn, by, "design_task_to_deal", "deal", t["deal_id"], log)
 
 
 @router.post("/design/tasks/{tid}/cancel")

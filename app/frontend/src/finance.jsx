@@ -54,9 +54,11 @@ function Summary({ m, d }) {
     {s.budget.length > 0 && <div className="card"><h3>Бюджет: план и факт</h3>
       <p className="small muted">Оплатили — нажмите на строку: сумма, дата, чек.</p>
       {s.budget.map(b => { const u = (b.bills || []).find(x => !x.paid), p = (b.bills || []).find(x => x.paid)
-        const hot = u && (m === ym() || u.status === 'overdue')
+        const wait = u && u.auto && u.status !== 'overdue'   // автосписание ещё впереди — запишется само
+        const hot = u && !wait && (m === ym() || u.status === 'overdue')
         return <div key={b.code} className={'row brow' + (hot ? ' unpaid' : '')} role="button" onClick={() => setPay(b)}>
           <span>{b.title}<div className="small muted">{hot ? <span className={['overdue', 'today', 'soon'].includes(u.status) ? 'why' : ''}>не оплачено · {u.status === 'overdue' ? 'срок был ' : 'до '}{dm(u.due)}</span>
+            : wait ? <>спишется само {dm(u.due)}</>
             : p && !u ? <span className="ok">{p.auto ? 'списано' : 'оплачено'} {dm(p.paid.date)}</span> : KIND[b.kind]}</div></span>
           <span className="small nowrap">{money(b.fact)}{b.estimate ? ' (оценка)' : ''} <span className="muted">/ {b.plan ? money(b.plan) : 'план не задан'}</span> <span className="muted">›</span></span></div> })}</div>}
     {pay && <BudgetPay b={pay} m={m} d={d} onClose={() => setPay(null)} onDone={() => { setPay(null); load() }} />}
