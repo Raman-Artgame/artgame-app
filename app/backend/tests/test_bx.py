@@ -85,6 +85,10 @@ def fake(method, params):
                            "UF_CRM_ARTGAME_PROJECT_CATEGORY": {"type": "enumeration", "items": [{"ID": "41", "VALUE": "1. Образование"}, {"ID": "42", "VALUE": "2. Общепит"}]},
                            "UF_CRM_ARTGAME_PROJECT_SUBCATEGORY": {"type": "enumeration", "items": [{"ID": "51", "VALUE": "1.1 Школы"}, {"ID": "52", "VALUE": "2.1 Кафе"}]},
                            "UF_CRM_6AD5EF400C4B9": {"type": "enumeration", "items": [{"ID": "61", "VALUE": "Таргет (реклама)"}, {"ID": "62", "VALUE": "Сарафан"}]},
+                           "UF_CRM_ARTGAME_PROJECT_SIZE": {"type": "enumeration", "items": [{"ID": "71", "VALUE": "Мелкий"}, {"ID": "72", "VALUE": "Средний"}]},
+                           "UF_CRM_ARTGAME_DESIGNER": {"type": "employee"}, "UF_CRM_ARTGAME_DESIGN_DEADLINE": {"type": "date"},
+                           "UF_CRM_ARTGAME_DESIGN_COMPLEXITY": {"type": "enumeration", "items": [{"ID": "81", "VALUE": "S"}, {"ID": "82", "VALUE": "M"}]},
+                           "UF_CRM_1753292354197": {"type": "string"},
                            "UF_CRM_1753381517": {"type": "employee", "listLabel": "Художники", "isMultiple": True}}}
     if method == "user.get":
         return {"result": [{"ID": "4565", "NAME": "Ануар", "LAST_NAME": "Минкеев", "USER_TYPE": "employee"},
