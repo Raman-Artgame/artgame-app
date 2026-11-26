@@ -1437,6 +1437,15 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
   .wrap[data-tab=leads] > .card:has(> .qrow.lead ~ .qrow.lead) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
   .wrap[data-tab=leads] > .card:has(> .qrow.lead ~ .qrow.lead) > :not(.qrow) { grid-column: 1 / -1; }
 
+  /* Открытая карточка сделки и лида: слева — паспорт сделки (шаги, действия), всегда на виду; справа — текущий шаг на всю ширину */
+  .wrap:is([data-tab=deals], [data-tab=leads]):has(> .hero) { display: grid; grid-template-columns: 460px minmax(0, 1fr); column-gap: 20px; align-items: start; }
+  .wrap:is([data-tab=deals], [data-tab=leads]):has(> .hero) > * { grid-column: 2; }
+  .wrap:is([data-tab=deals], [data-tab=leads]) > .hero { grid-column: 1; grid-row: 1 / span 60; position: sticky; top: 24px; max-height: calc(100dvh - 48px); overflow-y: auto; scrollbar-width: thin; margin-bottom: 0; padding: 22px 24px; }
+  .wrap:is([data-tab=deals], [data-tab=leads]):has(> .hero) > :is(.roleswitch, .dmbar) { grid-column: 1 / -1; }
+  /* блок «Дизайн» — под текущим шагом, чтобы шаг был сразу на виду */
+  .wrap[data-tab=deals]:has(> .hero) > .dtdeal { order: 99; }
+  .wrap[data-tab=deals] .embed iframe { height: 82dvh; }
+
   /* Продакшн: материал плиткой, а не двумя огромными фото */
   .rvgrid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
 
