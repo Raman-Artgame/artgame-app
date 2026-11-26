@@ -704,3 +704,37 @@ def test_anna_fixes(bxc, monkeypatch):
         DEALS["1601"].update({"TITLE": "1601 · КАФЕ — АСТАНА"})
         for k in ("UF_CRM_ARTGAME_OBJECT", "UF_CRM_ARTGAME_PROJECT_MODEL", "UF_CRM_ARTGAME_PROJECT_VIP", "UF_CRM_1753381517"):
             DEALS["1601"].pop(k, None)
+
+
+def test_mop_hints(bxc, tmp_path, monkeypatch):
+    """Утренние подсказки ботов (26.11): самый свежий файл, только за сегодня, МОП — свои (не больше 5), HEAD — все по менеджерам."""
+    import json
+    from artgame import mophints
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    monkeypatch.setenv("ARTGAME_HINTS_DIR", str(tmp_path))
+    mophints._cache.update(path="", mtime=0.0, rows=[])
+    assert c.get("/api/bx/hints", headers=hdr(6000)).json()["items"] == []   # файла ещё нет — пусто, не ошибка
+    day = mophints._today()
+    rows = [{"mop_id": 4565, "entity": "deal", "entity_id": 1601, "hint": "Клиент получил цену и молчит 3 дня — напишите про эскиз",
+             "reason": "цена 25.11, ответа нет", "steps": {"price": True}, "prices": [589250], "last_client_msg_at": "2026-11-23T10:00:00+05:00", "date": day},
+            {"mop_id": 4565, "entity": "lead", "entity_id": 3001, "hint": "Спросила про сроки — ответьте", "reason": "", "date": day},
+            {"mop_id": 4565, "entity": "deal", "entity_id": 1647, "hint": "вчерашняя", "date": "2000-01-01"},
+            {"mop_id": 4693, "entity": "deal", "entity_id": 1651, "hint": "Чужая подсказка", "date": day},
+            {"mop_id": 4565, "entity": "task", "entity_id": 1, "hint": "не сделка и не лид", "date": day}]
+    (tmp_path / "MOP-HINTS-20000101.json").write_text("[]", encoding="utf-8")
+    (tmp_path / ("MOP-HINTS-" + day.replace("-", "") + ".json")).write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    me = c.get("/api/bx/hints", headers=hdr(6000)).json()
+    assert [(x["entity"], x["id"]) for x in me["items"]] == [("deal", 1601), ("lead", 3001)]
+    assert me["items"][0]["title"] == "1601 · КАФЕ — АСТАНА" and me["items"][1]["title"] == "Дана"
+    assert "steps" not in me["items"][0] and "prices" not in me["items"][0], "оценки и цены из переписки МОП не показываем"
+    assert "by_mop" not in me
+    head = c.get("/api/bx/hints", headers=hdr(1000)).json()
+    assert len(head["items"]) == 3 and [m["count"] for m in head["by_mop"]] == [2, 1]
+    card = c.get("/api/bx/deals/1601/full", headers=hdr(6000)).json()
+    assert [h["text"] for h in card["hints"]] == ["Клиент получил цену и молчит 3 дня — напишите про эскиз"]
+    (tmp_path / ("MOP-HINTS-" + day.replace("-", "") + ".json")).write_text("{битый", encoding="utf-8")
+    import os, time
+    os.utime(tmp_path / ("MOP-HINTS-" + day.replace("-", "") + ".json"), (time.time() + 5, time.time() + 5))
+    assert c.get("/api/bx/hints", headers=hdr(6000)).json()["items"] == []   # битый файл — пусто, экран не падает
+    assert c.get("/api/bx/hints", headers=hdr(2000)).status_code == 403

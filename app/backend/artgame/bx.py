@@ -545,6 +545,8 @@ def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
     card["fill"] = fill.state(d, card, fill.saved_calc(deal_id))
     from .kpagree import get as kp_agreed
     card["kp_agreed"] = kp_agreed(deal_id)
+    from .mophints import for_deal
+    card["hints"] = for_deal(deal_id)   # подсказки ботов-аналитиков за сегодня (боковой блок на компьютере)
     card["fill"].update(required=fill.REQUIRED, step_of=fill.STAGE_STEP, free=p["role_code"] == "head")   # для замка в приложении
     return card
 

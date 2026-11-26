@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from . import constants as consts
 from . import ads, adrules, meta, mktlib, mktstats, mediasync, appeals, chatfiles, brand, closing, marketing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring, advances
-from . import bx, bxw, db, relay, mopcrm, deal_money, design, designobj, designtasks, designbrief, files, kpagree, projcard, shiftmove, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
+from . import bx, bxw, mophints, db, relay, mopcrm, deal_money, design, designobj, designtasks, designbrief, files, kpagree, projcard, shiftmove, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
 
@@ -63,6 +63,7 @@ app.include_router(files.router)
 app.include_router(places.router)
 app.include_router(bx.router)
 app.include_router(bxw.router)
+app.include_router(mophints.router)   # утренние подсказки ботов-аналитиков (26.11)
 app.include_router(leads.router)
 app.include_router(sales_exp.router)
 app.include_router(weblogin.router)

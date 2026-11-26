@@ -1,6 +1,6 @@
 """API для сквозного теста: Google Диск подменён памятью."""
 import uvicorn
-from fastapi import Request
+from fastapi import Body, Request
 
 from artgame import drive
 from artgame.config import settings
@@ -214,6 +214,21 @@ async def _store(fid: str, request: Request):
     """Картинка в подменённом Диске (marketing.cjs): тело запроса — байты файла."""
     STORE[fid] = {"parents": ["e2e"], "size": "1", "mimeType": request.headers.get("content-type", "image/jpeg"), "data": await request.body()}
     return {"ok": True}
+
+
+@app.post("/api/_e2e/hints")
+def _hints(rows: list[dict] = Body(...)):
+    """Утренний файл ботов-аналитиков (sdelki.cjs): кладётся в отдельную временную папку, поле date — сегодня."""
+    import json
+    import os
+    import tempfile
+    from artgame import mophints
+    d = os.environ.setdefault("ARTGAME_HINTS_DIR", tempfile.mkdtemp(prefix="artgame-hints-"))
+    day = mophints._today()
+    with open(os.path.join(d, "MOP-HINTS-" + day.replace("-", "") + ".json"), "w", encoding="utf-8") as f:
+        json.dump([{**r, "date": r.get("date", day)} for r in rows], f, ensure_ascii=False)
+    mophints._cache.update(path="", mtime=0.0, rows=[])
+    return {"ok": True, "dir": d}
 
 
 @app.post("/api/_e2e/consts")

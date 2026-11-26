@@ -1611,3 +1611,11 @@ button.dttile.on { border-color: var(--text); }
 .dealside .hints p.bot { border-left-color: var(--ok); }
 .dealside .botslot { margin-top: 6px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: var(--r); }
 
+/* подсказки ботов-аналитиков (26.11): «Дожать сегодня» у МОП и сводка на Пульте — спокойный зелёный, без красного */
+.card.push { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+.card.push h3 { color: var(--ok); }
+.card.push .qrow { cursor: pointer; }
+.pulse-sales .hintmop summary { cursor: pointer; list-style: none; }
+.pulse-sales .hintmop summary::-webkit-details-marker { display: none; }
+.pulse-sales .hintrow { padding: 6px 0 6px 12px; border-left: 2px solid var(--ok); margin: 4px 0 8px; }
+

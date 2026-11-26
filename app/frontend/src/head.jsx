@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { FeedbackInbox } from './feedback.jsx'
 import { api, setViewAs, viewAs } from './api.js'
 import { flush } from './queue.js'
-import { money } from './crm.jsx'
+import { cleanTitle, money } from './crm.jsx'
 import { LedgerForm } from './finance.jsx'
 import { ExpenseForm } from './work.jsx'
 import { ProjectSpend } from './shiftmove.jsx'
@@ -40,6 +40,7 @@ export function Pulse({ me, pulse, go }) {
   const cl = useClosing(true)   // HEAD 12.11: сделки на закрытие и закрытые мимо паспорта — первыми
   const [spend, setSpend] = useState(null)   // «+ Расход» (HEAD 12.11): форма журнала денег прямо на Пульте
   const [spent, setSpent] = useState('')
+  const [hints, setHints] = useState(null)   // подсказки ботов-аналитиков по МОП за сегодня (26.11)
   const openSpend = () => { setSpent(''); api('/fin/dict').then(setSpend, e => setSpent(e.message)) }
   const toggle = k => {
     setOpen(open === k ? null : k)
@@ -47,7 +48,7 @@ export function Pulse({ me, pulse, go }) {
       api(`/fin/kpi/${k}?ym=` + ym()).then(r => setDet(d => ({ ...d, [k]: r })), e => setDet(d => ({ ...d, [k]: { err: e.message } })))
   }
   useEffect(() => { api('/fin/summary?ym=' + ym()).then(setFin, e => setFin({ err: e.message })); api('/fin/year').then(setYear, () => {})
-    api('/fin/kpi?ym=' + ym()).then(setKpi, () => {}) }, [])
+    api('/fin/kpi?ym=' + ym()).then(setKpi, () => {}); api('/bx/hints').then(setHints, () => {}) }, [])
   if (p === null) return <div className="card muted">Загрузка…</div>
   if (p === false) return <div className="card muted">Пульт не загрузился. Обновите страницу.</div>
   const r = p.review
@@ -155,9 +156,16 @@ export function Pulse({ me, pulse, go }) {
       <div className="teamgrid">{p.team.filter(t => +t.active).map(t => <div key={t.code}><b>{t.active}</b><span className="small muted">{t.title}</span></div>)}</div>
       {!active && <p className="small muted">Ролей ещё никому не назначено.</p>}
     </div>
+  // Продажи (HEAD 26.11): сколько у каждого МОП «дожать сегодня» по разбору переписки; внутри — сами подсказки. Нет файла за сегодня — блока нет.
+  const salesC = hints?.by_mop?.length > 0 && <div className="card pulse-sales"><div className="head"><h3>Продажи · дожать сегодня</h3><button className="ghost mini" onClick={() => go('deals')}>Сделки</button></div>
+      <p className="small muted">По разбору переписки утром. Это подсказки менеджерам, не оценки.</p>
+      {hints.by_mop.map(m => <details key={m.mop_id} className="hintmop"><summary className="row"><b>{m.name}</b><span className="small muted">{m.count}</span></summary>
+        {m.items.map(x => <div key={x.entity + x.id} className="small hintrow"><b>{x.entity === 'lead' ? (x.title || 'Лид ' + x.id) : `№ ${x.id} ${cleanTitle(x.title, x.id)}`}</b><div>{x.hint}</div></div>)}
+      </details>)}
+    </div>
   if (wide) return <>{heroC}
-    <div className="desk"><div className="deskmain">{asksC}{moneyC}{fbC}</div><div className="deskside">{spendC}{dmC}{todayC}{teamC}</div></div></>
-  return <>{heroC}{spendC}{asksC}{dmC}{fbC}{moneyC}{todayC}{teamC}
+    <div className="desk"><div className="deskmain">{asksC}{moneyC}{fbC}</div><div className="deskside">{spendC}{dmC}{salesC}{todayC}{teamC}</div></div></>
+  return <>{heroC}{spendC}{asksC}{dmC}{salesC}{fbC}{moneyC}{todayC}{teamC}
   </>
 }
 

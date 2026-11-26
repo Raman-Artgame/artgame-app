@@ -94,8 +94,23 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   assert.ok(!(await h.locator('.kbsplit').textContent()).includes('без суммы'))
 
   // МОП: «Сегодня» — очередь: лид, где клиентка ждёт ответа в WhatsApp, горит; КП без ответа — сегодня; полоска месяца сверху
+  // утренние подсказки ботов-аналитиков (26.11): файл сервера → «Дожать сегодня» у МОП, строка в сделке, сводка HEAD
+  await fetch(API + '/_e2e/hints', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify([
+    { mop_id: 4565, entity: 'deal', entity_id: 1601, hint: 'КП у клиента 3 дня без ответа — спросите, удобно ли обсудить эскиз', reason: 'цену назвали 23.11, клиент молчит', steps: { price: true }, prices: [589250], last_client_msg_at: '2026-11-23T10:00:00+05:00' },
+    { mop_id: 4565, entity: 'lead', entity_id: 3001, hint: 'Дана спросила про сроки — ответьте и предложите замер', reason: 'вопрос без ответа' }]) })
   const p = await open(b, 6000)
   await p.locator('.bucket.hot').waitFor()
+  const push = p.locator('.card.push')
+  await push.waitFor()
+  assert.match(await push.textContent(), /Дожать сегодня 2.*№ 1601.*КП у клиента 3 дня без ответа.*цену назвали 23\.11.*Дана.*спросила про сроки/)
+  assert.ok(!/589\s?250/.test(await push.textContent()), 'цены и оценки из переписки МОП не показываем')
+  await p.screenshot({ path: `${shots}/mop-push-today.png`, fullPage: true })
+  await tab(h, 'Пульт')
+  await h.locator('.pulse-sales').waitFor()
+  assert.match(await h.locator('.pulse-sales').textContent(), /Продажи · дожать сегодня.*Ануар Минкеев2/)
+  await h.locator('.pulse-sales summary').first().click()
+  await h.locator('.pulse-sales .hintrow', { hasText: 'КП у клиента 3 дня' }).waitFor()
+  await h.screenshot({ path: `${shots}/head-pult-push.png` })
   assert.match(await p.locator('.bucket.hot').textContent(), /Дана.*клиент ждёт ответа в WhatsApp 2 ч/)
   const tiles = (await p.locator('.tiles').textContent()).match(/^1Горит(\d+)Сегодня(\d+)Можно позже/)
   assert.ok(tiles, 'плитки: 1 горит, затем сегодня и позже')
@@ -195,13 +210,15 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   await p.setViewportSize({ width: 1440, height: 900 })
   const side = p.locator('.dealside')
   await side.waitFor()
-  assert.match(await side.textContent(), /Показатели.*Сумма.*1\s310\s000.*Поступило.*Долг.*Аванс по расчёту655\s000.*Площадь60 м².*Срок работ4 раб\. дн\..*На стадии.*Последнее касание.*Подсказки.*боты-аналитики/)
+  assert.match(await side.locator('.hints .bot').textContent(), /КП у клиента 3 дня без ответа.*цену назвали 23\.11, клиент молчит · клиент писал 23 нояб\.$/)
+  assert.strictEqual(await side.locator('.botslot').count(), 0, 'есть подсказки ботов — заглушки нет')
+  assert.match(await side.textContent(), /Показатели.*Сумма.*1\s310\s000.*Поступило.*Долг.*Аванс по расчёту655\s000.*Площадь60 м².*Срок работ4 раб\. дн\..*На стадии.*Последнее касание.*Подсказки/)
   assert.ok(!(await p.locator('.hero > .kv').isVisible()), 'цифры шапки не повторяются')
   await p.screenshot({ path: `${shots}/mop-deal-side.png` })
   await p.setViewportSize({ width: 1280, height: 860 }); await p.waitForTimeout(300)
   await p.screenshot({ path: `${shots}/mop-deal-side-1280.png` })
   await p.setViewportSize({ width: 390, height: 844 })
-  assert.strictEqual(await side.count(), 0, 'на телефоне бокового блока нет')
+  await side.waitFor({ state: 'detached' })   // на телефоне бокового блока нет
   assert.ok(await p.locator('.hero > .kv').isVisible())
   // КП в карточке: итог и кнопка в блок; материалы клиенту под КП
   await step(p, 'КП')

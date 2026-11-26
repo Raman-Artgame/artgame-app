@@ -415,7 +415,7 @@ function DealSide({ d, calc }) {
       <h3>Подсказки</h3>
       {rules.map((t, i) => <p key={i} className="small">{t}</p>)}
       {!rules.length && !bots.length && <p className="small muted">По данным сделки всё в порядке.</p>}
-      {bots.map((h, i) => <p key={'b' + i} className="small bot">{h.text}{h.at && <span className="muted"> · {dt(h.at)}</span>}</p>)}
+      {bots.map((h, i) => <p key={'b' + i} className="small bot">{h.text}{(h.reason || h.at) && <span className="muted"><br />{[h.reason, h.at && 'клиент писал ' + new Date(h.at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })].filter(Boolean).join(' · ')}</span>}</p>)}
       {!bots.length && <div className="botslot small muted">Здесь будут подсказки по переписке и звонкам: что клиент спросил, что мы обещали, риск отказа. Их пришлют боты-аналитики — по утрам.</div>}
     </div>
   </aside>

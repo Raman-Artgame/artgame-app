@@ -122,7 +122,8 @@ export function Today({ openDeal, openLead, openMonth }) {
   const [only, setOnly] = useState('')
   const [wait, setWait] = useState(null)
   const [note, setNote] = useState('')
-  useEffect(() => { if (!t) loadToday(false).catch(e => setErr(e.message)) }, [])
+  const [push, setPush] = useState([])   // «Дожать сегодня» — утренние подсказки ботов-аналитиков переписки (26.11)
+  useEffect(() => { if (!t) loadToday(false).catch(e => setErr(e.message)); api('/bx/hints').then(h => setPush(h.items || []), () => {}) }, [])
   const reload = () => { setBusy(true); loadToday(true).catch(e => setErr(e.message)).finally(() => setBusy(false)) }
   if (err && !t) return <div className="card"><h2>Сегодня</h2><p className="muted">{err}</p></div>
   if (!t) return <Skeleton n={3} />
@@ -151,6 +152,7 @@ export function Today({ openDeal, openLead, openMonth }) {
       {note && <p className="small ok">{note}</p>}
       {!total && !q.later.length && <p className="small muted">Срочного нет. Хороший момент позвонить тем, кто давно молчит.</p>}
     </div>
+    {!only && push.length > 0 && <PushToday items={push} open={open} />}
     {BUCKETS.filter(([k]) => !only || only === k).map(([k, title, hint]) => {
       const items = q[k]
       const kinds = Object.keys(KINDS).filter(e => items.some(x => x.entity === e))
@@ -168,6 +170,24 @@ export function Today({ openDeal, openLead, openMonth }) {
     {wait && <WaitSheet api={api} path={`/bx/${wait.entity === 'lead' ? 'leads' : 'deals'}/${wait.id}`} title={`Жду ответа: ${wait.entity === 'lead' ? wait.name || wait.title : '№ ' + wait.id}`}
       onClose={() => setWait(null)} onDone={m => { setWait(null); setNote(m); setTimeout(() => setNote(''), 6000); reload() }} />}
   </>
+}
+
+// «Дожать сегодня» (HEAD 26.11): до 5 подсказок по переписке и звонкам, их утром собирают боты-аналитики. Без оценок и красного —
+// только что сделать и почему. Нажатие — карточка сделки или лида.
+export function PushToday({ items, open, title = 'Дожать сегодня', showMop }) {
+  return <div className="card push">
+    <h3>{title} <span className="muted small">{items.length}</span></h3>
+    <p className="small muted">Подсказки по переписке — собраны утром.</p>
+    {items.map(x => <div key={x.entity + x.id} className={'qrow ' + x.entity} onClick={() => open(x)}>
+      <span className={'ic ' + x.entity}>{x.entity === 'lead' ? initial(x.title) : '№'}</span>
+      <div className="qmain">
+        <div className="qt">{x.entity === 'lead' ? <b>{x.title || 'Лид ' + x.id}</b> : <><b>№ {x.id}</b> {cleanTitle(x.title, x.id)}</>}{showMop && x.mop ? <span className="muted small"> · {x.mop}</span> : null}</div>
+        <div className="small">{x.hint}</div>
+        {x.reason ? <div className="small muted">{x.reason}</div> : null}
+      </div>
+      <div className="qbtns"><button className="ghost mini">Открыть</button></div>
+    </div>)}
+  </div>
 }
 
 // Серые заготовки вместо «Загружаю…»: экран не прыгает, когда придут данные.
