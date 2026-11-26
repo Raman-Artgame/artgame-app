@@ -211,6 +211,12 @@ class Drive:
                    **({"json": {"name": name}} if name else {}))
         r.raise_for_status()
 
+    def trash(self, file_id: str) -> None:
+        """В корзину Диска (30 дней можно вернуть): копия фото в «Продакшн», закинутая по ошибке (HEAD 26.11)."""
+        r = _retry(httpx.patch, f"{API}/{file_id}", headers=self.h, timeout=60, params={"supportsAllDrives": "true", "fields": "id"},
+                   json={"trashed": True})
+        r.raise_for_status()
+
     def pdf_from_html(self, parent: str, name: str, html: str) -> str:
         """PDF из HTML (паспорт сделки, HEAD 12.11): HTML → временный Google Документ → PDF в папку → документ в корзину.
         Своей библиотеки PDF на сервере нет — Google делает PDF сам."""

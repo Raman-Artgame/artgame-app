@@ -142,6 +142,18 @@ def _vat() -> float:
         return 0.0
 
 
+NO_VAT = {"2069", "2071"}   # ИП Артамонов и «Без документов»: НДС нет (HEAD 26.11); НДС — только у ИП Яковлев
+
+
+def vat_free(d: dict) -> bool:
+    return str(d.get("MYCOMPANY_ID") or "") in NO_VAT
+
+
+def vat_of(d: dict) -> float:
+    """Ставка НДС сделки, %: 0 у сделок через ИП Артамонов и без документов, иначе — «Значения»."""
+    return 0.0 if vat_free(d) else _vat()
+
+
 def _deals(ids: list[int] | None = None) -> list[dict]:
     """Сделки для сверки: все с изменениями с начала учёта + сделки с деньгами в журнале (их — по номерам)."""
     if ids is not None:

@@ -96,7 +96,7 @@ DONE = ("UC_BMKDS4", "WON")        # «Оплата+закрывающие до�
 F_END = "UF_CRM_ARTGAME_PROJECT_END_ACTUAL"
 F_MODEL = "UF_CRM_ARTGAME_PROJECT_MODEL"
 P_SELECT = ["ID", "TITLE", "STAGE_ID", "OPPORTUNITY", "MOVED_TIME", F_END, bx.CITY, bx.OBJECT, F_MODEL,
-            "UF_CRM_ARTGAME_FIN03_RECEIVED", "UF_CRM_ARTGAME_FIN03_DEBT"]
+            "UF_CRM_ARTGAME_FIN03_RECEIVED", "UF_CRM_ARTGAME_FIN03_DEBT", "MYCOMPANY_ID"]
 ROW0 = 1_000_000
 
 
@@ -130,6 +130,11 @@ def _model(v) -> str | None:
     return next((m for m in ("B2B", "B2G", "B2C") if m in up), name or None)
 
 
+def _vat_free(d: dict) -> bool:
+    from .deal_money import vat_free   # здесь: deal_money сам берёт функции из этого файла
+    return vat_free(d)
+
+
 def import_projects(conn, since: date = START) -> dict:
     """Сделки «1.1 Продажи РК», сданные с `since`, → fin_projects (origin='bitrix'). Сделки, что уже есть в листе, не берём."""
     in_sheet = {r["deal_id"] for r in conn.execute("SELECT DISTINCT deal_id FROM fin_projects WHERE origin='sheet' AND deal_id IS NOT NULL")}
@@ -144,13 +149,15 @@ def import_projects(conn, since: date = START) -> dict:
         row_no = ROW0 + did
         title = (d.get(bx.OBJECT) or "").strip() or str(d.get("TITLE") or "").split("·", 1)[-1].split("—")[0].strip()
         added += conn.execute(
-            """INSERT INTO fin_projects (year, row_no, deal_id, month, closed, title, city, model, revenue, received, debt, origin, synced_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'bitrix', now())
+            """INSERT INTO fin_projects (year, row_no, deal_id, month, closed, title, city, model, revenue, received, debt, vat_free, origin, synced_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'bitrix', now())
                ON CONFLICT (year, row_no) DO UPDATE SET month=EXCLUDED.month, closed=EXCLUDED.closed, title=EXCLUDED.title,
-                 city=EXCLUDED.city, model=EXCLUDED.model, revenue=EXCLUDED.revenue, received=EXCLUDED.received, debt=EXCLUDED.debt, synced_at=now()
+                 city=EXCLUDED.city, model=EXCLUDED.model, revenue=EXCLUDED.revenue, received=EXCLUDED.received, debt=EXCLUDED.debt,
+                 vat_free=EXCLUDED.vat_free, synced_at=now()
                RETURNING (xmax = 0) AS ins""",
             (end.year, row_no, did, end.month, end, title, bx.city_name(d.get(bx.CITY)), _model(d.get(F_MODEL)), bx._money(d.get("OPPORTUNITY")),
-             bx._money(d.get("UF_CRM_ARTGAME_FIN03_RECEIVED")), bx._money(d.get("UF_CRM_ARTGAME_FIN03_DEBT")))).fetchone()["ins"]
+             bx._money(d.get("UF_CRM_ARTGAME_FIN03_RECEIVED")), bx._money(d.get("UF_CRM_ARTGAME_FIN03_DEBT")),
+             _vat_free(d))).fetchone()["ins"]
         seen.append(row_no)
     # сделку вернули со стадии или перенесли в лист — убираем из копии
     conn.execute("DELETE FROM fin_projects WHERE origin='bitrix' AND closed >= %s AND NOT (row_no = ANY(%s))", (since, seen))

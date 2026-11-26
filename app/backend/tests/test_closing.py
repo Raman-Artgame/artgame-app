@@ -306,6 +306,21 @@ def test_via_no_docs_only_money_and_prod(client, monkeypatch):
                         VALUES (gen_random_uuid(), 1810, 'photo', 'после.jpg', 'image/jpeg', 'drv-ph3', 'ready', %s)""", (ids[2000],))
     ph = next(x for x in client.get("/api/head/closing/1810", headers=hdr(1000)).json()["photos"])
     assert client.post(f"/api/head/closing/1810/prod/{ph['id']}", headers=hdr(1000)).json()["prod"]
+    # по ошибке закинул в Продакшн — «Вернуть в Отчёты»: копия с Диска в корзину, пункт «Продакшн» снова не выполнен
+    trashed = []
+    monkeypatch.setattr(drive.Drive, "trash", lambda self, fid: trashed.append(fid), raising=False)
+    assert client.post(f"/api/head/closing/1810/unprod/{ph['id']}", headers=hdr(1000)).json() == {"ok": True, "prod": False}
+    assert len(trashed) == 1 and "prod" in keys(client.get("/api/bx/deals/1810/close", headers=hdr(6000)).json())
+    assert client.post(f"/api/head/closing/1810/unprod/{ph['id']}", headers=hdr(6000)).status_code == 403
+    assert client.post(f"/api/head/closing/1810/prod/{ph['id']}", headers=hdr(1000)).json()["prod"]
+    # ИП Артамонов — тоже без НДС (HEAD 26.11); ИП Яковлев — с НДС
+    DEALS["1810"]["MYCOMPANY_ID"] = "2069"
+    m = client.get("/api/head/closing/1810", headers=hdr(1000)).json()["money"]
+    assert m["vat_pct"] == 0 and m["net"] == m["sum"]
+    DEALS["1810"]["MYCOMPANY_ID"] = "1103"
+    m = client.get("/api/head/closing/1810", headers=hdr(1000)).json()["money"]
+    assert m["vat_pct"] == 16 and m["net"] < m["sum"]
+    DEALS["1810"]["MYCOMPANY_ID"] = "2071"
     r = client.post("/api/head/closing/1810/close", headers=hdr(1000))
     assert r.status_code == 200, r.text
     assert DEALS["1810"][bxw.F_END_FACT] == "2026-11-20" and DEALS["1810"]["STAGE_ID"] == "WON"

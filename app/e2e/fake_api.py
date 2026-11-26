@@ -65,6 +65,9 @@ class FakeDrive:
         if name:
             STORE[fid]["name"] = name
 
+    def trash(self, fid):
+        STORE[fid]["trashed"] = True
+
     def copy(self, fid, parent, name=None):
         i = f"drv{len(STORE):08d}"
         STORE[i] = {**STORE[fid], "parents": [parent]}

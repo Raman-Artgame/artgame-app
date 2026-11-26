@@ -242,6 +242,12 @@ async function closeStep(p) {
   assert.strictEqual(await h.locator('.passph .ph').count(), 4)
   await h.locator('.passph .ph').first().getByRole('button', { name: 'В Продакшн' }).click()
   await h.locator('.passph .ph').first().locator('.badge', { hasText: 'в Продакшн' }).waitFor()
+  // HEAD 26.11: по ошибке закинул в Продакшн — «Вернуть в Отчёты», и снова «В Продакшн»
+  await shot(h, 'close-vernut-v-otchety')
+  await h.locator('.passph .ph').first().getByRole('button', { name: 'Вернуть в Отчёты' }).click()
+  await h.locator('.passph .ph').first().getByRole('button', { name: 'В Продакшн' }).waitFor()
+  await h.locator('.passph .ph').first().getByRole('button', { name: 'В Продакшн' }).click()
+  await h.locator('.passph .ph').first().locator('.badge', { hasText: 'в Продакшн' }).waitFor()
   await fits(h, 'паспорт сделки')
   await shot(h, 'close-head-passport', null, true)
   await h.evaluate(() => window.scrollTo(0, 0)); await shot(h, 'close-head-passport-top')

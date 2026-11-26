@@ -40,6 +40,7 @@ function Summary({ m, d }) {
     <div className="card"><h3>Прибыль месяца</h3>
       <div className="kv"><div><span className="muted small">Выручка с НДС</span><b>{money(s.revenue.gross)}</b></div>
         <div><span className="muted small">Без НДС</span><b>{money(s.revenue.net)}</b></div>
+        {s.revenue.vat_free > 0 && <div><span className="muted small">Из них без НДС вовсе</span><b>{money(s.revenue.vat_free)}</b></div>}
         <div><span className="muted small">Расходы</span><b>{money(Object.values(c).reduce((a, x) => a + x, 0))}</b></div>
         <div><span className="muted small">Прибыль до ИПН</span><b>{money(s.profit)}</b></div>
         {s.ipn != null && <div><span className="muted small">ИПН (оценка)</span><b>{money(s.ipn)}</b></div>}</div>

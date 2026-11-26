@@ -47,7 +47,7 @@ def money(oid: int, p: dict = Depends(active)):
     from .closing import costs
     m = deal_money.card(d)
     opp = bx._money(d.get("OPPORTUNITY"))
-    vat = deal_money._vat()
+    vat = deal_money.vat_of(d)
     net = round(opp / (1 + vat / 100), 2) if vat else opp
     with db.pool.connection() as conn:
         c = costs(conn, oid)

@@ -150,6 +150,7 @@ export function Passport({ id, back, onDecided }) {
     api(`/head/closing/${id}/close`, { method: 'POST' }).then(x => { setBusy(''); onDecided ? onDecided(x.bx === 'off' ? 'Закрыта в приложении, в Битрикс не записано.' : 'Сделка закрыта: «Оплата получена», паспорт сохранён, PDF — в «ДОКУМЕНТЫ».') : load() },
       e => { setBusy(''); setErr(e.message) }) }
   const prod = f => api(`/head/closing/${id}/prod/${f.id}`, { method: 'POST' }).then(() => { setMsg('Фото в «МЕДИА / Продакшн / Фото».'); load() }, e => setMsg(e.message))
+  const unprod = f => api(`/head/closing/${id}/unprod/${f.id}`, { method: 'POST' }).then(() => { setMsg('Фото вернулось в «Отчёты», из «Продакшн» убрано.'); load() }, e => setMsg(e.message))
   const pdf = () => { setBusy('pdf'); api(`/head/closing/${id}/pdf`, { method: 'POST' }).then(() => { setBusy(''); load() }, e => { setBusy(''); setMsg(e.message) }) }
   const client = !dl.client ? '—' : dl.client_type && !dl.client.includes(dl.client_type) ? `${dl.client} · ${dl.client_type}` : dl.client
   const kv = [['Клиент', client], ['Исполнитель', dl.myco], ['МОП', dl.mop || '—'], ['ГИП', dl.gip || '—'],
@@ -204,7 +205,7 @@ export function Passport({ id, back, onDecided }) {
 
     <div className="card"><h3>Деньги</h3>
       <div className="kv">
-        <div><span className="muted small">{m.vat_pct ? 'Сумма с НДС' : 'Сумма (без ИП, НДС нет)'}</span><b>{tg(m.sum)}</b></div>
+        <div><span className="muted small">{m.vat_pct ? 'Сумма с НДС' : 'Сумма (НДС нет)'}</span><b>{tg(m.sum)}</b></div>
         {m.vat_pct > 0 && <div><span className="muted small">Без НДС ({m.vat_pct}%)</span><b>{tg(m.net)}</b></div>}
         <div><span className="muted small">Поступило</span><b>{tg(m.received)}</b></div>
         <div><span className="muted small">Долг</span><b className={m.debt ? 'neg' : ''}>{tg(m.debt)}</b></div>
@@ -228,7 +229,7 @@ export function Passport({ id, back, onDecided }) {
       <div className="chips docchips">{p.docs.map(x => <span key={x.title} className={'tag' + (x.n ? '' : ' none')}>{x.title}{x.n ? ` · ${x.n}` : ' · нет'}</span>)}</div>
       {p.photos.length > 0 ? <div className="grid passph">{p.photos.map(f => <div key={f.id} className="ph">
         <a href={f.url} target="_blank" rel="noreferrer"><img src={f.thumb} alt={f.name} loading="lazy" /></a>
-        {f.prod ? <span className="badge ok">в Продакшн</span> : !p.frozen ? <button className="ghost mini" onClick={() => prod(f)}>В Продакшн</button> : null}</div>)}</div>
+        {f.prod ? <><span className="badge ok">в Продакшн</span>{!p.frozen && <button className="ghost mini" onClick={() => unprod(f)}>Вернуть в Отчёты</button>}</> : !p.frozen ? <button className="ghost mini" onClick={() => prod(f)}>В Продакшн</button> : null}</div>)}</div>
         : <p className="small muted">Фото объекта нет.</p>}
       {p.photos_total > p.photos.length && <p className="small muted">Последние {p.photos.length} из {p.photos_total} — остальные в папке сделки.</p>}
       {msg && <p className="small muted">{msg}</p>}

@@ -379,3 +379,12 @@ def test_bitrix_payment_without_date(client, monkeypatch):
     with db.pool.connection() as c:
         act = c.execute("SELECT op_date FROM fin_ledger WHERE source='bitrix' AND status='active'").fetchall()
     assert [str(x["op_date"]) for x in act] == ["2026-11-05"]
+
+
+def test_summary_vat_only_for_yakovlev(client, monkeypatch):
+    """HEAD 26.11: НДС — только с выручки через ИП Яковлев; сделки через ИП Артамонов и без документов — вся сумма."""
+    setup(client, monkeypatch)
+    monkeypatch.setattr(fin, "month_rows", lambda y, m, fresh=False: [{"id": 1, "sum": 1_160_000.0},
+                                                                     {"id": 2, "sum": 120_000.0, "vat_free": True}])
+    r = client.get("/api/fin/summary?ym=2026-11", headers=hdr(1000)).json()["revenue"]
+    assert r["gross"] == 1_280_000 and r["net"] == 1_120_000 and r["vat"] == 160_000 and r["vat_free"] == 120_000
