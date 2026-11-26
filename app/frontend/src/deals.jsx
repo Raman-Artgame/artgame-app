@@ -20,6 +20,20 @@ const RANK = { hot: 4, go: 3, wait: 2, idle: 1 }
 const cap = t => t ? t[0].toUpperCase() + t.slice(1) : ''
 const ddmm = s => s ? s.slice(8, 10) + '.' + s.slice(5, 7) : ''
 const daysTo = s => s ? Math.round((new Date(s + 'T00:00:00') - new Date(new Date().toDateString())) / 864e5) : null
+// Телефон (HEAD 26.11 «на телефоне канбан неудобно»): вместо колонок — стадии кнопками сверху и карточки выбранной стадии во всю ширину.
+// Компьютер и планшет шире 700 px — канбан как был. Стадию на телефоне меняют в карточке сделки.
+const NARROW = '(max-width: 700px)'
+function useNarrow() {
+  const [n, setN] = useState(() => window.matchMedia?.(NARROW).matches || false)
+  useEffect(() => {
+    const m = window.matchMedia?.(NARROW)
+    if (!m) return
+    const upd = () => setN(m.matches)
+    m.addEventListener?.('change', upd)
+    return () => m.removeEventListener?.('change', upd)
+  }, [])
+  return n
+}
 // доска «В работе» (HEAD 26.11): сколько оплачено и сколько осталось, кто куратор ГИП, когда сдача
 function WorkLine({ d }) {
   const pct = d.sum ? Math.min(100, Math.round(100 * (d.paid || 0) / d.sum)) : 0, left = daysTo(d.end)
@@ -106,6 +120,11 @@ export function Deals({ initial, place }) {
   const [over, setOver] = useState('')
   const [msg, setMsg] = useState(null)            // {text, id}
   const drag = useRef(null)
+  const narrow = useNarrow()
+  const [pst, setPst] = useState(null)            // телефон: открытая стадия (id | 'all'), null — сама выберет
+  useEffect(() => {   // телефон: выбранная стадия — в поле зрения ленты кнопок
+    if (narrow) document.querySelector('.kstages button.on')?.scrollIntoView?.({ inline: 'center', block: 'nearest' })
+  }, [narrow, pst, board, cat, data, card])
   const today = useToday()
   const load = fresh => { setBusy(true); setErr(''); if (fresh) loadToday(true).catch(() => {})
     return api(`/bx/deals${fresh ? '?fresh=1' : ''}`).then(setData, e => setErr(e.message)).finally(() => setBusy(false)) }
@@ -127,7 +146,7 @@ export function Deals({ initial, place }) {
       {nosum ? <span className="warn">без суммы: {nosum}</span> : null}</p>
     <div className="segf kbseg">{funnels.map(([k, name, n]) => k === 0
       ? [['sales', 'Продажи', SALES], ['work', 'В работе', WORK], ['parked', 'Отложено и отказы', [POSTPONED]]].map(([b, bn, ids]) => <button key={b} className={cat === 0 && board === b ? 'on' : ''}
-        onClick={() => { setCat(0); setBoard(b); setTone('') }}>{bn} <span>{mine.filter(d => d.category === 0 && ids.includes(stageOf(d))).length}</span></button>)
+        onClick={() => { setCat(0); setBoard(b); setTone(''); setPst(null) }}>{bn} <span>{mine.filter(d => d.category === 0 && ids.includes(stageOf(d))).length}</span></button>)
       : <button key={k} className={cat === k ? 'on' : ''} onClick={() => { setCat(k); setSt(null) }}>{name} <span>{n}</span></button>)}</div>
     {data.all && data.managers.length > 1 && <div className="chips sub"><button className={!mgr ? 'on' : ''} onClick={() => setMgr(0)}>Все</button>
       {data.managers.map(([id, name]) => <button key={id} className={mgr === id ? 'on' : ''} onClick={() => setMgr(id)}>{name.split(' ')[0]}</button>)}</div>}
@@ -156,7 +175,7 @@ export function Deals({ initial, place }) {
       .then(() => { say(`№ ${d.id} → «${name(to)}»`); loadToday(true).catch(() => {}) },
         e => { setMoved(m => ({ ...m, [d.id]: was })); say(`№ ${d.id} не перенесена: ${e.message}`, d.id) })
   }
-  const canDrag = board === 'sales' && !s
+  const canDrag = board === 'sales' && !s && !narrow
   const kcard = d => { const r = rem[d.id], age = ageDays(d.active || d.modified)
     return <div key={d.id} className={'kc' + (r?.tone === 'hot' ? ' hotc' : '')} draggable={canDrag}
       onDragStart={e => { drag.current = d.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(d.id)) }}
@@ -169,10 +188,33 @@ export function Deals({ initial, place }) {
       {WORK.includes(stageOf(d)) ? <WorkLine d={d} /> : null}
       <div className="kw">{[d.kind, data.all ? d.manager.split(' ')[0] : ''].filter(Boolean).join(' · ') || (d.area ? d.area + ' м²' : '')}</div>
     </div> }
+  const nowBar = <div className="kbnow">{TONES.filter(([k]) => counts[k] || k !== 'go').map(([k, t, sub]) => <button key={k} className={'kbcount ' + k + (tone === k ? ' on' : '')}
+      onClick={() => setTone(tone === k ? '' : k)}><span>{t}</span><b>{counts[k]}</b><i>{tone === k ? 'показаны только они · снять' : sub}</i></button>)}</div>
+  if (narrow) {
+    // по умолчанию — стадия, где кто-то ждёт ответа; иначе первая непустая
+    const cur = s || tone ? 'all' : pst === 'all' || cols.some(c => c.id === pst) ? pst
+      : (cols.find(c => c.items.some(d => rem[d.id]?.tone === 'hot')) || cols.find(c => c.items.length) || cols[0] || { id: 'all' }).id
+    const showCols = cur === 'all' ? cols.filter(c => c.items.length) : cols.filter(c => c.id === cur)
+    return <>
+      {head}
+      {nowBar}
+      <div className="chips scroll kstages">
+        <button className={cur === 'all' ? 'on' : ''} onClick={() => setPst('all')}>Все <span>{shown.length}</span></button>
+        {cols.map(c => <button key={c.id} className={cur === c.id ? 'on' : ''} onClick={() => setPst(c.id)}>{c.name} <span>{c.items.length}</span>
+          {c.items.some(d => rem[d.id]?.tone === 'hot') ? <i className="dot" /> : null}</button>)}
+      </div>
+      {showCols.map(c => <div key={c.id} className="kphone">
+        <div className="kphead"><span>{c.name}</span><b>{c.items.length} · {c.sum ? mln(c.sum) : '—'}</b>{WORK.includes(c.id) && c.debt ? <small>долг {mln(c.debt)}</small> : null}</div>
+        {c.items.map(kcard)}
+        {!c.items.length && <p className="muted small kempty">В этой стадии сделок нет.</p>}
+      </div>)}
+      {!shown.length && <p className="muted kbnone">{tone ? 'Таких сделок нет — снимите фильтр.' : s ? 'Ничего не найдено.' : 'На этой доске сделок нет.'}</p>}
+      <p className="small muted kbhint">Стадии — кнопками сверху. Стадию сделки меняют в её карточке. На компьютере эта доска — канбаном.</p>
+    </>
+  }
   return <>
     {head}
-    <div className="kbnow">{TONES.filter(([k]) => counts[k] || k !== 'go').map(([k, t, sub]) => <button key={k} className={'kbcount ' + k + (tone === k ? ' on' : '')}
-      onClick={() => setTone(tone === k ? '' : k)}><span>{t}</span><b>{counts[k]}</b><i>{tone === k ? 'показаны только они · снять' : sub}</i></button>)}</div>
+    {nowBar}
     {msg && <div className="toast kbmsg">{msg.text}{msg.id ? <button className="ghost mini" onClick={() => setCard(msg.id)}>Открыть сделку</button> : null}</div>}
     <div className="kb">{cols.map(c => <div key={c.id} className={'kcol' + (over === c.id ? ' over' : '') + (c.items.length ? '' : ' empty')}
       onDragOver={e => { if (canDrag) { e.preventDefault(); if (over !== c.id) setOver(c.id) } }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOver('') }}
@@ -183,7 +225,7 @@ export function Deals({ initial, place }) {
       {!c.items.length && <div className="kempty">{canDrag ? 'Перетащите сюда сделку' : 'Пусто'}</div>}
     </div>)}</div>
     {!shown.length && <p className="muted kbnone">{tone ? 'Таких сделок нет — снимите фильтр.' : s ? 'Ничего не найдено.' : 'На этой доске сделок нет.'}</p>}
-    {canDrag && <p className="small muted kbhint">Карточку тяните мышью в другую стадию. Если для стадии чего-то не хватает, сделка останется на месте и покажет, что заполнить. На телефоне колонки листаются пальцем, стадия меняется в карточке сделки.</p>}
+    {canDrag && <p className="small muted kbhint">Карточку тяните мышью в другую стадию. Если для стадии чего-то не хватает, сделка останется на месте и покажет, что заполнить.</p>}
     {!canDrag && <p className="small muted kbhint">Дальше по работе сделку ведут кнопки в карточке: «В производство», «Работы сданы», «На закрытие».</p>}
   </>
 }

@@ -111,7 +111,7 @@ async function deal(p, id) {
   await tab(m, 'Сделки')
   await m.getByRole('button', { name: 'Обновить' }).click()
   await m.locator('.segf button', { hasText: 'В работе' }).click()
-  const wc = m.locator('.kcol', { hasText: 'Выполнение проекта' }).locator('.kc', { hasText: '№ 1601' })
+  const wc = m.locator('.kc', { hasText: '№ 1601' })   // телефон — стадии кнопками, карточки во всю ширину (HEAD 26.11)
   await wc.waitFor()
   console.log('work card:', await wc.textContent())
   assert.match(await wc.locator('.kmeta').textContent(), /ГИП Айдана.*сдача \d\d\.\d\d/)

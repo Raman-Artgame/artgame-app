@@ -47,7 +47,7 @@ async function tab(p, name) {
 }
 async function dealsOpen(p) {
   await tab(p, 'Сделки')
-  await p.locator('.kb .kcol').first().waitFor({ state: 'attached' })
+  await p.locator('.kb .kcol, .kphone, .kstages').first().waitFor({ state: 'attached' })   // компьютер — канбан, телефон — стадии кнопками
 }
 async function card(p, id) {
   await dealsOpen(p)
@@ -79,6 +79,7 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   await h.waitForTimeout(500)
   assert.strictEqual((await call(1000, '/people')).find(x => x.id === m.id).bitrix_user_id, 4565)
   await dealsOpen(h)
+  await h.locator('.kstages button', { hasText: /^Все/ }).click()   // телефон: все стадии доски одним списком
   const nb = async name => +(await h.locator('.segf button', { hasText: name }).locator('span').textContent())
   assert.strictEqual(await nb('Продажи') + await nb('В работе'), 3, 'HEAD видит все открытые сделки')
   // цена (HEAD 26.11): ≈ ориентир / по расчёту, ✓ согласовано клиентом; без суммы — «Поставить ориентир» прямо на канбане
@@ -122,18 +123,32 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   assert.match(await p.locator('.strip').textContent(), /Месяц: 2,5 млн из 7 млн3% · до 4% ещё 4,5 млн/)
   await p.screenshot({ path: `${shots}/mop-today.png`, fullPage: true })
 
-  // Сделки канбаном (HEAD 26.11): только свои; колонки стадий, сумма крупно, напоминание «кто что ждёт» из очереди «Сегодня»
+  // Сделки (HEAD 26.11): только свои. Телефон — стадии кнопками и карточки во всю ширину (канбан там неудобен), компьютер — канбан;
+  // сумма крупно, напоминание «кто что ждёт» из очереди «Сегодня»
   await dealsOpen(p)
+  assert.strictEqual(await p.locator('.kb').count(), 0, 'на телефоне не канбан')
   assert.strictEqual(await p.locator('.kc').count(), 1)
+  assert.match(await p.locator('.kstages button.on').textContent(), /^Встреча\/Отправка КП\s?1$/, 'открыта стадия, где есть сделки')
+  const ph = p.locator('.kphone')
+  assert.match(await ph.locator('.kphead').textContent(), /Встреча\/Отправка КП1 · 589\s250/)
+  assert.match(await ph.locator('.kc .ks').textContent(), /589\s250\s₸/)
+  await ph.locator('.kc .kr.wait', { hasText: 'КП без ответа' }).waitFor()
+  assert.strictEqual(await p.locator('.kbcount.wait b').textContent(), '1')
+  const box = await ph.locator('.kc').boundingBox()
+  assert.ok(box.x >= 12 && box.x + box.width <= 390 - 12 && box.width > 330, `карточка во всю ширину, без обрезки (${box.x}, ${box.width})`)
+  await p.screenshot({ path: `${shots}/mop-deals.png`, fullPage: true })
+  await p.locator('.kstages button', { hasText: 'Взаимное информирование' }).click()
+  await p.locator('.kphone', { hasText: 'В этой стадии сделок нет' }).waitFor()
+  await p.locator('.kstages button', { hasText: /^Все/ }).click()
+  await ph.locator('.kc', { hasText: '№ 1601' }).waitFor()
+  // компьютер: канбан, пустые стадии — тоже колонки (в них перетаскивают)
+  await p.setViewportSize({ width: 1440, height: 900 })
+  await p.locator('.kb .kcol').first().waitFor()
   const kcol = p.locator('.kcol', { hasText: 'Встреча/Отправка КП' })
   assert.match(await kcol.locator('.khead').textContent(), /Встреча\/Отправка КП1/)
   assert.match(await kcol.locator('.ksum').textContent(), /589\s250/)
-  assert.match(await kcol.locator('.kc .ks').textContent(), /589\s250\s₸/)
-  await kcol.locator('.kc .kr.wait', { hasText: 'КП без ответа' }).waitFor()
-  assert.strictEqual(await p.locator('.kbcount.wait b').textContent(), '1')
   assert.ok(await p.locator('.kcol', { hasText: 'Взаимное информирование' }).count(), 'пустые стадии — тоже колонки, в них можно перетащить')
-  await p.screenshot({ path: `${shots}/mop-deals.png`, fullPage: true })
-  await p.setViewportSize({ width: 1440, height: 900 }); await p.waitForTimeout(400)
+  await p.waitForTimeout(400)
   await p.screenshot({ path: `${shots}/mop-deals-wide.png` })
   // перетаскивание: назад — сразу в Битрикс; вперёд без заполненной карточки — замок, карточка остаётся, кнопка «Открыть сделку»;
   // «Отложено» и отказы — отдельным списком
