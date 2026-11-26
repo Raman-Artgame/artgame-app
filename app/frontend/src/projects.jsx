@@ -35,6 +35,7 @@ export function Projects({ openDeal, me }) {
   if (open) return <ProjectCard x={open} me={me} back={() => setOpen(null)} openDeal={openDeal} />
   const list = d.projects.filter(x => seg === 'all' || (seg === 'work' ? x.working : seg === 'closing' ? x.closing : x.state === 'soon'))
   return <>
+    {me && me.role_code !== 'marketer' && <MyShoots />}
     <div className="card">
       <div className="head"><div><h2>Проекты</h2><div className="small muted">в работе {d.counts.work}{d.counts.late ? <span className="badge hot">{d.counts.late} просрочено</span> : null}</div></div>
         <button className="ghost mini" disabled={busy} onClick={() => load(true)}>{busy ? '…' : 'Обновить'}</button></div>
@@ -229,6 +230,33 @@ function ShootsBox({ id }) {
               <button onClick={() => answer(x.id, { ok: false, alt_date: x._d || null, note: x._n || null })}>Предложить дату</button></div></div>
         : <div className="seg"><button className="ghost" onClick={() => setAlt(x.id)}>Другая дата</button><button onClick={() => answer(x.id, { ok: true })}>Подтверждаю</button></div>)}
       {x.status === 'proposed' && x.alt_date && d.can_propose && <div className="seg"><button onClick={() => accept(x.id)}>Принять {dmy2(x.alt_date)}</button></div>}
+    </div>)}
+  </div>
+}
+
+// «Съёмки на моих объектах» (HEAD 26.11): календарь Куратора ГИП — агентство предлагает дату, ГИП отвечает здесь, без HEAD.
+// HEAD видит объекты без Куратора ГИП. Пусто — блока нет.
+function MyShoots() {
+  const [d, setD] = useState(null)
+  const [alt, setAlt] = useState(null)
+  const [msg, setMsg] = useState('')
+  const load = () => api('/shoots/mine').then(setD, () => setD(false))
+  useEffect(() => { load() }, [])
+  if (!d || !d.items.length) return null
+  const answer = (sid, body) => api(`/shoots/${sid}/answer`, { method: 'POST', body }).then(() => { setAlt(null); setMsg(''); load() }, e => setMsg(e.message))
+  return <div className="card shoots">
+    <div className="head"><h3>Съёмки на моих объектах</h3>{d.waiting > 0 && <span className="badge warn">ждут ответа {d.waiting}</span>}</div>
+    {msg && <p className="small muted">{msg}</p>}
+    {d.items.map(x => <div key={x.id} className="shoot">
+      <div className="row"><div><b>{dmy2(x.shoot_date)}{x.at_time ? ' · ' + x.at_time : ''} · {x.title}</b>
+        <div className="small muted">{[`№ ${x.object_id} ${cleanTitle(x.object_title, x.object_id)}`, x.author, x.note].filter(Boolean).join(' · ')}</div>
+        {x.alt_date && <div className="small why">Вы предложили {dmy2(x.alt_date)}{x.alt_note ? ': ' + x.alt_note : ''} — ждём ответа маркетинга</div>}</div>
+        <span className={'small nowrap ' + (x.status === 'proposed' ? 'muted' : 'ok')}>{x.status === 'proposed' ? 'ждёт вас' : 'в плане'}</span></div>
+      {x.status === 'proposed' && !x.alt_date && (alt === x.id
+        ? <div className="altd"><input type="date" onChange={e => (x._d = e.target.value)} /><input placeholder="Почему другая дата" onChange={e => (x._n = e.target.value)} />
+            <div className="seg"><button className="ghost" onClick={() => setAlt(null)}>Отмена</button>
+              <button onClick={() => answer(x.id, { ok: false, alt_date: x._d || null, note: x._n || null })}>Предложить дату</button></div></div>
+        : <div className="seg"><button className="ghost" onClick={() => setAlt(x.id)}>Другая дата</button><button onClick={() => answer(x.id, { ok: true })}>Подтверждаю</button></div>)}
     </div>)}
   </div>
 }

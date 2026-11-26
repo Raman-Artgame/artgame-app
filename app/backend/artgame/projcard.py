@@ -193,10 +193,27 @@ def obj_shoot_propose(oid: int, b: ShootPropose, p: dict = Depends(active)):
                          (b.title.strip(), b.shoot_date, b.at_time, oid, b.note, st, p["id"],
                           p["id"] if st == "planned" else None, datetime.now(timezone.utc) if st == "planned" else None)).fetchone()
         db.audit(conn, p["id"], "shoot_propose", "mkt_shoots", r["id"], {"object": oid, "date": str(b.shoot_date)})
-        if st == "proposed":
-            _tell(conn, o["gip_person_id"], f"🎥 {p['full_name']} предлагает съёмку на объекте «{o['title']}»: {b.shoot_date:%d.%m}"
-                  f"{' ' + b.at_time if b.at_time else ''} — {b.title}. Подтвердите в карточке проекта.")
+        if st == "proposed":   # Куратора ГИП нет — подтверждает HEAD, ему и сообщение (раньше не уходило никому)
+            to = o["gip_person_id"] or (conn.execute("SELECT id FROM people WHERE role_code='head' AND status='active' ORDER BY id LIMIT 1").fetchone() or {}).get("id")
+            _tell(conn, to, f"🎥 {p['full_name']} предлагает съёмку на объекте «{o['title']}»: {b.shoot_date:%d.%m}"
+                  f"{' ' + b.at_time if b.at_time else ''} — {b.title}. Подтвердите в «Проектах» → «Съёмки на моих объектах».")
     return {"id": r["id"], "status": st}
+
+
+@router.get("/shoots/mine")
+def my_shoots(p: dict = Depends(active)):
+    """Календарь съёмок Куратора ГИП (HEAD 26.11: агентство договаривается с ГИП в приложении, без HEAD): ждут ответа и в плане
+    на его объектах, от вчера и дальше. HEAD — по объектам без Куратора ГИП (подтверждает за него)."""
+    head = p["role_code"] == "head"
+    with db.pool.connection() as conn:
+        rows = conn.execute("""SELECT s.id, s.title, s.shoot_date, s.at_time, s.note, s.status, s.alt_date, s.alt_note, s.object_id,
+                                      o.title AS object_title, o.city AS object_city, a.full_name AS author
+                               FROM mkt_shoots s JOIN objects o ON o.id=s.object_id JOIN people a ON a.id=s.author_id
+                               WHERE s.status IN ('proposed','planned') AND s.object_id <> 0 AND s.shoot_date >= current_date - 1
+                                 AND """ + ("o.gip_person_id IS NULL" if head else "o.gip_person_id=%s") + """
+                               ORDER BY s.status <> 'proposed', s.shoot_date, s.at_time NULLS LAST, s.id""",
+                            () if head else (p["id"],)).fetchall()
+    return {"items": rows, "waiting": sum(1 for r in rows if r["status"] == "proposed" and not r["alt_date"])}
 
 
 def _shoot(conn, sid: int) -> dict:
@@ -213,7 +230,7 @@ def shoot_answer(sid: int, b: ShootAnswer, p: dict = Depends(active)):
     with db.pool.connection() as conn, conn.transaction():
         s = _shoot(conn, sid)
         if not (p["role_code"] == "head" or s["gip_person_id"] == p["id"]):
-            raise HTTPException(403, "Съёмку подтверждает ГИП объекта")
+            raise HTTPException(403, "Съёмку подтверждает Куратор ГИП объекта")
         if s["status"] != "proposed":
             raise HTTPException(409, "Съёмка уже не ждёт ответа")
         if b.ok:
