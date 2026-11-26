@@ -779,6 +779,8 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
                                FROM fin_ledger WHERE status='active' AND op_date >= %s AND op_date < %s""", (ym, ym, start, end)).fetchone()
         opening, closing = balances(conn, start), balances(conn, end)
         plans = conn.execute("SELECT code, title, kind, plan_key FROM fin_articles WHERE plan_key IS NOT NULL AND active ORDER BY sort").fetchall()
+        from .recurring import month_bills   # здесь, а не сверху: recurring сам берёт функции из этого файла
+        bills = month_bills(conn, ym)
         hist = start < HIST_CUT   # до ноября 2026: расходы проектов — оценки старой таблицы «Проекты 2026»
         hist_mat = _f(conn.execute("""SELECT coalesce(sum(materials + transport + other), 0) AS s FROM fin_projects
                                       WHERE year=%s AND month=%s""", (start.year, start.month)).fetchone()["s"]) if hist else 0.0
@@ -803,6 +805,9 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
         for code, b in budget.items():
             if b["plan"] and not b["fact"] and code != "ads":   # «ads» (% от выручки) — не поверх отдельных статей рекламы
                 b["fact"], b["estimate"] = float(b["plan"]), True
+    for code, rows in bills.items():   # платежи графика за этот месяц: дата и «оплачено» прямо в строке бюджета
+        if code in budget:
+            budget[code]["bills"] = rows
     fixed = sum(b["fact"] for b in budget.values() if b["kind"] == "fixed")
     variable = sum(b["fact"] for b in budget.values() if b["kind"] == "variable")
     taxes_paid = sum(b["fact"] for b in budget.values() if b["kind"] == "tax")

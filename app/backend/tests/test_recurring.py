@@ -109,3 +109,38 @@ def test_auto_and_bot(client, monkeypatch):
         assert {x["title"] for x in recurring.due_now(c, now.date())} == {"Аренда студии, Астана", "Claude"}
     p = client.get("/api/head/pulse", headers=hdr(1000)).json()
     assert p["bills"] and all(b["status"] in ("today", "overdue") for b in p["bills"])
+
+
+def test_budget_row_pay_and_no_double(client, monkeypatch):
+    """HEAD 26.11: строка бюджета показывает платёж графика; внесённое через «+ Общий» второй раз не просим и не пишем."""
+    from artgame import drive
+    monkeypatch.setattr(drive, "save_receipt", lambda conn, z, name, data, deal_id=None: "drv-rec")
+    _setup(client)
+    today = datetime.now(TZ).date()
+    ym = f"{today:%Y-%m}"
+    with db.pool.connection() as c:
+        c.execute("UPDATE fin_recurring SET start_date=%s", (today.replace(day=1),))
+        tel = c.execute("SELECT id, article_code FROM fin_recurring WHERE title='Баланс телефонии'").fetchone()
+        cl = c.execute("SELECT id, article_code FROM fin_recurring WHERE auto AND article_code IN (SELECT code FROM fin_articles WHERE plan_key='fin.fixed.sub.claude')").fetchone()
+    row = lambda code: next(b for b in client.get(f"/api/fin/summary?ym={ym}", headers=hdr(1000)).json()["budget"] if b["code"] == code)
+    b = row(tel["article_code"])
+    assert b["plan"] == 15000 and b["bills"][0]["id"] == tel["id"] and b["bills"][0]["paid"] is None and b["bills"][0]["cycle"] == ym
+    # оплата из строки бюджета — тот же платёж графика
+    body = {"client_uid": str(uuid.uuid4()), "cycle": ym, "account": "kaspi", "op_date": str(today), "amount": 15000, "receipt": JPEG}
+    assert client.post(f"/api/fin/recurring/{tel['id']}/pay", json=body, headers=hdr(1000)).json()["ok"]
+    b = row(tel["article_code"])
+    assert b["fact"] == 15000 and b["bills"][0]["status"] == "paid" and b["bills"][0]["paid"]["amount"] == 15000
+    # подписку внесли руками через «+ Общий» раньше дня списания: в графике она оплачена, автосписание второй строки не пишет
+    with db.pool.connection() as c:
+        c.execute("DELETE FROM fin_ledger WHERE source_ref=%s", (f"recurring:{cl['id']}:{ym}",))
+    r = client.post("/api/fin/ledger", json={"client_uid": str(uuid.uuid4()), "op_date": str(today), "account": "kaspi", "amount": 50000,
+                                             "article": cl["article_code"], "period": ym}, headers=hdr(1000))
+    assert r.status_code == 200
+    with db.pool.connection() as c:
+        assert not [x for x in recurring.auto_book(c, today.replace(day=28)) if x["id"] == cl["id"] and x["cycle"] == ym]
+        assert c.execute("SELECT count(*) AS n FROM fin_ledger WHERE article_code=%s AND period=%s AND status='active'",
+                         (cl["article_code"], ym)).fetchone()["n"] == 1
+    b = row(cl["article_code"])
+    assert b["fact"] == 50000 and b["bills"][0]["status"] == "paid"
+    again = {**body, "client_uid": str(uuid.uuid4())}
+    assert client.post(f"/api/fin/recurring/{cl['id']}/pay", json=again, headers=hdr(1000)).status_code == 409

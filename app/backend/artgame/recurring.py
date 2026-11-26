@@ -53,22 +53,54 @@ def _rows(conn, all_rows: bool = False) -> list[dict]:
                            WHERE %s OR r.active ORDER BY r.active DESC, r.every, r.day, r.sort, r.id""", (all_rows,)).fetchall()
 
 
+def _hand(conn) -> tuple[dict, set]:
+    """Без дублей с «+ Общий» (HEAD 26.11): расход, внесённый руками по статье платежа за этот месяц, — тоже «оплачено».
+    Только когда у статьи один платёж в графике: иначе непонятно, какой из них оплачен."""
+    rows = conn.execute("""SELECT article_code, period, min(op_date) AS op_date, sum(amount) AS amount, min(account_code) AS account_code
+                           FROM fin_ledger WHERE status='active' AND direction='out'
+                             AND (source_ref IS NULL OR source_ref NOT LIKE 'recurring:%%')
+                             AND article_code IN (SELECT article_code FROM fin_recurring)
+                           GROUP BY article_code, period""").fetchall()
+    one = {x["article_code"] for x in conn.execute(
+        "SELECT article_code FROM fin_recurring WHERE active GROUP BY article_code HAVING count(*)=1").fetchall()}
+    return {(x["article_code"], x["period"]): x for x in rows}, one
+
+
+def _paid(conn):
+    """Функция «чем оплачен цикл платежа»: строка журнала или None."""
+    ref = {x["source_ref"]: x for x in conn.execute(
+        """SELECT source_ref, op_date, amount, account_code FROM fin_ledger
+           WHERE source='app' AND status='active' AND source_ref LIKE 'recurring:%%'""").fetchall()}
+    hand, one = _hand(conn)
+
+    def get(r: dict, cycle: str):
+        x = ref.get(_ref(r["id"], cycle))
+        if not x and r["every"] == "month" and r["article_code"] in one:
+            x = hand.get((r["article_code"], cycle))
+        return x
+    return get
+
+
+def _status(due: date, today: date) -> str:
+    left = (due - today).days
+    return "overdue" if left < 0 else "today" if left == 0 else "soon" if left <= SOON else "later"
+
+
 def items(conn, today: date | None = None, all_rows: bool = False) -> list[dict]:
     """Каждый платёж с ближайшим неоплаченным циклом: status overdue | today | soon | later | paid | off."""
     today = today or _today()
     v = vals(conn)
-    paid = {x["source_ref"]: x for x in conn.execute(
-        """SELECT source_ref, op_date, amount, account_code FROM fin_ledger
-           WHERE source='app' AND status='active' AND source_ref LIKE 'recurring:%%'""").fetchall()}
+    paid = _paid(conn)
     out = []
     for r in _rows(conn, all_rows):
         cyc = [(c, d) for c, d in cycles(r, today) if d >= r["start_date"]]
-        unpaid = [(c, d) for c, d in cyc if _ref(r["id"], c) not in paid]
-        last = next((paid[_ref(r["id"], c)] for c, _ in reversed(cyc) if _ref(r["id"], c) in paid), None)
+        unpaid = [(c, d) for c, d in cyc if not paid(r, c)]
+        last = next((paid(r, c) for c, _ in reversed(cyc) if paid(r, c)), None)
         if unpaid:
             c, d = unpaid[0]
-            left = (d - today).days
-            st = "overdue" if left < 0 else "today" if left == 0 else "soon" if left <= SOON else "paid" if last else "later"
+            st = _status(d, today)
+            if st == "later" and last:
+                st = "paid"
         else:
             c, d = cyc[-1] if cyc else ("", None)
             st = "paid"
@@ -78,6 +110,26 @@ def items(conn, today: date | None = None, all_rows: bool = False) -> list[dict]
                     "amount_key": r["plan_key"], "cycle": c, "due": d.isoformat() if d else None,
                     "status": st if r["active"] else "off",
                     "last_paid": {"date": last["op_date"].isoformat(), "amount": float(last["amount"]), "account": last["account_code"]} if last else None})
+    return out
+
+
+def month_bills(conn, ym: str, today: date | None = None) -> dict[str, list[dict]]:
+    """Платежи графика за месяц ym по статьям — для «Бюджет: план и факт» (HEAD 26.11: «как подтвердить, что я уже оплатил?»)."""
+    today = today or _today()
+    y, m = int(ym[:4]), int(ym[5:7])
+    paid = _paid(conn)
+    out: dict[str, list[dict]] = {}
+    for r in _rows(conn):
+        if r["every"] == "year" and r["month"] != m:
+            continue
+        cycle, due = (ym, _on(y, m, r["day"])) if r["every"] == "month" else (str(y), _on(y, m, r["day"]))
+        if due < r["start_date"]:
+            continue   # до приложения — оплачено мимо него
+        x = paid(r, cycle)
+        out.setdefault(r["article_code"], []).append({
+            "id": r["id"], "title": r["title"], "cycle": cycle, "due": due.isoformat(), "auto": r["auto"],
+            "status": "paid" if x else _status(due, today),
+            "paid": {"date": x["op_date"].isoformat(), "amount": float(x["amount"])} if x else None})
     return out
 
 
@@ -95,6 +147,7 @@ def auto_book(conn, today: date | None = None) -> list[dict]:
     if not head:
         return []
     v = vals(conn)
+    paid = _paid(conn)
     done = []
     for r in _rows(conn):
         if not r["auto"]:
@@ -106,6 +159,8 @@ def auto_book(conn, today: date | None = None) -> list[dict]:
             ref = _ref(r["id"], c)
             if conn.execute("SELECT 1 FROM fin_ledger WHERE source='app' AND source_ref=%s", (ref,)).fetchone():
                 continue   # уже записано (или HEAD отменил — тогда вносит руками)
+            if paid(r, c):
+                continue   # уже внесено руками через «+ Общий» — второй раз не пишем
             period = c if r["every"] == "month" else f"{d:%Y-%m}"
             with conn.transaction():
                 row = add_ledger(conn, {"id": head["id"]}, client_uid=uuid.uuid4(), op_date=d, account=r["account_code"], direction="out",
@@ -159,8 +214,8 @@ def recurring_pay(rid: int, b: RecPayIn, p: dict = Depends(require_head)):
         if b.account != "cash" and not b.receipt and not r["auto"]:
             raise HTTPException(400, "Переводом — приложите чек")   # HEAD 12.11
         ref = _ref(rid, b.cycle)
-        if conn.execute("SELECT 1 FROM fin_ledger WHERE source='app' AND source_ref=%s AND status='active'", (ref,)).fetchone():
-            raise HTTPException(409, "уже оплачено за этот период")
+        if _paid(conn)(r, b.cycle):
+            raise HTTPException(409, "Уже оплачено за этот период — второй раз не вносим")
         period = b.cycle if r["every"] == "month" else f"{b.op_date:%Y-%m}"
         with conn.transaction():
             fid = _receipt(conn, p, f"{b.op_date} {r['title']} {b.amount:.0f}", b.receipt) if b.receipt else None

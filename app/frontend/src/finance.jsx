@@ -1,4 +1,4 @@
-import { Receipt } from './ui.jsx'
+import { Receipt, Sheet } from './ui.jsx'
 import React, { useEffect, useState } from 'react'
 import { api, uuid } from './api.js'
 import { enqueue, pending } from './queue.js'
@@ -22,11 +22,13 @@ function MonthBar({ m, setM }) {
     <b>{MONTH(m)}</b><button className="ghost mini" onClick={() => setM(shift(m, 1))}>›</button></div>
 }
 
-function Summary({ m }) {
+function Summary({ m, d }) {
   const [s, setS] = useState(null)
   const [e, setE] = useState('')
   const [exp, setExp] = useState('')
-  useEffect(() => { setS(null); api('/fin/summary?ym=' + m).then(setS, err(setE)) }, [m])
+  const [pay, setPay] = useState(null)
+  const load = () => api('/fin/summary?ym=' + m).then(setS, err(setE))
+  useEffect(() => { setS(null); load() }, [m])
   if (e) return <p className="small muted">{e}</p>
   if (!s) return <p className="small muted">Загрузка…</p>
   const c = s.costs
@@ -50,11 +52,55 @@ function Summary({ m }) {
         <span className="small muted">{money(+s.cash.opening.find(x => x.code === b.code)?.balance)} → <b>{money(+b.balance)}</b></span></div>)}
       {s.cash.company_paid_receipts > 0 && <p className="small muted">Чеки «деньги компании»: {money(s.cash.company_paid_receipts)} — внесите их списание со счёта в «Деньги».</p>}</div>
     {s.budget.length > 0 && <div className="card"><h3>Бюджет: план и факт</h3>
-      {s.budget.map(b => <div key={b.code} className="row"><span>{b.title}<div className="small muted">{KIND[b.kind]}</div></span>
-        <span className="small">{money(b.fact)}{b.estimate ? ' (оценка)' : ''} <span className="muted">/ {b.plan ? money(b.plan) : 'план не задан'}</span></span></div>)}</div>}
+      <p className="small muted">Оплатили — нажмите на строку: сумма, дата, чек.</p>
+      {s.budget.map(b => { const u = (b.bills || []).find(x => !x.paid), p = (b.bills || []).find(x => x.paid)
+        const hot = u && (m === ym() || u.status === 'overdue')
+        return <div key={b.code} className={'row brow' + (hot ? ' unpaid' : '')} role="button" onClick={() => setPay(b)}>
+          <span>{b.title}<div className="small muted">{hot ? <span className={['overdue', 'today', 'soon'].includes(u.status) ? 'why' : ''}>не оплачено · {u.status === 'overdue' ? 'срок был ' : 'до '}{dm(u.due)}</span>
+            : p && !u ? <span className="ok">{p.auto ? 'списано' : 'оплачено'} {dm(p.paid.date)}</span> : KIND[b.kind]}</div></span>
+          <span className="small nowrap">{money(b.fact)}{b.estimate ? ' (оценка)' : ''} <span className="muted">/ {b.plan ? money(b.plan) : 'план не задан'}</span> <span className="muted">›</span></span></div> })}</div>}
+    {pay && <BudgetPay b={pay} m={m} d={d} onClose={() => setPay(null)} onDone={() => { setPay(null); load() }} />}
     {s.warn.map(w => <p key={w} className="small why">{w}</p>)}
     <div className="card"><button className="ghost" onClick={sync}>Обновить Google Таблицу</button>{exp && <p className="small muted">{exp}</p>}</div>
   </>
+}
+
+// HEAD 26.11: «как мне сюда внести или подтвердить, что я уже что-то оплатил?» — нажатие на строку бюджета.
+// Статья из графика постоянных оплат закрывает платёж графика (тот же, что «Оплачено» в «Деньгах»), остальные — обычный общий расход.
+// Обе дороги пишут одну строку журнала денег; уже оплаченное второй раз не предлагаем.
+function BudgetPay({ b, m, d, onClose, onDone }) {
+  const bill = (b.bills || []).find(x => !x.paid)
+  const was = (b.bills || []).filter(x => x.paid)
+  const bank = d.accounts.filter(a => a.code !== 'cash'), hasCash = d.accounts.some(a => a.code === 'cash')
+  const [more, setMore] = useState(false)
+  const [v, set] = useState({ amount: b.plan && !(bill && b.bills.length > 1) ? String(Math.max(Math.round(b.plan - (bill ? 0 : b.fact)), 0) || '') : '', op_date: today(), cash: false, account: (bank[0] || d.accounts[0])?.code, receipt: '' })
+  const [busy, setBusy] = useState(false)
+  const [e, setE] = useState('')
+  const done = !bill && b.fact > 0 && !more   // по статье уже внесено — сначала показать это
+  const needR = !v.cash && !(bill && bill.auto)
+  const send = () => {
+    setBusy(true); setE('')
+    const base = { client_uid: uuid(), op_date: v.op_date, account: v.cash ? 'cash' : v.account, amount: +v.amount, receipt: v.receipt || null }
+    ;(bill ? api(`/fin/recurring/${bill.id}/pay`, { method: 'POST', body: { ...base, cycle: bill.cycle } })
+      : api('/fin/ledger', { method: 'POST', body: { ...base, article: b.code, period: m } })).then(onDone, err(setE)).finally(() => setBusy(false))
+  }
+  return <Sheet title={b.title} onClose={onClose}>
+    <p className="small muted">{MONTH(m)} · план {b.plan ? money(b.plan) : 'не задан'} · внесено {money(b.fact)}</p>
+    {was.map(x => <p key={x.id} className="small ok">✓ {x.title}: {money(x.paid.amount)}, {dm(x.paid.date)}</p>)}
+    {done ? <><p className="small">По этой статье за месяц уже внесено {money(b.fact)}. Второй раз вносить не нужно.</p>
+      <div className="dealbtns"><button onClick={onClose}>Понятно</button><button className="ghost" onClick={() => setMore(true)}>Был ещё один платёж</button></div></>
+      : <div className="dealedit">
+        {bill && <p className="small">{bill.title} · срок {dm(bill.due)}</p>}
+        <input inputMode="numeric" value={v.amount} onChange={x => set({ ...v, amount: x.target.value.replace(/\D/g, '') })} placeholder="Сумма, ₸" />
+        <input type="date" value={v.op_date} max={today()} onChange={x => set({ ...v, op_date: x.target.value })} />
+        <div className="seg"><button className={v.cash ? 'ghost' : ''} onClick={() => set({ ...v, cash: false })}>Переводом</button>
+          {hasCash && <button className={v.cash ? '' : 'ghost'} onClick={() => set({ ...v, cash: true })}>Наличными</button>}</div>
+        {!v.cash && bank.length > 1 && <select value={v.account} onChange={x => set({ ...v, account: x.target.value })}>{bank.map(a => <option key={a.code} value={a.code}>Со счёта: {a.title}</option>)}</select>}
+        <Receipt value={v.receipt} need={needR} pick={async f => set({ ...v, receipt: await shrink(f) })} />
+        {e && <p className="small why">{e}</p>}
+        <div className="dealbtns"><button disabled={busy || !(+v.amount > 0) || !v.op_date || (needR && !v.receipt)} onClick={send}>Оплачено {+v.amount > 0 ? money(+v.amount) : ''}</button>
+          <button className="ghost" onClick={onClose}>Отмена</button></div></div>}
+  </Sheet>
 }
 
 // spend — «+ Расход» с Пульта (HEAD 12.11: «где мне вносить расходы … не особо удобно»): только расходные статьи
@@ -548,7 +594,7 @@ export function Finance({ initial }) {
     <div className="card">{t !== 'over' && <MonthBar m={m} setM={setM} />}
       <div className="segf">{[['over', 'Обзор'], ['sum', 'Месяц'], ['cash', 'Деньги'], ['pay', 'ФОТ'], ['buy', 'Закупки'], ['who', 'Люди']].map(([k, n]) =>
         <button key={k} className={t === k ? 'on' : ''} onClick={() => setT(k)}>{n}</button>)}</div></div>
-    {t === 'over' ? <Overview openMonth={x => { setM(x); setT('sum') }} /> : t === 'sum' ? <Summary m={m} /> : t === 'cash' ? <Ledger m={m} d={d} /> : t === 'pay' ? <Payroll m={m} d={d} /> : t === 'buy' ? <StockSpend /> : <Payees d={d} />}
+    {t === 'over' ? <Overview openMonth={x => { setM(x); setT('sum') }} /> : t === 'sum' ? <Summary m={m} d={d} /> : t === 'cash' ? <Ledger m={m} d={d} /> : t === 'pay' ? <Payroll m={m} d={d} /> : t === 'buy' ? <StockSpend /> : <Payees d={d} />}
   </>
 }
 
