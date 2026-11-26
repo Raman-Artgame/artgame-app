@@ -49,7 +49,7 @@
         if (t !== n.data) n.data = t
       }
     }
-    new MutationObserver(function () { if (!nbT) nbT = setTimeout(nbsp, 60) })
+    new MutationObserver(function () { if (!nbT) nbT = (window.requestAnimationFrame || setTimeout)(nbsp) })   // до отрисовки — перенос не мелькает
       .observe(document.documentElement, { childList: true, subtree: true, characterData: true })
     document.addEventListener('DOMContentLoaded', nbsp)
   }
