@@ -1,0 +1,152 @@
+// Сквозной тест HR (HEAD 26.11 «отдел HR в приложении»): кандидат по ссылке-вакансии без входа проходит анкету шагами
+// (RU/ҚАЗ, без ставок, фото работ и резюме) → у HEAD «Команда → Кандидаты» и строка в Пульте → карточка с подсказкой уровня,
+// звёзды, «Принять» → строки в «Базе кандидатов» и «Сотрудниках» → кандидат входит с тем же телефоном и сразу получает роль.
+// API — e2e/fake_api.py (Диск и таблицы подменены); экран — vite preview :4173.
+const { chromium } = require('playwright')
+const { execSync } = require('child_process')
+const assert = require('assert')
+const BE = __dirname + '/../backend'
+const PY = process.env.PY || `${BE}/.venv/bin/python`
+const sign = id => execSync(`cd ${BE} && ${PY} -c "import sys;sys.path+=['tests'];from conftest import make_init_data;print(make_init_data({'id':${id},'first_name':'Тест'}))"`).toString().trim()
+const API = 'http://127.0.0.1:8100/api'
+const call = async (id, path, body) => (await fetch(API + path, { method: body ? 'POST' : 'GET',
+  headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': sign(id) }, body: body && JSON.stringify(body) })).json()
+const shots = process.env.SHOTS || '/var/tmp'
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+const fits = async (p, what) => assert.ok(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `${what}: ничего не уезжает вбок`)
+
+async function open(b, id, path = '/') {
+  const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
+  const p = await ctx.newPage()
+  if (id) { const d = sign(id)
+    await p.addInitScript(d => { window.Telegram = { WebApp: { initData: d, initDataUnsafe: { user: { first_name: 'Т' } }, ready() {} } } }, d) }
+  await p.route('https://telegram.org/**', r => r.fulfill({ body: '' }))
+  await p.route('https://fonts.googleapis.com/**', r => r.fulfill({ body: '', contentType: 'text/css' }))
+  await p.goto('http://127.0.0.1:4173' + path)
+  return p
+}
+async function tab(p, name) {
+  const nav = p.locator('nav')
+  const re = new RegExp(`^${name}\\s*\\d*$`)
+  await nav.locator('button').first().waitFor()
+  if (await nav.getByRole('button', { name: re }).waitFor({ timeout: 1500 }).then(() => true, () => false)) return nav.getByRole('button', { name: re }).click()
+  await nav.locator('button').last().click()
+  await p.locator('.sheetbox').getByRole('button', { name, exact: true }).click()
+}
+
+;(async () => {
+  const b = await chromium.launch()
+  await call(1000, '/register', { full_name: 'HEAD' })
+  await fetch(API + '/_e2e/consts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+    'pay.support.shift': '10 000', 'pay.artist.shift': '15 000' }) })
+
+  // 1. Кандидат: ссылка из Instagram, телефон без входа
+  const c = await open(b, 0, '/?job=art&src=instagram')
+  await c.getByRole('heading', { name: 'Художник по росписи' }).waitFor()
+  await fits(c, 'анкета, шаг 1')
+  await c.getByRole('button', { name: 'Дальше' }).click()
+  await c.getByText('Заполни поля со звёздочкой').waitFor()   // без имени и телефона дальше нельзя
+  const fill = async (q, v) => c.locator('.hjfield', { hasText: q }).locator('.hjin').fill(v)
+  await fill('Фамилия и имя', 'Садыкова Айгерим'); await fill('Телефон', '8 777 123 45 67'); await fill('Город', 'Астана')
+  await fill('Дата рождения', '03.05.2000'); await fill('Когда готов', 'с 1 декабря')
+  await c.locator('.hjchips button', { hasText: 'Instagram' }).click()
+  await c.screenshot({ path: `${shots}/hr-1-o-sebe.png` })
+  await c.getByRole('button', { name: 'Дальше' }).click()
+  // 2. «Как у нас устроено»: старт с Саппорта, ставок нет
+  await c.getByRole('heading', { name: 'Как у нас устроено' }).waitFor()
+  assert.ok(await c.getByText('Все начинают с Саппорта, даже опытные').isVisible())
+  const t2 = await c.locator('.hj').textContent()
+  assert.ok(t2.includes('10 000 ₸ за смену 10 ч') && !t2.includes('15 000'), 'только стартовая ставка Саппорта: ' + t2)
+  await c.locator('.hjchips button', { hasText: '3–5 лет' }).click()
+  await c.screenshot({ path: `${shots}/hr-2-kak-ustroeno.png` })
+  await c.getByRole('button', { name: 'Дальше' }).click()
+  // 3. стиль до трёх (четвёртый вытесняет первый), тематика отдельно
+  for (const x of ['Реализм', 'Каллиграфия и леттеринг', 'Орнамент, этно', 'Поп-арт']) await c.locator('.hjq', { hasText: 'В каком стиле' }).locator('button', { hasText: x }).click()
+  assert.equal(await c.locator('.hjq', { hasText: 'В каком стиле' }).locator('button.on').count(), 3)
+  await c.locator('.hjq', { hasText: 'Какие темы' }).locator('button', { hasText: 'Казахская культура' }).click()
+  await fits(c, 'анкета, стиль'); await c.screenshot({ path: `${shots}/hr-3-stil.png` })
+  await c.getByRole('button', { name: 'Дальше' }).click()
+  // 4. материалы — проверяем казахский тоже
+  await c.locator('.hjchips button', { hasText: 'Фасадная' }).click()
+  await c.locator('.hjchips button', { hasText: 'Бетон, кирпич' }).click()
+  await c.locator('.hjlang button', { hasText: 'ҚАЗ' }).click()
+  await c.getByRole('heading', { name: 'Материалдар' }).waitFor()
+  await c.screenshot({ path: `${shots}/hr-4-materialy-kaz.png` })
+  await c.locator('.hjlang button', { hasText: 'RU' }).click()
+  await c.getByRole('button', { name: 'Дальше' }).click()
+  // 5. техника
+  for (const x of ['Кисти и валики', 'Аэрограф', 'Трафарет']) await c.locator('.hjq', { hasText: 'Чем работаешь' }).locator('button', { hasText: x }).click()
+  await c.locator('.hjq', { hasText: 'Как переносишь' }).locator('button', { hasText: 'Проектор' }).click()
+  await c.locator('.hjq', { hasText: 'Работа на высоте' }).locator('button', { hasText: 'Леса' }).click()
+  await c.locator('.hjq', { hasText: 'Свой инструмент' }).locator('button', { hasText: 'Есть' }).click()
+  await c.getByRole('button', { name: 'Дальше' }).click()
+  // 6. объекты
+  await fill('Самый крупный объект', 'Кафе 60 м², вела сама'); await c.locator('.hjchips button', { hasText: '10–20 м²' }).click()
+  await fill('Руководил людьми', 'да, бригада из 3')
+  await c.getByRole('button', { name: 'Дальше' }).click()
+  // 7. работы: 3 фото и резюме файлом
+  await c.locator('.hjpic.add input[type=file]').setInputFiles([1, 2, 3].map(n => ({ name: `w${n}.png`, mimeType: 'image/png', buffer: PNG })))
+  await c.locator('.hjpic.ok').nth(2).waitFor()
+  await c.locator('.hjfile input[type=file]').setInputFiles({ name: 'cv.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') })
+  await c.getByText('Резюме загружено').waitFor()
+  await fill('Instagram', 'instagram.com/aigerim.art')
+  await c.screenshot({ path: `${shots}/hr-5-raboty.png` })
+  await c.getByRole('button', { name: 'Дальше' }).click()
+  // 8. ожидания: график и доход
+  await c.getByRole('heading', { name: 'Ожидания' }).waitFor()
+  await c.locator('.hjchips button', { hasText: 'Полный день' }).click(); await c.locator('.hjchips button', { hasText: '5–6' }).click()
+  await c.locator('.hjchips button', { hasText: 'Ночные смены' }).click()
+  await fill('зарабатывать', '300 000')
+  await fits(c, 'анкета, ожидания'); await c.screenshot({ path: `${shots}/hr-6-ozhidaniya.png` })
+  await c.getByRole('button', { name: 'Отправить анкету' }).click()
+  await c.getByRole('heading', { name: 'Спасибо! Анкета у нас' }).waitFor()
+  await c.screenshot({ path: `${shots}/hr-7-spasibo.png` })
+  // остальные вакансии открываются и показывают свой шаг «Как у нас устроено»
+  for (const [d, title] of [['print', 'Настенная печать'], ['mop', 'Менеджер по продажам'], ['design', 'Дизайнер росписи'], ['video', 'Видеограф']]) {
+    const v = await open(b, 0, `/?job=${d}`)
+    await v.getByRole('heading', { name: title }).waitFor()
+    await v.locator('.hjfield', { hasText: 'Фамилия и имя' }).locator('.hjin').fill('Тест Тестов')
+    await v.locator('.hjfield', { hasText: 'Телефон' }).locator('.hjin').fill('8701000000' + d.length)
+    await v.locator('.hjfield', { hasText: 'Город' }).locator('.hjin').fill('Астана')
+    await v.getByRole('button', { name: 'Дальше' }).click()
+    await v.getByRole('heading', { name: 'Как у нас устроено' }).waitFor()
+    await fits(v, `вакансия ${d}`); await v.screenshot({ path: `${shots}/hr-vak-${d}.png` })
+    await v.context().close()
+  }
+  // ещё один, кто уже был в базе (Резерв)
+  const r2 = await (await fetch(API + '/hr/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir: 'print', answers: { full_name: 'Кайратов Ерлан', phone: '87015550000', city: 'Караганда' } }) })).json()
+  await fetch(API + `/hr/c/${r2.token}/done`, { method: 'POST' })
+
+  // 2. HEAD: строка в Пульте → «Команда → Кандидаты»
+  const h = await open(b, 1000)
+  await h.getByText('Новые кандидаты: 2').waitFor()   // недописанные анкеты (без «Отправить») в счёт не идут
+  await h.getByText('Новые кандидаты: 2').click()
+  await h.locator('.hritem').first().waitFor()
+  assert.ok(await h.locator('.hritem', { hasText: 'Кайратов' }).getByText('уже был: Резерв').isVisible())
+  await fits(h, 'Кандидаты'); await h.screenshot({ path: `${shots}/hr-8-kandidaty.png` })
+  await h.locator('.hritem', { hasText: 'Садыкова' }).click()
+  await h.locator('.hrhint').waitFor()
+  const hint = await h.locator('.hrhint').textContent()
+  assert.ok(hint.includes('Художник Про · 13 из 16'), 'подсказка уровня: ' + hint)
+  assert.equal(await h.locator('.hrpics img').count(), 3)
+  assert.ok(await h.getByText('Полный день').isVisible() && await h.getByText('300 000').isVisible())
+  await fits(h, 'карточка кандидата'); await h.screenshot({ path: `${shots}/hr-9-kartochka.png`, fullPage: true })
+  await h.locator('.hrstars button').nth(3).click()
+  await h.locator('.hrstars button.on').nth(3).waitFor()
+  await h.getByRole('button', { name: 'Принять в команду' }).click()
+  assert.ok(await h.locator('.hrform .segf button.on', { hasText: 'Саппорт' }).isVisible(), 'старт — Саппорт')
+  await h.screenshot({ path: `${shots}/hr-10-prinyat.png` })
+  await h.locator('.hrform').getByRole('button', { name: 'Принять', exact: true }).click()
+  await h.getByText(/Ждём, когда войдёт/).waitFor()
+  const rows = await (await fetch(API + '/_e2e/hr_rows')).json()
+  assert.ok(rows.some(r => r[0] === 'base' && r[2] === 'Садыкова Айгерим' && r[3] === 'В команде'), 'база кандидатов: В команде')
+  assert.ok(rows.some(r => r[0] === 'staff' && r[1] === 'Садыкова Айгерим' && r[2] === 'Саппорт'), 'сотрудники: строка')
+
+  // 3. входит в приложение с тем же телефоном — роль уже стоит
+  await call(7777, '/register', { full_name: 'Айгерим Садыкова', phone: '+7 777 123 45 67' })
+  const me = await call(7777, '/me')
+  assert.equal(me.role_code, 'support'); assert.equal(me.status, 'active')
+  console.log('kandidaty: ok')
+  await b.close()
+})().catch(e => { console.error(e); process.exit(1) })
