@@ -1332,7 +1332,9 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
    справа быстрые действия и команда. Логику экранов не трогаем — только раскладку. */
 @media (min-width: 1100px) {
   :root { --side: 248px; }
-  body { padding-left: var(--side); }
+  body:has(nav) { padding-left: var(--side); }
+  /* вход, анкета, «заявка у HEAD» — без меню: узкая карточка по центру */
+  body:not(:has(nav)) .wrap, body.web:not(:has(nav)) .wrap { max-width: 520px; margin: 0 auto; }
   .wrap, body.web .wrap { max-width: none; padding: 32px 40px 48px; }
   .wrap .card { padding: 22px 24px; margin-bottom: 16px; }
   .wrap h2 { font-size: 24px; }
@@ -1357,7 +1359,7 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
   .webbar button { background: var(--alt); color: var(--muted); border: 0; }
 
   /* окна — шире, по центру области справа от меню */
-  .sheet { padding-left: var(--side); }
+  body:has(nav) .sheet { padding-left: var(--side); }
   .sheetbox, body.web .sheetbox { max-width: 640px; }
   .sheetbox.modal, body.web .sheetbox.modal { max-width: 760px; }
 
@@ -1396,6 +1398,28 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
   /* Сделки: стадии воронки — колонками, как доска */
   .wrap[data-tab=deals] > .card:has(> .stage ~ .stage) { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 8px 28px; align-items: start; }
   .wrap[data-tab=deals] .stage .stagehead { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+
+  /* Маркетинг, план месяца: сводка и объёмы — на всю ширину (объёмы в 4 колонки), дни — в 3 колонки */
+  .wrap[data-tab=mkt] .card:has(> .mktday) { columns: 3; column-gap: 28px; }
+  .wrap[data-tab=mkt] .card:has(> .mktday) > :not(.mktday) { column-span: all; }
+  .wrap[data-tab=mkt] .mktday { break-inside: avoid; }
+  .wrap[data-tab=mkt] .mktnorms { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 24px; }
+  .wrap[data-tab=mkt] .mktnorms > span:first-child { grid-column: 1 / -1; }
+  .wrap[data-tab=mkt] .card > .seg { max-width: 560px; }
+
+  /* Маркетинг: рамки сторис, файлы и главы книги бренда — мелкой плиткой */
+  .wrap[data-tab=mkt] .kitgrid, .wrap[data-tab=mkt] .kitgrid.three { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+  .wrap[data-tab=mkt] .mktgrid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+  .wrap[data-tab=mkt] .bbchs { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+
+  /* открытый проект: шапка на всю ширину, блоки колонками */
+  .wrap[data-tab=projects]:has(> .phero) { columns: 2; column-gap: 20px; }
+  .wrap[data-tab=projects]:has(> .phero) > * { break-inside: avoid; }
+  .wrap[data-tab=projects] > .phero { column-span: all; }
+
+  /* Лиды: список в две колонки */
+  .wrap[data-tab=leads] > .card:has(> .qrow.lead ~ .qrow.lead) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
+  .wrap[data-tab=leads] > .card:has(> .qrow.lead ~ .qrow.lead) > :not(.qrow) { grid-column: 1 / -1; }
 
   /* Продакшн: материал плиткой, а не двумя огромными фото */
   .rvgrid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
