@@ -315,8 +315,10 @@ def test_via_no_docs_only_money_and_prod(client, monkeypatch):
     assert client.post(f"/api/head/closing/1810/prod/{ph['id']}", headers=hdr(1000)).json()["prod"]
     # ИП Артамонов — тоже без НДС (HEAD 26.11); ИП Яковлев — с НДС
     DEALS["1810"]["MYCOMPANY_ID"] = "2069"
+    from artgame import deal_money
+    monkeypatch.setattr(deal_money, "tax_pct", lambda myco: 3.0 if str(myco) == "2069" else 0.0)   # «Значения»: fin.tax.artamonov = 3
     m = client.get("/api/head/closing/1810", headers=hdr(1000)).json()["money"]
-    assert m["vat_pct"] == 0 and m["net"] == m["sum"]
+    assert m["vat_pct"] == 0 and m["tax_pct"] == 3 and m["tax"] == round(m["sum"] * 0.03, 2) and m["net"] == round(m["sum"] * 0.97, 2)
     DEALS["1810"]["MYCOMPANY_ID"] = "1103"
     m = client.get("/api/head/closing/1810", headers=hdr(1000)).json()["money"]
     assert m["vat_pct"] == 16 and m["net"] < m["sum"]

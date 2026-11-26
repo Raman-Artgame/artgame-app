@@ -80,12 +80,12 @@ def bitrix_rows(year: int) -> list[dict]:
     from . import db
     try:
         with db.pool.connection() as conn:
-            got = conn.execute("""SELECT deal_id, title, city, closed, month, revenue, vat_free FROM fin_projects
+            got = conn.execute("""SELECT deal_id, title, city, closed, month, revenue, vat_free, myco FROM fin_projects
                                   WHERE year=%s AND origin='bitrix' ORDER BY closed""", (year,)).fetchall()
     except Exception:  # noqa: BLE001 — базы нет (тесты листа) — только лист
         return []
     return [{"id": r["deal_id"], "title": r["title"], "city": r["city"], "closed": str(r["closed"]), "month": r["month"],
-             "sum": float(r["revenue"]), "vat_free": bool(r["vat_free"])} for r in got]
+             "sum": float(r["revenue"]), "vat_free": bool(r["vat_free"]), "myco": r["myco"] or ""} for r in got]
 
 
 def month_rows(y: int, m: int, fresh: bool = False) -> list[dict]:

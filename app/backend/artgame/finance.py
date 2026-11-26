@@ -401,13 +401,16 @@ def company_revenue(y: int, m: int) -> tuple[float | None, str]:
         return None, f"выручка месяца не прочитана ({e}) — % МОП не начислен"
 
 
-def revenue_vat_free(y: int, m: int) -> float:
-    """Часть выручки месяца без НДС вовсе: сделки через ИП Артамонов и без документов (HEAD 26.11)."""
+def revenue_vat_free(y: int, m: int) -> tuple[float, float]:
+    """Выручка месяца без НДС вовсе (сделки через ИП Артамонов и без документов, HEAD 26.11) и налог с неё:
+    у ИП Артамонов — % из «Значений» (fin.tax.artamonov), без документов — ничего."""
     from . import fin
+    from .deal_money import tax_pct
     try:
-        return sum(r["sum"] for r in fin.month_rows(y, m) if r.get("vat_free"))
+        rows = [r for r in fin.month_rows(y, m) if r.get("vat_free")]
     except Exception:  # noqa: BLE001
-        return 0.0
+        return 0.0, 0.0
+    return sum(r["sum"] for r in rows), round(sum(r["sum"] * tax_pct(r.get("myco")) / 100 for r in rows), 2)
 
 
 def mop_pay(v: dict, gross: float) -> tuple[float, float, float, int]:
@@ -795,8 +798,9 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
         hist_mat = _f(conn.execute("""SELECT coalesce(sum(materials + transport + other), 0) AS s FROM fin_projects
                                       WHERE year=%s AND month=%s""", (start.year, start.month)).fetchone()["s"]) if hist else 0.0
     vat_pct = v.get("vat") or 0
-    free = min(revenue_vat_free(start.year, start.month), gross) if gross is not None else 0.0
-    net = (gross - free) / (1 + vat_pct / 100) + free if gross is not None else None   # НДС — только с выручки через ИП Яковлев
+    free, tax = revenue_vat_free(start.year, start.month) if gross is not None else (0.0, 0.0)
+    free = min(free, gross or 0.0)
+    net = (gross - free) / (1 + vat_pct / 100) + free - tax if gross is not None else None   # НДС — только с выручки через ИП Яковлев
     budget = {}
     for r in led:
         if r["kind"] in ("fixed", "variable", "tax"):
@@ -842,7 +846,7 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
         today = {"share": round(share, 4), "days": day, "days_month": days, "payroll": round(costs["payroll"] - later, 2),
                  "payroll_month": costs["payroll"], "profit": None if profit is None else round(profit + later, 2)}
     return {"month": ym, "warn": warn, "today": today,
-            "revenue": {"gross": gross, "net": None if net is None else round(net), "vat": None if gross is None else round(gross - net), "vat_free": round(free)},
+            "revenue": {"gross": gross, "net": None if net is None else round(net), "vat": None if gross is None else round(gross - net - tax), "vat_free": round(free), "tax": round(tax)},
             "costs": costs, "profit": profit,
             "ipn": round(max(profit, 0) * ipn_pct / 100) if profit is not None and ipn_pct else None,
             "budget": [{"code": k, **b} for k, b in budget.items()],

@@ -149,15 +149,15 @@ def import_projects(conn, since: date = START) -> dict:
         row_no = ROW0 + did
         title = (d.get(bx.OBJECT) or "").strip() or str(d.get("TITLE") or "").split("·", 1)[-1].split("—")[0].strip()
         added += conn.execute(
-            """INSERT INTO fin_projects (year, row_no, deal_id, month, closed, title, city, model, revenue, received, debt, vat_free, origin, synced_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'bitrix', now())
+            """INSERT INTO fin_projects (year, row_no, deal_id, month, closed, title, city, model, revenue, received, debt, vat_free, myco, origin, synced_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'bitrix', now())
                ON CONFLICT (year, row_no) DO UPDATE SET month=EXCLUDED.month, closed=EXCLUDED.closed, title=EXCLUDED.title,
                  city=EXCLUDED.city, model=EXCLUDED.model, revenue=EXCLUDED.revenue, received=EXCLUDED.received, debt=EXCLUDED.debt,
-                 vat_free=EXCLUDED.vat_free, synced_at=now()
+                 vat_free=EXCLUDED.vat_free, myco=EXCLUDED.myco, synced_at=now()
                RETURNING (xmax = 0) AS ins""",
             (end.year, row_no, did, end.month, end, title, bx.city_name(d.get(bx.CITY)), _model(d.get(F_MODEL)), bx._money(d.get("OPPORTUNITY")),
              bx._money(d.get("UF_CRM_ARTGAME_FIN03_RECEIVED")), bx._money(d.get("UF_CRM_ARTGAME_FIN03_DEBT")),
-             _vat_free(d))).fetchone()["ins"]
+             _vat_free(d), str(d.get("MYCOMPANY_ID") or "") or None)).fetchone()["ins"]
         seen.append(row_no)
     # сделку вернули со стадии или перенесли в лист — убираем из копии
     conn.execute("DELETE FROM fin_projects WHERE origin='bitrix' AND closed >= %s AND NOT (row_no = ANY(%s))", (since, seen))

@@ -31,7 +31,7 @@ NO_DOCS = "2071"                  # «Без документов (наличн�
 MYCO = {"1103": "ИП Яковлев", "2069": "ИП Артамонов", "2071": "Без документов (наличные/перевод)"}
 # HEAD 26.11: «выбор, через что это будет проходить, нужно сделать удобным» — три кнопки в шаге «Закрытие» и в паспорте.
 VIA = [{"id": "1103", "title": "ИП Яковлев", "hint": "с договором, счётом и АВР"},
-       {"id": "2069", "title": "ИП Артамонов", "hint": "с договором, счётом и АВР; НДС нет"},
+       {"id": "2069", "title": "ИП Артамонов", "hint": "с договором, счётом и АВР; НДС нет, только налог"},
        {"id": NO_DOCS, "title": "Без ИП, без документов", "hint": "наличные или перевод: нужны только оплата и Продакшн; НДС и налога нет"}]
 FROM = date(2026, 11, 12)         # с этого дня сделка в «Оплата получена» без паспорта — «закрыта мимо HEAD»
 F_LAYOUT = "UF_CRM_ARTGAME_APPROVED_LAYOUT"   # «Эскиз» (утверждённый макет) в сделке
@@ -240,9 +240,9 @@ def passport(conn, p: dict, d: dict, money: dict, cks: list[dict], o: dict) -> d
     did = int(d["ID"])
     card = bx.deal_card(p, did, audit=False)
     names = {u["id"]: u["name"] for u in bx.users()}
-    vat = deal_money.vat_of(d)   # HEAD 26.11: НДС — только у ИП Яковлев; Артамонов и «без документов» — вся сумма
     opp = bx._money(d.get("OPPORTUNITY"))
-    net = round(opp / (1 + vat / 100), 2) if vat else opp
+    nt = deal_money.net_of(d, opp)   # HEAD 26.11: НДС — только у ИП Яковлев; ИП Артамонов — налог; без документов — вся сумма
+    vat, net = nt["vat_pct"], nt["net"]
     c = costs(conn, did)
     profit = round(net - c["total"], 2)
     margin = round(profit / net * 100, 1) if net > 0 else None
@@ -275,7 +275,7 @@ def passport(conn, p: dict, d: dict, money: dict, cks: list[dict], o: dict) -> d
                  "object": card.get("object") or "", "address": card.get("address") or "", "area": card.get("area") or 0, "service": card.get("service") or "",
                  "stage": d.get("STAGE_ID"), "dates": {"signed": signed.isoformat() if signed else "", "start": start.isoformat() if start else "",
                                                        "end_plan": end_plan.isoformat() if end_plan else "", "end_fact": end_fact.isoformat() if end_fact else ""}},
-        "money": {"sum": opp, "net": net, "vat": round(opp - net, 2), "vat_pct": vat, "received": money["received"], "debt": money["debt"],
+        "money": {"sum": opp, "net": net, "vat": nt["vat"], "vat_pct": vat, "tax": nt["tax"], "tax_pct": nt["tax_pct"], "received": money["received"], "debt": money["debt"],
                   "overpaid": money["overpaid"], "items": items, "history": money["history"]},
         "costs": c["groups"], "costs_total": c["total"],
         "result": {"net": net, "costs": c["total"], "profit": profit, "margin": margin, "model": model},
@@ -696,7 +696,8 @@ def pdf_html(pas: dict) -> str:
                                  ["Договор (в работу)", iso(dt["signed"])], ["Старт (факт)", iso(dt["start"])], ["Сдача (план)", iso(dt["end_plan"])],
                                  ["Сдача (факт)", iso(dt["end_fact"])]]),
          "<h2>Деньги</h2>", _t([*([["Сумма с НДС", _fmt(m["sum"])], [f"Без НДС ({m['vat_pct']:g}%)", _fmt(m["net"])], ["НДС", _fmt(m["vat"])]] if m["vat_pct"]
-                                 else [["Сумма (НДС нет)", _fmt(m["sum"])]]),
+                                 else [["Сумма (НДС нет)", _fmt(m["sum"])],
+                                       *([[f"Налог ({m['tax_pct']:g}%)", _fmt(m["tax"])], ["После налога", _fmt(m["net"])]] if m.get("tax_pct") else [])]),
                                  ["Поступило", _fmt(m["received"])], ["Долг", _fmt(m["debt"])]]),
          _t([[iso(x["op_date"]), x["account_title"], _fmt(x["amount"]), "чек есть" if x.get("receipt_file_id") else "без чека"] for x in m["items"]],
             ["Дата", "Счёт", "Сумма", "Чек"]) if m["items"] else "",

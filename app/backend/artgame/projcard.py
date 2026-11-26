@@ -47,12 +47,12 @@ def money(oid: int, p: dict = Depends(active)):
     from .closing import costs
     m = deal_money.card(d)
     opp = bx._money(d.get("OPPORTUNITY"))
-    vat = deal_money.vat_of(d)
-    net = round(opp / (1 + vat / 100), 2) if vat else opp
+    nt = deal_money.net_of(d, opp)
+    vat, net = nt["vat_pct"], nt["net"]
     with db.pool.connection() as conn:
         c = costs(conn, oid)
     profit = round(net - c["total"], 2)
-    return {"sum": opp, "net": net, "vat_pct": vat, "received": m["received"], "debt": m["debt"], "on_check": m["on_check"],
+    return {"sum": opp, "net": net, "vat_pct": vat, "tax_pct": nt["tax_pct"], "tax": nt["tax"], "received": m["received"], "debt": m["debt"], "on_check": m["on_check"],
             "overpaid": m["overpaid"], "costs": [{"key": g["key"], "title": g["title"], "total": g["total"]} for g in c["groups"]],
             "costs_total": c["total"], "profit": profit, "margin": round(profit / net * 100, 1) if net > 0 else None, "warn": c["warn"]}
 

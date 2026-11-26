@@ -154,6 +154,26 @@ def vat_of(d: dict) -> float:
     return 0.0 if vat_free(d) else _vat()
 
 
+ARTAMONOV, TAX_KEY = "2069", "fin.tax.artamonov"   # у ИП Артамонов НДС нет, только налог — % из «Значений» (HEAD 26.11: 3 %)
+
+
+def tax_pct(myco) -> float:
+    """Налог с суммы сделки, %: только у ИП Артамонов; без документов — ни НДС, ни налога."""
+    if str(myco or "") != ARTAMONOV:
+        return 0.0
+    try:
+        return float(bx._vals().get(TAX_KEY) or 0)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def net_of(d: dict, opp: float) -> dict:
+    """Выручка сделки после НДС или налога: {net, vat_pct, vat, tax_pct, tax}."""
+    vat, tax = vat_of(d), tax_pct(d.get("MYCOMPANY_ID"))
+    net = round(opp / (1 + vat / 100), 2) if vat else round(opp * (1 - tax / 100), 2)
+    return {"net": net, "vat_pct": vat, "vat": round(opp - net, 2) if vat else 0.0, "tax_pct": tax, "tax": round(opp - net, 2) if not vat else 0.0}
+
+
 def _deals(ids: list[int] | None = None) -> list[dict]:
     """Сделки для сверки: все с изменениями с начала учёта + сделки с деньгами в журнале (их — по номерам)."""
     if ids is not None:
