@@ -61,14 +61,14 @@ def _out(conn, r: dict) -> dict:
     return {**{k: r[k] for k in ("id", "title", "channel", "kind", "plan_date", "caption", "object_id", "status", "author_id",
                                  "submitted_at", "reviewed_at", "review_note", "url", "published_at", "created_at",
                                  "result", "result_note", "views", "leads", "checked_at")},
-            "author": r.get("author"), "checked": r.get("checked"), "reviewer": r.get("reviewer"), "object_title": r.get("object_title"), "files": _files(conn, list(r["file_ids"] or [])),
+            "rubric_id": r.get("rubric_id"), "rubric": r.get("rubric"), "author": r.get("author"), "checked": r.get("checked"), "reviewer": r.get("reviewer"), "object_title": r.get("object_title"), "files": _files(conn, list(r["file_ids"] or [])),
             "srcs": _files(conn, list(r.get("src_ids") or [])), "drafts": _files(conn, list(r.get("draft_ids") or [])), "out_saved": r.get("out_saved")}
 
 
-SQL = """SELECT m.*, pe.full_name AS author, o.title AS object_title, ck.full_name AS checked,
+SQL = """SELECT m.*, pe.full_name AS author, o.title AS object_title, ck.full_name AS checked, rb.title AS rubric,
                 CASE WHEN rv.role_code='head' THEN 'HEAD' ELSE rv.full_name END AS reviewer
          FROM mkt_posts m JOIN people pe ON pe.id=m.author_id LEFT JOIN objects o ON o.id=m.object_id
-         LEFT JOIN people ck ON ck.id=m.checked_by LEFT JOIN people rv ON rv.id=m.reviewed_by"""
+         LEFT JOIN people ck ON ck.id=m.checked_by LEFT JOIN people rv ON rv.id=m.reviewed_by LEFT JOIN mkt_rubrics rb ON rb.id=m.rubric_id"""
 
 
 def _get(conn, post_id: int, lock: bool = False) -> dict:
@@ -85,11 +85,20 @@ def mkt_dict(p: dict = Depends(active)):
 
 
 def _norms(conn, t0: date, t1: date) -> list[dict]:
-    """Объём месяца по договору: сколько положено, сколько в плане и сколько вышло. Карусель считается постом."""
+    """Объём месяца по договору: сколько положено, сколько в плане и сколько вышло. Карусель считается постом.
+    «Ролики видеографа» — в плане съёмки месяца, сделано — готовые видео (финалы публикаций), загруженные видеографом.
+    «Отчёт Instagram» — недельные выводы агентства в «Итогах» (mkt_reports)."""
     got = {r["k"]: r for r in conn.execute(
         """SELECT CASE WHEN kind='carousel' THEN 'post' ELSE kind END AS k, count(*) AS planned,
                   count(*) FILTER (WHERE status='published') AS done
            FROM mkt_posts WHERE status<>'cancelled' AND plan_date >= %s AND plan_date < %s GROUP BY 1""", (t0, t1)).fetchall()}
+    sh = conn.execute("SELECT count(*) AS n FROM mkt_shoots WHERE status<>'cancelled' AND shoot_date >= %s AND shoot_date < %s", (t0, t1)).fetchone()["n"]
+    vid = conn.execute("""SELECT count(*) AS n FROM files f JOIN people pe ON pe.id=f.uploaded_by
+                          WHERE f.kind='pub' AND f.status='ready' AND f.mime LIKE 'video/%%' AND pe.mkt_job='video'
+                            AND f.created_at >= %s AND f.created_at < %s""", (t0, t1)).fetchone()["n"]
+    rep = conn.execute("SELECT count(*) AS n FROM mkt_reports WHERE week >= %s AND week < %s", (t0, t1)).fetchone()["n"]
+    got["video"] = {"planned": sh, "done": vid}
+    got["ig_report"] = {"planned": rep, "done": rep}
     today = date.today()
     late = t0 <= today < t1 and today.day >= 20       # договор агентства (HEAD 24.11): к 20-му должно выйти две трети объёма
     return [{"kind": n["kind"], "title": n["title"], "per_month": n["per_month"],
@@ -146,11 +155,14 @@ class PostIn(BaseModel):
     src_ids: list[int] = Field(default_factory=list, max_length=60)      # исходники из «Медиа» (HEAD 26.11): помечаются «в работе» / «вышло»
     draft_ids: list[int] = Field(default_factory=list, max_length=20)    # монтаж: черновые версии
     object_id: int | None = None
+    rubric_id: int | None = None                                          # рубрика (HEAD 26.11) — для статистики «что залетело»
 
 
 def _check(conn, b: PostIn, p: dict | None = None):
     if b.channel not in CHANNELS or b.kind not in KINDS:
         raise HTTPException(400, "bad channel/kind")
+    if b.rubric_id and not conn.execute("SELECT 1 FROM mkt_rubrics WHERE id=%s", (b.rubric_id,)).fetchone():
+        raise HTTPException(400, "нет такой рубрики")
     if p and p["role_code"] != "head" and p.get("mkt_job") == "target" and b.kind != "ad":
         raise HTTPException(403, "таргетолог ставит только рекламу")
     for ids in (b.file_ids, b.src_ids, b.draft_ids):
@@ -165,9 +177,10 @@ def post_add(b: PostIn, p: dict = Depends(active)):
     _job(p, POST_JOBS, "публикации")
     with db.pool.connection() as conn, conn.transaction():
         _check(conn, b, p)
-        r = conn.execute("""INSERT INTO mkt_posts (title, channel, kind, plan_date, caption, file_ids, src_ids, draft_ids, object_id, author_id)
-                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                         (b.title.strip(), b.channel, b.kind, b.plan_date, b.caption, b.file_ids, b.src_ids, b.draft_ids, b.object_id, p["id"])).fetchone()
+        r = conn.execute("""INSERT INTO mkt_posts (title, channel, kind, plan_date, caption, file_ids, src_ids, draft_ids, object_id, rubric_id, author_id)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                         (b.title.strip(), b.channel, b.kind, b.plan_date, b.caption, b.file_ids, b.src_ids, b.draft_ids, b.object_id, b.rubric_id,
+                          p["id"])).fetchone()
         db.audit(conn, p["id"], "mkt_post_add", "mkt_posts", r["id"], {"title": b.title})
         return _out(conn, _get(conn, r["id"]))
 
@@ -183,8 +196,8 @@ def post_edit(post_id: int, b: PostIn, p: dict = Depends(active)):
             raise HTTPException(409, "править можно черновик или возвращённое")
         _check(conn, b, p)
         conn.execute("""UPDATE mkt_posts SET title=%s, channel=%s, kind=%s, plan_date=%s, caption=%s, file_ids=%s, src_ids=%s, draft_ids=%s,
-                        object_id=%s, status='draft', updated_at=now() WHERE id=%s""",
-                     (b.title.strip(), b.channel, b.kind, b.plan_date, b.caption, b.file_ids, b.src_ids, b.draft_ids, b.object_id, post_id))
+                        object_id=%s, rubric_id=%s, status='draft', updated_at=now() WHERE id=%s""",
+                     (b.title.strip(), b.channel, b.kind, b.plan_date, b.caption, b.file_ids, b.src_ids, b.draft_ids, b.object_id, b.rubric_id, post_id))
         return _out(conn, _get(conn, post_id))
 
 

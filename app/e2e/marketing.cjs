@@ -76,7 +76,9 @@ const noScroll = async p => assert.ok(await p.evaluate(() => document.documentEl
   const d = new Date(); const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-20`
   await s.locator('input[type=date]').fill(day)
   await s.locator('textarea').fill('Было серо — стало Алма 🌿\nРоспись ARTGAME за 5 смен.\n#роспись #астана')
-  await s.locator('select').selectOption('731')
+  await s.locator('select').first().locator('option', { hasText: 'Процесс росписи' }).waitFor({ state: 'attached' })
+  await s.locator('select').first().selectOption({ label: 'Процесс росписи' })   // рубрика (HEAD 26.11) — для «Итогов»
+  await s.locator('select').last().selectOption('731')
   await shot(m, 'mkt-3-new')
   // исходники (HEAD 26.11): из чего монтируют — в «Медиа» станут «в работе»
   await s.getByRole('button', { name: '🎬 Выбрать исходники из «Медиа»' }).click()
@@ -412,6 +414,22 @@ const noScroll = async p => assert.ok(await p.evaluate(() => document.documentEl
   await my.getByRole('button', { name: 'Подтверждаю' }).click()
   await my.getByText('в плане').waitFor()
   assert.strictEqual((await call(3000, '/shoots/mine')).waiting, 0)
+  // 10. «Итоги» (HEAD 26.11): ссылка из «Вышло» связана с постом Instagram, разбивка по рубрикам, «куда двигаться», недельный вывод
+  psql("INSERT INTO mkt_ig_media (id, kind, permalink, posted_at, views, reach, likes, comments, saved, shares) VALUES ('e2e1', 'REELS', 'https://www.instagram.com/reel/abc/', now() - interval '1 day', 15300, 9100, 400, 31, 52, 18)")
+  const hs = await open(b, 1000)
+  await tab(hs, 'Маркетинг')
+  await hs.locator('.mktnav').getByRole('button', { name: 'Итоги' }).click()
+  await hs.getByText('Куда двигаться').waitFor()
+  const rub = hs.locator('.mktnorm', { hasText: 'Процесс росписи' })
+  await rub.getByText(/15\s300 просм\. в среднем/).waitFor()
+  await hs.getByRole('button', { name: '+ За прошлую неделю' }).click()
+  await hs.getByPlaceholder('Что сработало').fill('Рилс процесса росписи — 15 тыс. просмотров, лучше всего.')
+  await hs.getByPlaceholder('Что делаем на следующей неделе').fill('Ещё два рилса процесса и отзыв клиента.')
+  await hs.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await hs.getByText(/^Неделя с /).waitFor()
+  await noScroll(hs); await shot(hs, 'mkt-41-itogi')
+  const norms = (await call(1000, `/mkt/posts?ym=${day.slice(0, 7)}`)).norms.map(n => n.kind)
+  assert.ok(norms.includes('video') && norms.includes('ig_report'), norms.join(','))
   console.log('marketing ok')
   await b.close()
 })().catch(e => { console.error(e); process.exit(1) })

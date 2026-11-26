@@ -7,7 +7,7 @@ from datetime import date
 from pydantic import BaseModel, Field
 
 from . import constants as consts
-from . import ads, adrules, meta, mktlib, mediasync, appeals, chatfiles, brand, closing, marketing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring, advances
+from . import ads, adrules, meta, mktlib, mktstats, mediasync, appeals, chatfiles, brand, closing, marketing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring, advances
 from . import bx, bxw, db, relay, mopcrm, deal_money, design, designobj, designtasks, files, kpagree, projcard, shiftmove, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
@@ -51,6 +51,7 @@ app.include_router(marketing.router)   # контент-план маркети�
 app.include_router(ads.router)         # «Реклама»: площадки, расход, заявки и сделки (HEAD 14.11)
 app.include_router(adrules.router)     # кампании и объявления, подсказки «антислив», отчёт неделя/месяц (HEAD 24.11)
 app.include_router(mktlib.router)      # рубрики и поиск «Медиа», исходники в рубрику, сценарий → съёмка (HEAD 24.11)
+app.include_router(mktstats.router)    # «Итоги»: что залетело по рубрикам и форматам, недельный вывод агентства (HEAD 26.11)
 app.include_router(mediasync.router)   # «Медиа»: подтяжка папок «МЕДИА» сделок с Диска (HEAD 26.11)
 app.include_router(meta.router)        # загрузчик Meta: расход кабинета и статистика Instagram (HEAD 24.11)
 app.include_router(brand.router)       # «Бренд»: книга бренда и паки с Диска (HEAD 14.11)
