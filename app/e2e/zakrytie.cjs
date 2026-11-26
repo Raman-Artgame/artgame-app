@@ -364,6 +364,7 @@ async function closeStep(p) {
   assert.ok(!/договор|Счёт|АВР|Окончание работ/.test(left) && /Продакшн/.test(left), 'без документов: ' + left)
   assert.deepStrictEqual((await e2e('/bx_calls')).filter(x => x.params.id === 1730 && x.method === 'crm.deal.update').map(x => x.params.fields),
     [{ MYCOMPANY_ID: '2071' }], 'выбор записан в сделку')
+  await h.locator('.passnums div', { hasText: /^Выручка300\s000/ }).waitFor()   // без ИП — вся сумма, НДС не вычитаем
   await fits(h, 'выбор «через что»')
   await h.evaluate(() => document.querySelector('.passhero').scrollIntoView({ block: 'start' }))
   await h.waitForTimeout(400)

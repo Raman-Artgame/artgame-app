@@ -290,6 +290,7 @@ def test_via_no_docs_only_money_and_prod(client, monkeypatch):
     assert DEALS["1810"]["MYCOMPANY_ID"] == "2071"
     ps = client.get("/api/head/closing/1810", headers=hdr(1000)).json()
     assert ps["via"] == "2071" and ps["deal"]["myco"].startswith("Без документов")
+    assert ps["money"]["vat_pct"] == 0 and ps["money"]["net"] == ps["money"]["sum"] == ps["result"]["net"]   # без ИП НДС не вычитаем
     assert {x["key"] for x in ps["checks"] if not x["ok"]} == {"debt", "photos", "prod"}                        # документы и дата сдачи не нужны
     # оплата, фото, Продакшн — и HEAD принимает; «Окончание факт» = день, когда сделку перевели
     monkeypatch.setattr(drive, "save_income_receipt", lambda conn, name, data, deal_id: "drv-income")

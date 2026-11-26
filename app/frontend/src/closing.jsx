@@ -166,7 +166,7 @@ export function Passport({ id, back, onDecided }) {
       <div className="passnums">
         <div><span>Прибыль</span><b className={r.profit < 0 ? 'neg' : ''}>{tg(r.profit)}</b></div>
         <div><span>Маржа</span><b className={low ? 'neg' : 'pos'}>{pct(r.margin)}</b>{r.model != null && <em>норма {pct(r.model)}</em>}</div>
-        <div><span>Выручка без НДС</span><b>{tg(r.net)}</b></div>
+        <div><span>{m.vat_pct ? 'Выручка без НДС' : 'Выручка'}</span><b>{tg(r.net)}</b></div>
         <div><span>Затраты</span><b>{tg(r.costs)}</b></div>
       </div>
     </div>
@@ -204,8 +204,8 @@ export function Passport({ id, back, onDecided }) {
 
     <div className="card"><h3>Деньги</h3>
       <div className="kv">
-        <div><span className="muted small">Сумма с НДС</span><b>{tg(m.sum)}</b></div>
-        <div><span className="muted small">Без НДС ({m.vat_pct}%)</span><b>{tg(m.net)}</b></div>
+        <div><span className="muted small">{m.vat_pct ? 'Сумма с НДС' : 'Сумма (без ИП, НДС нет)'}</span><b>{tg(m.sum)}</b></div>
+        {m.vat_pct > 0 && <div><span className="muted small">Без НДС ({m.vat_pct}%)</span><b>{tg(m.net)}</b></div>}
         <div><span className="muted small">Поступило</span><b>{tg(m.received)}</b></div>
         <div><span className="muted small">Долг</span><b className={m.debt ? 'neg' : ''}>{tg(m.debt)}</b></div>
       </div>

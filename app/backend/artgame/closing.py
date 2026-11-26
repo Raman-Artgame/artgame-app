@@ -240,7 +240,8 @@ def passport(conn, p: dict, d: dict, money: dict, cks: list[dict], o: dict) -> d
     did = int(d["ID"])
     card = bx.deal_card(p, did, audit=False)
     names = {u["id"]: u["name"] for u in bx.users()}
-    vat = deal_money._vat()
+    # HEAD 26.11 «по всем моментам ок»: сделка без ИП и документов — НДС нет, выручка = вся сумма
+    vat = 0 if str(d.get("MYCOMPANY_ID") or "") == NO_DOCS else deal_money._vat()
     opp = bx._money(d.get("OPPORTUNITY"))
     net = round(opp / (1 + vat / 100), 2) if vat else opp
     c = costs(conn, did)
@@ -671,7 +672,8 @@ def pdf_html(pas: dict) -> str:
                                  ["Площадь", f"{dl['area']:g} м²" if dl["area"] else "—"], ["Услуга", dl["service"]],
                                  ["Договор (в работу)", iso(dt["signed"])], ["Старт (факт)", iso(dt["start"])], ["Сдача (план)", iso(dt["end_plan"])],
                                  ["Сдача (факт)", iso(dt["end_fact"])]]),
-         "<h2>Деньги</h2>", _t([["Сумма с НДС", _fmt(m["sum"])], [f"Без НДС ({m['vat_pct']:g}%)", _fmt(m["net"])], ["НДС", _fmt(m["vat"])],
+         "<h2>Деньги</h2>", _t([*([["Сумма с НДС", _fmt(m["sum"])], [f"Без НДС ({m['vat_pct']:g}%)", _fmt(m["net"])], ["НДС", _fmt(m["vat"])]] if m["vat_pct"]
+                                 else [["Сумма (без ИП, НДС нет)", _fmt(m["sum"])]]),
                                  ["Поступило", _fmt(m["received"])], ["Долг", _fmt(m["debt"])]]),
          _t([[iso(x["op_date"]), x["account_title"], _fmt(x["amount"]), "чек есть" if x.get("receipt_file_id") else "без чека"] for x in m["items"]],
             ["Дата", "Счёт", "Сумма", "Чек"]) if m["items"] else "",
