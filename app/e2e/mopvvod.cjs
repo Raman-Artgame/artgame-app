@@ -95,6 +95,22 @@ async function tab(p, name) {
   assert.strictEqual(rq.PRESET_ID, 3); assert.strictEqual(rq.RQ_BIN, '123456789012'); assert.strictEqual(rq.RQ_CEO_NAME, 'Сидоров Самат')
   assert.strictEqual(calls.find(x => x.method === 'crm.requisite.bankdetail.add').params.fields.RQ_IIK, 'KZ123456789012345678')
 
+  // 2б. «Заполнить недостающее» → окно «Карточка сделки» по шагам: нехватающее отмечено «нужно», всё заполняется здесь
+  await p.locator('.fillbar .fb-go').click()
+  const fs = p.locator('.sheetbox .fillform')
+  await fs.waitFor()
+  await fs.locator('label', { hasText: 'Куратор ГИП' }).waitFor()
+  const txt = await fs.textContent()
+  assert.ok(!txt.includes('«Заполнить карточку» →') && !txt.includes('Ответственный исполнитель') && !txt.includes('Художники'), 'старого нет')
+  assert.deepStrictEqual(await fs.locator('h3.fillsec').evaluateAll(h => h.map(x => x.firstChild.textContent)), ['Клиент и объект', 'Договор', 'В работе'])
+  await noScroll(p)
+  await p.screenshot({ path: `${shots}/mopvvod-5-kartochka.png` })
+  await p.setViewportSize({ width: 390, height: 2300 }); await p.waitForTimeout(300)
+  await p.screenshot({ path: `${shots}/mopvvod-5-kartochka-full.png` })
+  await p.setViewportSize({ width: 390, height: 844 })
+  await p.locator('.sheetbox button.x').click()
+  await p.locator('.sheetbox').waitFor({ state: 'detached' })
+
   // 3. Подписанный договор: шаг «Договор» → «Загрузить подписанный договор» → поле сделки
   await p.locator('.hero .steps > div', { hasText: 'Договор' }).click()
   const up = p.locator('.card.signed')

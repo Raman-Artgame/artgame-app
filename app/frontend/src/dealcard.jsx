@@ -505,7 +505,8 @@ export function DealCard({ id, back, place }) {
     {sheet?.kind === 'wait' && <WaitSheet api={api} path={`/bx/deals/${id}`} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'stage' && <StageSheet d={d} stages={stages} onClose={() => setSheet(null)} onDone={said} onFill={() => setSheet({ kind: 'fill' })} />}
     {sheet?.kind === 'client' && <ClientSheet dealId={d.id} onClose={() => setSheet(null)} onDone={said} />}
-    {sheet?.kind === 'fill' && <FillSheet d={d} onClose={() => setSheet(null)} onDone={said} />}
+    {sheet?.kind === 'fill' && <FillSheet d={d} onClose={() => setSheet(null)} onDone={said}
+      onClient={() => setSheet({ kind: 'client' })} onCalc={() => { setSheet(null); setPanel('calc') }} />}
     {sheet?.kind === 'note' && <NoteSheet d={d} initial={sheet.text} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'pay' && <PaySheet d={d} slot={sheet.slot} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'say' && <Scripts codes={codes} algoStep={algo[0]} title={`Скрипты: ${name(cur)}`} onClose={() => setSheet(null)} />}
