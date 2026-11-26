@@ -153,11 +153,13 @@ function Thumb({ f }) {
   return <>{st !== 'ok' && badge}<img src={f.thumb} alt="" style={st === 'ok' ? null : { position: 'absolute', opacity: 0 }} onLoad={() => setSt('ok')} onError={() => setSt('bad')} /></>
 }
 
+const FOLD = 3   // эскизов больше трёх — список свёрнут
 export function Gallery({ obj, me, start = 'design', only, skip = [], bare = false, top = null }) {
   const [kind, setKind] = useState(start)
   const [list, setList] = useState(null)
   const [busy, setBusy] = useState('')
   const [open, setOpen] = useState(null)
+  const [all, setAll] = useState(false)
   const load = () => (kind === 'media' ? api(`/media?scope=object&object_id=${obj.id}`).then(r => r.items) :
     kind === 'video' ? api(`/media?scope=object&type=video&object_id=${obj.id}`).then(r => r.items) : api(`/objects/${obj.id}/files?kind=${kind}`))
     .then(setList, () => setList([]))
@@ -185,6 +187,8 @@ export function Gallery({ obj, me, start = 'design', only, skip = [], bare = fal
   }
   const grid = kind === 'photo'   // фото — сеткой; эскизы, видео, продакшн, документы — списком с названием
   const pics = list && (grid ? list.filter(f => f.thumb) : [])
+  const rows = list ? list.filter(f => !grid || !f.thumb) : []
+  const fold = kind === 'design' && rows.length > FOLD
   const empty = { design: 'Эскизов и файлов в печать пока нет — их загружает дизайнер.', video: 'Видео пока нет.', media: 'Утверждённого материала пока нет.' }
   return <div className={bare ? 'gbare' : 'card'}>
     {kinds.length > 1 && <div className="segf">{kinds.map(k => <button key={k} className={k === kind ? 'on' : ''} onClick={() => setKind(k)}>{KIND[k]}</button>)}</div>}
@@ -201,7 +205,12 @@ export function Gallery({ obj, me, start = 'design', only, skip = [], bare = fal
     {busy && <p className="muted small">{busy}</p>}
     {!list ? <p className="muted">Загрузка…</p> : !list.length ? <p className="muted small">{empty[kind] || 'Пока пусто.'}</p> : <>
       {pics.length > 0 && <div className="grid">{pics.map(f => <button key={f.id} className="gpic" onClick={() => setOpen(f)}><img src={f.thumb} alt={f.name} loading="lazy" /></button>)}</div>}
-      {list.filter(f => !grid || !f.thumb).map(f => <div key={f.id} className="mitem">
+      {/* HEAD 26.11: длинный список эскизов неудобно листать — свёрнуто: счётчик и превью первых, по нажатию раскрывается */}
+      {fold && <button className={'gfold' + (all ? ' on' : '')} aria-expanded={all} onClick={() => setAll(!all)}>
+        <span className="gfoldt"><b>{KIND[kind] || 'Файлы'} · {rows.length}</b><i>{all ? 'Свернуть ▴' : 'Показать все ▾'}</i></span>
+        {!all && <span className="gfoldp">{rows.slice(0, 4).map(f => <span key={f.id} className="mthumb"><Thumb f={f} /></span>)}{rows.length > 4 && <em>+{rows.length - 4}</em>}</span>}
+      </button>}
+      {(fold && !all ? [] : rows).map(f => <div key={f.id} className="mitem">
         <button className="mthumb" onClick={() => setOpen(f)}><Thumb f={f} /></button>
         <div className="mbody"><a onClick={() => setOpen(f)}><b>{f.media_type === 'reels' ? '🎬 ' : f.media_type === 'video' ? '▶ ' : ''}{f.name}</b></a>{kind === 'design' && /утвержд/i.test(f.note || '') && <i className="okmark small"> ✓ утверждён</i>}<br />
           <span className="muted small">{f.size ? size(f.size) + ' · ' : ''}{f.by} · {new Date(f.created_at).toLocaleDateString('ru-RU')}{kind === 'video' && f.review === 'approved' ? ' · в Продакшн' : ''}</span></div>

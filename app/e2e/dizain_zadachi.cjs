@@ -64,7 +64,8 @@ async function tab(p, name) {
 
   // 2. Дизайнер: «Дизайн» сразу открывает доску задач
   const d = await open(b, 7100)
-  await d.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000201' }) }))
+  let up = 200
+  await d.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000' + (++up) }) }))
   await tab(d, 'Дизайн')
   await d.locator('.dtstage .dtrow', { hasText: 'Столовая' }).waitFor()
   assert.match(await d.locator('.segf button.on').first().textContent(), /Задачи2/)
@@ -89,6 +90,18 @@ async function tab(p, name) {
   await d.locator('.sheetbox .mitem', { hasText: 'Столовая эскиз' }).waitFor()
   await d.waitForTimeout(700)
   await d.screenshot({ path: `${shots}/dz-task-3-card.png`, fullPage: true })
+  // эскизов больше трёх — список свёрнут: счётчик и превью, по нажатию раскрывается (HEAD 26.11)
+  for (const n of ['Спортзал стена 1', 'Спортзал стена 2', 'Холл']) {
+    await d.locator('.sheetbox label.photo input[type=file]').setInputFiles({ name: n + '@100x.png', mimeType: 'image/png', buffer: Buffer.from('PNG-DATA') })
+    await d.waitForTimeout(900)
+  }
+  await d.locator('.sheetbox .gfold', { hasText: 'Эскизы · 4' }).waitFor()
+  assert.strictEqual(await d.locator('.sheetbox .mitem').count(), 0, 'свёрнуто — строк нет')
+  await d.waitForTimeout(600)
+  await d.screenshot({ path: `${shots}/dz-eskizy-svernuto.png`, fullPage: true })
+  await d.locator('.sheetbox .gfold').click()
+  assert.strictEqual(await d.locator('.sheetbox .mitem').count(), 4)
+  await d.locator('.sheetbox .gfold').click()
   await d.locator('.sheetbox').getByRole('button', { name: 'Утверждено' }).click()
   await d.locator('.dtstage.done .dtrow', { hasText: 'Столовая' }).waitFor()
   assert.match(await d.locator('.dtstage.work, .dtstage.new').first().textContent(), /Спортзал/)
@@ -99,10 +112,13 @@ async function tab(p, name) {
   await tab(m, 'Сделки')
   await m.locator('.chips.scroll button', { hasText: 'Все' }).click()
   await m.locator('.stage .qrow', { hasText: '№ 1601' }).click()
-  await m.locator('.dtdeal .dtrow', { hasText: 'Столовая эскиз' }).waitFor()
+  await m.locator('.dtdeal').getByRole('button', { name: 'Показать все 4 ▾' }).waitFor()
+  assert.strictEqual(await m.locator('.dtdeal .dtrow.click').count(), 3, 'в сделке у МОП видно три последних эскиза')
   assert.match(await m.locator('.dtdeal .dtrow').first().textContent(), /Столовая.*Малика.*УТВЕРЖДЕНО/)
   await m.locator('.dtdeal').scrollIntoViewIfNeeded()
   await m.screenshot({ path: `${shots}/dz-task-4-mop-eskiz.png` })
+  await m.locator('.dtdeal').getByRole('button', { name: 'Показать все 4 ▾' }).click()
+  await m.locator('.dtdeal .dtrow', { hasText: 'Столовая эскиз' }).waitFor()
   // единиц задача не дала; сделка 1601 в списках объектов не появилась
   const t = (await call(6000, '/bx/deals/1601/design-tasks')).items
   assert.deepStrictEqual(t.map(x => [x.title, x.stage_name, x.designer]), [['Столовая', 'УТВЕРЖДЕНО', 'Малика'], ['Спортзал', 'Свежие заказы', '']])
