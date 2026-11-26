@@ -14,6 +14,7 @@ import uuid
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from psycopg.errors import UniqueViolation
 from pydantic import BaseModel, Field
 
 from . import db
@@ -42,6 +43,12 @@ def cycles(r: dict, today: date) -> list[tuple[str, date]]:
 
 def _ref(rid: int, cycle: str) -> str:
     return f"recurring:{rid}:{cycle}"
+
+
+def _from(r: dict) -> date:
+    """С какой даты считаем платёж. Автосписание (HEAD 26.11: «почему они не списываются и не указываются?») — весь месяц
+    запуска: подписка, списанная 1-го или 11-го до запуска графика, тоже записывается. Ручные — с даты запуска."""
+    return r["start_date"].replace(day=1) if r["auto"] else r["start_date"]
 
 
 def _today() -> date:
@@ -93,7 +100,7 @@ def items(conn, today: date | None = None, all_rows: bool = False) -> list[dict]
     paid = _paid(conn)
     out = []
     for r in _rows(conn, all_rows):
-        cyc = [(c, d) for c, d in cycles(r, today) if d >= r["start_date"]]
+        cyc = [(c, d) for c, d in cycles(r, today) if d >= _from(r)]
         unpaid = [(c, d) for c, d in cyc if not paid(r, c)]
         last = next((paid(r, c) for c, _ in reversed(cyc) if paid(r, c)), None)
         if unpaid:
@@ -123,7 +130,7 @@ def month_bills(conn, ym: str, today: date | None = None) -> dict[str, list[dict
         if r["every"] == "year" and r["month"] != m:
             continue
         cycle, due = (ym, _on(y, m, r["day"])) if r["every"] == "month" else (str(y), _on(y, m, r["day"]))
-        if due < r["start_date"]:
+        if due < _from(r):
             continue   # до приложения — оплачено мимо него
         x = paid(r, cycle)
         out.setdefault(r["article_code"], []).append({
@@ -154,7 +161,7 @@ def auto_book(conn, today: date | None = None) -> list[dict]:
             continue
         amount = v.get(r["plan_key"]) if r["plan_key"] else None
         for c, d in cycles(r, today):
-            if d < r["start_date"] or d > today or not amount:
+            if d < _from(r) or d > today or not amount:
                 continue
             ref = _ref(r["id"], c)
             if conn.execute("SELECT 1 FROM fin_ledger WHERE source='app' AND source_ref=%s", (ref,)).fetchone():
@@ -162,11 +169,14 @@ def auto_book(conn, today: date | None = None) -> list[dict]:
             if paid(r, c):
                 continue   # уже внесено руками через «+ Общий» — второй раз не пишем
             period = c if r["every"] == "month" else f"{d:%Y-%m}"
-            with conn.transaction():
-                row = add_ledger(conn, {"id": head["id"]}, client_uid=uuid.uuid4(), op_date=d, account=r["account_code"], direction="out",
-                                 amount=amount, article=r["article_code"], period=period,
-                                 note=f"Автосписание: {r['title']} за {c}", source="app", source_ref=ref)
-                db.audit(conn, head["id"], "fin_recurring_auto", "fin_recurring", r["id"], {"cycle": c, "amount": amount, "ledger": row["id"]})
+            try:   # два запроса разом (Пульт и «Финансы») пишут одно и то же — второй молча уступает
+                with conn.transaction():
+                    row = add_ledger(conn, {"id": head["id"]}, client_uid=uuid.uuid4(), op_date=d, account=r["account_code"], direction="out",
+                                     amount=amount, article=r["article_code"], period=period,
+                                     note=f"Автосписание: {r['title']} за {c}", source="app", source_ref=ref)
+                    db.audit(conn, head["id"], "fin_recurring_auto", "fin_recurring", r["id"], {"cycle": c, "amount": amount, "ledger": row["id"]})
+            except UniqueViolation:
+                continue
             done.append({"id": r["id"], "title": r["title"], "amount": amount, "cycle": c})
     return done
 

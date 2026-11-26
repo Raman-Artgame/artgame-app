@@ -144,3 +144,16 @@ def test_budget_row_pay_and_no_double(client, monkeypatch):
     assert b["fact"] == 50000 and b["bills"][0]["status"] == "paid"
     again = {**body, "client_uid": str(uuid.uuid4())}
     assert client.post(f"/api/fin/recurring/{cl['id']}/pay", json=again, headers=hdr(1000)).status_code == 409
+
+
+def test_auto_books_whole_start_month(client):
+    """HEAD 26.11: подписка с датой до запуска графика (Gigapixel 1-го, запуск 12-го) в месяц запуска записывается сама."""
+    _setup(client)
+    with db.pool.connection() as c:
+        c.execute("UPDATE fin_recurring SET start_date='2026-11-12'")
+        c.execute("UPDATE fin_recurring SET day=1 WHERE title='Claude'")
+        done = recurring.auto_book(c, date(2026, 11, 26))
+        assert [(x["title"], x["cycle"], x["amount"]) for x in done] == [("Claude", "2026-11", 50000)]   # октябрь не трогаем
+        assert recurring.month_bills(c, "2026-11", date(2026, 11, 26))["sub_claude"][0]["status"] == "paid"
+        assert _by(c, date(2026, 11, 26), "Аренда студии, Астана")["status"] == "later"                  # ручные — как были
+        assert recurring.auto_book(c, date(2026, 11, 26)) == []

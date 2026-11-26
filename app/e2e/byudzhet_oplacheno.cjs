@@ -19,8 +19,11 @@ const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Alm
   await call(1000, '/register', { full_name: 'Раман HEAD' })
   await call(1000, '/_e2e/consts', { 'fin.fixed.rent_studio_ast': 300000, 'fin.fixed.rent_office_sales': 100000, 'fin.fixed.rent_shop': 150000,
     'fin.fixed.rent_workshop_ast': 200000, 'fin.fixed.rent_workshop_shym': 120000, 'fin.fixed.internet_ast': 17000, 'fin.fixed.telephony': 15000,
-    'fin.fixed.hosting': 10000, 'fin.fixed.sub.claude': 50000 })
-  sql(`UPDATE fin_recurring SET start_date = date_trunc('month', now() AT TIME ZONE 'Asia/Almaty')::date`)
+    'fin.fixed.hosting': 10000, 'fin.fixed.sub.claude': 50000, 'fin.fixed.sub.gigapixel': 10000, 'fin.fixed.sub.freepik': 10000,
+    'fin.fixed.sub.chatgpt': 10000, 'fin.fixed.sub.gworkspace': 13600 })
+  // график запущен «вчера»: подписки с датой раньше (Gigapixel 1-го) всё равно записываются сами — месяц запуска целиком (HEAD 26.11)
+  sql(`UPDATE fin_recurring SET start_date = CASE WHEN auto THEN (now() AT TIME ZONE 'Asia/Almaty')::date - 1 ELSE date_trunc('month', now() AT TIME ZONE 'Asia/Almaty')::date END`)
+  sql(`UPDATE fin_recurring SET day = 1 WHERE title = 'Gigapixel'`)
   sql(`UPDATE fin_recurring SET day = 1 WHERE title = 'Аренда студии, Астана'`)
   // мастерскую HEAD уже внёс через «+ Общий» — без привязки к графику
   const art = sql(`SELECT code FROM fin_articles WHERE plan_key='fin.fixed.rent_workshop_ast'`)
@@ -44,6 +47,9 @@ const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Alm
   assert.ok(await studio.evaluate(x => x.classList.contains('unpaid')), 'неоплаченное выделено')
   const shop = card.locator('.brow', { hasText: 'Аренда мастерской Астана' })
   await shop.locator('.ok', { hasText: 'оплачено' }).waitFor()        // внесено через «+ Общий» — уже оплачено
+  const giga = card.locator('.brow', { hasText: 'Gigapixel' })
+  await giga.locator('.ok', { hasText: 'списано' }).waitFor()          // автосписание записалось само, без чека
+  await giga.getByText(/10\s000\s₸\s*\/\s*10\s000/).waitFor()
   await card.scrollIntoViewIfNeeded()
   await card.screenshot({ path: `${shots}/byudzhet-1-stroki.png` })
 

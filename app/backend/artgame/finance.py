@@ -748,6 +748,8 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
     t0, t1 = datetime(start.year, start.month, 1, tzinfo=TZ), datetime(end.year, end.month, 1, tzinfo=TZ)
     warn = []
     with db.pool.connection() as conn:
+        from .recurring import auto_book, month_bills   # здесь, а не сверху: recurring сам берёт функции из этого файла
+        auto_book(conn)   # автосписания, которые таймер ещё не записал, — до подсчёта факта
         v = vals(conn)
         gross, w = company_revenue(start.year, start.month)
         if w:
@@ -779,7 +781,6 @@ def summary(ym: str | None = None, p: dict = Depends(require_head)):
                                FROM fin_ledger WHERE status='active' AND op_date >= %s AND op_date < %s""", (ym, ym, start, end)).fetchone()
         opening, closing = balances(conn, start), balances(conn, end)
         plans = conn.execute("SELECT code, title, kind, plan_key FROM fin_articles WHERE plan_key IS NOT NULL AND active ORDER BY sort").fetchall()
-        from .recurring import month_bills   # здесь, а не сверху: recurring сам берёт функции из этого файла
         bills = month_bills(conn, ym)
         hist = start < HIST_CUT   # до ноября 2026: расходы проектов — оценки старой таблицы «Проекты 2026»
         hist_mat = _f(conn.execute("""SELECT coalesce(sum(materials + transport + other), 0) AS s FROM fin_projects
