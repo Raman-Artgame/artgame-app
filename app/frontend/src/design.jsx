@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { Sheet } from './ui.jsx'
 import { bxLink, usePortal } from './crm.jsx'
-import { TaskBoard, useTaskCount } from './designtasks.jsx'
+import { DealFiles, TaskBoard, useTaskCount } from './designtasks.jsx'
 
 // «Дизайн» (HEAD 06–07.11): воронка Битрикса «Дизайн РК», единицы за месяц, каталог референсов.
 // Единица — только при «УТВЕРЖДЕНО» (макет и эскиз утверждены); каждый переход в «Правки» — новый круг, без доплаты.
@@ -27,7 +27,7 @@ export function Design({ me, initial }) {
       <button className={view === 'units' ? 'on' : ''} onClick={() => setView('units')}>Единицы</button>
       <button className={view === 'cat' ? 'on' : ''} onClick={() => setView('cat')}>Каталоги</button>
     </div></div>
-    {view === 'tasks' ? <TaskBoard team={team} /> : view === 'deals' ? <Deals /> : view === 'units' ? <Units /> : <Catalogs me={me} />}
+    {view === 'tasks' ? <TaskBoard team={team} me={me} /> : view === 'deals' ? <Deals me={me} /> : view === 'units' ? <Units /> : <Catalogs me={me} />}
   </>
 }
 
@@ -45,17 +45,17 @@ const GUIDE = {
   FINAL_INVOICE: { color: '#f11716', todo: 'Срочный заказ — берётся первым, остальное ждёт.',
     how: 'Срок сегодня или завтра. Вопросы к МОП — сразу, не копить. Главный дизайнер следит лично.', want: 'Эскиз клиенту к сроку, без переносов.' },
   UC_3KZLWD: { color: '#ace9fb', todo: 'Собрать всё для макета: размеры стены, фото объекта, референсы, пожелания клиента.',
-    how: 'Запросить у МОП через сделку. Фото и размеры — в папку проекта, референсы — из каталогов.', want: 'Полная задача без догадок — тогда «Взято в работу».' },
+    how: 'Запросить у МОП через сделку. Фото и размеры загрузи в карточку, референсы — из каталогов.', want: 'Полная задача без догадок — тогда «Взято в работу».' },
   PREPARATION: { color: '#30afff', todo: 'Делать макет и эскиз.',
-    how: 'Стиль — по каталогу референсов. На макете для клиента — поля 50 см у краёв; что печать, что руками — отметить. Готовое — в «ДИЗАЙН/Утвержденные дизайны».',
-    want: 'Макет к сроку дизайна и ссылка на него в карточке.' },
+    how: 'Стиль — по каталогу референсов. На макете для клиента — поля 50 см у краёв; что печать, что руками — отметить. Готовое загрузи в карточку сделки кнопкой «Загрузить эскиз».',
+    want: 'Макет к сроку дизайна, загружен в карточку.' },
   PREPAYMENT_INVOIC: { color: '#00c0d5', todo: 'Макет у клиента — ждём ответ.',
     how: 'Клиенту напрямую не пишем: всё через МОП и Битрикс. Тишина больше суток — напомнить МОП.', want: '«Утверждаю» — или список правок от МОП.' },
   EXECUTING: { color: '#31c469', todo: 'Внести правки клиента.',
     how: 'Правки — списком от МОП, все за один раз. Каждый вход в «Правки» — новый круг, без доплаты.', want: 'Исправленный макет быстро и без нового круга.' },
   UC_LC1X2T: { color: '#00c4fb', todo: 'Макет у МОП: КП и договор.',
-    how: 'Проверь, что в карточке есть папка проекта и ссылка на утверждённый эскиз.', want: 'МОП закрывает с клиентом — стадия «УТВЕРЖДЕНО».' },
-  WON: { color: '#7bd500', todo: 'Утверждено — единица засчитана.', how: 'Нужны размер, дизайнер и ссылка на утверждённый эскиз.', want: 'Эскиз уходит в производство.' },
+    how: 'Проверь, что утверждённый эскиз загружен в карточку.', want: 'МОП закрывает с клиентом — стадия «УТВЕРЖДЕНО».' },
+  WON: { color: '#7bd500', todo: 'Утверждено — единица засчитана.', how: 'Нужны размер, дизайнер и загруженный эскиз.', want: 'Эскиз уходит в производство.' },
 }
 const code = id => String(id || '').split(':')[1] || ''
 const today = () => new Date(new Date().toDateString())
@@ -83,7 +83,7 @@ function Due({ s }) {
   return <span className={'due' + (d < 0 ? ' late' : d <= 1 ? ' soon' : '')}>{d < 0 ? `просрочено ${-d} дн` : d === 0 ? 'сегодня' : d === 1 ? 'завтра' : 'до ' + dmy(s)}</span>
 }
 
-function Deals() {
+function Deals({ me }) {
   const [d, setD] = useState(null)
   const [e, setE] = useState('')
   const [open, setOpen] = useState(null)
@@ -116,7 +116,7 @@ function Deals() {
   return <>
     <div className="card dzhero">
       <div className="head"><h2>Воронка «Дизайн РК»</h2><button className="ghost mini" onClick={() => { setD(null); load(1) }}>Обновить</button></div>
-      <p className="small muted">Единица — когда проект с твоим дизайном ушёл в работу. Связь с клиентом — кнопкой в карточке сделки, через Битрикс. Готовые эскизы — в «ДИЗАЙН/Утвержденные дизайны».</p>
+      <p className="small muted">Единица — когда проект с твоим дизайном ушёл в работу. Связь с клиентом — кнопкой в карточке сделки, через Битрикс. Эскизы загружайте файлом в карточке сделки.</p>
       {!d.bx && <p className="small why">Запись в Битрикс выключена — изменения пишутся только в журнал.</p>}
       <div className="segf dztabs">{tabs.map(([k, t, n]) => <button key={k} className={v === k ? 'on' : ''} onClick={() => { setView(k); setOnly('') }}>{t}<b>{n}</b></button>)}</div>
     </div>
@@ -142,13 +142,13 @@ function Deals() {
           {!rows.length && <p className="small muted">Здесь сейчас пусто.</p>}</>}
         </div> })}</>}
     {!d.deals.length && <div className="card"><p className="small muted">{d.can_assign ? 'Открытых сделок дизайна нет.' : 'На вас пока нет сделок дизайна.'}</p></div>}
-    {open && <DealSheet x={open} d={d} team={team} onClose={() => setOpen(null)} onDone={() => { setOpen(null); load(1) }} />}
+    {open && <DealSheet x={open} d={d} team={team} me={me} onClose={() => setOpen(null)} onDone={() => { setOpen(null); load(1) }} />}
   </>
 }
 
-function DealSheet({ x, d, team, onClose, onDone }) {
+function DealSheet({ x, d, team, me, onClose, onDone }) {
   const portal = usePortal()
-  const [v, set] = useState({ stage: x.stage, designer_bx: x.designer_bx || '', size: x.size || '', deadline: x.deadline || '', folder: x.folder, layout: x.layout })
+  const [v, set] = useState({ stage: x.stage, designer_bx: x.designer_bx || '', size: x.size || '', deadline: x.deadline || '' })
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const send = () => {
@@ -157,8 +157,6 @@ function DealSheet({ x, d, team, onClose, onDone }) {
     if (d.can_assign && String(v.designer_bx) !== String(x.designer_bx || '')) b.designer_bx = +v.designer_bx || 0
     if (d.can_assign && v.size && v.size !== x.size) b.size = v.size
     if (v.deadline && v.deadline !== x.deadline) b.deadline = v.deadline
-    if (v.folder !== x.folder) b.folder = v.folder
-    if (v.layout !== x.layout) b.layout = v.layout
     if (!Object.keys(b).length) return onClose()
     setBusy(true)
     api(`/design/deals/${x.id}`, { method: 'POST', body: b }).then(onDone, ex => { setMsg(ex.message); setBusy(false) })
@@ -187,7 +185,7 @@ function DealSheet({ x, d, team, onClose, onDone }) {
           <p className="small muted">Сделка уйдёт в «Ждём клиента», просрочка не копится. Через 7 дней МОП получит напоминание.</p></div>)}
     <label className="muted">Стадия</label>
     <select value={v.stage} onChange={e => set({ ...v, stage: e.target.value })}>{d.stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-    {v.stage === won && v.stage !== x.stage && <p className="small why">Перед «УТВЕРЖДЕНО» нужны размер, дизайнер и ссылка на утверждённый эскиз.</p>}
+    {v.stage === won && v.stage !== x.stage && <p className="small why">Перед «УТВЕРЖДЕНО» нужны размер, дизайнер и загруженный эскиз.</p>}
     <label className="muted">Дизайнер</label>
     <select disabled={!d.can_assign} value={v.designer_bx} onChange={e => set({ ...v, designer_bx: e.target.value })}>
       <option value="">не назначен</option>
@@ -200,10 +198,9 @@ function DealSheet({ x, d, team, onClose, onDone }) {
     <label className="muted">Срок дизайна</label>
     <input type="date" value={v.deadline} onChange={e => set({ ...v, deadline: e.target.value })} />
     {x.waited_days > 0 && x.deadline_eff && <p className="small muted">С учётом ожидания клиента (+{x.waited_days} дн): до {dmy(x.deadline_eff)}.</p>}
-    <label className="muted">Папка проекта</label>
-    <input value={v.folder} placeholder="ссылка на Диск" onChange={e => set({ ...v, folder: e.target.value })} />
-    <label className="muted">Утверждённый эскиз</label>
-    <input value={v.layout} placeholder="ссылка на эскиз" onChange={e => set({ ...v, layout: e.target.value })} />
+    <h3 className="dth">Эскизы и материалы</h3>
+    <p className="small muted">Загрузите файл — он сам ляжет в папку сделки «ДИЗАЙН». МОП увидит его в карточке сделки.</p>
+    <DealFiles dealId={x.id} me={me} />
     {msg && <p className="small why">{msg}</p>}
     <button disabled={busy} onClick={send}>Сохранить в Битрикс</button>
   </Sheet>

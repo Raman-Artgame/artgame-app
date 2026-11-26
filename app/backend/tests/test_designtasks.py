@@ -31,11 +31,21 @@ def test_design_tasks(client, dz):  # noqa: F811
     # «Утверждено» — только с эскизом; файл должен лежать в ДИЗАЙН этой сделки
     assert client.post(f"/api/design/tasks/{a['id']}", json={"stage": "done"}, headers=hdr(7100)).status_code == 400
     assert client.post(f"/api/design/tasks/{a['id']}", json={"file_id": 999999}, headers=hdr(7100)).status_code == 400
+    # папку сделки заводит сервер сам: строка objects со статусом early, в списках объектов её нет
+    assert client.post("/api/design/deal/1601/object", headers=hdr(6000)).status_code == 403
+    assert client.post("/api/design/deal/1601/object", headers=hdr(7100)).json() == {"id": 1601}
+    assert client.post("/api/design/deal/1601/object", headers=hdr(7100)).json() == {"id": 1601}
+    assert client.post("/api/design/deal/999/object", headers=hdr(7100)).status_code == 404
     with db.pool.connection() as c:
-        c.execute("INSERT INTO objects (id, title, city, bitrix_stage) VALUES (1601, 'Продажа', 'Астана', 'UC_AV00QK') ON CONFLICT (id) DO NOTHING")
+        o = c.execute("SELECT status, title, bitrix_stage FROM objects WHERE id=1601").fetchone()
+        assert (o["status"], o["title"], o["bitrix_stage"]) == ("early", "Продажа", "NEW")
         fid = c.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, status, uploaded_by, drive_id)
                            VALUES (gen_random_uuid(), 1601, 'design', 'stolovaya.png', 'image/png', 10, 'ready', %s, 'drive-file-0001')
                            RETURNING id""", (ids[7100],)).fetchone()["id"]
+    assert 1601 not in [x["id"] for x in client.get("/api/objects", headers=hdr(7100)).json()]
+    # файл уже лежит в ДИЗАЙН сделки — «Утверждено» проходит и без привязки файла к задаче
+    assert client.post(f"/api/design/tasks/{b['id']}", json={"stage": "done"}, headers=hdr(7000)).json()["stage"] == "done"
+    assert client.post(f"/api/design/tasks/{b['id']}", json={"stage": "new"}, headers=hdr(7000)).json()["approved"] == ""
     t = client.post(f"/api/design/tasks/{a['id']}", json={"file_id": fid, "stage": "done"}, headers=hdr(7100)).json()
     assert t["stage"] == "done" and t["approved"] and t["file_name"] == "stolovaya.png"
     m = client.get("/api/bx/deals/1601/design-tasks", headers=hdr(6000)).json()["items"][0]

@@ -288,8 +288,12 @@ def update(deal_id: int, b: DealIn, p: dict = Depends(active)):
             raise HTTPException(400, "Такой стадии в воронке дизайна нет")
         if b.stage == WON:
             layout = b.layout if b.layout is not None else d.get(F_LAYOUT)
+            if not layout:   # HEAD 26.11: эскиз грузят файлом в карточке — ссылка руками больше не нужна
+                with db.pool.connection() as conn:
+                    layout = conn.execute("SELECT 1 FROM files WHERE object_id=%s AND kind='design' AND status='ready' LIMIT 1",
+                                          (deal_id,)).fetchone()
             designer = b.designer_bx if b.designer_bx is not None else cur_uid
-            miss = [t for t, x in (("размер", size), ("ссылка на утверждённый эскиз", layout), ("дизайнер", designer)) if not x]
+            miss = [t for t, x in (("размер", size), ("эскиз файлом в карточке", layout), ("дизайнер", designer)) if not x]
             if miss:
                 raise HTTPException(409, "Перед «УТВЕРЖДЕНО» заполните: " + ", ".join(miss))
         if b.stage != d.get("STAGE_ID"):

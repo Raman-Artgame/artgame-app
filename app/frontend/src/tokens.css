@@ -1293,3 +1293,5 @@ button.btnlike { padding: 12px 10px; font-size: 13px; font-weight: 600; margin: 
 .dtcheck input { width: auto; margin: 0; }
 button.okbtn { background: var(--okbg); color: var(--ok); margin-top: 8px; }
 button.okbtn:hover { background: var(--okbg); filter: brightness(1.2); }
+.dtthumb { flex: none; width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: var(--alt); display: grid; place-items: center; }
+.dtcap.dtfiles { margin-top: 14px; }

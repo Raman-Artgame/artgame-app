@@ -64,6 +64,7 @@ async function tab(p, name) {
 
   // 2. Дизайнер: «Дизайн» сразу открывает доску задач
   const d = await open(b, 7100)
+  await d.route('https://upload.example/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'drvBIG00000201' }) }))
   await tab(d, 'Дизайн')
   await d.locator('.dtstage .dtrow', { hasText: 'Столовая' }).waitFor()
   assert.match(await d.locator('.segf button.on').first().textContent(), /Задачи2/)
@@ -79,19 +80,36 @@ async function tab(p, name) {
   await d.waitForFunction(() => document.querySelectorAll('.sheetbox select')[1]?.value === 'l')
   await d.locator('.sheetbox').getByRole('button', { name: 'Утверждено' }).click()
   await d.locator('.sheetbox .why', { hasText: 'Сначала загрузите эскиз' }).waitFor()
-  await d.locator('.sheetbox input[placeholder="или ссылка на эскиз"]').fill('https://drive.google.com/file/d/e2e-stolovaya')
-  await d.locator('.sheetbox h3').click()
-  await d.waitForTimeout(500)
+  // эскиз — файлом прямо в карточке: сделка ещё не в работе, папку заводит сервер; ссылок руками нет (HEAD 26.11)
+  assert.strictEqual(await d.locator('.sheetbox input[placeholder*="ссылк"]').count(), 0)
+  await d.locator('.sheetbox label.photo input[type=file]').setInputFiles({ name: 'Столовая эскиз@100x.png', mimeType: 'image/png', buffer: Buffer.from('PNG-DATA') })
+  await d.locator('.sheetbox .mitem', { hasText: 'Столовая эскиз' }).waitFor()
+  await d.locator('.sheetbox .x').click()
+  await d.locator('.dtstage .dtrow', { hasText: 'Столовая' }).click()
+  await d.locator('.sheetbox .mitem', { hasText: 'Столовая эскиз' }).waitFor()
+  await d.waitForTimeout(700)
   await d.screenshot({ path: `${shots}/dz-task-3-card.png`, fullPage: true })
   await d.locator('.sheetbox').getByRole('button', { name: 'Утверждено' }).click()
   await d.locator('.dtstage.done .dtrow', { hasText: 'Столовая' }).waitFor()
   assert.match(await d.locator('.dtstage.work, .dtstage.new').first().textContent(), /Спортзал/)
 
-  // 4. МОП видит результат в сделке; единиц задача не дала
+  // 4. МОП видит эскиз в карточке сделки
+  await m.reload()
+  await m.locator('nav button').first().waitFor()
+  await tab(m, 'Сделки')
+  await m.locator('.chips.scroll button', { hasText: 'Все' }).click()
+  await m.locator('.stage .qrow', { hasText: '№ 1601' }).click()
+  await m.locator('.dtdeal .dtrow', { hasText: 'Столовая эскиз' }).waitFor()
+  assert.match(await m.locator('.dtdeal .dtrow').first().textContent(), /Столовая.*Малика.*УТВЕРЖДЕНО/)
+  await m.locator('.dtdeal').scrollIntoViewIfNeeded()
+  await m.screenshot({ path: `${shots}/dz-task-4-mop-eskiz.png` })
+  // единиц задача не дала; сделка 1601 в списках объектов не появилась
   const t = (await call(6000, '/bx/deals/1601/design-tasks')).items
   assert.deepStrictEqual(t.map(x => [x.title, x.stage_name, x.designer]), [['Столовая', 'УТВЕРЖДЕНО', 'Малика'], ['Спортзал', 'Свежие заказы', '']])
   const u = await call(7100, `/design/units?ym=${new Date().toISOString().slice(0, 7)}`)
   assert.strictEqual(u.mine, 0, 'задачи единиц не дают: единица одна за весь проект')
+  const objs = await call(7100, '/objects')
+  assert.ok(!objs.some(o => o.id === 1601), 'сделка до работы в списке объектов не видна')
   await b.close()
   console.log('OK: МОП просит дизайн из сделки, дизайнер ведёт задачу на доске и утверждает, сделка на месте, единиц нет')
 })().catch(e => { console.error('FAIL', e.message); process.exit(1) })

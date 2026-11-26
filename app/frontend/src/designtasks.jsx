@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { Sheet } from './ui.jsx'
 import { cleanTitle } from './crm.jsx'
-import { uploadBig } from './objects.jsx'
+import { Gallery, Viewer } from './objects.jsx'
 
 // Задачи на дизайн при сделке (HEAD 25.11 «в целом норм, давай попробуем»): МОП жмёт «Нужен дизайн» в карточке сделки —
 // сделка остаётся на своей стадии, у дизайнера карточка во вкладке «Дизайн» с его привычными стадиями.
@@ -11,7 +11,31 @@ const openUrl = u => { const t = window.Telegram?.WebApp; if (t?.openLink && t.i
 const dm = s => s ? `${s.slice(8, 10)}.${s.slice(5, 7)}` : ''
 const today = () => new Date().toISOString().slice(0, 10)
 const tone = st => st === 'done' ? ' okt' : st === 'urgent' ? ' hott' : st === 'new' ? ' none' : ''
-const who = t => [t.designer || 'дизайнер не назначен', t.deadline ? 'срок ' + dm(t.deadline) : '', t.file_id ? 'эскиз в папке ДИЗАЙН' : t.link ? 'эскиз по ссылке' : ''].filter(Boolean).join(' · ')
+const who = t => [t.designer || 'дизайнер не назначен', t.deadline ? 'срок ' + dm(t.deadline) : ''].filter(Boolean).join(' · ')
+
+// Эскизы и материалы сделки (HEAD 26.11: «как выгрузить материал?»): дизайнер грузит файл прямо здесь, он сам ложится
+// в папку сделки ДИЗАЙН на Диске. Ссылок руками нет. У сделки до стадии работы папки ещё нет — сервер заводит её сам.
+export function DealFiles({ dealId, me }) {
+  const [ok, setOk] = useState(null)
+  useEffect(() => { api(`/design/deal/${dealId}/object`, { method: 'POST' }).then(() => setOk(true), () => setOk(false)) }, [dealId])
+  if (ok === null) return <p className="muted small">Загрузка…</p>
+  if (!ok) return <p className="small why">Не удалось открыть папку сделки. Обновите страницу; не поможет — напишите HEAD.</p>
+  return <Gallery obj={{ id: dealId }} me={me} only={['design']} bare />
+}
+
+// То же для МОП, только посмотреть: что дизайнер уже загрузил.
+function SeeFiles({ dealId }) {
+  const [list, setList] = useState([])
+  const [open, setOpen] = useState(null)
+  useEffect(() => { api(`/objects/${dealId}/files?kind=design`).then(setList, () => setList([])) }, [dealId])
+  if (!list.length) return null
+  return <><p className="dtcap dtfiles">Эскизы · {list.length}</p>
+    {list.map(f => <div key={f.id} className="dtrow click" onClick={() => setOpen(f)}>
+      {f.thumb ? <img className="dtthumb" src={f.thumb} alt="" /> : <span className="dtthumb">📄</span>}
+      <div className="dtmain"><b>{f.name}</b><span className="small muted">{f.by} · {new Date(f.created_at).toLocaleDateString('ru-RU')}</span></div>
+    </div>)}
+    <Viewer f={open} onClose={() => setOpen(null)} /></>
+}
 
 // Блок «Дизайн» в карточке сделки (МОП и HEAD): список задач и кнопка «Нужен дизайн».
 export function DealDesign({ dealId }) {
@@ -32,6 +56,7 @@ export function DealDesign({ dealId }) {
       {d.can_add && t.stage === 'new' && <button className="pencil" aria-label="Убрать задачу" onClick={() => drop(t)}>✕</button>}
     </div>)}
     {!d.items.length && <p className="small muted">Задач на дизайн по этой сделке пока нет.</p>}
+    <SeeFiles dealId={dealId} />
     {d.can_add && <button onClick={() => setAdd({ title: '', note: '', urgent: false })}>+ Нужен дизайн</button>}
     {d.can_add && <p className="small muted">Сделка остаётся на своей стадии. Дизайнер увидит задачу у себя во вкладке «Дизайн».</p>}
     {err && !add && <p className="small why">{err}</p>}
@@ -55,7 +80,7 @@ export function useTaskCount() {
 }
 
 // Доска дизайнера: задачи по стадиям. Дизайнер видит свои и неразобранные, Главный и HEAD — все.
-export function TaskBoard({ team }) {
+export function TaskBoard({ team, me }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [only, setOnly] = useState('')
@@ -86,22 +111,13 @@ export function TaskBoard({ team }) {
       </div>)}
     </div>)}
     {!d.items.length && <div className="card"><p className="small muted">Задач пока нет. Они появятся здесь, когда МОП нажмёт «Нужен дизайн» в карточке сделки.</p></div>}
-    {open && <TaskSheet t={open} d={d} team={team} onClose={() => setOpen(null)} onDone={x => { setOpen(x || null); load() }} />}
+    {open && <TaskSheet t={open} d={d} team={team} me={me} onClose={() => setOpen(null)} onDone={x => { setOpen(x || null); load() }} />}
   </>
 }
 
-function TaskSheet({ t, d, team, onClose, onDone }) {
+function TaskSheet({ t, d, team, me, onClose, onDone }) {
   const [err, setErr] = useState('')
-  const [pct, setPct] = useState(null)
-  const [link, setLink] = useState(t.link)
-  const [noFolder, setNoFolder] = useState(false)
-  const pick = useRef()
   const save = (body, close) => { setErr(''); return api(`/design/tasks/${t.id}`, { method: 'POST', body }).then(x => onDone(close ? null : x), e => setErr(e.message)) }
-  const file = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return
-    setErr(''); setPct(0)
-    try { const r = await uploadBig(t.deal_id, 'design', f, p => setPct(p)); await save({ file_id: r.id || r.file_id }) }
-    catch (ex) { if (/no object|404/i.test(ex.message || '')) setNoFolder(true); else setErr('Файл не загрузился: ' + ex.message) }
-    setPct(null) }
   const mine = d.all || !t.designer_id || t.designer_id === d.me
   const designers = (team || []).filter(x => x.id)
   return <Sheet title={`№ ${t.deal_id} · ${t.title}`} onClose={onClose}>
@@ -115,12 +131,9 @@ function TaskSheet({ t, d, team, onClose, onDone }) {
     <div className="dttwo"><div><label>Размер</label>
       <select value={t.size} disabled={!mine} onChange={e => save({ size: e.target.value || null })}><option value="">—</option>{d.sizes.map(s => <option key={s} value={s}>{s.toUpperCase()}</option>)}</select></div>
       <div><label>Срок</label><input type="date" value={t.deadline} disabled={!mine} onChange={e => save({ deadline: e.target.value || null })} /></div></div>
-    <h3 className="dth">Эскиз</h3>
-    {t.file_id ? <p className="small">✓ {t.file_name || 'файл загружен'} — в папке сделки ДИЗАЙН</p> : <p className="small muted">Файл сохранится в папку сделки ДИЗАЙН.</p>}
-    <input ref={pick} type="file" hidden onChange={file} />
-    {mine && <button className="ghost" disabled={pct !== null} onClick={() => pick.current.click()}>{pct !== null ? `Загружаю… ${Math.round(pct * 100)}%` : t.file_id ? 'Заменить эскиз' : 'Загрузить эскиз'}</button>}
-    {noFolder && <p className="small why">У сделки ещё нет папки на Диске — пока вставьте ссылку на эскиз.</p>}
-    {mine && <input value={link} placeholder="или ссылка на эскиз" onChange={e => setLink(e.target.value)} onBlur={() => link !== t.link && save({ link })} />}
+    <h3 className="dth">Эскизы и материалы</h3>
+    <p className="small muted">Загрузите файл — он сам ляжет в папку сделки «ДИЗАЙН». МОП увидит его в карточке сделки.</p>
+    <DealFiles dealId={t.deal_id} me={me} />
     {err && <p className="small why">{err}</p>}
     <div className="dttwo dtacts">
       {t.bitrix ? <button className="ghost" onClick={() => openUrl(t.bitrix)}>Написать клиенту</button> : <span />}

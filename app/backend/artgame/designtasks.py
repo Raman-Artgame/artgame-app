@@ -3,7 +3,7 @@
 - МОП (или HEAD) в карточке сделки жмёт «Нужен дизайн» — на любой стадии, сколько угодно раз. Сделка остаётся на своей стадии.
 - У дизайнера карточка во вкладке «Дизайн» с привычными стадиями воронки «Дизайн РК» (названия те же, хранятся здесь).
 - Дизайнер видит свои и ещё не разобранные задачи; Главный дизайнер и HEAD — все и назначают исполнителя.
-- Эскиз — файлом в папку сделки ДИЗАЙН (обычная загрузка объекта) или ссылкой, пока папки нет.
+- Эскиз — файлом прямо в карточке: ложится в папку сделки ДИЗАЙН (HEAD 26.11: ссылок руками нет).
 - Единиц задачи не дают: единица одна за весь проект (design_units), считается как раньше.
 - В Битрикс ничего не пишем и в бот не шлём: новое видно цифрой на доске и в карточке сделки.
 """
@@ -44,6 +44,33 @@ def _bitrix(deal_id: int) -> str:
         return (bxw.portal() + f"/crm/deal/details/{deal_id}/") if bxw.portal() else ""
     except Exception:  # noqa: BLE001
         return ""
+
+
+def ensure_object(conn, deal_id: int) -> int:
+    """Строка сделки в objects — без неё файлу некуда лечь. До стадии работы сделки там нет: заводим со статусом early
+    (в списках объектов её не видно; синхронизация сама сделает active, когда сделка дойдёт до работы)."""
+    if conn.execute("SELECT 1 FROM objects WHERE id=%s", (deal_id,)).fetchone():
+        return deal_id
+    from .sync_objects import FOLDER_FIELD, split_title
+    j = bx.read("crm.deal.get", {"id": deal_id})
+    d = j.get("result", j) if isinstance(j, dict) else None
+    if not d or not d.get("ID"):
+        raise HTTPException(404, "Сделка не найдена")
+    title, city = split_title(str(deal_id), d.get("TITLE") or f"Сделка {deal_id}")
+    conn.execute("""INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at)
+                    VALUES (%s,%s,%s,%s,%s,'early',%s,now()) ON CONFLICT (id) DO NOTHING""",
+                 (deal_id, title or f"Сделка {deal_id}", city or bx.city_name(d.get(bx.CITY)) or None, d.get("STAGE_ID"),
+                  int(d.get("CATEGORY_ID") or 0), d.get(FOLDER_FIELD) or None))
+    db.audit(conn, None, "object_early", "objects", deal_id, {"stage": d.get("STAGE_ID")})
+    return deal_id
+
+
+@router.post("/design/deal/{deal_id}/object")
+def deal_object(deal_id: int, p: dict = Depends(active)):
+    """Перед загрузкой эскиза: у сделки должна быть строка в objects (папка ДИЗАЙН создаётся при самой загрузке)."""
+    need(p)
+    with db.pool.connection() as conn, conn.transaction():
+        return {"id": ensure_object(conn, deal_id)}
 
 
 class TaskIn(BaseModel):
@@ -141,8 +168,10 @@ def edit(tid: int, b: TaskEdit, p: dict = Depends(active)):
                 raise HTTPException(400, "Файл не из папки ДИЗАЙН этой сделки")
             upd["file_id"] = b.file_id
         if upd.get("stage") == "done":
-            if not (upd.get("file_id") or t["file_id"] or upd.get("link") or ("link" not in upd and t["link"])):
-                raise HTTPException(400, "Сначала загрузите эскиз или вставьте ссылку на него")
+            has = upd.get("file_id") or t["file_id"] or upd.get("link") or ("link" not in upd and t["link"]) or conn.execute(
+                "SELECT 1 FROM files WHERE object_id=%s AND kind='design' AND status='ready' LIMIT 1", (t["deal_id"],)).fetchone()
+            if not has:
+                raise HTTPException(400, "Сначала загрузите эскиз — кнопка «Загрузить эскиз» в этой карточке")
             upd["approved_at"] = "now"
         elif "stage" in upd and t["stage"] == "done":
             upd["approved_at"] = None
