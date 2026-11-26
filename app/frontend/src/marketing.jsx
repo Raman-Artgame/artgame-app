@@ -49,7 +49,7 @@ export function Marketing({ me, pending }) {
       {job === 'lead' && <button className={view === 'check' ? 'on' : ''} onClick={() => setView('check')}>Проверка{toCheck ? <span>{toCheck}</span> : null}</button>}
       {tabs.map(([k, t]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}
     </div>
-    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} /> : view === 'brand' ? <Brand canPost={can.post && !can.onlyAd} onPublish={publishStory} /> : view === 'ads' ? <Ads /> : view === 'story' ? <StoryHome canPost onPublish={publishStory} /> :
+    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} head={head} /> : view === 'brand' ? <Brand canPost={can.post && !can.onlyAd} onPublish={publishStory} /> : view === 'ads' ? <Ads /> : view === 'story' ? <StoryHome canPost onPublish={publishStory} /> :
       view === 'shoots' ? <Shoots can={can.shoot} /> : view === 'ideas' ? <Ideas can={can.idea} /> : <Plan key={view + tick} can={can.post} onOpen={setOpen} onNew={() => setEdit({})} />}
     {edit && <Editor post={edit} onlyAd={can.onlyAd} onClose={() => setEdit(null)} onSaved={x => { setEdit(null); setOpen(x); reload() }} />}
     {open && !edit && <PostSheet post={open} head={head} mine={can.post && (can.all || open.author_id === me.id)} canResult={can.result} onClose={() => setOpen(null)} onEdit={() => setEdit(open)}
@@ -557,7 +557,21 @@ function uploadSrc(file, where, onProgress) {
     .then(r => r.done ? r : sendToGoogle(r.upload_url, file, onProgress).then(g => api(`/mkt/src/uploads/${r.file_id}/done`, { method: 'POST', body: { drive_id: g.id } })))
 }
 
-function Media({ picked, onPick, canUp }) {
+function Media({ picked, onPick, canUp, head }) {
+  const [sync, setSync] = useState(null)   // HEAD 26.11: подтянуть «МЕДИА» сделок с Диска — {added, left, busy, err}
+  const pull = async () => {
+    let added = 0
+    setSync({ added, left: null, busy: true })
+    try {
+      for (let i = 0; i < 200; i++) {
+        const r = await api('/mkt/library/sync?limit=15', { method: 'POST' })
+        added += r.added
+        setSync({ added, left: r.left, busy: r.left > 0 })
+        if (!r.left || !r.done) break
+      }
+    } catch (e) { setSync(s => ({ ...s, busy: false, err: e.message })) }
+    setSync(s => ({ ...s, busy: false })); setTick(t => t + 1)
+  }
   const [up, setUp] = useState(null)   // {mode: obj|rub, obj, rub, title, type, pct, msg}
   const [objsAll, setObjsAll] = useState(null)
   const [type, setType] = useState('reels')
@@ -593,6 +607,8 @@ function Media({ picked, onPick, canUp }) {
   }
   return <div className={onPick ? '' : 'card'}>
     {!onPick && <p className="small muted">Материал с объектов и исходники по рубрикам. Ищи по проекту, городу, году или метке. «Лучшее» — то, что HEAD утвердил в «Продакшн».</p>}
+    {!onPick && head && <div className="small">{sync?.busy ? <span className="muted">Читаю папки сделок… добавлено {sync.added}{sync.left != null ? `, осталось сделок ${sync.left}` : ''}</span>
+      : <><button className="ghost" onClick={pull}>⟳ Подтянуть с Диска</button>{sync && <span className="muted"> {sync.err || `Добавлено файлов: ${sync.added}`}</span>}</>}</div>}
     {!onPick && canUp && !up && <button className="ghost" onClick={() => { setUp({ mode: 'rub', obj: '', rub: '', title: '', type: 'video', pct: null, msg: '' }); if (!objsAll) api('/objects').then(setObjsAll, () => setObjsAll([])) }}>⬆ Загрузить снятое</button>}
     {up && <div className="mktupbox">
       <div className="chips">{[['rub', 'В рубрику'], ['obj', 'На объект']].map(([k, t]) => <button key={k} className={up.mode === k ? 'on' : ''} onClick={() => setUp({ ...up, mode: k, msg: '' })}>{t}</button>)}</div>

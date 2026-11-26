@@ -134,3 +134,41 @@ def test_library_project_category(client, team, monkeypatch):
     assert [s["id"] for s in cats["Еда и гостеприимство"]["subs"]] == ["43273"] and cats["Игры и развлечения"]["subs"] == []
     q = lambda s: [x["id"] for x in client.get("/api/mkt/library?" + s, headers=hdr(2000)).json()["items"]]  # noqa: E731
     assert q("cat=43253") == [900] and q("cat=43259") == [901] and q("cat=43259&sub=43293") == [] and q("cat=43255") == []
+
+
+def test_library_sync_from_drive(client, team, monkeypatch):
+    """HEAD 26.11: то, что разложено в «МЕДИА» сделки руками, само появляется в «Медиа»; второй раз не заводится."""
+    from artgame import mediasync
+    F = drive.FOLDER
+    tree = {
+        "root731": [{"id": "m731", "name": "МЕДИА", "mimeType": F}, {"id": "dz", "name": "ДИЗАЙН", "mimeType": F}],
+        "m731": [{"id": "pr", "name": "Продакшн", "mimeType": F}, {"id": "rp", "name": "Отчёты", "mimeType": F}, {"id": "rl", "name": "Рилс", "mimeType": F}],
+        "pr": [{"id": "pf", "name": "Фото", "mimeType": F}, {"id": "pv", "name": "Видео", "mimeType": F}],
+        "pf": [{"id": "g1", "name": "Готово 1.jpg", "mimeType": "image/jpeg", "size": "10", "imageMediaMetadata": {"time": "2025:06:01 12:00:00"}},
+               {"id": "d0", "name": "Стена до.jpg", "mimeType": "image/jpeg", "size": "1"}],          # уже есть в базе (drive_id d0)
+        "pv": [{"id": "g2", "name": "Пролёт.mov", "mimeType": "video/quicktime", "size": "20", "createdTime": "2026-10-25T00:00:00Z",
+                "modifiedTime": "2025-09-03T10:00:00Z"}],
+        "rp": [{"id": "sub", "name": "день 2", "mimeType": F}, {"id": "doc", "name": "акт.pdf", "mimeType": "application/pdf"}],
+        "sub": [{"id": "g3", "name": "IMG_1.jpg", "mimeType": "image/jpeg", "size": "5"}],
+        "rl": [{"id": "g4", "name": "Рилс.mp4", "mimeType": "video/mp4", "size": "30"}],
+    }
+    monkeypatch.setattr(mediasync, "_ls", lambda d, parent: tree.get(parent, []))
+    with db.pool.connection() as c:
+        c.execute("UPDATE files SET drive_id='d0' WHERE id=900")
+        c.execute("UPDATE objects SET drive_folder='root731' WHERE id=731")
+    assert client.post("/api/mkt/library/sync", headers=hdr(2000)).status_code == 403
+    r = client.post("/api/mkt/library/sync", headers=hdr(1000)).json()
+    assert r["added"] == 4 and r["left"] == 0 and not r["errors"]
+    with db.pool.connection() as c:
+        got = {x["drive_id"]: x for x in c.execute("SELECT * FROM files WHERE note LIKE 'Диск:%%'").fetchall()}
+    assert set(got) == {"g1", "g2", "g3", "g4"}
+    assert (got["g1"]["media_type"], got["g1"]["review"], got["g1"]["created_at"].year) == ("photo", "approved", 2025)
+    assert (got["g2"]["media_type"], got["g2"]["created_at"].year) == ("video", 2025)        # раньше из «создан/изменён»
+    assert (got["g3"]["review"], got["g3"]["note"]) == (None, "Диск: МЕДИА/Отчёты/день 2")    # отчёт: без решения, не в очередь HEAD
+    assert got["g4"]["media_type"] == "reels"
+    q = lambda s: {x["name"] for x in client.get("/api/mkt/library?" + s, headers=hdr(2000)).json()["items"]}  # noqa: E731
+    assert {"Готово 1.jpg", "Пролёт.mov", "IMG_1.jpg", "Рилс.mp4"} <= q("object_id=731") and "Готово 1.jpg" in q("year=2025&best=1")
+    assert "IMG_1.jpg" not in q("best=1")
+    with db.pool.connection() as c:
+        c.execute("UPDATE objects SET media_synced_at=NULL")
+    assert client.post("/api/mkt/library/sync", headers=hdr(1000)).json()["added"] == 0       # повтор ничего не дублирует
