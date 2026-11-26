@@ -107,6 +107,13 @@ nav .cnt { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 16px;
 .place .chips { display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto; background: var(--surface); border-bottom: 1px solid var(--line); margin: 0; }
 .placeframe { flex: 1; width: 100%; border: 0; background: #fff; }
 .embed { position: relative; margin: 0 -18px -18px; border-top: 1px solid var(--line2); }
+.toolsov { position: fixed; inset: 0; z-index: 60; background: var(--bg, #0B0B0D); display: flex; flex-direction: column; }
+.toolsbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.toolsbar b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolsbar .calcteam { margin: 0; }
+@media (max-width: 700px) { .toolsbar { gap: 6px 8px; padding: 6px 10px; } .toolsbar .calcteam { flex-basis: 100%; flex-wrap: nowrap; } .toolsbar .calcteam > span { display: none; } .toolsbar .calcteam .mini { padding: 6px 10px; font-size: 13px; } }
+.toolsov iframe { flex: 1; width: 100%; border: 0; background: #0B0B0D; }
+.calcsum .dealbtns { margin-top: 10px; }
 .calcblock .embed { margin: 8px -18px 10px; border-bottom: 1px solid var(--line2); } .calcblock .embed iframe { border-radius: 0; }
 .calcteam { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 10px; }
 .calcsaved { border-top: 1px solid var(--line2); padding-top: 10px; } .calcsaved h4 { margin: 0 0 6px; }
@@ -1503,6 +1510,10 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
   /* блок «Дизайн» — под текущим шагом, чтобы шаг был сразу на виду */
   .wrap[data-tab=deals]:has(> .hero) > .dtdeal { order: 99; }
   .wrap[data-tab=deals] .embed iframe { height: 82dvh; }
+  /* боковой блок сделки (HEAD 26.11): показатели и подсказки; цифры шапки на компьютере — только здесь */
+  .wrap[data-tab=deals]:has(> .dealside) > .hero > .kv { display: none; }
+  .wrap[data-tab=deals] > .dealside { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .dealside > .card { margin: 0; }
 
   /* Продакшн: материал плиткой, а не двумя огромными фото */
   .rvgrid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
@@ -1580,3 +1591,21 @@ button.dttile.on { border-color: var(--text); }
 .dtunits { margin: 4px 0 0; }
 .dtunits b { color: var(--text); }
 .dtback .dtcap { color: var(--ok); }
+
+/* сделка на широком компьютере: паспорт | шаг | показатели и подсказки */
+@media (min-width: 1440px) {
+  .wrap[data-tab=deals]:has(> .hero):has(> .dealside) { grid-template-columns: 400px minmax(0, 1fr) 300px; }
+  .wrap[data-tab=deals] > .dealside { grid-template-columns: 1fr; grid-column: 3; grid-row: 1 / span 60; position: sticky; top: 24px; max-height: calc(100dvh - 48px); overflow-y: auto; scrollbar-width: thin; margin-bottom: 0; align-content: start; }
+}
+.dealside h3 { margin: 0 0 8px; }
+.dealside .srow { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.dealside .srow:last-child { border-bottom: 0; }
+.dealside .srow span { min-width: 0; }
+.dealside .srow b { font-variant-numeric: tabular-nums; text-align: right; }
+.dealside .srow.n b { white-space: nowrap; flex: none; }
+.dealside .srow em { font-style: normal; color: var(--muted); font-weight: 400; margin-right: 2px; }
+.dealside .srow.warn b { color: var(--warn); }
+.dealside .hints p { margin: 0 0 8px; padding-left: 12px; border-left: 2px solid var(--warn); }
+.dealside .hints p.bot { border-left-color: var(--ok); }
+.dealside .botslot { margin-top: 6px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: var(--r); }
+

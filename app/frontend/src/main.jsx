@@ -142,6 +142,7 @@ function Main({ me, onMe, web, logout }) {
     mkt ? [['mkt', 'Маркетинг'], ['projects', 'Проекты'], ['mine', 'Кабинет'], ['chat', 'Чат']] :
     dz ? [['design', 'Дизайн'], ['projects', 'Проекты'], ...(PROD.has(role) || me.reels ? [['prod', 'Продакшн']] : []), ['study', 'Учёба'], ['mine', 'Кабинет'], ['expense', 'Расход'], ...pays, ['chat', 'Чат']] :   // «Проверки» у дизайнеров нет (HEAD 09.11)
    [...(sales ? [['today', 'Сегодня'], ['leads', 'Лиды'], ['deals', 'Сделки'], ['projects', 'Проекты'], ['month', 'Месяц']] : []),
+    ...(mopPlace && sales && role !== 'head' ? [['tools', 'Расчёт']] : []),   // блок «Расчёт · КП · Документы · Скрипты» без сделки (HEAD 26.11)
     ...(mopPlace ? [['study', 'Учёба']] : []),
     ...(other.length ? [['place', 'Место']] : []),
     ...(mop || carp ? [] : [['shift', 'Смена'], ['expense', 'Расход']]), ...pays,
@@ -157,7 +158,7 @@ function Main({ me, onMe, web, logout }) {
   const HEAD_FIRST = ['review', 'deals', 'projects', 'fin']   // HEAD 09.11: проекты — на главную, команда — в «Ещё»
   const HEAD_MORE = ['chat', 'closing', 'people', 'mkt', 'prod', 'design', 'leads', 'study', 'journal']   // склад — в «Финансы → Закупки»; «Месяц» — в Пульте; «Место» и «Смотреть как» убраны (HEAD 09.11)
   // МОП (HEAD 14.11 «чтобы чат и кабинет не терялись»): Чат — в первых пяти, Кабинет — перед Учёбой; лента листается, край подсвечен.
-  const SALES_ORDER = ['today', 'leads', 'deals', 'chat', 'projects', 'pays', 'month', 'mine', 'study', 'place']
+  const SALES_ORDER = ['today', 'leads', 'deals', 'chat', 'tools', 'projects', 'pays', 'month', 'mine', 'study', 'place']
   const ordered = sales && !isHead ? [...tabs].sort((a, b) => (SALES_ORDER.indexOf(a[0]) + 1 || 99) - (SALES_ORDER.indexOf(b[0]) + 1 || 99)) : tabs
   const menu = isHead ? [['home', 'Пульт'], ...HEAD_FIRST.map(k => tabs.find(x => x[0] === k)).filter(Boolean),
     ...HEAD_MORE.map(k => tabs.find(x => x[0] === k)).filter(Boolean)] : ordered
@@ -170,6 +171,10 @@ function Main({ me, onMe, web, logout }) {
   // наставник видит путь своих (HEAD 11.11): Главный и Про — саппортов, художников (Про — и Главных), Мастер — операторов, Главный дизайнер — дизайнеров
   const team = MENTOR.has(role) && !me._view_as ? <TeamPath /> : null
   const folds = dcodes.map(r => <DutyFold key={r} code={r} d={DUTIES[r]} g={path && r === pathCode ? null : GROW[r]} me={me} />)
+  if (tab === 'tools' && mopPlace) return <>
+    <Places key="tools" list={[mopPlace]} mode="tools" />
+    <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={!isHead} />
+  </>
   if (tab === 'place' || tab === 'study') return <>
     {me.roles?.length > 1 && <div className="wrap"><RoleSwitch me={me} /></div>}
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, studyOpts(p.code)]))}
@@ -398,6 +403,7 @@ const ICON = {
   viewas: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   pays: 'M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5-2 1.5zM9 7.5h6M9 10.5h6M12 10.5v6',   // «Оплаты» (HEAD 10.11): чек со знаком ₸
   closing: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4M9 16l2 2 4-4',   // «Закрытие» (HEAD 12.11): замок с галочкой
+  tools: 'M5 3h14v18H5zM8 7h8M8 11h2m3 0h3M8 15h2m3 0h3M8 18h2m3 0h3',   // «Расчёт» (26.11): калькулятор
   more: 'M5 12h.01M12 12h.01M19 12h.01' }
 const Icon = ({ k }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[k] || ICON.more} /></svg>
 const MAX = 6   // кнопок в меню без листа «Ещё»

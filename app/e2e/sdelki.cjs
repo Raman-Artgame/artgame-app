@@ -55,6 +55,12 @@ async function card(p, id) {
   await p.locator('.kc', { hasText: `№ ${id}` }).first().click()
   await p.locator('.hero .steps').waitFor()
 }
+// окно «Расчёт и КП» из сделки (HEAD 26.11): рабочее место МОП в режиме tools поверх карточки
+async function toolsFrame(p) {
+  await p.locator('.toolsov iframe').waitFor()
+  for (let i = 0; i < 80; i++) { const f = p.frames().find(x => x.url().includes('/api/p/mop/') && x.url().includes('mode=tools')); if (f) return f; await p.waitForTimeout(250) }
+  throw new Error('нет окна «Расчёт и КП»')
+}
 const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).click()
 
 ;(async () => {
@@ -94,7 +100,7 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   const tiles = (await p.locator('.tiles').textContent()).match(/^1Горит(\d+)Сегодня(\d+)Можно позже/)
   assert.ok(tiles, 'плитки: 1 горит, затем сегодня и позже')
   assert.match(await p.locator('nav button', { hasText: 'Сегодня' }).textContent(), new RegExp(`${1 + +tiles[1]}$`), 'счётчик в меню')
-  assert.deepStrictEqual(await p.locator('nav button').allTextContents().then(a => a.map(x => x.replace(/\d+$/, ''))), ['Сегодня', 'Лиды', 'Сделки', 'Чат', 'Проекты', 'Месяц', 'Кабинет', 'Учёба'], 'у МОП все кнопки одной лентой, Чат четвёртым (HEAD 14.11)')
+  assert.deepStrictEqual(await p.locator('nav button').allTextContents().then(a => a.map(x => x.replace(/\d+$/, ''))), ['Сегодня', 'Лиды', 'Сделки', 'Чат', 'Расчёт', 'Проекты', 'Месяц', 'Кабинет', 'Учёба'], 'у МОП все кнопки одной лентой, Чат четвёртым (HEAD 14.11)')
   assert.match(await p.locator('.bucket.today').textContent(), /№ 1601.*КП без ответа/)
   assert.strictEqual(await p.locator('.bucket.hot a.btn', { hasText: 'Ответить' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/lead/details/3001/')
   await p.locator('.strip').waitFor()
@@ -138,28 +144,42 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   assert.match(await p.locator('.contact').textContent(), /Ромашка.*\+77001112233/)
   assert.strictEqual(await p.locator('.contact a.btn', { hasText: 'Позвонить' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/deal/details/1601/')
   assert.strictEqual(await p.locator('.contact a.btn', { hasText: 'WhatsApp' }).getAttribute('href'), 'https://fake.bitrix24.kz/crm/deal/details/1601/', 'звонок и WhatsApp — две кнопки, обе в карточку Битрикса (HEAD 14.11)')
-  // Расчёт (HEAD 26.11): полный калькулятор блока «Расчёт · КП · Документы» прямо в сделке, площадь из сделки подставлена
-  const calc = p.locator('.card.calcblock')
-  await calc.locator('iframe').waitFor()
-  let cf = null
-  for (let i = 0; i < 60 && !cf; i++) { cf = p.frames().find(f => f.url().includes('/api/p/mop/') && f.url().includes('#calc')); if (!cf) await p.waitForTimeout(250) }
+  // Расчёт (HEAD 26.11, «Окно из сделки + меню»): в сделке — только итог; блок «Расчёт · КП · Документы · Скрипты» открывается окном
+  // на весь экран со сделкой внутри; «Записать в сделку» — сервер пересчитывает по «Значениям» и пишет в Битрикс
+  const calc = p.locator('.card.calcsum')
+  assert.match(await calc.textContent(), /ещё не считали/)
+  await calc.getByRole('button', { name: 'Открыть «Расчёт и КП»' }).click()
+  const cf = await toolsFrame(p)
   await cf.locator('#agsave').waitFor()   // кнопка появляется, когда данные сделки уже подставлены
   assert.strictEqual(await cf.locator('#p-m2').inputValue(), '25', 'площадь из сделки')
   assert.ok(!(await cf.locator('#tokp').isVisible()), 'в сделке вместо «Добавить в КП» — «Записать в сделку»')
+  const tabsOn = await cf.evaluate(() => [...document.querySelectorAll('#tabs .tab')].filter(t => getComputedStyle(t).display !== 'none').map(t => t.dataset.v))
+  assert.deepStrictEqual(tabsOn.filter(v => !['calc', 'kp', 'docs', 'scripts'].includes(v)), [], 'в окне только расчёт, КП, документы, скрипты')
+  assert.match(await p.locator('.toolsbar').textContent(), /В сделку.*№ 1601.*Улица.*Сложная поверхность/)
   await cf.locator('#p-m2').fill('60')
   await cf.locator('#total', { hasText: '1 191 000' }).waitFor()
   await cf.locator('#ex-lac').check()
   await cf.locator('#total', { hasText: '1 310 000' }).waitFor()
-  await p.screenshot({ path: `${shots}/mop-calc.png`, fullPage: true })
+  await p.screenshot({ path: `${shots}/mop-calc.png` })
   await p.setViewportSize({ width: 1440, height: 900 }); await p.waitForTimeout(400)
-  await p.screenshot({ path: `${shots}/mop-calc-wide.png`, fullPage: true })
+  await p.screenshot({ path: `${shots}/mop-calc-wide.png` })
   await p.setViewportSize({ width: 390, height: 844 })
   await cf.locator('#agsave').click()
   await p.locator('.toast', { hasText: 'Записано в сделку: 1 310 000' }).waitFor()
   assert.ok(!(await p.locator('.toast').textContent()).includes('Внимание'), 'блок и сервер посчитали одинаково')
-  await p.locator('.hero .steps > div', { hasText: 'Расчёт' }).click()
-  assert.match(await calc.locator('.calcsaved').textContent(), /1\s310\s000.*Аванс 50%655\s000.*Смен по норме6.*Художников3.*Срок клиенту4 раб\. дн\./)
-  await p.locator('.hero .steps > div', { hasText: 'Договор' }).click()
+  await cf.locator('#agsavest.ok').waitFor()
+  // не выходя из окна — в КП: сделка подтянута, позиция из только что записанного расчёта уже в КП
+  await cf.evaluate(() => { location.hash = '#kp' })
+  await p.waitForFunction(() => /загружена/.test(document.querySelector('.toolsov iframe')?.contentDocument?.getElementById('crmStatus')?.textContent || ''), null, { timeout: 20000 })
+  await p.waitForFunction(() => document.querySelector('.toolsov iframe')?.contentWindow?.KPGEN?.count() === 1, null, { timeout: 10000 })
+  const kp = await cf.evaluate(() => ({ client: document.getElementById('client').value, item: document.querySelector('#items [data-f=name]').value, qty: document.querySelector('#items [data-f=qty]').value, header: getComputedStyle(document.querySelector('header.top')).display }))
+  assert.deepStrictEqual(kp, { client: 'ТОО «Ромашка»', item: 'Художественная роспись стен', qty: '60', header: 'none' })
+  await p.screenshot({ path: `${shots}/mop-kp.png` })
+  await p.locator('.toolsbar').getByRole('button', { name: '← В сделку' }).click()
+  await p.locator('.toolsov').waitFor({ state: 'detached' })
+  await step(p, 'Расчёт')
+  assert.match(await calc.textContent(), /1\s310\s000.*Аванс 50%655\s000.*Смен по норме6.*Художников3.*Срок клиенту4 раб\. дн\..*Пересчитать в «Расчёт и КП»/)
+  await step(p, 'Договор')
   let calls = await bxCalls()
   const upd = calls.find(c => c.method === 'crm.deal.update' && c.params.fields.OPPORTUNITY === 1310000)
   assert.ok(upd && upd.params.fields.UF_CRM_ARTGAME_AREA_M2 === 60 && upd.params.fields.UF_CRM_ARTGAME_NORM_SHIFTS === 6, 'сумма, площадь и норма в Битрикс')
@@ -171,15 +191,22 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   assert.strictEqual(await p.locator('.sheetbox .scr .code').first().textContent(), 'С17')
   await p.screenshot({ path: `${shots}/mop-scripts.png` })
   await p.locator('.sheetbox .x').click()
-  // КП: панель рабочего места внутри карточки, сделка подтянута, позиция из расчёта уже в КП
+  // Компьютер (HEAD 26.11): справа — показатели сделки и подсказки, цифры шапки только там; место под подсказки ботов-аналитиков
+  await p.setViewportSize({ width: 1440, height: 900 })
+  const side = p.locator('.dealside')
+  await side.waitFor()
+  assert.match(await side.textContent(), /Показатели.*Сумма.*1\s310\s000.*Поступило.*Долг.*Аванс по расчёту655\s000.*Площадь60 м².*Срок работ4 раб\. дн\..*На стадии.*Последнее касание.*Подсказки.*боты-аналитики/)
+  assert.ok(!(await p.locator('.hero > .kv').isVisible()), 'цифры шапки не повторяются')
+  await p.screenshot({ path: `${shots}/mop-deal-side.png` })
+  await p.setViewportSize({ width: 1280, height: 860 }); await p.waitForTimeout(300)
+  await p.screenshot({ path: `${shots}/mop-deal-side-1280.png` })
+  await p.setViewportSize({ width: 390, height: 844 })
+  assert.strictEqual(await side.count(), 0, 'на телефоне бокового блока нет')
+  assert.ok(await p.locator('.hero > .kv').isVisible())
+  // КП в карточке: итог и кнопка в блок; материалы клиенту под КП
   await step(p, 'КП')
-  await p.locator('.embed iframe').waitFor()
-  await p.waitForFunction(() => /загружена/.test(document.querySelector('.embed iframe')?.contentDocument?.getElementById('crmStatus')?.textContent || ''), null, { timeout: 20000 })
-  await p.waitForFunction(() => document.querySelector('.embed iframe')?.contentWindow?.KPGEN?.count() === 1, null, { timeout: 10000 })
-  const kp = await mopFrame(p).evaluate(() => ({ client: document.getElementById('client').value, item: document.querySelector('#items [data-f=name]').value, qty: document.querySelector('#items [data-f=qty]').value, header: getComputedStyle(document.querySelector('header.top')).display }))
-  assert.deepStrictEqual(kp, { client: 'ТОО «Ромашка»', item: 'Художественная роспись стен', qty: '60', header: 'none' })
+  await p.getByRole('button', { name: 'Собрать КП в «Расчёт и КП»' }).waitFor()
   assert.strictEqual(await p.locator('.mat').count(), 6, 'материалы клиенту под КП')
-  await p.screenshot({ path: `${shots}/mop-kp.png`, fullPage: true })
   // Замок: договор закрыт, пока КП не в сделке; скачанный КП → файл в сделку → договор открывается
   await step(p, 'Договор')
   await p.locator('.lockbox', { hasText: 'КП в сделке' }).waitFor()
@@ -199,29 +226,36 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   await p.waitForTimeout(400); await p.screenshot({ path: `${shots}/mop-fill.png` })
   await p.locator('.sheetbox .x').click()
   await step(p, 'КП')
-  await p.waitForFunction(() => document.querySelector('.embed iframe')?.contentWindow?.KPGEN?.count() === 1, null, { timeout: 20000 })
+  await p.getByRole('button', { name: 'Собрать КП в «Расчёт и КП»' }).click()
+  const kf = await toolsFrame(p)
+  await p.waitForFunction(() => document.querySelector('.toolsov iframe')?.contentWindow?.KPGEN?.count() === 1, null, { timeout: 20000 })
   const dl = require('child_process').execSync('python3 -c "import tempfile;print(tempfile.gettempdir())"').toString().trim() + '/artgame-dl'
   require('fs').mkdirSync(dl, { recursive: true }); require('fs').writeFileSync(dl + '/e2ekp.bin', '%PDF-1.4 e2e')
-  await mopFrame(p).evaluate(() => window.ARTGAME_ON_DOWNLOAD({ name: 'КП 1601 Ромашка.pdf', fid: 'e2ekp' }))
+  await kf.evaluate(() => window.ARTGAME_ON_DOWNLOAD({ name: 'КП 1601 Ромашка.pdf', fid: 'e2ekp' }))
   await p.waitForFunction(() => fetch('/api/_e2e/bx_calls').then(r => r.json()).then(c => c.some(x => x.params.fields?.UF_CRM_1753202415 === 'файл')))
+  await p.keyboard.press('Escape')
+  await p.locator('.toolsov').waitFor({ state: 'detached' })
   // HEAD 26.11: «Клиент согласовал КП» — сумма и нормы закрепляются, пересчёт закрыт до «Снять согласование»
   await p.getByRole('button', { name: 'Клиент согласовал КП' }).click()
   await p.locator('.kpagree.on', { hasText: 'Сумма и нормы закреплены' }).waitFor()
   await p.screenshot({ path: `${shots}/mop-kp-agreed.png` })
   await step(p, 'Расчёт')
   await p.locator('.card p.why', { hasText: 'КП согласовано клиентом' }).waitFor()
-  assert.strictEqual(await p.getByRole('button', { name: /Записать .*в сделку/ }).count(), 0, 'пересчёт закрыт')
   // Договор: сумма и аванс из расчёта, клиент из Битрикса; скачанный договор → запись в сделку
   await step(p, 'Договор')
-  await p.waitForFunction(() => /заполнено/.test(document.querySelector('.embed iframe')?.contentDocument?.querySelector('#app .agbx-st')?.textContent || ''), null, { timeout: 20000 })
-  const ds = await mopFrame(p).evaluate(() => ({ num: DS.num, cname: DS.cname, total: DS.total, area: DS.area }))
+  await p.getByRole('button', { name: 'Договор, счёт, акт в «Расчёт и КП»' }).click()
+  const df = await toolsFrame(p)
+  await p.waitForFunction(() => /заполнено/.test(document.querySelector('.toolsov iframe')?.contentDocument?.querySelector('#app .agbx-st')?.textContent || ''), null, { timeout: 20000 })
+  const ds = await df.evaluate(() => ({ num: DS.num, cname: DS.cname, total: DS.total, area: DS.area }))
   assert.deepStrictEqual(ds, { num: '1601', cname: 'ТОО «Ромашка»', total: 1310000, area: 60 })
   const n0 = (await bxCalls()).length
-  await mopFrame(p).evaluate(() => { DS.adv = 50; dsSave(); return window.ARTGAME_ON_DOWNLOAD({ name: 'ARTGAME_Dogovor_1601.docx', fid: 'nofile' }) })
+  await df.evaluate(() => { DS.adv = 50; dsSave(); return window.ARTGAME_ON_DOWNLOAD({ name: 'ARTGAME_Dogovor_1601.docx', fid: 'nofile' }) })
   await p.waitForFunction(n => fetch('/api/_e2e/bx_calls').then(r => r.json()).then(c => c.length > n), n0)
   const dog = (await bxCalls()).slice(n0).find(c => c.method === 'crm.deal.update')
   assert.strictEqual(dog.params.fields.OPPORTUNITY, 1310000)
-  await p.screenshot({ path: `${shots}/mop-docs.png`, fullPage: true })
+  await p.screenshot({ path: `${shots}/mop-docs.png` })
+  await p.locator('.toolsbar').getByRole('button', { name: '← В сделку' }).click()
+  await p.locator('.toolsov').waitFor({ state: 'detached' })
   // итог звонка с перезвоном — всплывающее окно → комментарий и задача
   await p.locator('.hero').getByRole('button', { name: 'Итог звонка' }).click()
   await p.locator('.sheetbox').getByRole('button', { name: 'Перезвонить' }).click()
@@ -270,6 +304,14 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   await mopFrame(p).evaluate(() => { location.hash = '#calc' })
   await p.waitForFunction(() => (document.querySelector('iframe.placeframe')?.contentWindow?.location.hash || '') === '#ucheb', null, { timeout: 5000 })
   await p.screenshot({ path: `${shots}/mop-study.png` })
+  // «Расчёт» в меню МОП (HEAD 26.11): тот же блок без сделки — расчёт, КП, документы, скрипты; учебник туда не пускает
+  await tab(p, 'Расчёт')
+  await p.waitForFunction(() => { const w = document.querySelector('iframe.placeframe')?.contentWindow; return w && /mode=tools/.test(w.location.search) && w.location.hash === '#calc' && w.document.getElementById('cform') }, null, { timeout: 20000 })
+  const menu = await mopFrame(p).evaluate(() => ({ m: getComputedStyle(document.querySelector('#tabs .tab[data-v=m]')).display, kp: getComputedStyle(document.querySelector('#tabs .tab[data-v=kp]')).display, save: !!document.getElementById('agsave'), tokp: getComputedStyle(document.getElementById('tokp')).display !== 'none' }))
+  assert.deepStrictEqual(menu, { m: 'none', kp: 'block', save: false, tokp: true }, 'без сделки — «Добавить в КП», без «Записать в сделку»')
+  await mopFrame(p).evaluate(() => { location.hash = '#ucheb' })
+  await p.waitForFunction(() => (document.querySelector('iframe.placeframe')?.contentWindow?.location.hash || '') === '#calc', null, { timeout: 5000 })
+  await p.screenshot({ path: `${shots}/mop-menu-raschet.png` })
 
   // «Месяц»: план в тёмной карточке
   await tab(p, 'Месяц')

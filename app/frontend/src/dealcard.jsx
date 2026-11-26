@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { api, uuid } from './api.js'
 import { enqueue } from './queue.js'
 import { SalesSpend } from './salesexp.jsx'
-import { Embed } from './places.jsx'
-import { CityPicker, Copy, Receipt, Sheet, WaitSheet, cityBase } from './ui.jsx'
+import { Tools } from './places.jsx'
+import { CityPicker, Copy, Receipt, Sheet, WaitSheet, cityBase, useWide } from './ui.jsx'
 import { shrink } from './work.jsx'
 import { CallOutcome, Contact, Feed, Skeleton, bxLink, cleanTitle, dt, money, strip, usePortal } from './crm.jsx'
 import { leftText } from './projects.jsx'
@@ -182,40 +182,24 @@ function priceIn(S, team) {
     place: S.place || 'base', cash: +S.cash || 0, qty: +S.fix?.qty || 1, design_urgent: !!S.dx?.urgent, design_concept: !!S.dx?.concept,
     design_extra: +S.dx?.extra || 0, outdoor: team.outdoor, surface: team.surface }
 }
-function Calc({ d, saved, place, onSaved }) {
-  const [team, setTeam] = useState({ outdoor: !!saved?.in?.outdoor, surface: !!saved?.in?.surface })
-  const [state] = useState(() => calcState(d, saved))
-  const onCalc = (m, reply) => {
-    if (d.kp_agreed) return reply(false, `КП согласовано клиентом на ${money(d.kp_agreed.total)}. Новую цену — после «Снять согласование» в шаге «КП».`)
-    if (!TAB_SVC[m.state.tab]) return reply(false, 'Картины пока считаются здесь только для клиента: в сделку их запишем после обновления калькулятора картин.')
-    api(`/bx/deals/${d.id}/price/save`, { method: 'POST', body: priceIn(m.state, team) }).then(x => {
-      const got = x.calc?.total || 0, diff = Math.round(got) !== Math.round(m.total)
-      const text = (x.bx === 'off' ? 'Расчёт сохранён, в Битрикс не записан (ключ записи не задан).' : `Записано в сделку: ${money(got)}, площадь, смены и срок.`)
-        + (diff ? ` Внимание: блок показал ${money(m.total)}, по «Значениям» на сервере — ${money(got)}; записано ${money(got)}. Скажите HEAD.` : '')
-      reply(true, text); onSaved(text)
-    }, e => reply(false, 'Не записалось: ' + e.message))
-  }
+// Шаг «Расчёт» в карточке — только итог; сам расчёт — в блоке «Расчёт и КП» окном поверх сделки (HEAD 26.11, вариант «окно из сделки»)
+function CalcSum({ d, saved, open }) {
   const r = saved?.out, n = r?.norm || {}
-  return <div className="card calcblock">
-    <div className="panelhead"><h3>Расчёт</h3><span className="small muted">{saved ? `записан ${dt(saved.at)}` : 'по «Значениям» сейчас'}</span></div>
-    <p className="small muted">Полный калькулятор блока «Расчёт · КП · Документы»: услуга и площадь из сделки уже стоят. Посчитайте и нажмите «Записать в сделку» под итогом — сумма, площадь и нормы уйдут в Битрикс, КП и договор возьмут их сами.</p>
+  return <div className="card calcsum">
+    <div className="panelhead"><h3>Расчёт</h3><span className="small muted">{saved ? `записан ${dt(saved.at)}` : 'ещё не считали'}</span></div>
     {d.kp_agreed && <p className="small why">КП согласовано клиентом на {money(d.kp_agreed.total)} — сумма и нормы закреплены. Новую цену — после «Снять согласование» в шаге «КП».</p>}
-    <Embed place={place} view="calc" dealId={d.id} calc={state} onCalc={onCalc} />
-    <div className="calcteam"><span className="small muted">Для нормы смен:</span>
-      <button className={'mini' + (team.outdoor ? '' : ' ghost')} onClick={() => setTeam({ ...team, outdoor: !team.outdoor })}>Улица</button>
-      <button className={'mini' + (team.surface ? '' : ' ghost')} onClick={() => setTeam({ ...team, surface: !team.surface })}>Сложная поверхность</button></div>
-    {r ? <div className="calcsaved">
-      <h4>В сделке сейчас</h4>
-      <div className="kv">
-        <div><span className="muted small">{r.no_vat ? 'Итого по акции, без НДС' : 'Итого с НДС'}</span><b>{money(r.total)}</b></div>
-        <div><span className="muted small">Аванс {r.pay.prepay_pct}%</span><b>{money(r.pay.prepay)}</b></div>
-        {r.dprice ? <div><span className="muted small">Дизайн {r.design}, 100% вперёд</span><b>{money(r.dprice)}</b></div> : null}
-        {n.shifts ? <><div><span className="muted small">Смен по норме</span><b>{n.shifts}</b></div>
-          <div><span className="muted small">Художников</span><b>{n.crew}</b></div>
-          <div><span className="muted small">Срок клиенту</span><b>{n.client} раб. дн.</b></div></> : null}
-      </div>
-      <div className="dealbtns wrapbtns"><Copy text={r.client_text} label="Скопировать текст клиенту" /></div>
-    </div> : <p className="small muted">В сделке расчёта ещё нет.</p>}
+    {r ? <div className="kv">
+      <div><span className="muted small">{r.no_vat ? 'Итого по акции, без НДС' : 'Итого с НДС'}</span><b>{money(r.total)}</b></div>
+      <div><span className="muted small">Аванс {r.pay.prepay_pct}%</span><b>{money(r.pay.prepay)}</b></div>
+      {r.dprice ? <div><span className="muted small">Дизайн {r.design}, 100% вперёд</span><b>{money(r.dprice)}</b></div> : null}
+      {n.shifts ? <><div><span className="muted small">Смен по норме</span><b>{n.shifts}</b></div>
+        <div><span className="muted small">Художников</span><b>{n.crew}</b></div>
+        <div><span className="muted small">Срок клиенту</span><b>{n.client} раб. дн.</b></div></> : null}
+    </div> : <p className="small muted">Посчитайте в блоке «Расчёт и КП»: услуга и площадь сделки там уже стоят. «Записать в сделку» под итогом — и сумма, аванс, смены и срок появятся здесь.</p>}
+    <div className="dealbtns wrapbtns">
+      <button onClick={() => open('calc')}>{r ? 'Пересчитать в «Расчёт и КП»' : 'Открыть «Расчёт и КП»'}</button>
+      {r && <Copy text={r.client_text} label="Скопировать текст клиенту" />}
+    </div>
     <Trip id={d.id} />
   </div>
 }
@@ -390,6 +374,53 @@ export function PaySheet({ d, slot, onClose, onDone }) {
   </Sheet>
 }
 
+// Боковой блок сделки на компьютере (HEAD 26.11): основные показатели одним столбиком и подсказки. Показатели шапки (сумма, площадь,
+// услуга, город) на компьютере живут только здесь — в шапке они скрыты, чтобы не повторяться. Подсказки: сейчас — по данным сделки;
+// d.hints — место под подсказки ботов-аналитиков переписки и звонков ([{text, at, from}] в /bx/deals/{id}/full, пока сервер их не отдаёт).
+const DAY = 86400000
+const daysAgo = at => at ? Math.max(0, Math.floor((Date.now() - new Date(at).getTime()) / DAY)) : null
+const daysTxt = n => n === null ? '—' : n === 0 ? 'сегодня' : n + ' ' + (n % 10 === 1 && n % 100 !== 11 ? 'день' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'дня' : 'дней')
+function sideHints(d, calc, inStage, touch) {
+  const out = [], early = !WORK_ON.has(d.stage) && d.stage !== 'LOSE'
+  if (early && !calc && !d.kp_agreed) out.push('Нет расчёта — посчитайте в «Расчёт и КП», чтобы назвать клиенту цену и срок.')
+  if (early && touch !== null && touch >= 3) out.push(`Клиент без касания ${daysTxt(touch)} — позвоните или напишите, договоритесь о следующем шаге.`)
+  if (early && inStage !== null && inStage >= 7) out.push(`Сделка ${daysTxt(inStage)} на стадии «${d.stage_name}» — уточните, что мешает двигаться дальше.`)
+  if (d.pay.debt > 0 && (d.pay.received > 0 || WORK_ON.has(d.stage))) out.push(`Долг ${money(d.pay.debt)} — напомните об оплате, скрипт в шаге «Оплата».`)
+  if (calc && !d.kp_agreed && KP_ON.has(d.stage)) out.push('Когда клиент согласится с КП — нажмите «Клиент согласовал КП», сумма закрепится.')
+  return out
+}
+function DealSide({ d, calc }) {
+  const sold = d.kp_agreed ? '✓' : calc ? '' : '≈'
+  const inStage = daysAgo(d.history?.[0]?.at)
+  const touch = daysAgo(d.feed?.[0]?.at)
+  const term = calc?.out?.norm?.client || d.norm?.term
+  const rules = sideHints(d, calc, inStage, touch)
+  const bots = Array.isArray(d.hints) ? d.hints : []
+  const row = (k, v, cls = 'n') => <div className={'srow' + (cls ? ' ' + cls : '')}><span className="muted small">{k}</span><b>{v}</b></div>
+  return <aside className="dealside">
+    <div className="card">
+      <h3>Показатели</h3>
+      {row('Сумма', <>{sold && <em title={sold === '✓' ? 'согласовано клиентом' : 'ориентир'}>{sold}</em>} {money(d.sum)}</>)}
+      {row('Поступило', money(d.pay.received))}
+      {row(d.pay.lost ? 'Упущено' : 'Долг', money(d.pay.lost || d.pay.debt), (d.pay.debt > 0 && d.pay.received > 0) ? 'n warn' : 'n')}
+      {calc && row('Аванс по расчёту', money(calc.out.pay.prepay))}
+      {row('Площадь', d.area ? d.area + ' м²' : '—')}
+      {row('Услуга', d.service || '—', ' ')}
+      {row('Город', d.city || '—')}
+      {row('Срок работ', term ? term + ' раб. дн.' : '—')}
+      {row('На стадии', daysTxt(inStage))}
+      {row('Последнее касание', touch === null ? '—' : touch === 0 ? 'сегодня' : daysTxt(touch) + ' назад', touch >= 3 && !WORK_ON.has(d.stage) ? 'n warn' : 'n')}
+    </div>
+    <div className="card hints">
+      <h3>Подсказки</h3>
+      {rules.map((t, i) => <p key={i} className="small">{t}</p>)}
+      {!rules.length && !bots.length && <p className="small muted">По данным сделки всё в порядке.</p>}
+      {bots.map((h, i) => <p key={'b' + i} className="small bot">{h.text}{h.at && <span className="muted"> · {dt(h.at)}</span>}</p>)}
+      {!bots.length && <div className="botslot small muted">Здесь будут подсказки по переписке и звонкам: что клиент спросил, что мы обещали, риск отказа. Их пришлют боты-аналитики — по утрам.</div>}
+    </div>
+  </aside>
+}
+
 export function DealCard({ id, back, place }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
@@ -398,8 +429,11 @@ export function DealCard({ id, back, place }) {
   const [panel, setPanel] = useState(null)
   const [moreActs, setMoreActs] = useState(false)
   const [sheet, setSheet] = useState(null)   // {kind: call|stage|note|say, ...}
+  const [tools, setTools] = useState(null)   // блок «Расчёт и КП» окном: 'calc' | 'kp' | 'docs'
+  const [team, setTeam] = useState(null)     // для нормы смен: улица, сложная поверхность
   const [msg, setMsg] = useState('')
   const portal = usePortal()
+  const wide = useWide()
   const load = fresh => api(`/bx/deals/${id}/full${fresh ? '?fresh=1' : ''}`).then(setD, e => setErr(e.message))
   const loadCalc = () => api(`/bx/deals/${id}/calc`).then(c => setCalc(c && c.out ? c : null), () => setCalc(null))
   useEffect(() => { load(false); loadCalc(); api('/bx/stages').then(setStages, () => {}) }, [id])
@@ -423,6 +457,17 @@ export function DealCard({ id, back, place }) {
   let anketa = ''
   try { anketa = localStorage.getItem(anketaKey(d.id)) || '' } catch { /* без памяти */ }
   const ds = calc || anketa ? { ...(calc ? { total: calc.out.total, area: +calc.in.area || 0, prepay: calc.out.pay?.prepay, adv: calc.out.pay?.prepay_pct, days: calc.out.norm?.client } : {}), anketa } : null
+  const tm = team || { outdoor: !!calc?.in?.outdoor, surface: !!calc?.in?.surface }
+  const onCalc = (m, reply) => {   // «Записать в сделку» из блока: сервер пересчитывает по «Значениям» и пишет в Битрикс
+    if (d.kp_agreed) return reply(false, `КП согласовано клиентом на ${money(d.kp_agreed.total)}. Новую цену — после «Снять согласование» в шаге «КП».`)
+    if (!TAB_SVC[m.state.tab]) return reply(false, 'Картины пока считаются здесь только для клиента: в сделку их запишем после обновления калькулятора картин.')
+    api(`/bx/deals/${d.id}/price/save`, { method: 'POST', body: priceIn(m.state, tm) }).then(x => {
+      const got = x.calc?.total || 0, diff = Math.round(got) !== Math.round(m.total)
+      const text = (x.bx === 'off' ? 'Расчёт сохранён, в Битрикс не записан (ключ записи не задан).' : `Записано в сделку: ${money(got)}, площадь, смены и срок.`)
+        + (diff ? ` Внимание: блок показал ${money(m.total)}, по «Значениям» на сервере — ${money(got)}; записано ${money(got)}. Скажите HEAD.` : '')
+      reply(true, text); loadCalc(); load(true); setMsg(text); setTimeout(() => setMsg(''), 8000)
+    }, e => reply(false, 'Не записалось: ' + e.message))
+  }
   return <>
     <div className="hero">
       <a className="back" onClick={back}>← к сделкам</a>
@@ -457,7 +502,13 @@ export function DealCard({ id, back, place }) {
         <button className={'ghost' + (cur === 'hist' ? ' on' : '')} onClick={() => setPanel('hist')}>История</button>
       </div>}
     </div>
+    {wide && <DealSide d={d} calc={calc} />}
     {msg && <div className="toast">{msg}</div>}
+    {tools && <Tools place={place} dealId={d.id} title={`№ ${d.id} · ${cleanTitle(d.title, d.id)}`} view={tools} calc={calcState(d, calc)} kp={kpItem} ds={ds}
+      onDoc={onDoc} onCalc={onCalc} close={() => { setTools(null); load(true); loadCalc() }}
+      bar={<div className="calcteam"><span className="small muted">Для нормы смен:</span>
+        <button className={'mini' + (tm.outdoor ? '' : ' ghost')} onClick={() => setTeam({ ...tm, outdoor: !tm.outdoor })}>Улица</button>
+        <button className={'mini' + (tm.surface ? '' : ' ghost')} onClick={() => setTeam({ ...tm, surface: !tm.surface })}>Сложная поверхность</button></div>} />}
     <DealDesign dealId={d.id} />
 
     {cur === 'client' && <div className="card">
@@ -466,14 +517,14 @@ export function DealCard({ id, back, place }) {
       <Qualify key={d.modified} d={d} onDone={() => load(true)} />
       <button className="ghost clientbtn" onClick={() => setSheet({ kind: 'client' })}>Клиент и реквизиты: {c.type || 'Физлицо'}{c.name ? ' · ' + c.name : ''}</button>
     </div>}
-    {cur === 'calc' && <Calc key={d.id} d={d} saved={calc} place={place} onSaved={t => { loadCalc(); said(t) }} />}
+    {cur === 'calc' && <CalcSum d={d} saved={calc} open={setTools} />}
     {cur === 'kp' && <>
       <div className="card">
         <div className="panelhead"><h3>Коммерческое предложение</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>
         {calc ? <p className="small muted">Позиция из расчёта ({money(calc.out.total)}) уже в КП, клиент и сделка подставлены. Проверьте, скачайте PDF — файл ляжет в сделку Битрикса, стадия сменится на «Отправка КП».</p>
           : <p className="small why">Сначала сделайте расчёт — тогда КП соберётся без ввода цифр. <a onClick={() => setPanel('calc')}>К расчёту</a></p>}
         {lockKP.length ? <Locked what="КП" miss={lockKP} onFill={fillIt} onCalc={() => setPanel('calc')} />
-          : <Embed place={place} view="kp" dealId={d.id} kp={kpItem} onDoc={onDoc} />}
+          : <div className="dealbtns wrapbtns"><button onClick={() => setTools('kp')}>Собрать КП в «Расчёт и КП»</button></div>}
         <KpAgree d={d} onDone={said} />
       </div>
       <Materials place={place} d={d} portal={portal} />
@@ -484,7 +535,7 @@ export function DealCard({ id, back, place }) {
         <p className="small muted">{calc ? `Сумма ${money(calc.out.total)} и аванс ${money(calc.out.pay.prepay)} — из расчёта; ` : ''}клиент и реквизиты — из карточки клиента. Скачанный файл ложится в сделку, стадия — «Отправка счёта/договора».</p>
         <button className="ghost mini" onClick={() => setSheet({ kind: 'client' })}>{d.requisites?.cbin || c.type === 'Физлицо' ? 'Клиент и реквизиты' : 'Внести реквизиты клиента'}</button>
         {lockDocs.length ? <Locked what="Договор и счёт" miss={lockDocs} onFill={fillIt} onCalc={() => setPanel('calc')} />
-          : <Embed place={place} view="docs" dealId={d.id} ds={ds} onDoc={onDoc} />}
+          : <div className="dealbtns wrapbtns"><button onClick={() => setTools('docs')}>Договор, счёт, акт в «Расчёт и КП»</button></div>}
       </div>
       <SignedUpload d={d} onDone={(r, t) => said(t)} />
       {!!d.files.length && <div className="card"><h3>Документы в сделке</h3>

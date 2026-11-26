@@ -78,3 +78,36 @@ export function usePlaces() {
   useEffect(() => { api('/places').then(setList, () => setList([])) }, [])
   return list
 }
+
+// Блок «Расчёт · КП · Документы · Скрипты» целиком (HEAD 26.11: «все калькуляторы, генераторы КП — в одном месте,
+// а фокус — на сделке»). Из сделки — окном поверх карточки, данные сделки подставлены в каждый раздел; закрыли — снова сделка.
+// view — раздел, с которого открыть; onCalc / onDoc — «Записать в сделку» и скачанный документ (как у Embed).
+export function Tools({ place, dealId, title, view, kp, ds, calc, onDoc, onCalc, close, bar }) {
+  useEffect(() => {
+    const on = e => {
+      if (e.origin !== location.origin) return
+      if (e.data?.type === 'artgame:doc' && onDoc) onDoc(e.data)
+      if (e.data?.type === 'artgame:calc' && onCalc && e.data.deal === dealId)
+        onCalc(e.data, (ok, text) => e.source?.postMessage({ type: 'artgame:calc-done', ok, text }, location.origin))
+    }
+    const esc = e => { if (e.key === 'Escape') close() }
+    window.addEventListener('message', on); window.addEventListener('keydown', esc)
+    const ov = document.body.style.overflow; document.body.style.overflow = 'hidden'
+    return () => { window.removeEventListener('message', on); window.removeEventListener('keydown', esc); document.body.style.overflow = ov }
+  }, [onDoc, onCalc, dealId, close])
+  const [src] = useState(() => {
+    try { localStorage.setItem('artgame.bx.open', JSON.stringify({ id: dealId, view: 'deal', kp, ds, calc, t: Date.now() })) } catch { /* без памяти */ }
+    return place ? `${place.url}?mode=tools&dark=1#${view || 'calc'}` : ''
+  })
+  const fr = useRef(null)
+  useEffect(() => { fr.current?.contentWindow?.postMessage({ type: 'artgame:deal-data', id: dealId, kp, ds }, location.origin) }, [kp, ds, dealId])
+  return <div className="toolsov" role="dialog" aria-label="Расчёт и КП">
+    <div className="toolsbar">
+      <button className="ghost mini" onClick={close}>← В сделку</button>
+      <b>{title}</b>
+      {bar}
+    </div>
+    {place ? <iframe ref={fr} title="Расчёт и КП" src={src} /> : <p className="muted">Рабочее место МОП недоступно для вашей роли.</p>}
+  </div>
+}
+

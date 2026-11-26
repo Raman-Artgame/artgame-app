@@ -2,6 +2,8 @@
    Режимы (параметр ?mode= в адресе фрейма):
      study — вкладка «Учёба»: только учебник, тест, правила игры; рабочие вкладки (Расчёт, КП, Документы, Скрипты, Сделка, Клиентам) спрятаны.
      embed — панель внутри карточки сделки: без шапки, один раздел (#kp или #docs), сделка и расчёт подставлены сами.
+     tools — блок «Расчёт · КП · Документы · Скрипты» целиком (HEAD 26.11: «все калькуляторы и генераторы КП — в одном месте»):
+             из сделки — окном поверх карточки, сделка подставлена в каждый раздел; из меню «Расчёт» — без сделки.
    Данные для панели: localStorage 'artgame.bx.open' = {id, view: 'kp'|'docs', kp: позиция КП из расчёта, ds: {total, area}}.
    КП и «Документы» по-прежнему читают сделку через mcp (place_shim.js) и сообщают о скачанном файле (ARTGAME_ON_DOWNLOAD). */
 (function () {
@@ -20,6 +22,9 @@
     '.agbx-st{font-size:.9em;opacity:.85;flex-basis:100%}' +
     (MODE === 'study' ? '#tabs .tab[data-v=calc],#tabs .tab[data-v=kp],#tabs .tab[data-v=docs],#tabs .tab[data-v=scripts],#tabs .tab[data-v=a],#tabs .tab[data-v=mat]{display:none!important}' +
       '.btns a[href="#calc"],.btns a[href="#kp"],.btns a[href="#docs"],.btns a[href="#scripts"],.btns a[href="#algo"],.btns a[href="#mat"]{display:none!important}' : '') +
+    (MODE === 'tools' ? 'header.top,#vals-foot{display:none!important}body{padding-top:0!important}' +
+      '#tabs .tab:not([data-v=calc]):not([data-v=kp]):not([data-v=docs]):not([data-v=scripts]){display:none!important}' +
+      '.agdeal .agbx,.agdeal #tokp{display:none!important}#agsave{font-weight:700}#agsavest{margin-top:8px}#agsavest.ok{color:#3DDC97}#agsavest.err{color:#FF5C72}' : '') +
     (MODE === 'embed' ? 'header.top,#vals-foot,#tabs{display:none!important}body{padding-top:0!important}.agbx{display:none!important}' +
       '#tokp{display:none!important}#agsave{font-weight:700}#agsavest{margin-top:8px}#agsavest.ok{color:#3DDC97}#agsavest.err{color:#FF5C72}' : '')
   document.head.appendChild(css)
@@ -28,6 +33,26 @@
   var WORK = /^#?(calc|kp|docs|scripts|sc-.*|algo|amain|a\d\d|mat|search|q=.*)$/
   function guard() { if (MODE === 'study' && WORK.test(location.hash)) location.replace('#ucheb') }
   if (MODE === 'study') { window.addEventListener('hashchange', guard); if (!location.hash || location.hash === '#home') location.replace('#ucheb'); guard() }
+  // «Расчёт»: только рабочие разделы — всё остальное (учебник, тест) ведёт в расчёт
+  var TOOLS = /^#?(calc|kp|docs|scripts|sc-.*)$/
+  function guardT() { if (MODE === 'tools' && !TOOLS.test(location.hash)) location.replace('#calc') }
+  if (MODE === 'tools') { window.addEventListener('hashchange', guardT); guardT() }
+  // суммы не рвутся на две строки (узкий экран): «1 000 ₸» — неразрывные пробелы внутри числа и перед ₸
+  if (MODE === 'tools' || MODE === 'embed') {
+    var NUM = /(\d) (?=\d{3}(?!\d))|(\d) (?=₸)/g, nbT = 0
+    var nbsp = function () {
+      nbT = 0
+      var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+      for (var n = w.nextNode(); n; n = w.nextNode()) {
+        if (n.parentElement && /^(SCRIPT|STYLE|TEXTAREA)$/.test(n.parentElement.tagName)) continue
+        var t = n.data.replace(NUM, '$1$2 ')
+        if (t !== n.data) n.data = t
+      }
+    }
+    new MutationObserver(function () { if (!nbT) nbT = setTimeout(nbsp, 60) })
+      .observe(document.documentElement, { childList: true, subtree: true, characterData: true })
+    document.addEventListener('DOMContentLoaded', nbsp)
+  }
 
   function money(n) { return n ? Math.round(n).toLocaleString('ru-RU') + ' ₸' : '' }
   function label(d) { return '№ ' + d.id + ' · ' + (d.title || '').slice(0, 60) + ' · ' + d.stage_name + (d.sum ? ' · ' + money(d.sum) : '') }
@@ -146,7 +171,7 @@
     return true
   }
   function mountCalc() {
-    if (MODE !== 'embed' || !CALC_DEAL) return
+    if ((MODE !== 'embed' && MODE !== 'tools') || !CALC_DEAL) return
     var tokp = document.getElementById('tokp')
     if (!tokp || document.getElementById('agsave')) return
     var b = document.createElement('button'); b.type = 'button'; b.id = 'agsave'; b.className = 'btn'; b.textContent = 'Записать в сделку № ' + CALC_DEAL
@@ -168,34 +193,61 @@
   })
 
   /* ---- открыть сделку из карточки приложения ---- */
+  function setupCalc(o) {
+    // скрипт моста может загрузиться раньше калькулятора: подставляем, как только появится его форма
+    var tries = 0, filled = false
+    var t3 = setInterval(function () {
+      if (!filled && (filled = calcPrefill(o))) CALC_DEAL = o.id   // «Записать в сделку» — только после подстановки
+      if (filled) mountCalc()
+      if ((filled && document.getElementById('agsave')) || ++tries > 80) clearInterval(t3)
+    }, 150)
+  }
+  function setupKp(o) {
+    var tries = 0
+    var t = setInterval(function () { if (kpPick(o.id) || ++tries > 40) { clearInterval(t); if (o.kp) kpAdd(o.kp) } }, 250)
+  }
+  function setupDocs(o) {
+    var tries = 0
+    var t2 = setInterval(function () {
+      if (typeof DS === 'undefined') { if (++tries > 40) clearInterval(t2); return }
+      if (!DS.doc) { DS.doc = 'dogovor'; if (typeof dsSave === 'function') dsSave(); if (typeof dsRerender === 'function') dsRerender() }
+      mountDocs()
+      var st = document.querySelector('#app .agbx-st')
+      if (st || ++tries > 40) { clearInterval(t2); if (st) docsFill(o.id, st, o.ds) }
+    }, 250)
+  }
   function pending() {
     var o = null
     try { o = JSON.parse(localStorage.getItem('artgame.bx.open') || 'null'); localStorage.removeItem('artgame.bx.open') } catch (e) {}
     if (!o || !o.id || Date.now() - (o.t || 0) > 60000) return
-    var tries = 0
     if (o.view === 'hash' && o.hash) {
       if (location.hash !== o.hash) location.hash = o.hash
+    } else if (o.view === 'deal') {
+      // блок целиком из сделки: сделка подставляется в каждый раздел, когда его впервые открыли
+      document.documentElement.classList.add('agdeal')
+      var done = {}
+      var go = function () {
+        var h = (location.hash || '').slice(1)
+        if (done[h]) return
+        if (h === 'calc') { done[h] = 1; setupCalc(o) } else if (h === 'kp') { done[h] = 1; setupKp(o) } else if (h === 'docs') { done[h] = 1; setupDocs(o) }
+      }
+      window.addEventListener('hashchange', go)
+      // расчёт записан, пока окно открыто: сделка присылает свежую позицию КП и сумму — их возьмут КП и договор, когда их откроют
+      window.addEventListener('message', function (e) {
+        if (e.origin !== location.origin || !e.data || e.data.type !== 'artgame:deal-data' || e.data.id !== o.id) return
+        if (e.data.kp) o.kp = e.data.kp
+        if (e.data.ds) o.ds = e.data.ds
+      })
+      go()
     } else if (o.view === 'calc') {
       if (location.hash !== '#calc') location.hash = '#calc'
-      // скрипт моста может загрузиться раньше калькулятора: подставляем, как только появится его состояние S
-      var filled = false
-      var t3 = setInterval(function () {
-        if (!filled && (filled = calcPrefill(o))) CALC_DEAL = o.id   // «Записать в сделку» — только после подстановки
-        if (filled) mountCalc()
-        if ((filled && document.getElementById('agsave')) || ++tries > 80) clearInterval(t3)
-      }, 150)
+      setupCalc(o)
     } else if (o.view === 'kp') {
       if (location.hash !== '#kp') location.hash = '#kp'
-      var t = setInterval(function () { if (kpPick(o.id) || ++tries > 40) { clearInterval(t); if (o.kp) kpAdd(o.kp) } }, 250)
+      setupKp(o)
     } else {
       if (location.hash !== '#docs') location.hash = '#docs'
-      var t2 = setInterval(function () {
-        if (typeof DS === 'undefined') { if (++tries > 40) clearInterval(t2); return }
-        if (!DS.doc) { DS.doc = 'dogovor'; if (typeof dsSave === 'function') dsSave(); if (typeof dsRerender === 'function') dsRerender() }
-        mountDocs()
-        var st = document.querySelector('#app .agbx-st')
-        if (st || ++tries > 40) { clearInterval(t2); if (st) docsFill(o.id, st, o.ds) }
-      }, 250)
+      setupDocs(o)
     }
   }
 
