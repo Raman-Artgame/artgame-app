@@ -1333,7 +1333,7 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
 @media (min-width: 1100px) {
   :root { --side: 248px; }
   body { padding-left: var(--side); }
-  .wrap, body.web .wrap { max-width: 1360px; padding: 32px 40px 48px; }
+  .wrap, body.web .wrap { max-width: none; padding: 32px 40px 48px; }
   .wrap .card { padding: 22px 24px; margin-bottom: 16px; }
   .wrap h2 { font-size: 24px; }
 
@@ -1384,19 +1384,32 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
   .deskmain .kpis small { font-size: 12px; }
   .deskmain .spark { max-height: 90px; margin-top: 16px; }
 
-  /* Команда, Кабинет: карточки колонками */
-  .wrap[data-tab=people], .wrap[data-tab=mine] { columns: 2; column-gap: 20px; }
-  .wrap[data-tab=people] > *, .wrap[data-tab=mine] > * { break-inside: avoid; }
-  .wrap > .roleswitch, .wrap > .toast, .wrap > .dmbar, .wrap > .segf { column-span: all; }
+  /* Экраны из нескольких карточек — колонками на весь экран (HEAD 26.11: «везде на весь экран»).
+     Только когда карточек две и больше: одна открытая карточка (диалог, карточка лида) остаётся во всю ширину. */
+  .wrap:is([data-tab=people], [data-tab=mine], [data-tab=review], [data-tab=closing], [data-tab=journal], [data-tab=chat], [data-tab=today], [data-tab=kit], [data-tab=shift], [data-tab=stock], [data-tab=month]):has(> .card ~ .card) { columns: 2; column-gap: 20px; }
+  .wrap:is([data-tab=people], [data-tab=mine], [data-tab=review], [data-tab=closing], [data-tab=journal], [data-tab=chat], [data-tab=today], [data-tab=kit], [data-tab=shift], [data-tab=stock], [data-tab=month]) > * { break-inside: avoid; }
+  .wrap > .roleswitch, .wrap > .toast, .wrap > .dmbar, .wrap > .segf, .wrap > .chips, .wrap > .card:has(> h1:first-child), .wrap > .card:has(> .segf:first-child) { column-span: all; }
 
-  /* формы (смена, расход) — не растягиваем поля на весь экран */
-  .wrap[data-tab=shift], .wrap[data-tab=expense] { max-width: 920px; }
+  /* одиночные формы (расход, закупка) — поля не растягиваем на весь экран */
+  .wrap[data-tab=expense] > .card:not(:has(> h1:first-child)), .wrap[data-tab=expense] > .segf { max-width: 880px; }
+
+  /* Сделки: стадии воронки — колонками, как доска */
+  .wrap[data-tab=deals] > .card:has(> .stage ~ .stage) { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 8px 28px; align-items: start; }
+  .wrap[data-tab=deals] .stage .stagehead { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+
+  /* Продакшн: материал плиткой, а не двумя огромными фото */
+  .rvgrid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
 
   /* график по месяцам не растёт в высоту вместе с шириной */
   .chart { max-height: 340px; }
 
   /* Финансы: цифры в три колонки */
   .wrap[data-tab=fin] .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .wrap[data-tab=fin] .fin-hero .kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  /* обзор года: графики в две колонки, шапка и цифры — на всю ширину */
+  .wrap[data-tab=fin]:has(.fin-hero) { columns: 2; column-gap: 20px; }
+  .wrap[data-tab=fin]:has(.fin-hero) > * { break-inside: avoid; }
+  .wrap[data-tab=fin] > .fin-hero { column-span: all; }
 
   /* проекты — плитками */
   .pcards { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
@@ -1407,6 +1420,6 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
   .wrap[data-tab=design] > .dtstage { grid-column: auto; }
 }
 @media (min-width: 1600px) {
-  .wrap[data-tab=people], .wrap[data-tab=mine] { columns: 3; }
+  .wrap:is([data-tab=people], [data-tab=mine], [data-tab=kit], [data-tab=journal]):has(> .card ~ .card ~ .card) { columns: 3; }
   .desk { grid-template-columns: minmax(0, 1fr) 420px; }
 }
