@@ -95,6 +95,19 @@ async function tab(p, name) {
   assert.strictEqual(rq.PRESET_ID, 3); assert.strictEqual(rq.RQ_BIN, '123456789012'); assert.strictEqual(rq.RQ_CEO_NAME, 'Сидоров Самат')
   assert.strictEqual(calls.find(x => x.method === 'crm.requisite.bankdetail.add').params.fields.RQ_IIK, 'KZ123456789012345678')
 
+  // 2б. «Заполнить недостающее»: сверху только то, чего не хватает, полями прямо тут — категория, подкатегория, объект…
+  await p.locator('.fillbar .fb-go').click()
+  const fs = p.locator('.sheetbox .fillmiss')
+  await fs.waitFor()
+  assert.ok(await fs.locator('label', { hasText: 'Категория' }).count(), 'категория — в окне')
+  assert.ok(!(await p.locator('.sheetbox').textContent()).includes('«Заполнить карточку» →'), 'без путей «куда нажать»')
+  await noScroll(p)
+  await p.screenshot({ path: `${shots}/mopvvod-5-zapolnit.png` })
+  await p.locator('.sheetbox .allbtn').click()
+  await p.locator('.sheetbox .aibox').waitFor()
+  await p.locator('.sheetbox button.x').click()
+  await p.locator('.sheetbox').waitFor({ state: 'detached' })
+
   // 3. Подписанный договор: шаг «Договор» → «Загрузить подписанный договор» → поле сделки
   await p.locator('.hero .steps > div', { hasText: 'Договор' }).click()
   const up = p.locator('.card.signed')

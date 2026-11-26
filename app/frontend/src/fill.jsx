@@ -175,8 +175,8 @@ function Project({ dict, v, set, only, skip = [] }) {
     {sel('subcategory', 'Подкатегория', subs.length ? subs : dict.subcategory || [])}
     {sel('entry', 'Точка входа', dict.entry || [])}
     {has('vip') && <label className="check"><span>VIP-клиент</span><input type="checkbox" checked={!!v.vip} onChange={e => set('vip', e.target.checked)} /></label>}
-    {sel('curator', 'Куратор', users)}
-    {sel('executor', 'Ответственный исполнитель', users)}
+    {/* HEAD 26.11: в сделках только куратор ГИП; «Ответственный исполнитель» из формы убран, поле в Битриксе остаётся */}
+    {sel('curator', 'Куратор ГИП', users)}
     {has('artists') && <div className="fillchips"><span className="cplabel">Художники</span>
       <div className="chips">{artists.map(id => <button key={id} className="on" onClick={() => set('artists', artists.filter(x => x !== id))}>{uname(id)} ✕</button>)}</div>
       <select value="" onChange={e => e.target.value && set('artists', [...artists, e.target.value])}><option value="">+ добавить художника</option>
