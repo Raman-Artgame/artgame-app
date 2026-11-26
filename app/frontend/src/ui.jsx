@@ -93,3 +93,18 @@ export function Receipt({ value, pick, need }) {
     {!value && <p className="small muted">{need ? 'Без чека расход не принимается. ' : ''}Скриншот из галереи или снимок камерой.</p>}
   </div>
 }
+
+// Компьютер (HEAD 26.11): от 1100 px меню — колонкой слева, все кнопки сразу, без «Ещё» и без ленты. Ширина — в tokens.css.
+export const WIDE = '(min-width: 1100px)'
+export function useWide() {
+  const [w, setW] = useState(() => window.matchMedia?.(WIDE).matches || false)
+  useEffect(() => {
+    const m = window.matchMedia?.(WIDE)
+    if (!m) return
+    const upd = () => setW(m.matches)
+    m.addEventListener?.('change', upd)
+    return () => m.removeEventListener?.('change', upd)
+  }, [])
+  return w
+}
+

@@ -8,6 +8,7 @@ import { ExpenseForm } from './work.jsx'
 import { ProjectSpend } from './shiftmove.jsx'
 import { Spark, mln } from './charts.jsx'
 import { closeAsks, useClosing } from './closing.jsx'
+import { useWide } from './ui.jsx'
 
 // Кабинет HEAD — «Пульт» (HEAD 08.11): сверху то, что ждёт решения, дальше деньги месяца, кто сегодня на объектах,
 // команда и последние действия. Отсюда же — «Смотреть как сотрудник».
@@ -28,6 +29,7 @@ export function usePulse(on) {
 }
 
 export function Pulse({ me, pulse, go }) {
+  const wide = useWide()
   const p = pulse
   const [fin, setFin] = useState(null)
   const [fb, setFb] = useState(null)   // обращения после ответа — заново с сервера
@@ -69,8 +71,9 @@ export function Pulse({ me, pulse, go }) {
   const active = p.team.reduce((n, t) => n + +t.active, 0)
   const td = fin?.today   // HEAD 14.11: месяц идёт — ФОТ и прибыль «на сегодня» (оклады по дням)
   const profit = td ? td.profit : fin?.profit
-  return <>
-    <div className="card dark pulse-hero">
+  // Компьютер (HEAD 26.11): те же блоки, но рабочим столом — слева решения и деньги, справа быстрые действия и команда.
+  // На телефоне порядок и разметка прежние.
+  const heroC = <div className="card dark pulse-hero">
       <span className="muted small">{new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
       <h1>{name ? `${name}, ` : ''}{asks.length ? 'ждёт решения' : 'всё решено'}</h1>
       <div className="pulse-kpi">
@@ -79,27 +82,22 @@ export function Pulse({ me, pulse, go }) {
         <button onClick={() => document.getElementById('pulse-today')?.scrollIntoView({ behavior: 'smooth' })}><b>{p.today.length}</b><span>смен сегодня</span></button>
       </div>
     </div>
-
-    {/* HEAD 15.11: «расходы вывести отдельным удобным блоком» — на проект (доставка, такси, докупка) и общий (аренда, подписки, своё) */}
-    <div className="card spendcard"><h3>Расходы</h3>{spend === 'project' ? <><h3 className="small muted">На проект</h3>
+  const spendC = <div className="card spendcard"><h3>Расходы</h3>{spend === 'project' ? <><h3 className="small muted">На проект</h3>
       <ProjectSpend ExpenseForm={ExpenseForm} cancel={() => setSpend(null)} done={t => { setSpend(null); setSpent(t) }} /></>
       : spend ? <><h3 className="small muted">Общий расход</h3>
       <LedgerForm d={spend} spend cancel={() => setSpend(null)} done={() => { setSpend(null); setSpent('Записано в «Деньги».') }} /></>
       : <><div className="seg"><button onClick={() => { setSpent(''); setSpend('project') }}>+ На проект</button><button className="ghost" onClick={openSpend}>+ Общий</button></div>
         <p className="small muted">{spent || 'На проект — доставка, такси, докупка: проект поиском, сумма, чек; сразу в затратах проекта. Общий — аренда, коммуналка, своя трата, чек в «06 РАСХОДЫ HEAD».'}</p></>}</div>
-    {asks.length > 0 && <div className="card"><h3>Ждёт вашего решения</h3>
+  const asksC = asks.length > 0 && <div className="card"><h3>Ждёт вашего решения</h3>
       {asks.map((a, i) => <div key={i} className={'qrow' + (a.red ? ' hot' : '')} onClick={() => go(a.k)}>
         <div className="qmain"><b>{a.t}</b><div className={'small ' + (a.hot ? 'why' : 'muted')}>{a.s}</div></div><span className="muted">›</span>
       </div>)}
       {curating && <p className="small muted">{curating}</p>}
-    </div>}
-
-    <div className="qrow card dmpulse" onClick={() => go('chat')}><div className="qmain"><b>📣 Написать команде</b>
+    </div>
+  const dmC = <div className="qrow card dmpulse" onClick={() => go('chat')}><div className="qmain"><b>📣 Написать команде</b>
       <div className="small muted">всем или по ролям — придёт в приложение и в бот; одному — только в приложение</div></div><span className="muted">›</span></div>
-
-    <FeedbackInbox items={fb ?? p.feedback} reload={() => api('/head/pulse').then(x => setFb(x.feedback))} />
-
-    <div className="card pulse-money"><div className="head"><h3>Деньги · {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</h3>
+  const fbC = <FeedbackInbox items={fb ?? p.feedback} reload={() => api('/head/pulse').then(x => setFb(x.feedback))} />
+  const moneyC = <div className="card pulse-money"><div className="head"><h3>Деньги · {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</h3>
       <span className="muted" role="button" onClick={() => go('fin')}>Финансы ›</span></div>
       {!fin ? <p className="small muted">Считаю…</p> : fin.err ? <p className="small muted">{fin.err}</p> : <>
         <div className="kpis">
@@ -145,8 +143,7 @@ export function Pulse({ me, pulse, go }) {
         {year?.months?.length > 1 && <><Spark values={year.months.map(m => m.net)} /><p className="small muted">Выручка без НДС по месяцам {year.year}</p></>}
       </>}
     </div>
-
-    <div className="card" id="pulse-today"><h3>Сегодня на объектах</h3>
+  const todayC = <div className="card" id="pulse-today"><h3>Сегодня на объектах</h3>
       {!p.today.length ? <p className="small muted">Смен сегодня пока нет.</p> : p.today.map(s => <div key={s.id} className="row">
         <div><b>{s.full_name}</b> <span className="small muted">{s.role_title}</span>
           <div className="small muted">{s.object_title} · {ZONE[s.zone_code] || s.zone_code}</div></div>
@@ -154,12 +151,13 @@ export function Pulse({ me, pulse, go }) {
       </div>)}
       <p className="small muted">За 7 дней: смен {(+p.week.approved) + (+p.week.rejected)} проверено ({p.week.rejected} отклонено), работали {p.week.people} чел.</p>
     </div>
-
-    <div className="card"><div className="head"><h3>Команда · {active}</h3><button className="ghost mini" onClick={() => go('people')}>Команда</button></div>
+  const teamC = <div className="card"><div className="head"><h3>Команда · {active}</h3><button className="ghost mini" onClick={() => go('people')}>Команда</button></div>
       <div className="teamgrid">{p.team.filter(t => +t.active).map(t => <div key={t.code}><b>{t.active}</b><span className="small muted">{t.title}</span></div>)}</div>
       {!active && <p className="small muted">Ролей ещё никому не назначено.</p>}
     </div>
-
+  if (wide) return <>{heroC}
+    <div className="desk"><div className="deskmain">{asksC}{moneyC}{fbC}</div><div className="deskside">{spendC}{dmC}{todayC}{teamC}</div></div></>
+  return <>{heroC}{spendC}{asksC}{dmC}{fbC}{moneyC}{todayC}{teamC}
   </>
 }
 

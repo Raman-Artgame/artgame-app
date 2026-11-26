@@ -21,6 +21,7 @@ import { TeamPath, countOf, markLabel, markOf, useMarks } from './grow.jsx'
 import { Feedback } from './feedback.jsx'
 import { Chat, useUnread } from './dm.jsx'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
+import { useWide } from './ui.jsx'
 import './tokens.css'
 import { MyData, ProfileForm } from './profile.jsx'
 import { FileLinks } from './objects.jsx'
@@ -399,20 +400,6 @@ const ICON = {
   more: 'M5 12h.01M12 12h.01M19 12h.01' }
 const Icon = ({ k }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[k] || ICON.more} /></svg>
 const MAX = 6   // кнопок в меню без листа «Ещё»
-// Компьютер (HEAD 26.11): от 1100 px меню — колонкой слева, все кнопки сразу, без «Ещё» и без ленты. Ширина — в tokens.css.
-const WIDE = '(min-width: 1100px)'
-function useWide() {
-  const [w, setW] = useState(() => window.matchMedia?.(WIDE).matches || false)
-  useEffect(() => {
-    const m = window.matchMedia?.(WIDE)
-    if (!m) return
-    const upd = () => setW(m.matches)
-    m.addEventListener?.('change', upd)
-    return () => m.removeEventListener?.('change', upd)
-  }, [])
-  return w
-}
-
 // scroll (HEAD 08.11, у всех): все кнопки внизу одной лентой без «Ещё», лента листается пальцем; открытая вкладка — в поле зрения.
 function Nav({ tabs, tab, setTab, counts = {}, scroll }) {
   const [more, setMore] = useState(false)

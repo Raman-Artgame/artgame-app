@@ -1325,52 +1325,88 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
 .prodsk img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; flex: 0 0 64px; }
 .prodsk > div { min-width: 0; }
 
-/* ---- компьютер, широкий экран (HEAD 26.11: «с маленьким экраном вообще не удобно») ----
+/* ---- компьютер, широкий экран (HEAD 26.11: «с маленьким экраном вообще не удобно», «красиво и удобно») ----
    Только от 1100 px: телефон и Telegram на телефоне не меняются ни на пиксель. Меню — колонкой слева, все кнопки сразу
-   (без «Ещё», см. useWide в main.jsx), содержимое — на ширину экрана (до 1320 px). Плитки в 2–3 колонки — по вкладке
-   (.wrap[data-tab=<вкладка>] из main.jsx): Пульт, Команда, Кабинет — колонками; доска дизайна — колонками по стадиям; проекты — сеткой.
-   Логику экранов не трогаем — только раскладку. */
+   (без «Ещё», useWide в ui.jsx), внизу колонки — кто вошёл и «Выйти». Содержимое — на ширину экрана (до 1360 px).
+   Раскладка по вкладке — .wrap[data-tab=<вкладка>] из main.jsx. Пульт — рабочий стол (.desk в head.jsx): слева решения и деньги,
+   справа быстрые действия и команда. Логику экранов не трогаем — только раскладку. */
 @media (min-width: 1100px) {
-  :root { --side: 232px; }
+  :root { --side: 248px; }
   body { padding-left: var(--side); }
-  .wrap, body.web .wrap { max-width: 1320px; padding: 24px 32px 40px; }
-  .webbar { margin: -24px -32px 16px; padding: 14px 32px; border-radius: 0; }
+  .wrap, body.web .wrap { max-width: 1360px; padding: 32px 40px 48px; }
+  .wrap .card { padding: 22px 24px; margin-bottom: 16px; }
+  .wrap h2 { font-size: 24px; }
 
   /* меню слева */
   nav, body.web nav { top: 0; bottom: 0; left: 0; right: auto; width: var(--side); max-width: none; margin: 0; display: flex; flex-direction: column;
-    gap: 2px; padding: 20px 12px; border-top: 0; border-right: 1px solid var(--dark-line); border-radius: 0; overflow-y: auto; scrollbar-width: thin; }
-  nav::before { content: 'ARTGAME'; display: block; padding: 2px 12px 18px; color: #fff; font: 800 20px/1 Onest, Inter, system-ui; letter-spacing: .02em; }
-  nav button, nav.scroll button { flex: none; flex-direction: row; justify-content: flex-start; gap: 12px; min-width: 0; padding: 11px 12px; font-size: 14px; text-align: left; scroll-snap-align: none; }
+    gap: 2px; padding: 24px 14px 96px; background: var(--surface); border-top: 0; border-right: 1px solid var(--line); border-radius: 0; overflow-y: auto; scrollbar-width: thin; }
+  nav::before { content: 'ARTGAME'; display: block; padding: 2px 12px 22px; color: #fff; font: 800 21px/1 Onest, Inter, system-ui; letter-spacing: .02em; }
+  nav button, nav.scroll button { flex: none; flex-direction: row; justify-content: flex-start; gap: 12px; min-width: 0; padding: 11px 12px; font-size: 14.5px; text-align: left; scroll-snap-align: none; color: var(--muted); }
+  nav button:hover { background: var(--alt); color: var(--text); }
+  nav button.on { background: var(--dark); color: #fff; box-shadow: inset 3px 0 0 var(--accent); }
   nav.scroll { overflow-x: hidden; scroll-snap-type: none; }
   nav svg { width: 20px; height: 20px; flex: none; }
-  nav .cnt { position: static; margin-left: auto; }
+  nav .cnt { position: static; margin-left: auto; min-width: 20px; height: 20px; font: 700 11px/20px Onest, Inter, system-ui; text-align: center; }
   .navspace, .navhint { display: none; }
   .place { height: 100dvh; }
+  /* кто вошёл и «Выйти» — внизу колонки меню (вместо полосы над страницей) */
+  .webbar { position: fixed; left: 0; bottom: 0; z-index: 11; width: var(--side); margin: 0; padding: 14px 18px; gap: 8px; background: var(--surface);
+    border-top: 1px solid var(--line); border-right: 1px solid var(--line); border-radius: 0; }
+  .webbar > b { display: none; }
+  .webbar .muted { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .webbar button { background: var(--alt); color: var(--muted); border: 0; }
 
   /* окна — шире, по центру области справа от меню */
   .sheet { padding-left: var(--side); }
   .sheetbox, body.web .sheetbox { max-width: 640px; }
   .sheetbox.modal, body.web .sheetbox.modal { max-width: 760px; }
 
-  /* Пульт, Команда, Кабинет: карточки колонками (как доска), шапка — на всю ширину */
-  .wrap[data-tab=home], .wrap[data-tab=people], .wrap[data-tab=mine] { columns: 2; column-gap: 16px; }
-  .wrap[data-tab=home] > *, .wrap[data-tab=people] > *, .wrap[data-tab=mine] > * { break-inside: avoid; }
-  .wrap > .webbar, .wrap > .roleswitch, .wrap > .toast, .wrap > .dmbar, .wrap > .pulse-hero, .wrap > .segf { column-span: all; }
+  /* Пульт: шапка строкой — заголовок слева, три цифры справа; ниже рабочий стол в две колонки */
+  .wrap > .pulse-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; column-gap: 32px; padding: 4px 0 8px; margin-bottom: 24px;
+    background: none; border: 0; box-shadow: none; }
+  .pulse-hero .pulse-kpi { grid-column: 2; grid-row: 1 / span 2; }
+  .pulse-hero h1 { font-size: 38px; margin: 6px 0 0; }
+  .pulse-hero .muted:first-child { font-size: 14px; }
+  .pulse-kpi { flex: none; grid-template-columns: repeat(3, 168px); gap: 12px; }
+  .pulse-kpi button { padding: 16px 18px; gap: 6px; border-radius: 16px; }
+  .pulse-kpi button b { font-size: 34px; }
+  .pulse-kpi button span { font-size: 13px; }
+  .desk { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: start; }
+  .desk .card h3 { font-size: 18px; margin-bottom: 12px; }
+  .desk .qrow { padding: 15px 10px; margin: 0 -10px; border-radius: 12px; }
+  .desk .qrow b { font-size: 16px; }
+  .desk .qrow:hover { background: var(--alt); }
+  .desk .qrow.card { margin: 0 0 16px; padding: 18px 24px; }
+  .deskmain .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .deskmain .kpis > div { padding: 16px; }
+  .deskmain .kpis b { font-size: 24px; margin: 4px 0; }
+  .deskmain .kpis span { font-size: 13px; }
+  .deskmain .kpis small { font-size: 12px; }
+  .deskmain .spark { max-height: 90px; margin-top: 16px; }
+
+  /* Команда, Кабинет: карточки колонками */
+  .wrap[data-tab=people], .wrap[data-tab=mine] { columns: 2; column-gap: 20px; }
+  .wrap[data-tab=people] > *, .wrap[data-tab=mine] > * { break-inside: avoid; }
+  .wrap > .roleswitch, .wrap > .toast, .wrap > .dmbar, .wrap > .segf { column-span: all; }
 
   /* формы (смена, расход) — не растягиваем поля на весь экран */
-  .wrap[data-tab=shift], .wrap[data-tab=expense] { max-width: 880px; }
+  .wrap[data-tab=shift], .wrap[data-tab=expense] { max-width: 920px; }
 
   /* график по месяцам не растёт в высоту вместе с шириной */
   .chart { max-height: 340px; }
 
+  /* Финансы: цифры в три колонки */
+  .wrap[data-tab=fin] .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+
   /* проекты — плитками */
-  .pcards { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+  .pcards { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
 
   /* доска дизайна: стадии — колонками */
-  .wrap[data-tab=design] { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); column-gap: 14px; align-items: start; }
+  .wrap[data-tab=design] { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); column-gap: 16px; align-items: start; }
   .wrap[data-tab=design] > * { grid-column: 1 / -1; }
   .wrap[data-tab=design] > .dtstage { grid-column: auto; }
 }
 @media (min-width: 1600px) {
-  .wrap[data-tab=home], .wrap[data-tab=people], .wrap[data-tab=mine] { columns: 3; }
+  .wrap[data-tab=people], .wrap[data-tab=mine] { columns: 3; }
+  .desk { grid-template-columns: minmax(0, 1fr) 420px; }
 }
