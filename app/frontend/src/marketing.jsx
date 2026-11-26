@@ -3,6 +3,7 @@ import { api, uuid, webToken } from './api.js'
 import { Viewer, download, uploadBig, sendToGoogle } from './objects.jsx'
 import { Sheet } from './ui.jsx'
 import { Kit, StoryHome } from './mktkit.jsx'
+import { Stats } from './mktstats.jsx'
 
 // Рабочее место маркетинга (HEAD 14.11): «План» — контент-план месяца, «Медиа» — материал с объектов,
 // HEAD — «На утверждение». Каждую публикацию утверждает HEAD: черновик → «Отправить HEAD» → «Утверждаю» / «Вернуть»
@@ -28,7 +29,7 @@ export function Marketing({ me, pending }) {
   const job = head ? 'head' : (me.mkt_job || null)
   const can = { post: head || [null, 'lead', 'smm', 'stories', 'target'].includes(job), onlyAd: job === 'target', all: head || [null, 'lead', 'smm'].includes(job),
     idea: job !== 'target', shoot: head || [null, 'lead', 'smm', 'video'].includes(job), result: head || [null, 'lead', 'smm', 'target'].includes(job) }
-  const tabs = [['plan', 'План'], ...(can.post && !can.onlyAd ? [['story', 'Сторис']] : []), ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа'], ['ads', 'Реклама'], ['brand', 'Бренд']].filter(([k]) => !TABS[job] || TABS[job].includes(k))
+  const tabs = [['plan', 'План'], ...(can.post && !can.onlyAd ? [['story', 'Сторис']] : []), ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа'], ['ads', 'Реклама'], ...(head || job === 'lead' ? [['stats', 'Итоги']] : []), ['brand', 'Бренд']].filter(([k]) => !TABS[job] || TABS[job].includes(k))
     .sort((a, b) => TABS[job] ? TABS[job].indexOf(a[0]) - TABS[job].indexOf(b[0]) : 0)
   const [toCheck, setToCheck] = useState(0)
   const [view, setView] = useState(head && pending ? 'review' : tabs[0][0])
@@ -49,7 +50,7 @@ export function Marketing({ me, pending }) {
       {job === 'lead' && <button className={view === 'check' ? 'on' : ''} onClick={() => setView('check')}>Проверка{toCheck ? <span>{toCheck}</span> : null}</button>}
       {tabs.map(([k, t]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}
     </div>
-    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} head={head} /> : view === 'brand' ? <Brand canPost={can.post && !can.onlyAd} onPublish={publishStory} /> : view === 'ads' ? <Ads /> : view === 'story' ? <StoryHome canPost onPublish={publishStory} /> :
+    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} head={head} /> : view === 'brand' ? <Brand canPost={can.post && !can.onlyAd} onPublish={publishStory} /> : view === 'ads' ? <Ads /> : view === 'stats' ? <Stats /> : view === 'story' ? <StoryHome canPost onPublish={publishStory} /> :
       view === 'shoots' ? <Shoots can={can.shoot} /> : view === 'ideas' ? <Ideas can={can.idea} /> : <Plan key={view + tick} can={can.post} onOpen={setOpen} onNew={() => setEdit({})} />}
     {edit && <Editor post={edit} onlyAd={can.onlyAd} onClose={() => setEdit(null)} onSaved={x => { setEdit(null); setOpen(x); reload() }} />}
     {open && !edit && <PostSheet post={open} head={head} mine={can.post && (can.all || open.author_id === me.id)} canResult={can.result} onClose={() => setOpen(null)} onEdit={() => setEdit(open)}
@@ -452,7 +453,7 @@ function PostRow({ x, d, onOpen }) {
   return <div className="mitem mktrow" onClick={() => onOpen(x)}>
     <span className="mthumb">{f?.thumb ? <img src={f.thumb} alt="" loading="lazy" /> : <span>{x.kind === 'stories' ? '◐' : x.kind === 'post' || x.kind === 'carousel' ? '▦' : '▶'}</span>}</span>
     <div className="mbody"><b>{x.title}</b>
-      <div className="small muted">{d.channels[x.channel]} · {d.kinds[x.kind]}{x.object_title ? ` · №${x.object_id} ${x.object_title}` : ''}</div>
+      <div className="small muted">{d.channels[x.channel]} · {d.kinds[x.kind]}{x.rubric ? ` · ${x.rubric}` : ''}{x.object_title ? ` · №${x.object_id} ${x.object_title}` : ''}</div>
       <span className={'badge ' + ST[x.status][1]} style={{ marginLeft: 0 }}>{ST[x.status][0]}</span>
       {x.result && <span className={'badge ' + (x.result === 'good' ? 'ok' : 'hot')}>{x.result === 'good' ? 'дала результат' : 'без результата'}</span>}
       {x.status === 'rejected' && x.review_note && <div className="small why">{x.reviewer || 'HEAD'}: {x.review_note}</div>}
@@ -471,7 +472,7 @@ function PostSheet({ post, head, mine, canResult, onClose, onEdit, onChanged }) 
   const act = (path, body) => { setMsg(''); api(`/mkt/posts/${x.id}/${path}`, { method: 'POST', body: body || {} }).then(onChanged, e => setMsg(e.message)) }
   return <Sheet title={x.title} onClose={onClose}>
     <span className={'badge ' + ST[x.status][1]} style={{ marginLeft: 0 }}>{ST[x.status][0]}</span>
-    <p className="small muted">{day(x.plan_date)} · {d?.channels[x.channel]} · {d?.kinds[x.kind]}{x.object_title ? ` · №${x.object_id} ${x.object_title}` : ''} · {x.author}</p>
+    <p className="small muted">{day(x.plan_date)} · {d?.channels[x.channel]} · {d?.kinds[x.kind]}{x.rubric ? ` · ${x.rubric}` : ''}{x.object_title ? ` · №${x.object_id} ${x.object_title}` : ''} · {x.author}</p>
     {x.caption && <p className="mktcap">{x.caption}</p>}
     {x.files.length > 0 && <div className="mktfiles">{x.files.map(f => <button key={f.id} className="mthumb" onClick={() => setView(f)}>
       {f.thumb ? <img src={f.thumb} alt="" loading="lazy" /> : <span>▶</span>}</button>)}</div>}
@@ -502,7 +503,8 @@ function Editor({ post, onlyAd, onClose, onSaved }) {
   const [d, setD] = useState(null)
   const [objs, setObjs] = useState([])
   const [b, setB] = useState({ title: post.title || '', channel: post.channel || 'instagram', kind: post.kind || (onlyAd ? 'ad' : 'reels'), plan_date: post.plan_date || '',
-    caption: post.caption || '', object_id: post.object_id || '', files: post.files || [], srcs: post.srcs || [], drafts: post.drafts || [] })
+    caption: post.caption || '', object_id: post.object_id || '', rubric_id: post.rubric_id || '', files: post.files || [], srcs: post.srcs || [], drafts: post.drafts || [] })
+  const [rubs, setRubs] = useState([])
   const [pick, setPick] = useState(null)   // 'srcs' | 'files' — что выбираем из «Медиа»
   const [msg, setMsg] = useState('')
   const [up, setUp] = useState(null)   // доля загруженного, пока файл идёт на Диск
@@ -515,13 +517,13 @@ function Editor({ post, onlyAd, onClose, onSaved }) {
     }
     setUp(null)
   }
-  useEffect(() => { api('/mkt/dict').then(setD, e => setMsg(e.message)); api('/objects').then(setObjs, () => {}) }, [])
+  useEffect(() => { api('/mkt/dict').then(setD, e => setMsg(e.message)); api('/objects').then(setObjs, () => {}); api('/mkt/rubrics').then(setRubs, () => {}) }, [])
   const set = (k, v) => setB(s => ({ ...s, [k]: v }))
   const save = () => {
     if (up !== null) return setMsg('Дождись конца загрузки.')
     if (!b.title.trim()) return setMsg('Напиши, что это за публикация.')
     const body = { title: b.title, channel: b.channel, kind: b.kind, plan_date: b.plan_date || null, caption: b.caption || null,
-      object_id: b.object_id ? +b.object_id : null, file_ids: b.files.map(f => f.id), src_ids: b.srcs.map(f => f.id), draft_ids: b.drafts.map(f => f.id) }
+      object_id: b.object_id ? +b.object_id : null, rubric_id: b.rubric_id && b.kind !== 'ad' ? +b.rubric_id : null, file_ids: b.files.map(f => f.id), src_ids: b.srcs.map(f => f.id), draft_ids: b.drafts.map(f => f.id) }
     api(post.id ? `/mkt/posts/${post.id}` : '/mkt/posts', { method: 'POST', body }).then(onSaved, e => setMsg(e.message))
   }
   if (pick) return <Sheet title={pick === 'srcs' ? 'Исходники из «Медиа»' : 'Финал из «Медиа»'} onClose={() => setPick(null)}>
@@ -537,6 +539,9 @@ function Editor({ post, onlyAd, onClose, onSaved }) {
       <div className="chips">{Object.entries(d.channels).map(([k, t]) => <button key={k} className={b.channel === k ? 'on' : ''} onClick={() => set('channel', k)}>{t}</button>)}</div>
       <label className="muted small">Формат</label>
       <div className="chips">{Object.entries(d.kinds).filter(([k]) => !onlyAd || k === 'ad').map(([k, t]) => <button key={k} className={b.kind === k ? 'on' : ''} onClick={() => set('kind', k)}>{t}</button>)}</div></>}
+    {b.kind !== 'ad' && rubs.length > 0 && <><label className="muted small">Рубрика</label>
+      <select value={b.rubric_id} onChange={e => set('rubric_id', e.target.value)}><option value="">Без рубрики (не попадёт в «Итоги» по рубрикам)</option>
+        {rubs.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}</select></>}
     <label className="muted small">Дата выхода</label>
     <input type="date" value={b.plan_date} onChange={e => set('plan_date', e.target.value)} />
     <label className="muted small">Текст публикации</label>
