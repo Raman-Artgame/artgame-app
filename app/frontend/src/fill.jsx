@@ -47,13 +47,17 @@ export function FillBar({ fill, onOpen }) {
     <div className="fb-top"><span>Обязательно заполнить</span><b>{fill.need_done} из {fill.need}</b></div>
     <div className="fb-line"><i style={{ width: pct + '%' }} /></div>
     <div className="fb-miss">{fill.missing.slice(0, 4).join(', ') + (fill.missing.length > 4 ? ` и ещё ${fill.missing.length - 4}` : '')} — без этого сделка дальше не пойдёт</div>
+    <button className="mini fb-go">Заполнить недостающее</button>
   </div>
 }
 
 const EDIT = [['city', 'Город'], ['service', 'Услуга'], ['area', 'Площадь, м²'], ['address', 'Адрес объекта'],
   ['adv', 'Аванс, %'], ['days', 'Срок по договору, календарных дней'], ['warranty', 'Гарантия, месяцев'], ['start', 'Старт работ (факт)'], ['end', 'Сдача (план)']]
 
-export function FillSheet({ d, onClose, onDone }) {
+// HEAD 26.11 «чтобы была кнопка и всё можно было заполнить»: сверху — только недостающее, полями прямо здесь;
+// остальная карточка и помощник — под «Все поля карточки».
+const PROJ_KEYS = ['category', 'subcategory', 'entry']
+export function FillSheet({ d, onClose, onDone, onClient, onCalc }) {
   const by = Object.fromEntries((d.fill?.items || []).map(x => [x.key, x]))
   const init = { cityName: d.city || '', city: '', service: '', area: d.area || '', address: d.address || '',
     adv: by.adv?.value || '', days: by.days?.value || '', warranty: by.warranty?.value || '', start: by.start?.value || '', end: by.end?.value || '' }
@@ -65,6 +69,9 @@ export function FillSheet({ d, onClose, onDone }) {
   const [found, setFound] = useState(null)
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState('')
+  const [obj, setObj] = useState(d.object || '')
+  const miss = (d.fill?.items || []).filter(x => x.need && !x.ok)
+  const [all, setAll] = useState(!miss.length)
   useEffect(() => { api('/bx/dict').then(x => { setDict(x); const s = x.services.find(s => s.name === d.service); setF(v => ({ ...v, service: s?.id || '' })) }, () => {}) }, [])
   const set = (k, v) => { setF(x => ({ ...x, [k]: v })); setAi(a => ({ ...a, [k]: false })) }
   const parse = () => {
@@ -90,6 +97,7 @@ export function FillSheet({ d, onClose, onDone }) {
   const same = (a, b) => Array.isArray(a) ? [...a].sort().join() === [...(b || [])].sort().join() : String(a ?? '') === String(b ?? '')
   const prj = Object.fromEntries(Object.entries(pr).filter(([k, v]) => !same(v, p0[k]) && (dict.project?.have || []).includes(k)))
   if (Object.keys(prj).length) body.project = prj
+  if (obj.trim() && obj.trim() !== (d.object || '')) body.object = obj.trim()
   const nBody = Object.keys(body).length - (body.project ? 1 : 0) + Object.keys(prj).length
   const save = () => { setBusy('save'); api(`/bx/deals/${d.id}/fields`, { method: 'POST', body })
     .then(r => onDone(r.bx === 'off' ? 'Сохранено в журнал, в Битрикс не записано.' : 'Карточка записана в Битрикс.'), e => { setMsg('Не записалось: ' + e.message); setBusy('') }) }
@@ -104,10 +112,29 @@ export function FillSheet({ d, onClose, onDone }) {
     if (k === 'address') return <label key={k} className={cls(k)}>{lab}<input value={f[k]} onChange={e => set(k, e.target.value)} placeholder="Город, улица, дом" /></label>
     return <label key={k} className={cls(k)}>{lab}<input type="number" min="0" inputMode="decimal" value={f[k]} onChange={e => set(k, e.target.value)} /></label>
   }
-  const other = (d.fill?.items || []).filter(x => !x.edit && !x.ok && x.need)
+  const mk = new Set(miss.map(x => x.key))
+  const top = EDIT.filter(([k]) => mk.has(k))
+  const topProj = PROJ_KEYS.filter(k => mk.has(k) && (dict.project?.have || []).includes(k))
+  const rest = miss.filter(x => !EDIT.some(([k]) => k === x.key) && !PROJ_KEYS.includes(x.key) && x.key !== 'object')
+  const act = x => ['name', 'phone', 'requisites'].includes(x.key) && onClient ? <button className="ghost mini" onClick={onClient}>Клиент и реквизиты</button>
+    : ['calc', 'sum'].includes(x.key) && onCalc ? <button className="ghost mini" onClick={onCalc}>Посчитать цену и срок</button>
+    : <span className="muted small">{x.where}</span>
   const cl = found?.client || {}
   const clRows = [['Клиент', cl.name], ['Юрлицо', cl.company], ['БИН/ИИН', cl.bin], ['Подписант', cl.signer], ['Телефон', cl.phone], ['E-mail', cl.email], ['Пожелания', cl.wishes]].filter(x => x[1])
-  return <Sheet title="Заполнить карточку" onClose={onClose} wide>
+  return <Sheet title={miss.length ? `Не хватает: ${miss.length}` : 'Заполнить карточку'} onClose={onClose} wide>
+    {!!miss.length && <div className="fillmiss">
+      {(top.length || topProj.length || mk.has('object')) && <div className="fillgrid">
+        {mk.has('object') && <label className="need"><span>Объект <i className="muted small">из него название сделки</i></span>
+          <input value={obj} onChange={e => setObj(e.target.value)} placeholder="«Школа №12», «Кофейня Daily»" /></label>}
+        {top.map(([k, l]) => field(k, l))}
+      </div>}
+      {dict.project && !!topProj.length && <Project dict={dict.project} v={pr} set={(k, v) => setPr(x => ({ ...x, [k]: v }))} only={topProj} />}
+      {[...new Map(rest.map(x => [['name', 'phone', 'requisites'].includes(x.key) ? 'client' : ['calc', 'sum'].includes(x.key) ? 'calc' : x.key, x])).values()].map(x =>
+        <div key={x.key} className="row"><span>{['name', 'phone'].includes(x.key) ? rest.filter(y => ['name', 'phone', 'requisites'].includes(y.key)).map(y => y.label).join(', ')
+          : ['calc', 'sum'].includes(x.key) ? 'Расчёт и сумма' : x.label}</span>{act(x)}</div>)}
+    </div>}
+    {miss.length > 0 && <button className="ghost mini allbtn" onClick={() => setAll(!all)}>{all ? 'Скрыть остальные поля' : 'Все поля карточки и помощник'}</button>}
+    {all && <>
     <div className="aibox">
       <div className="aihead"><b>Помощник</b><span className="small">вставьте переписку из WhatsApp или анкету клиента — поля заполнятся сами</span></div>
       <textarea rows={5} value={text} onChange={e => setText(e.target.value)} placeholder="Например: «Здравствуйте, нужна роспись в детском саду, Астана, ул. Кенесары 40, примерно 45 м²…»" />
@@ -119,10 +146,9 @@ export function FillSheet({ d, onClose, onDone }) {
         <Copy text={clRows.map(([k, v]) => `${k}: ${v}`).join('\n')} label="Скопировать данные клиента" />
       </div>}
     </div>
-    <div className="fillgrid">{EDIT.map(([k, l]) => field(k, l))}</div>
-    {dict.project && <Project dict={dict.project} v={pr} set={(k, v) => setPr(x => ({ ...x, [k]: v }))} />}
-    {!!other.length && <div className="fillother"><b className="small">Ещё не хватает</b>
-      {other.map(x => <div key={x.key} className="row"><span>{x.label}</span><span className="muted small">{x.where}</span></div>)}</div>}
+    <div className="fillgrid">{EDIT.filter(([k]) => !mk.has(k)).map(([k, l]) => field(k, l))}</div>
+    {dict.project && <Project dict={dict.project} v={pr} set={(k, v) => setPr(x => ({ ...x, [k]: v }))} skip={topProj} />}
+    </>}
     <button disabled={!Object.keys(body).length || !!busy} onClick={save}>{busy === 'save' ? 'Записываю…' : `Записать в Битрикс${nBody ? ` (${nBody})` : ''}`}</button>
   </Sheet>
 }
@@ -130,8 +156,8 @@ export function FillSheet({ d, onClose, onDone }) {
 // Поля проекта (аудит 06.11: в Битриксе есть, в приложении не было): модель B2B/B2C/B2G, категория, размер, люди, дизайн.
 // Показываем только поля, которые есть в Битриксе; записываем только изменённые.
 const catNo = n => ((n || '').match(/^\s*(\d+)/) || [])[1]
-function Project({ dict, v, set }) {
-  const has = k => (dict.have || []).includes(k)
+function Project({ dict, v, set, only, skip = [] }) {
+  const has = k => (dict.have || []).includes(k) && (!only || only.includes(k)) && !skip.includes(k)
   const users = dict.users || []
   const sel = (k, label, opts) => has(k) && <label key={k}><span>{label}</span><select value={v[k] || ''} onChange={e => set(k, e.target.value)}>
     <option value="">—</option>{opts.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
@@ -142,7 +168,7 @@ function Project({ dict, v, set }) {
   const artists = v.artists || []
   const uname = id => users.find(u => u.id === id)?.name || id
   return <div className="fillgrid">
-    <h3 className="fillsec">Проект</h3>
+    {!only && <h3 className="fillsec">Проект</h3>}
     {chips('model', 'Модель')}
     {chips('size', 'Размер проекта')}
     {sel('category', 'Категория', dict.category || [])}
