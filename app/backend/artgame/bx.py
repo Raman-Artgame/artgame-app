@@ -492,6 +492,8 @@ def deal_full(p: dict, deal_id: int, fresh: bool = False) -> dict:
     card["acq"] = for_deal(deal_id)   # траты отдела продаж по сделке — стоимость привлечения
     from . import fill
     card["fill"] = fill.state(d, card, fill.saved_calc(deal_id))
+    from .kpagree import get as kp_agreed
+    card["kp_agreed"] = kp_agreed(deal_id)
     card["fill"].update(required=fill.REQUIRED, step_of=fill.STAGE_STEP, free=p["role_code"] == "head")   # для замка в приложении
     return card
 

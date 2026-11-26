@@ -133,6 +133,30 @@ function Trip({ id }) {
     {msg && <p className="small why">{msg}</p>}</>
 }
 
+// «Клиент согласовал КП» (схема HEAD 26.11): сумма и нормы закрепляются; поменять — только «Снять согласование» с причиной.
+function KpAgree({ d, onDone }) {
+  const [undo, setUndo] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const a = d.kp_agreed
+  const hasKp = (d.files || []).some(f => (f.title || '').startsWith('КП'))
+  const go = (path, body, t) => { setBusy(true); setErr(''); api(`/bx/deals/${d.id}/${path}`, { method: 'POST', body }).then(() => onDone(t), e => setErr(e.message)).finally(() => setBusy(false)) }
+  if (a) return <div className="kpagree on">
+    <div><b>Клиент согласовал КП</b><span className="small muted">{money(a.total)} · {dt(a.at)} · {a.by}. Сумма и нормы закреплены.</span></div>
+    {undo === null ? <button className="ghost mini" onClick={() => setUndo('')}>Снять согласование</button>
+      : <><input value={undo} onChange={e => setUndo(e.target.value)} placeholder="Почему: клиент попросил другую площадь…" />
+        <div className="dealbtns wrapbtns"><button className="mini" disabled={busy || undo.trim().length < 3} onClick={() => go('kp-agreed/undo', { reason: undo.trim() }, 'Согласование снято — можно пересчитать.')}>Снять</button>
+          <button className="ghost mini" onClick={() => setUndo(null)}>Отмена</button></div></>}
+    {err && <p className="small why">{err}</p>}
+  </div>
+  if (!hasKp || !d.sum) return <p className="small muted">Когда КП скачано и клиент согласился — здесь появится кнопка «Клиент согласовал КП».</p>
+  return <div className="kpagree">
+    <button disabled={busy} onClick={() => go('kp-agreed', {}, 'Клиент согласовал КП: сумма и нормы закреплены.')}>Клиент согласовал КП</button>
+    <span className="small muted">Сумма {money(d.sum)} и нормы закрепятся; договор и счёт возьмут их.</span>
+    {err && <p className="small why">{err}</p>}
+  </div>
+}
+
 function Calc({ d, saved, onSaved }) {
   const svc0 = /печат/i.test(d.service || '') ? 'print' : 'mural'
   const [f, setF] = useState(() => saved?.in || { service: svc0, area: d.area || '', level: d.level || 'medium', design: null, extras: [], outdoor: false, place: 'base', cash: 0, qty: 1 })
@@ -194,7 +218,8 @@ function Calc({ d, saved, onSaved }) {
       {r.flags.map(([c, t], i) => <div key={i} className={'flag ' + c}>{t}</div>)}
       <div className="copybox">{r.ladder}</div>
       <div className="dealbtns wrapbtns"><Copy text={r.ladder} label="Скопировать лестницу цены" /><Copy text={r.client_text} label="Скопировать текст клиенту" /></div>
-      <button disabled={busy || !r.total} onClick={save}>{saved ? 'Записать заново в сделку' : 'Записать в сделку'}</button>
+      {d.kp_agreed ? <p className="small why">КП согласовано клиентом на {money(d.kp_agreed.total)} — сумма и нормы закреплены. Чтобы записать новую цену, сначала «Снять согласование» в шаге «КП».</p>
+        : <button disabled={busy || !r.total} onClick={save}>{saved ? 'Записать заново в сделку' : 'Записать в сделку'}</button>}
       {msg && <p className="small muted">{msg}</p>}
       <p className="small muted">В сделку уходят сумма, площадь, сложность, смены, состав и срок; в ленту — короткий расчёт. КП и договор возьмут эти цифры сами.</p>
     </>}
@@ -456,6 +481,7 @@ export function DealCard({ id, back, place }) {
           : <p className="small why">Сначала сделайте расчёт — тогда КП соберётся без ввода цифр. <a onClick={() => setPanel('calc')}>К расчёту</a></p>}
         {lockKP.length ? <Locked what="КП" miss={lockKP} onFill={fillIt} onCalc={() => setPanel('calc')} />
           : <Embed place={place} view="kp" dealId={d.id} kp={kpItem} onDoc={onDoc} />}
+        <KpAgree d={d} onDone={said} />
       </div>
       <Materials place={place} d={d} portal={portal} />
     </>}
@@ -509,7 +535,9 @@ export function DealCard({ id, back, place }) {
     {sheet?.kind === 'wait' && <WaitSheet api={api} path={`/bx/deals/${id}`} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'stage' && <StageSheet d={d} stages={stages} onClose={() => setSheet(null)} onDone={said} onFill={() => setSheet({ kind: 'fill' })} />}
     {sheet?.kind === 'client' && <ClientSheet dealId={d.id} onClose={() => setSheet(null)} onDone={said} />}
-    {sheet?.kind === 'fill' && <FillSheet d={d} onClose={() => setSheet(null)} onDone={said} />}
+    {sheet?.kind === 'fill' && <FillSheet d={d} onClose={() => setSheet(null)} onDone={said}
+      onClient={() => setSheet({ kind: 'client' })} onStep={k => { setSheet(null); setPanel(k) }} onProd={() => setSheet({ kind: 'prod' })}
+      onDesign={() => { setSheet(null); setTimeout(() => document.querySelector('.dtdeal')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50) }} />}
     {sheet?.kind === 'prod' && <ProductionSheet dealId={d.id} onClose={() => setSheet(null)} onDone={said} onFill={() => setSheet({ kind: 'fill' })} />}
     {sheet?.kind === 'note' && <NoteSheet d={d} initial={sheet.text} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'pay' && <PaySheet d={d} slot={sheet.slot} onClose={() => setSheet(null)} onDone={said} />}
