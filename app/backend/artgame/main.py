@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from . import constants as consts
 from . import ads, adrules, meta, mktlib, mktstats, mediasync, appeals, chatfiles, brand, closing, marketing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring, advances
-from . import bx, bxw, mophints, db, relay, mopcrm, deal_money, design, designobj, designtasks, designbrief, files, kpagree, projcard, shiftmove, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
+from . import bx, bxw, mophints, db, relay, mopcrm, deal_money, design, designobj, designtasks, designbrief, files, hr, kpagree, projcard, shiftmove, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
 
@@ -85,6 +85,7 @@ app.include_router(gip.router)
 app.include_router(designobj.router)   # дизайн в карточке проекта на любой стадии (HEAD 14.11)
 app.include_router(kpagree.router)   # «Клиент согласовал КП» закрепляет сумму и нормы (HEAD 26.11)
 app.include_router(designtasks.router)   # задачи на дизайн при сделке — доска дизайнера (HEAD 25.11)
+app.include_router(hr.router)   # кандидаты: анкета по ссылке, «Команда → Кандидаты» (HEAD 26.11)
 app.include_router(designbrief.router)   # вопрос дизайнера к МОП, бриф клиента по ссылке (HEAD 26.11)
 app.include_router(shiftmove.router)   # перенос смены на другой объект, HEAD (14.11)
 app.include_router(projcard.router)   # карточка проекта: контакт на объекте, деньги проекта (HEAD 14.11)
@@ -128,11 +129,18 @@ def register(body: RegisterIn, user: dict = Depends(tg_user)):
             (tg_id, user.get("username"), body.full_name.strip(), body.phone,
              "head" if is_head else None, "active" if is_head else "pending"),
         ).fetchone()
+        hired = not is_head and hr.on_register(conn, row["id"], body.phone)   # принятый кандидат — роль сразу (HEAD 26.11)
         if is_head:
             conn.execute("INSERT INTO person_zones (person_id, zone_code) SELECT %s, code FROM zones WHERE code<>'marketing'", (row["id"],))
         db.audit(conn, row["id"], "register", "people", row["id"])
         p = load_person(conn, tg_id)
-    if not is_head and settings.head_tg_id and settings.bot_token:
+    if hired and settings.head_tg_id and settings.bot_token:
+        try:
+            from . import notify
+            notify.SEND(settings.head_tg_id, f"Принятый кандидат вошёл в приложение: {body.full_name.strip()}. Роль уже стоит.")
+        except Exception as e:  # noqa: BLE001
+            print("register notify:", e)
+    elif not is_head and settings.head_tg_id and settings.bot_token:
         try:   # HEAD узнаёт о заявке сразу, роль назначает во вкладке «Команда»
             from . import notify
             who = body.full_name.strip() + (f" (@{user['username']})" if user.get("username") else "")

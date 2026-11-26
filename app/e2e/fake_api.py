@@ -262,6 +262,20 @@ async def _profile_done(request, call_next):
     return resp
 
 
+
+# HR (HEAD 26.11): таблицы Диска подменены — строки складываются в HR_ROWS (смотрит e2e/kandidaty.cjs)
+from artgame import hr_sheets as _hs  # noqa: E402
+HR_ROWS: list = []
+_hs.find_prior = lambda ph: {"sheet": "Художники", "status": "Резерв", "comment": "звать, когда набор", "contact": "окт 2026"} if ph == "87015550000" else None
+_hs.base_upsert = lambda sheet, c, lvl, url: HR_ROWS.append(["base", sheet, c["full_name"], _hs.status_of(c), lvl]) or 2
+_hs.staff_append = lambda c, title, sup: HR_ROWS.append(["staff", c["full_name"], title, sup]) or 60
+
+
+@app.get("/api/_e2e/hr_rows")
+def _hr_rows():
+    return HR_ROWS
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8100)
 

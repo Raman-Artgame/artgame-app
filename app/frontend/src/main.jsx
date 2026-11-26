@@ -27,6 +27,8 @@ import { MyData, ProfileForm } from './profile.jsx'
 import { FileLinks } from './objects.jsx'
 import { Closing } from './closing.jsx'
 import { ClientBriefPage } from './brief.jsx'
+import { JobPage } from './hrform.jsx'
+import { TeamTabs } from './hr.jsx'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
   print_operator: 'Оператор настенного принтера', print_master: 'Мастер настенной печати', mop: 'МОП', mop_vip: 'VIP МОП',
@@ -116,6 +118,7 @@ function Main({ me, onMe, web, logout }) {
   useEffect(() => { if (tab !== 'design') setDesignView(null) }, [tab])
   const go = t => { if (t === 'deals') setDealId(null); if (t === 'leads') setLeadId(null)
     if (t.startsWith('design:')) { setDesignView(t.slice(7)); setTab('design'); return }
+    if (t === 'people:hr') { try { sessionStorage.setItem('artgame.team.v', 'hr') } catch { /* */ } setTab('people'); return }
     if (t === 'fin:cash') { setFinView('cash'); setTab('fin'); return } if (t === 'fin') setFinView(null); if (t === 'design') setDesignView(null); setTab(t) }
   const [toast, setToast] = useState('')
   const done = t => { setToast(t); setTab('mine'); setTimeout(() => setToast(''), 4000) }
@@ -191,7 +194,7 @@ function Main({ me, onMe, web, logout }) {
       {toast && <div className="toast">{toast}</div>}
       {unread > 0 && tab !== 'chat' && !isHead && <button className="dmbar" onClick={() => go('chat')}>✉️ Новое сообщение в чате<span>Открыть ›</span></button>}
       {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'chat' ? <Chat head={isHead} /> : tab === 'viewas' ? <ViewAsCard /> :
-        tab === 'people' ? <><TeamPath head /><People ROLE={ROLE} ZONE={ZONE} openViewAs={isHead ? () => setTab('viewas') : null} /></> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
+        tab === 'people' ? <TeamTabs><TeamPath head /><People ROLE={ROLE} ZONE={ZONE} openViewAs={isHead ? () => setTab('viewas') : null} /></TeamTabs> : tab === 'deals' ? <Deals key={dealId || 0} initial={dealId} place={mopPlace} /> :
         tab === 'leads' ? (leadId ? <LeadCard key={leadId} id={leadId} back={() => setLeadId(null)} openDeal={openDeal} /> : <Leads openLead={openLead} openMonth={openMonth} />) :
         tab === 'today' ? <Today openDeal={openDeal} openLead={openLead} openMonth={openMonth} /> : tab === 'month' ? <Month openDeal={openDeal} /> :
         tab === 'projects' ? <Projects openDeal={sales ? openDeal : null} me={me} /> : tab === 'journal' ? <Journal me={me} /> : tab === 'prod' ? <Production me={me} /> : tab === 'mkt' ? <Marketing me={me} pending={pulse?.posts || 0} /> :
@@ -448,5 +451,7 @@ function Nav({ tabs, tab, setTab, counts = {}, scroll }) {
 }
 
 // Бриф клиента по ссылке (HEAD 26.11): /?brief=ТОКЕН открывается без входа — клиент не сотрудник, приложение ему не показываем
-const briefToken = new URLSearchParams(location.search).get('brief')
-createRoot(document.getElementById('root')).render(briefToken ? <ClientBriefPage token={briefToken} /> : <App />)
+// Анкета кандидата (HEAD 26.11 «отдел HR»): /?job=art&src=instagram — тоже без входа, кандидат ещё не сотрудник
+const qs = new URLSearchParams(location.search)
+const briefToken = qs.get('brief'), job = qs.get('job')
+createRoot(document.getElementById('root')).render(briefToken ? <ClientBriefPage token={briefToken} /> : job ? <JobPage dir={job} src={qs.get('src')} /> : <App />)
