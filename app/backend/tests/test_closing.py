@@ -274,3 +274,38 @@ def test_bypass_no_docs_and_test_deal(client, monkeypatch):
     monkeypatch.setitem(DEALS, "1409", deal(1409, TITLE="ТЕСТ ARTGAME — ДОКУМЕНТЫ — НЕ КЛИЕНТ"))
     assert client.post("/api/bx/deals/1409/close", headers=hdr(6000)).status_code == 400
     assert client.post("/api/head/closing/1409/close", headers=hdr(1000)).status_code == 400
+
+
+def test_via_no_docs_only_money_and_prod(client, monkeypatch):
+    """HEAD 26.11: сделка без ИП и документов — выбор тремя кнопками; остаются оплата и Продакшн, дата сдачи — день закрытия."""
+    ids, calls, sent, pdfs = setup(client, monkeypatch)
+    monkeypatch.setitem(DEALS, "1810", deal(1810, stage="WON", MOVED_TIME="2026-11-20T10:00:00+05:00"))
+    st = client.get("/api/bx/deals/1810/close", headers=hdr(6000)).json()
+    assert st["via"] == "1103" and st["can_via"] and [x["id"] for x in st["via_list"]] == ["1103", "2069", "2071"]
+    assert "end" in keys(st)
+    assert client.post("/api/bx/deals/1810/via", json={"id": "9"}, headers=hdr(1000)).status_code == 400
+    assert client.post("/api/bx/deals/1810/via", json={"id": "2071"}, headers=hdr(2000)).status_code == 403     # не МОП и не HEAD
+    r = client.post("/api/bx/deals/1810/via", json={"id": "2071"}, headers=hdr(1000))
+    assert r.status_code == 200, r.text
+    assert DEALS["1810"]["MYCOMPANY_ID"] == "2071"
+    ps = client.get("/api/head/closing/1810", headers=hdr(1000)).json()
+    assert ps["via"] == "2071" and ps["deal"]["myco"].startswith("Без документов")
+    assert {x["key"] for x in ps["checks"] if not x["ok"]} == {"debt", "photos", "prod"}                        # документы и дата сдачи не нужны
+    # оплата, фото, Продакшн — и HEAD принимает; «Окончание факт» = день, когда сделку перевели
+    monkeypatch.setattr(drive, "save_income_receipt", lambda conn, name, data, deal_id: "drv-income")
+    assert client.post("/api/bx/deals/1810/payment", json={"client_uid": uid(), "amount": 1160000, "op_date": "2026-11-19", "account": "kaspi",
+                                                           "receipt": JPG}, headers=hdr(6000)).status_code == 200
+    chk = client.get("/api/fin/payments/check", headers=hdr(1000)).json()
+    for x in (chk.get("items") if isinstance(chk, dict) else chk):
+        assert client.post(f"/api/fin/ledger/{x['id']}/check", headers=hdr(1000)).status_code == 200
+    with db.pool.connection() as conn:
+        conn.execute("""INSERT INTO objects (id, title, city, bitrix_stage, drive_folder, design_synced_at)
+                        VALUES (1810, 'Щиток', 'Астана', 'WON', 'fold-1810', now())""")
+        conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, drive_id, status, uploaded_by)
+                        VALUES (gen_random_uuid(), 1810, 'photo', 'после.jpg', 'image/jpeg', 'drv-ph3', 'ready', %s)""", (ids[2000],))
+    ph = next(x for x in client.get("/api/head/closing/1810", headers=hdr(1000)).json()["photos"])
+    assert client.post(f"/api/head/closing/1810/prod/{ph['id']}", headers=hdr(1000)).json()["prod"]
+    r = client.post("/api/head/closing/1810/close", headers=hdr(1000))
+    assert r.status_code == 200, r.text
+    assert DEALS["1810"][bxw.F_END_FACT] == "2026-11-20" and DEALS["1810"]["STAGE_ID"] == "WON"
+    assert client.post("/api/bx/deals/1810/via", json={"id": "1103"}, headers=hdr(1000)).status_code == 409    # закрыта — не меняем

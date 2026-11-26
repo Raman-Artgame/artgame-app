@@ -1623,3 +1623,10 @@ button.dttile.on { border-color: var(--text); }
 .scr .st b.fill { font-weight: 700; color: var(--text); }
 mark.gap { background: var(--warnbg); color: var(--warn); border-radius: 4px; padding: 0 3px; }
 
+
+/* Закрытие: через что проходит сделка (HEAD 26.11) */
+.viapick { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; }
+.viapick .viabtns { display: flex; flex-wrap: wrap; gap: 6px; }
+.viapick .viabtns button, .decide .viapick .viabtns button { flex: 1 1 auto; margin: 0; padding: 10px 12px; font-size: 14px; background: var(--dark2) !important; color: var(--text); border: 1px solid var(--line); opacity: 1; }
+.viapick .viabtns button.on, .decide .viapick .viabtns button.on { background: var(--accent) !important; color: #fff; border-color: transparent; }
+.viapick p { margin: 0; }

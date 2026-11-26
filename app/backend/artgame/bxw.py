@@ -29,7 +29,7 @@ F_START, F_END = "UF_CRM_ARTGAME_PROJECT_START_ACTUAL", "UF_CRM_ARTGAME_PROJECT_
 F_CONTRACT_NO = "UF_CRM_1753292354197"   # «Номер договора»
 F_END_FACT = "UF_CRM_ARTGAME_PROJECT_END_ACTUAL"   # «Окончание факт»: пишет приложение при закрытии сделки HEAD (12.11)
 WRITABLE = {"OPPORTUNITY", "STAGE_ID", F_START, F_END, F_END_FACT, bx.AREA, bx.SERVICE, bx.ADDR, bx.CITY, F_ADV, F_DAYS, F_WARR, F_INV_SUM, F_INV_PURPOSE, F_REASON,
-            F_KP, F_CONTRACT, F_INVOICES, F_ACTS, F_OTHER, bx.F_LEVEL, bx.F_SHIFTS, bx.F_CREW, bx.F_TERM, "TITLE", bx.OBJECT, *bx.PROJECT}
+            F_KP, F_CONTRACT, F_INVOICES, F_ACTS, F_OTHER, bx.F_LEVEL, bx.F_SHIFTS, bx.F_CREW, bx.F_TERM, "TITLE", bx.OBJECT, "MYCOMPANY_ID", *bx.PROJECT}
 KEEP_EMPTY = {k for k, (_, kind) in bx.PROJECT.items() if kind in ("bool", "users")}   # «нет» и пустой список — тоже значение
 MULTI_FILE = {F_KP, F_CONTRACT, F_INVOICES, F_ACTS, F_OTHER}
 # Переходы по документам: двигаем только вперёд и только из перечисленных стадий.

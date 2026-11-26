@@ -29,6 +29,10 @@ router = APIRouter(prefix="/api")
 READY, WON = "UC_BMKDS4", "WON"   # «Оплата+закрывающие документы» → «Оплата получена»
 NO_DOCS = "2071"                  # «Без документов (наличные/перевод)»: без договора, счёта и АВР (решение 2)
 MYCO = {"1103": "ИП Яковлев", "2069": "ИП Артамонов", "2071": "Без документов (наличные/перевод)"}
+# HEAD 26.11: «выбор, через что это будет проходить, нужно сделать удобным» — три кнопки в шаге «Закрытие» и в паспорте.
+VIA = [{"id": "1103", "title": "ИП Яковлев", "hint": "с договором, счётом и АВР"},
+       {"id": "2069", "title": "ИП Артамонов", "hint": "с договором, счётом и АВР"},
+       {"id": NO_DOCS, "title": "Без ИП, без документов", "hint": "наличные или перевод: нужны только оплата и Продакшн"}]
 FROM = date(2026, 11, 12)         # с этого дня сделка в «Оплата получена» без паспорта — «закрыта мимо HEAD»
 F_LAYOUT = "UF_CRM_ARTGAME_APPROVED_LAYOUT"   # «Эскиз» (утверждённый макет) в сделке
 MODEL = "fin.margin.model"        # норма маржи сделки, % — лист «Значения»; нет ключа — маржа без сравнения и без флага
@@ -95,9 +99,9 @@ def checks(conn, d: dict, money: dict, o: dict | None = None) -> list[dict]:
         has = bool(d.get(f))
         add(key, title, has, "в сделке" if has else "не нужен: сделка «Без документов»" if no_docs else "нет файла", where, "МОП", skip=no_docs)
     end = _day(d.get(F_END_FACT)) or o.get("done_on")
-    add("end", "Окончание работ (факт)", end,
+    add("end", "Окончание работ (факт)", end, "не нужно: при закрытии поставим дату закрытия" if no_docs and not end else
         (f"{_dmy(end)}" + (f" · отметил {o['done_by']}" if o.get("done_on") and not d.get(F_END_FACT) and o.get("done_by") else "")) if end else "дата не отмечена",
-        "«Проекты» → объект → «Работы сданы» (или здесь, ниже)", "ГИП")
+        "«Проекты» → объект → «Работы сданы» (или здесь, ниже)", "ГИП", skip=no_docs)
     ph = conn.execute("""SELECT count(*) AS n FROM files WHERE object_id=%s AND status='ready' AND kind IN ('photo','media')
                          AND coalesce(mime,'') LIKE 'image/%%'""", (did,)).fetchone()["n"] if o else 0
     add("photos", "Фото готового объекта", ph > 0, f"фото: {ph}" if ph else "фото нет",
@@ -319,7 +323,7 @@ def _state(conn, p: dict, d: dict) -> dict:
         maybe_sync(conn, o)
     cks = checks(conn, d, money, o)
     return {"id": did, "stage": d["STAGE_ID"], "ready": d["STAGE_ID"] == READY, "won": d["STAGE_ID"] == WON, "test": bx.is_test(d),
-            "myco": _myco(d), "no_docs": str(d.get("MYCOMPANY_ID") or "") == NO_DOCS, "checks": cks, "ok": all(x["ok"] for x in cks),
+            "myco": _myco(d), "via": str(d.get("MYCOMPANY_ID") or ""), "via_list": VIA, "can_via": p["role_code"] in ("head", "mop", "mop_vip"), "no_docs": str(d.get("MYCOMPANY_ID") or "") == NO_DOCS, "checks": cks, "ok": all(x["ok"] for x in cks),
             "object": bool(o), "done_on": o.get("done_on").isoformat() if o.get("done_on") else "", "closed_at": o.get("closed_at"),
             "request": _last(conn, did), "head": p["role_code"] == "head", "money": money, "o": o}
 
@@ -369,6 +373,32 @@ def close_send(deal_id: int, bg: BackgroundTasks, p: dict = Depends(active)):
         out = {"ok": True, "request": _last(conn, deal_id)}
     bg.add_task(_tell_heads, jobs)   # заявка приходит HEAD на Пульт и в бот (документ, утверждён 12.11)
     return out
+
+
+class ViaIn(BaseModel):
+    id: str
+
+
+@router.post("/bx/deals/{deal_id}/via")
+def via_set(deal_id: int, b: ViaIn, p: dict = Depends(active)):
+    """Через что проходит сделка: ИП Яковлев, ИП Артамонов или без ИП и документов. Меняют HEAD и МОП сделки, пока она
+    не закрыта паспортом. Пишется в поле сделки «Реквизиты моей компании» — от него зависят пункты закрытия."""
+    if b.id not in {x["id"] for x in VIA}:
+        raise HTTPException(400, "Нет такого варианта")
+    if p["role_code"] not in ("head", "mop", "mop_vip"):
+        raise HTTPException(403, "Меняют МОП сделки и HEAD")
+    d = bx._deal(p, deal_id, fresh=True)
+    with db.pool.connection() as conn:
+        if conn.execute("SELECT 1 FROM deal_close WHERE deal_id=%s AND status='closed'", (deal_id,)).fetchone():
+            raise HTTPException(409, "Сделка закрыта — паспорт уже сохранён")
+    if str(d.get("MYCOMPANY_ID") or "") != b.id:
+        r = bxw.write(p, deal_id, "через что проходит сделка", {"MYCOMPANY_ID": b.id},
+                      "сделка проходит: " + next(x["title"] for x in VIA if x["id"] == b.id))
+        if r["bx"] == "error":
+            raise HTTPException(502, f"Битрикс не принял: {r.get('error')}")
+        if r["bx"] == "off":
+            raise HTTPException(503, "Запись в Битрикс выключена — выбор не сохранён")
+    return {"ok": True, "via": b.id}
 
 
 class DoneIn(BaseModel):
@@ -481,7 +511,7 @@ def closing_one(deal_id: int, p: dict = Depends(require_head)):
         s = _state(conn, p, d)
         pas = passport(conn, p, d, s["money"], s["checks"], s["o"])
     return {**_sign(pas), "frozen": False, "checks": s["checks"], "ok": s["ok"], "request": s["request"], "ready": s["ready"],
-            "won": s["won"], "test": s["test"], "object": s["object"], "bypass": s["won"]}
+            "won": s["won"], "test": s["test"], "object": s["object"], "bypass": s["won"], "via": s["via"], "via_list": VIA}
 
 
 class DecideIn(BaseModel):
@@ -526,6 +556,8 @@ def closing_close(deal_id: int, bg: BackgroundTasks, p: dict = Depends(require_h
     fields = {} if via == "bitrix" else {"STAGE_ID": WON}
     if not d.get(F_END_FACT) and o.get("done_on"):
         fields[bxw.F_END_FACT] = o["done_on"].isoformat()
+    elif not d.get(F_END_FACT) and s["no_docs"]:   # без документов дату сдачи не спрашиваем: день, когда сделку закрыли
+        fields[bxw.F_END_FACT] = ((_day(d.get("MOVED_TIME")) if via == "bitrix" else None) or datetime.now(TZ).date()).isoformat()
     r = {"bx": "skip"}
     if fields:   # в Битрикс — только стадия и дата; прибыль и маржа туда не пишутся (решение 3)
         r = bxw.write(p, deal_id, "закрытие сделки", fields, "закрыл сделку: паспорт сделки сохранён в приложении" if via == "app" else None)

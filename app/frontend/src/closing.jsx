@@ -83,7 +83,8 @@ export function ClosePanel({ d, onDone }) {
       {rq.points?.length > 0 && <div>{rq.points.map(x => <span key={x.key} className="miss">{x.title}</span>)}</div>}
       <div className="small" style={{ marginTop: 6 }}>Доделайте и отправьте снова.</div></div>}
     {!closed && !sent && !s.ready && <p className="small muted">«На закрытие» — со стадии «Оплата+закрывающие документы», когда работы сданы. Ниже — что приложение проверит.</p>}
-    {s.no_docs && <p className="small muted">Сделка «Без документов (наличные/перевод)»: договор, счёт и АВР не нужны.</p>}
+    {!closed && !sent && s.can_via ? <ViaPick id={d.id} via={s.via} list={s.via_list} onSaved={load} />
+      : s.no_docs && <p className="small muted">Сделка без ИП и документов: договор, счёт и АВР не нужны.</p>}
     {s.test && <p className="small why">Тестовая сделка — её не закрываем.</p>}
     <Checks list={s.checks} />
     {!closed && s.object && (!s.checks.find(x => x.key === 'end')?.ok || (rq?.status === 'returned' && rq.points?.some(x => x.key === 'end'))) &&
@@ -94,6 +95,23 @@ export function ClosePanel({ d, onDone }) {
     {!s.head && !closed && !sent && <p className="small muted">В «Оплата получена» сделку переводит только HEAD — после проверки паспорта сделки.</p>}
     {s.head && !s.test && <button className={closed ? 'ghost' : ''} onClick={() => setPass(true)}>{closed ? 'Паспорт сделки' : sent ? 'Открыть заявку · паспорт сделки' : miss.length ? 'Паспорт сделки' : 'Паспорт сделки · закрыть'}</button>}
     {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}
+  </div>
+}
+
+// HEAD 26.11: «выбор, через что это будет проходить, нужно сделать удобным» — три кнопки; от выбора зависят пункты закрытия.
+function ViaPick({ id, via, list, onSaved }) {
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  if (!list?.length) return null
+  const pick = x => { if (x.id === via || busy) return
+    setBusy(x.id); setErr('')
+    api(`/bx/deals/${id}/via`, { method: 'POST', body: { id: x.id } }).then(() => { setBusy(''); onSaved() }, e => { setBusy(''); setErr(e.message) }) }
+  const cur = list.find(x => x.id === via)
+  return <div className="viapick">
+    <span className="small muted">Через что проходит сделка</span>
+    <div className="viabtns">{list.map(x => <button key={x.id} className={x.id === via ? 'on' : ''} disabled={!!busy} onClick={() => pick(x)}>{busy === x.id ? 'Сохраняю…' : x.title}</button>)}</div>
+    <p className="small muted">{cur ? cur.hint[0].toUpperCase() + cur.hint.slice(1) + '.' : 'Не выбрано — выберите, от этого зависят пункты закрытия.'}</p>
+    {err && <p className="small why">{err}</p>}
   </div>
 }
 
@@ -159,6 +177,7 @@ export function Passport({ id, back, onDecided }) {
     {!p.frozen && <div className="card decide">
       {p.request?.status === 'sent' && <p className="small">На закрытие отправил {p.request.sent_by} · {dm(p.request.sent_at)}</p>}
       {p.request?.status === 'returned' && <p className="small muted">Последний раз вернули {dm(p.request.decided_at)}{p.request.reason ? `: ${p.request.reason}` : ''}</p>}
+      <ViaPick id={id} via={p.via} list={p.via_list} onSaved={load} />
       {!p.ready && !p.won && <p className="small muted">Сделка не на «Оплата+закрывающие документы» — закрыть пока нельзя.</p>}
       {(p.ready || p.won) && bad.length > 0 && <div className="lockbox"><b>🔒 {p.bypass ? '«Принять закрытие»' : '«Закрыть»'} откроется, когда будут выполнены все пункты</b>
         <div>Не выполнено {bad.length} из {p.checks.length}:</div><div>{bad.map(x => <span key={x.key} className="miss">{x.short || x.title}</span>)}</div></div>}

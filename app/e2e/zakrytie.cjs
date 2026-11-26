@@ -355,6 +355,20 @@ async function closeStep(p) {
   await shot(h, 'close-head-locked')
   assert.ok(!(await e2e('/bx_calls')).some(x => x.params.id === 1730), 'в Битрикс ничего не ушло')
 
+  // HEAD 26.11: сделка прошла без ИП и документов — три кнопки «через что», после выбора остаются оплата и Продакшн
+  const vp = dc.locator('.viapick')
+  await vp.locator('button.on', { hasText: 'ИП Яковлев' }).waitFor()
+  await vp.getByRole('button', { name: 'Без ИП, без документов' }).click()
+  await vp.locator('button.on', { hasText: 'Без ИП, без документов' }).waitFor()
+  const left = await dc.locator('.lockbox').textContent()
+  assert.ok(!/договор|Счёт|АВР|Окончание работ/.test(left) && /Продакшн/.test(left), 'без документов: ' + left)
+  assert.deepStrictEqual((await e2e('/bx_calls')).filter(x => x.params.id === 1730 && x.method === 'crm.deal.update').map(x => x.params.fields),
+    [{ MYCOMPANY_ID: '2071' }], 'выбор записан в сделку')
+  await fits(h, 'выбор «через что»')
+  await h.evaluate(() => document.querySelector('.passhero').scrollIntoView({ block: 'start' }))
+  await h.waitForTimeout(400)
+  await shot(h, 'close-bez-dokumentov')
+
   await b.close()
   console.log('zakrytie OK')
 })().catch(e => { console.error(e); process.exit(1) })
