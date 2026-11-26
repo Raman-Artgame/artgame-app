@@ -27,13 +27,15 @@ export function DealFiles({ dealId, me }) {
 function SeeFiles({ dealId }) {
   const [list, setList] = useState([])
   const [open, setOpen] = useState(null)
+  const [all, setAll] = useState(false)
   useEffect(() => { api(`/objects/${dealId}/files?kind=design`).then(setList, () => setList([])) }, [dealId])
   if (!list.length) return null
   return <><p className="dtcap dtfiles">Эскизы · {list.length}</p>
-    {list.map(f => <div key={f.id} className="dtrow click" onClick={() => setOpen(f)}>
+    {(all ? list : list.slice(0, 3)).map(f => <div key={f.id} className="dtrow click" onClick={() => setOpen(f)}>
       {f.thumb ? <img className="dtthumb" src={f.thumb} alt="" /> : <span className="dtthumb">📄</span>}
       <div className="dtmain"><b>{f.name}</b><span className="small muted">{f.by} · {new Date(f.created_at).toLocaleDateString('ru-RU')}</span></div>
     </div>)}
+    {list.length > 3 && <button className="ghost mini" onClick={() => setAll(!all)}>{all ? 'Свернуть ▴' : `Показать все ${list.length} ▾`}</button>}
     <Viewer f={open} onClose={() => setOpen(null)} /></>
 }
 

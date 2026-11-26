@@ -1296,6 +1296,18 @@ button.okbtn:hover { background: var(--okbg); filter: brightness(1.2); }
 .dtthumb { flex: none; width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: var(--alt); display: grid; place-items: center; }
 .dtcap.dtfiles { margin-top: 14px; }
 
+/* Свёрнутый список файлов (HEAD 26.11): счётчик, превью первых, раскрывается по нажатию */
+button.gfold { display: block; width: 100%; padding: 12px; margin: 8px 0 0; background: var(--alt); border: 1px solid var(--line); border-radius: var(--r2); color: var(--text); text-align: left; }
+button.gfold:hover { background: var(--alt); border-color: var(--muted); }
+.gfold .gfoldt { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.gfold .gfoldt i { font-style: normal; font-size: 13px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.gfold .gfoldp { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.gfold .gfoldp .mthumb { width: 56px; height: 56px; flex: none; position: relative; }
+.gfold .gfoldp em { font-style: normal; font-size: 13px; color: var(--muted); font-weight: 700; margin-left: 4px; }
+button.gfold { display: flex !important; flex-direction: column; align-items: stretch; height: auto; font-weight: 400; }
+.gfold .gfoldt { width: 100%; }
+.gfold .gfoldt b { white-space: nowrap; font-size: 15px; }
+.gfold .gfoldp { width: 100%; overflow: hidden; }
 /* Эстафета сделки (HEAD 26.11): полоска пути из пяти отрезков и окно «В производство» */
 .dpath { margin: 10px 0 2px; }
 .dpbar { display: flex; gap: 3px; }
