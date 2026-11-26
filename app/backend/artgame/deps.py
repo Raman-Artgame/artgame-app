@@ -66,9 +66,18 @@ def current_person(x_telegram_init_data: str = Header(default=""), authorization
     if d and d.get("as"):   # HEAD смотрит как сотрудник: дальше всё считается от лица этого человека, запись закрыта
         with db.pool.connection() as conn:
             p = acting(resolve(conn, p, d["as"], load_person))
-        return {**p, "roles": roles_of(p)}
+        return _onboard({**p, "roles": roles_of(p)})
     p = acting(act_as(p, x_act_role))
-    return {**p, "roles": roles_of(p)}
+    return _onboard({**p, "roles": roles_of(p)})
+
+
+def _onboard(p: dict) -> dict:
+    """Знакомство после «Принять» (HEAD 26.11): что ещё не прочитано — приложение показывает шаги, смены закрыты."""
+    if not p.get("onboard_from"):
+        return {**p, "onboard": []}
+    from .onboard import pending
+    with db.pool.connection() as conn:
+        return {**p, "onboard": pending(conn, p)}
 
 
 def require_head(p: dict = Depends(current_person)) -> dict:

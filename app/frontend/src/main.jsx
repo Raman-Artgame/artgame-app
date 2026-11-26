@@ -29,6 +29,7 @@ import { Closing } from './closing.jsx'
 import { ClientBriefPage } from './brief.jsx'
 import { JobPage } from './hrform.jsx'
 import { TeamTabs } from './hr.jsx'
+import { Onboard } from './onboard.jsx'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
   print_operator: 'Оператор настенного принтера', print_master: 'Мастер настенной печати', mop: 'МОП', mop_vip: 'VIP МОП',
@@ -58,6 +59,11 @@ function App() {
   if (!me.profile_at && !me._view_as && me.status !== 'blocked') return <div className="wrap"><ProfileForm me={me} first onDone={setMe} /></div>
   if (me.status !== 'active') return <><ViewAsBar me={me} ROLE={ROLE} /><div className="wrap"><div className="card"><h1>{me.full_name}</h1>
     <p className="muted">{me.status === 'pending' ? 'Заявка у HEAD. Как только назначат роль, откроются разделы.' : 'Вход закрыт.'}</p></div></div></>
+  // знакомство после «Принять» (HEAD 26.11): правила роли, ТБ, соглашение — до первой смены
+  if (me.onboard?.length && !me._view_as) { const r = me.role_main || me.role_code
+    return <Onboard me={me} onDone={load}
+      docText={doc => JSON.stringify(doc === 'duties' ? [DUTIES[r], POLICY] : ['safety', PRINT.has(r)])}
+      renderDoc={doc => doc === 'duties' ? <Duty d={DUTIES[r]} code={r} me={me} /> : <Safety print={PRINT.has(r)} />} /> }
   return <><ViewAsBar me={me} ROLE={ROLE} /><FileLinks />
     <Main me={me} onMe={setMe} web={web} logout={() => { api('/logout', { method: 'POST', noView: true }).catch(() => {}); setWebToken(''); setViewAs(''); setLogin(true) }} /></>
 }

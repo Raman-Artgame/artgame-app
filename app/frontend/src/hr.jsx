@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { Copy } from './ui.jsx'
 import './hr.css'
+import { OnboardStatus } from './onboard.jsx'
 
 // «Команда → Кандидаты» (HEAD 26.11 «отдел HR»): анкеты по ссылке-вакансии, шаги до «Принять», подсказка уровня по ответам.
 // Видит только HEAD. Строка в «Базе кандидатов» и «Сотрудниках» пишется сервером сама (hr_sheets.py).
@@ -132,7 +133,7 @@ function CandCard({ id, back }) {
         <button disabled={!f.trial_on} onClick={() => save({ stage: 'trial', trial_on: f.trial_on, ...(f.trial_object ? { trial_object: +f.trial_object } : {}) })}>Назначить пробную</button></div>}
       {act === 'hired' && <div className="hrform"><label>С какой роли начинает</label>
         <div className="segf">{(c.roles || []).map(([k, t]) => <button key={k} className={f.hired_role === k ? 'on' : ''} onClick={() => setF({ ...f, hired_role: k })}>{t}</button>)}</div>
-        <p className="small muted">Все начинают с первой ступени. Человек входит в бот ARTGAME → «ARTGAME», вводит имя и этот же телефон — роль «{roleTitle[f.hired_role]}» встанет сама. Строка уйдёт в «Сотрудники и суппорты».</p>
+        <p className="small muted">Все начинают с первой ступени. Человек входит в бот ARTGAME → «ARTGAME», вводит имя и этот же телефон — роль «{roleTitle[f.hired_role]}» встанет сама. Строка уйдёт в «Сотрудники и суппорты». До первой смены он прочитает правила роли, ТБ и примет соглашение о неразглашении.</p>
         <button disabled={!f.hired_role} onClick={() => save({ stage: 'hired', hired_role: f.hired_role })}>Принять</button></div>}
       {(act === 'reserve' || act === 'rejected') && <div className="hrform"><label>Почему</label>
         <input value={f.reason || ''} maxLength={200} placeholder={act === 'reserve' ? 'нет набора в городе, позвать весной…' : 'слабые работы, не пришёл, не профиль…'} onChange={e => setF({ ...f, reason: e.target.value })} />
@@ -140,6 +141,7 @@ function CandCard({ id, back }) {
         <button disabled={!(f.reason || '').trim()} onClick={() => save({ stage: act, reason: f.reason, ...(act === 'rejected' ? { self_refused: !!f.self_refused } : {}) })}>{act === 'reserve' ? 'В резерв' : 'Отказать'}</button></div>}
       {c.stage === 'hired' && c.trial_on && <p className="small muted">{c.trial_paid ? `✓ Пробная смена ${c.trial_on.slice(8, 10)}.${c.trial_on.slice(5, 7)} начислена в ФОТ.` : `Пробная смена ${c.trial_on.slice(8, 10)}.${c.trial_on.slice(5, 7)} начислится в ФОТ, когда войдёт в приложение.`}</p>}
       {c.stage === 'hired' && <p className="small muted">{c.person_id ? '✓ Вошёл в приложение, роль стоит.' : `Ждём, когда войдёт в приложение с телефоном ${c.phone}. Можно отправить ему ссылку на бот.`}</p>}
+      {c.stage === 'hired' && c.person_id && <OnboardStatus ob={c.onboard} />}
       {c.stage === 'hired' && !c.person_id && <a className="btn ghost mini" href={wa(c, `Вы в команде ARTGAME! Откройте бот ARTGAME в Telegram, нажмите «Старт», потом «ARTGAME» внизу и введите имя и этот номер — ${c.phone}.`)} target="_blank" rel="noreferrer">Написать в WhatsApp, как войти</a>}
       {err && <p className="hrerr">{err}</p>}
     </div>
