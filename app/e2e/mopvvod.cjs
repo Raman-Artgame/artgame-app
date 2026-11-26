@@ -67,8 +67,8 @@ async function tab(p, name) {
 
   // 2. Клиент и реквизиты сделки 1601 (ТОО «Ромашка»): БИН, подписант, банк → в Битрикс, договор возьмёт сам
   await tab(p, 'Сделки')
-  await p.locator('.chips.scroll button', { hasText: 'Все' }).click()
-  await p.locator('.stage .qrow', { hasText: '№ 1601' }).click()
+  await p.locator('.card input[placeholder^="Номер"]').fill('1601')
+  await p.locator('.kc', { hasText: '№ 1601' }).first().click()
   await p.locator('.hero .steps').waitFor()
   await p.locator('.hero .morebtn').click()
   await p.locator('.hero').getByRole('button', { name: 'Клиент и реквизиты', exact: true }).click()

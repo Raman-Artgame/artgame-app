@@ -37,8 +37,8 @@ async function tab(p, name) {
 const fits = async (p, what) => assert.ok(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `${what}: ничего не уезжает вбок`)
 async function deal(p, id) {
   await tab(p, 'Сделки')
-  await p.locator('.chips.scroll button', { hasText: 'Все' }).click()
-  await p.locator('.stage .qrow', { hasText: `№ ${id}` }).click()
+  await p.locator('.card input[placeholder^="Номер"]').fill(`${id}`)
+  await p.locator('.kc', { hasText: `№ ${id}` }).first().click()
   await p.locator('.hero .dpath').waitFor()
 }
 

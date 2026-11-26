@@ -72,8 +72,8 @@ const art = (p, n) => p.evaluate(n => {
 // МОП: «Сделки» → № 1710 → шаг «Закрытие»
 async function closeStep(p) {
   await tab(p, 'Сделки')
-  await p.locator('.chips.scroll button', { hasText: 'Все' }).click()
-  await p.locator('.stage .qrow', { hasText: '№ 1710' }).click()
+  await p.locator('.card input[placeholder^="Номер"]').fill('1710')
+  await p.locator('.kc', { hasText: '№ 1710' }).first().click()
   await p.locator('.hero .steps').waitFor()
   await p.locator('.hero .steps > div', { hasText: 'Закрытие' }).click()
   const c = p.locator('.closepanel')
@@ -340,8 +340,8 @@ async function closeStep(p) {
   await e2e('/deal/1730', { TITLE: '1730 · ОФИС КАСПИЙ — АЛМАТЫ', STAGE_ID: 'UC_BMKDS4', OPPORTUNITY: '300000.00', ASSIGNED_BY_ID: '4565', MYCOMPANY_ID: '1103',
     DATE_MODIFY: new Date().toISOString(), UF_CRM_1753202415: FILE, UF_CRM_1753202391: FILE, UF_CRM_ARTGAME_DOC05_INVOICES: FILE })
   await tab(h, 'Сделки')
-  await h.locator('.chips.scroll button', { hasText: 'Все' }).click()
-  await h.locator('.stage .qrow', { hasText: '№ 1730' }).click()
+  await h.locator('.card input[placeholder^="Номер"]').fill('1730')
+  await h.locator('.kc', { hasText: '№ 1730' }).first().click()
   await h.locator('.hero .steps > div', { hasText: 'Закрытие' }).click()
   await h.locator('.closepanel .cklist').waitFor()
   await h.locator('.closepanel').getByRole('button', { name: 'Паспорт сделки', exact: true }).click()

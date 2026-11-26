@@ -1342,6 +1342,32 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
 .kpagree.on { border-left: 3px solid var(--ok, #5fb04a); }
 .kpagree > div:first-child { display: flex; flex-direction: column; gap: 2px; }
 
+/* канбан сделок (HEAD 26.11 «нормальный канбан как в Битриксе», суммы крупно, напоминания «кто что ждёт») */
+.kbtotal { font-size: 18px; font-weight: 800; margin-left: 6px; }
+.kbnow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.kbcount { display: flex; flex-direction: column; align-items: flex-start; gap: 0; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2); padding: 10px 12px; color: var(--text); font-weight: 500; }
+.kbcount span { font-size: 13px; color: var(--muted); } .kbcount b { font-size: 24px; line-height: 1.15; } .kbcount i { font-style: normal; font-size: 11.5px; color: var(--muted); }
+.kbcount.hot b { color: var(--hot); } .kbcount.wait b { color: var(--warn); } .kbcount.go b { color: var(--ok); }
+.kbcount.on { border-color: var(--text); background: var(--alt); }
+.kbmsg { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.kb { display: flex; gap: 10px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; margin: 0 -16px 8px; padding: 0 16px 10px; align-items: flex-start; }
+.kcol { flex: 0 0 min(84vw, 320px); scroll-snap-align: start; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px; min-height: 140px; }
+.kcol.over { border-color: var(--accent); background: #1d1419; }
+.kcol.dim { opacity: .75; }
+.khead { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; font-size: 14px; padding: 2px 4px 0; } .khead b { color: var(--muted); font-weight: 600; }
+.ksum { font-size: 20px; font-weight: 800; padding: 0 4px 10px; }
+.kc { background: var(--alt); border: 1px solid var(--line); border-radius: var(--r2); padding: 10px 11px; margin-bottom: 8px; cursor: pointer; }
+.kc[draggable=true] { cursor: grab; } .kc:active { cursor: grabbing; }
+.kc.hotc { border-color: #5a2030; }
+.kn { font-size: 12px; color: var(--muted); } .kt { font-weight: 700; margin: 1px 0 3px; line-height: 1.25; }
+.ks { font-size: 20px; font-weight: 800; letter-spacing: -.01em; } .ks.nosum { font-size: 13px; font-weight: 600; color: var(--hot); }
+.kr { display: inline-block; font-size: 12px; font-weight: 600; border-radius: 8px; padding: 3px 8px; margin-top: 6px; }
+.kr.hot { background: var(--hotbg); color: var(--hot); } .kr.wait { background: var(--warnbg); color: var(--warn); }
+.kr.idle { background: var(--dark); color: var(--muted); } .kr.go { background: var(--okbg); color: var(--ok); }
+.kw { font-size: 12px; color: var(--muted); margin-top: 5px; }
+.kempty { border: 2px dashed var(--line); border-radius: var(--r2); padding: 18px 8px; text-align: center; color: var(--muted); font-size: 12px; }
+.kbhint { margin: 0 0 12px; }
+
 /* ---- компьютер, широкий экран (HEAD 26.11: «с маленьким экраном вообще не удобно», «красиво и удобно») ----
    Только от 1100 px: телефон и Telegram на телефоне не меняются ни на пиксель. Меню — колонкой слева, все кнопки сразу
    (без «Ещё», useWide в ui.jsx), внизу колонки — кто вошёл и «Выйти». Содержимое — на ширину экрана (до 1360 px).
@@ -1472,4 +1498,9 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
 @media (min-width: 1600px) {
   .wrap:is([data-tab=people], [data-tab=mine], [data-tab=kit], [data-tab=journal]):has(> .card ~ .card ~ .card) { columns: 3; }
   .desk { grid-template-columns: minmax(0, 1fr) 420px; }
+}
+@media (min-width: 1100px) {
+  .wrap[data-tab=deals] .kbnow { grid-template-columns: repeat(4, minmax(0, 240px)); }
+  .wrap[data-tab=deals] .kb { margin: 0 0 8px; padding: 0 0 12px; scroll-snap-type: none; }
+  .wrap[data-tab=deals] .kcol { flex: 0 0 290px; }
 }

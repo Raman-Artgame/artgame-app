@@ -44,8 +44,8 @@ async function tab(p, name) {
   // 1. МОП: карточка сделки → «Нужен дизайн» дважды
   const m = await open(b, 6000)
   await tab(m, 'Сделки')
-  await m.locator('.chips.scroll button', { hasText: 'Все' }).click()
-  await m.locator('.stage .qrow', { hasText: '№ 1601' }).click()
+  await m.locator('.card input[placeholder^="Номер"]').fill('1601')
+  await m.locator('.kc', { hasText: '№ 1601' }).first().click()
   await m.locator('.dtdeal').waitFor()
   await m.waitForTimeout(800)
   const before = (await bxCalls()).length   // карточка при открытии сама дописывает своё — считаем после
@@ -110,8 +110,8 @@ async function tab(p, name) {
   await m.reload()
   await m.locator('nav button').first().waitFor()
   await tab(m, 'Сделки')
-  await m.locator('.chips.scroll button', { hasText: 'Все' }).click()
-  await m.locator('.stage .qrow', { hasText: '№ 1601' }).click()
+  await m.locator('.card input[placeholder^="Номер"]').fill('1601')
+  await m.locator('.kc', { hasText: '№ 1601' }).first().click()
   await m.locator('.dtdeal').getByRole('button', { name: 'Показать все 4 ▾' }).waitFor()
   assert.strictEqual(await m.locator('.dtdeal .dtrow.click').count(), 3, 'в сделке у МОП видно три последних эскиза')
   assert.match(await m.locator('.dtdeal .dtrow').first().textContent(), /Столовая.*Малика.*УТВЕРЖДЕНО/)

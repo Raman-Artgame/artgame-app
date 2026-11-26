@@ -47,13 +47,12 @@ async function tab(p, name) {
 }
 async function dealsOpen(p) {
   await tab(p, 'Сделки')
-  await p.locator('.chips.scroll').waitFor()
-  await p.locator('.chips.scroll button', { hasText: 'Все' }).click()
-  await p.locator('.stagehead').first().waitFor()
+  await p.locator('.kb .kcol').first().waitFor()
 }
 async function card(p, id) {
   await dealsOpen(p)
-  await p.locator('.stage .qrow', { hasText: `№ ${id}` }).click()
+  await p.locator('.card input[placeholder^="Номер"]').fill(String(id))
+  await p.locator('.kc', { hasText: `№ ${id}` }).first().click()
   await p.locator('.hero .steps').waitFor()
 }
 const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).click()
@@ -74,7 +73,8 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   await h.waitForTimeout(500)
   assert.strictEqual((await call(1000, '/people')).find(x => x.id === m.id).bitrix_user_id, 4565)
   await dealsOpen(h)
-  assert.strictEqual(await h.locator('.stage .qrow').count(), 3, 'HEAD видит все открытые сделки')
+  const nb = async name => +(await h.locator('.segf button', { hasText: name }).locator('span').textContent())
+  assert.strictEqual(await nb('Продажи') + await nb('В работе'), 3, 'HEAD видит все открытые сделки')
 
   // МОП: «Сегодня» — очередь: лид, где клиентка ждёт ответа в WhatsApp, горит; КП без ответа — сегодня; полоска месяца сверху
   const p = await open(b, 6000)
@@ -90,14 +90,38 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   assert.match(await p.locator('.strip').textContent(), /Месяц: 2,5 млн из 7 млн3% · до 4% ещё 4,5 млн/)
   await p.screenshot({ path: `${shots}/mop-today.png`, fullPage: true })
 
-  // Сделки воронкой: только свои
+  // Сделки канбаном (HEAD 26.11): только свои; колонки стадий, сумма крупно, напоминание «кто что ждёт» из очереди «Сегодня»
   await dealsOpen(p)
-  assert.strictEqual(await p.locator('.stage .qrow').count(), 1)
-  assert.match(await p.locator('.stagehead').first().textContent(), /Встреча\/Отправка КП.*1.*589\s250/)
-  await p.screenshot({ path: `${shots}/mop-deals.png` })
+  assert.strictEqual(await p.locator('.kc').count(), 1)
+  const kcol = p.locator('.kcol', { hasText: 'Встреча/Отправка КП' })
+  assert.match(await kcol.locator('.khead').textContent(), /Встреча\/Отправка КП1/)
+  assert.match(await kcol.locator('.ksum').textContent(), /589\s250/)
+  assert.match(await kcol.locator('.kc .ks').textContent(), /589\s250\s₸/)
+  await kcol.locator('.kc .kr.wait', { hasText: 'КП без ответа' }).waitFor()
+  assert.strictEqual(await p.locator('.kbcount.wait b').textContent(), '1')
+  assert.ok(await p.locator('.kcol', { hasText: 'Взаимное информирование' }).count(), 'пустые стадии — тоже колонки, в них можно перетащить')
+  await p.screenshot({ path: `${shots}/mop-deals.png`, fullPage: true })
+  await p.setViewportSize({ width: 1440, height: 900 }); await p.waitForTimeout(400)
+  await p.screenshot({ path: `${shots}/mop-deals-wide.png` })
+  // перетаскивание: назад — сразу в Битрикс; вперёд без заполненной карточки — замок, карточка остаётся, кнопка «Открыть сделку»;
+  // «Отложено» — только из карточки, с датой
+  const k0 = (await bxCalls()).length
+  await p.locator('.kc', { hasText: '№ 1601' }).dragTo(p.locator('.kcol', { hasText: 'Взаимное информирование' }))
+  await p.locator('.kcol', { hasText: 'Взаимное информирование' }).locator('.kc', { hasText: '№ 1601' }).waitFor()
+  await p.waitForFunction(n => fetch('/api/_e2e/bx_calls').then(r => r.json()).then(c => c.slice(n).some(x => x.params.fields?.STAGE_ID === 'NEW')), k0)
+  await p.locator('.kc', { hasText: '№ 1601' }).dragTo(p.locator('.kcol', { hasText: 'Отложено' }))
+  await p.locator('.kbmsg', { hasText: 'с датой возврата' }).waitFor()
+  await p.locator('.kc', { hasText: '№ 1601' }).dragTo(p.locator('.kcol', { hasText: 'Встреча/Отправка КП' }))
+  await p.locator('.kbmsg', { hasText: 'не перенесена: сначала заполните' }).waitFor()
+  await p.locator('.kcol', { hasText: 'Взаимное информирование' }).locator('.kc', { hasText: '№ 1601' }).waitFor()
+  await p.screenshot({ path: `${shots}/mop-deals-zamok.png` })
+  assert.ok((await p.locator('.kbmsg').getByRole('button', { name: 'Открыть сделку' }).count()), 'из сообщения — сразу в сделку')
+  await call(1000, '/bx/deals/1601/stage', { stage: 'PREPARATION' })   // HEAD вернул стадию
+  await p.setViewportSize({ width: 390, height: 844 })
+  await dealsOpen(p)
 
   // Карточка: тёмная шапка, шаги; расчёта ещё нет → открыт шаг «Расчёт» с площадью сделки
-  await p.locator('.stage .qrow').first().click()
+  await p.locator('.kc').first().click()
   await p.locator('.hero .steps').waitFor()
   assert.match(await p.locator('.hero .steps').textContent(), /Клиент.*Расчёт.*КП.*Договор.*Оплата.*В работе/)
   assert.match(await p.locator('.nextstep').textContent(), /Следующий шаг.*Расчёт.*Посчитать цену и срок/)
@@ -314,7 +338,7 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   await w.locator('.tiles').waitFor()
   await w.screenshot({ path: `${shots}/web-today.png` })
   await dealsOpen(w)
-  await w.locator('.stage .qrow').first().click()
+  await w.locator('.kc').first().click()
   await w.locator('.hero .steps').waitFor()
   await w.screenshot({ path: `${shots}/web-card.png`, fullPage: true })
   await w.getByRole('button', { name: 'Выйти' }).click()
