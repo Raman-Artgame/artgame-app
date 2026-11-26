@@ -21,6 +21,7 @@ import { TeamPath, countOf, markLabel, markOf, useMarks } from './grow.jsx'
 import { Feedback } from './feedback.jsx'
 import { Chat, useUnread } from './dm.jsx'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
+import { useWide } from './ui.jsx'
 import './tokens.css'
 import { MyData, ProfileForm } from './profile.jsx'
 import { FileLinks } from './objects.jsx'
@@ -177,7 +178,7 @@ function Main({ me, onMe, web, logout }) {
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={!isHead} />
   </>
   return <>
-    <div className="wrap">
+    <div className="wrap" data-tab={tab}>
       {web && <div className="webbar"><b>ARTGAME</b><span className="muted small">{me.full_name}</span><button className="ghost mini" onClick={logout}>Выйти</button></div>}
       <RoleSwitch me={me} />
       {!PLAIN.has(tab) && tab !== 'home' && tab !== 'chat' && !isHead && <div className="card"><h1>{me.full_name}</h1><span className="tag">{me.acting ? `${ROLE[me.role_main]} · и.о. ${gen(me.role_code)}` : ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
@@ -399,18 +400,18 @@ const ICON = {
   more: 'M5 12h.01M12 12h.01M19 12h.01' }
 const Icon = ({ k }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[k] || ICON.more} /></svg>
 const MAX = 6   // кнопок в меню без листа «Ещё»
-
 // scroll (HEAD 08.11, у всех): все кнопки внизу одной лентой без «Ещё», лента листается пальцем; открытая вкладка — в поле зрения.
 function Nav({ tabs, tab, setTab, counts = {}, scroll }) {
   const [more, setMore] = useState(false)
-  const fold = !scroll && tabs.length > MAX
+  const wide = useWide()
+  const fold = !scroll && !wide && tabs.length > MAX
   const main = fold ? tabs.slice(0, MAX - 1) : tabs
   const rest = fold ? tabs.slice(MAX - 1) : []
   const inRest = rest.find(([k]) => k === tab)
   // лента листается (HEAD 14.11): у края, за которым ещё кнопки, — затемнение со стрелкой (только рисунок, нажатия проходят к кнопкам); точка — если там непрочитанное
   const ref = useRef(null)
   const [edge, setEdge] = useState({ l: false, r: false, dot: false })
-  const on = scroll && tabs.length > MAX
+  const on = scroll && !wide && tabs.length > MAX
   useEffect(() => {
     const n = ref.current
     if (!on || !n) return

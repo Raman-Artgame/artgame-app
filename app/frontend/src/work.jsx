@@ -100,7 +100,7 @@ export function Promo({ id, zone, compact, onData, role }) {
     {c.sketches.length > 0 && <><h3>Эскизы</h3><div className="sketches">{c.sketches.map(f => f.thumb ?
       <button key={f.id} className={'sk' + (f.approved ? ' ok' : '')} onClick={() => setBig(f)}><img src={f.thumb} alt={f.name} loading="lazy" /></button> :
       <a key={f.id} className="sk pdf" href={f.url} target="_blank" rel="noreferrer">PDF<span>{f.name}</span></a>)}</div></>}
-    {!c.sketches.length && <p className="small muted">Эскизов пока нет: они появятся сами, когда дизайнер положит их в папку сделки «ДИЗАЙН».</p>}
+    {!c.sketches.length && <p className="small muted">Эскизов пока нет: они появятся здесь сами, когда дизайнер загрузит их в приложении.</p>}
     {last && (last.before || last.after) && !compact && <><h3>До и после · {last.who.split(' ')[0]}, {new Date(last.at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</h3>
       {last.before && last.after ? <div className="ba">
         <img src={last.after} alt="после" />
