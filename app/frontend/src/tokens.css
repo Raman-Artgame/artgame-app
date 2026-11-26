@@ -1630,3 +1630,12 @@ mark.gap { background: var(--warnbg); color: var(--warn); border-radius: 4px; pa
 .viapick .viabtns button, .decide .viapick .viabtns button { flex: 1 1 auto; margin: 0; padding: 10px 12px; font-size: 14px; background: var(--dark2) !important; color: var(--text); border: 1px solid var(--line); opacity: 1; }
 .viapick .viabtns button.on, .decide .viapick .viabtns button.on { background: var(--accent) !important; color: #fff; border-color: transparent; }
 .viapick p { margin: 0; }
+
+/* Сделки на телефоне (HEAD 26.11): стадии кнопками, карточки во всю ширину; канбан — только шире 700 px */
+.kstages { margin-bottom: 10px; }
+.kphone { margin-bottom: 14px; }
+.kphead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-weight: 700; padding: 2px 2px 8px; flex-wrap: wrap; }
+.kphead b { font-weight: 800; }
+.kphead small { flex-basis: 100%; color: var(--warn); font-weight: 600; font-size: 12px; }
+.kphone .kc { padding: 12px 14px; }
+
