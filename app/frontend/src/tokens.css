@@ -1619,3 +1619,7 @@ button.dttile.on { border-color: var(--text); }
 .pulse-sales .hintmop summary::-webkit-details-marker { display: none; }
 .pulse-sales .hintrow { padding: 6px 0 6px 12px; border-left: 2px solid var(--ok); margin: 4px 0 8px; }
 
+/* «Ответить клиенту» (26.11): подставленное из сделки — жирным, пропуски [в скобках] — подсвечены */
+.scr .st b.fill { font-weight: 700; color: var(--text); }
+mark.gap { background: var(--warnbg); color: var(--warn); border-radius: 4px; padding: 0 3px; }
+

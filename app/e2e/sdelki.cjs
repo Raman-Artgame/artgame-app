@@ -200,11 +200,18 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
   assert.ok(upd && upd.params.fields.UF_CRM_ARTGAME_AREA_M2 === 60 && upd.params.fields.UF_CRM_ARTGAME_NORM_SHIFTS === 6, 'сумма, площадь и норма в Битрикс')
   // после расчёта следующий шаг — Договор (стадия «Отправка КП» = КП уже есть); «Сообщение» — скрипты шага 09 во всплывающем окне
   await p.locator('.nextstep', { hasText: 'Договор' }).waitFor()
-  await p.locator('.hero').getByRole('button', { name: 'Сообщение' }).click()
+  // «Ответить клиенту» (HEAD 26.11): имя клиента, сумма, срок — из сделки; чего нет — [в скобках] подсвечено
+  await p.locator('.hero').getByRole('button', { name: 'Ответить клиенту' }).click()
   await p.locator('.sheetbox .scr').first().waitFor()
-  assert.match(await p.locator('.sheetbox .mhead').textContent(), /Скрипты: Договор/)
+  assert.match(await p.locator('.sheetbox .mhead').textContent(), /Ответить клиенту: Договор/)
   assert.strictEqual(await p.locator('.sheetbox .scr .code').first().textContent(), 'С17')
-  await p.screenshot({ path: `${shots}/mop-scripts.png` })
+  const s24 = p.locator('.sheetbox .scr', { hasText: 'С24' })
+  assert.match(await s24.locator('.st').textContent(), /^Айгерим, отправляю договор и счёт на предоплату\. После оплаты закрепляем за вами даты \[даты\]/)
+  assert.strictEqual(await s24.locator('mark.gap').textContent(), '[даты]')
+  assert.match(await s24.textContent(), /дописать: 1/)
+  assert.ok(await p.locator('.sheetbox a', { hasText: 'Открыть переписку в Битриксе' }).count())
+  await s24.scrollIntoViewIfNeeded(); await p.waitForTimeout(600); await p.screenshot({ path: `${shots}/mop-otvetit.png` })
+  await p.waitForTimeout(600); await p.screenshot({ path: `${shots}/mop-scripts.png` })
   await p.locator('.sheetbox .x').click()
   // Компьютер (HEAD 26.11): справа — показатели сделки и подсказки, цифры шапки только там; место под подсказки ботов-аналитиков
   await p.setViewportSize({ width: 1440, height: 900 })

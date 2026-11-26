@@ -51,8 +51,37 @@ function useScripts() {
 }
 const allScr = s => [...(s?.scr?.p1 || []), ...(s?.scr?.p2 || [])].flatMap(([, items]) => items)
 
-// Скрипты шага во всплывающем окне: русский / казахский, каждая реплика копируется одной кнопкой.
-function Scripts({ codes, title, onClose, algoStep }) {
+// «Ответить клиенту» (HEAD 26.11): в реплики подставляются данные сделки — имя клиента, имя МОП, площадь, сумма, срок, объект.
+// Чего в сделке нет, остаётся в [скобках] и подсвечено — МОП дописывает сам. Суммы — из согласованного КП, иначе из расчёта, иначе ориентир.
+const num = n => n ? Math.round(n).toLocaleString('ru-RU') : ''
+const first = s => (s || '').replace(/^(ТОО|ИП|АО)\s*«[^»]*»\s*·?\s*/, '').trim().split(/\s+/)[0] || ''
+export function scriptCtx(d, calc) {
+  const c = d.client || {}
+  const r = calc?.out, area = +calc?.in?.area || d.area || 0
+  const total = d.kp_agreed?.total || r?.total || d.sum || 0
+  const days = r?.norm?.client || d.norm?.term
+  const obj = d.object || cleanTitle(d.title, d.id)
+  const name = first(c.type === 'Физлицо' || !d.contact ? c.name : d.contact)
+  const v = { name, me: first(d.manager), area: area ? num(area) : '', size: area ? num(area) + ' м²' : '', sum: num(total), dsum: num(r?.dprice),
+    days: days ? days + ' раб. дн.' : '', daysKz: days ? days + ' жұмыс күні' : '', obj, objCity: [obj, d.city].filter(Boolean).join(', ') }
+  return {
+    '[Имя]': v.name, '[Есімі]': v.name, '[Ваше имя]': v.me, '[Атыңыз]': v.me,
+    '[площадь]': v.area, '[аудан]': v.area, '[размер]': v.size, '[өлшем]': v.size,
+    '[сумма]': v.sum, '[сома]': v.sum, '[дни]': v.days, '[күндер]': v.daysKz,
+    '[объект]': v.obj, '[нысан]': v.obj, '[объект, город]': v.objCity, '[нысан, қала]': v.objCity,
+    _design: v.dsum,   // Д4/Д5: [сумма] — цена дизайна, не проекта
+  }
+}
+const DESIGN_SUM = new Set(['Д4', 'Д5'])
+function fillScript(t, ctx, code) {
+  const map = DESIGN_SUM.has(code) ? { ...ctx, '[сумма]': ctx._design, '[сома]': ctx._design } : ctx
+  const parts = (t || '').split(/(\[[^\]]{1,60}\])/)
+  const out = parts.map(x => /^\[.*\]$/.test(x) && map[x] ? { t: map[x], ok: true } : { t: x, gap: /^\[.*\]$/.test(x) })
+  return { text: out.map(x => x.t).join(''), parts: out, gaps: out.filter(x => x.gap).length }
+}
+
+// Скрипты шага во всплывающем окне: русский / казахский, каждая реплика копируется одной кнопкой; данные сделки уже подставлены.
+function Scripts({ codes, title, onClose, algoStep, ctx, link }) {
   const s = useScripts()
   const [lang, setLang] = useState(() => { try { return localStorage.getItem('ag-rm-lang') || 'ru' } catch { return 'ru' } })
   const byCode = Object.fromEntries(allScr(s).map(x => [x.c, x]))
@@ -63,10 +92,14 @@ function Scripts({ codes, title, onClose, algoStep }) {
     <div className="segf"><button className={lang === 'ru' ? 'on' : ''} onClick={() => { setLang('ru'); try { localStorage.setItem('ag-rm-lang', 'ru') } catch { /* */ } }}>Русский</button>
       <button className={lang === 'kz' ? 'on' : ''} onClick={() => { setLang('kz'); try { localStorage.setItem('ag-rm-lang', 'kz') } catch { /* */ } }}>Қазақша</button></div>
     {!s && <Skeleton n={3} />}
+    {ctx && <p className="small muted">Имя, сумма, площадь и срок уже из сделки. <mark className="gap">[В скобках]</mark> — допишите сами. Отправляйте клиенту через Битрикс.</p>}
+    {link && <div className="dealbtns"><a className="btn mini" href={link} target="_blank" rel="noreferrer">Открыть переписку в Битриксе</a></div>}
     {s && !list.length && <p className="muted">Для этого шага готовых реплик нет — см. учебник во вкладке «Учёба».</p>}
     {list.map(x => { const t = lang === 'kz' && x.kz ? x.kz : x.ru
-      return <div key={x.c} className="scr"><div><span className="code">{x.c}</span><b>{x.s}</b></div><div className="st">{t}</div>
-        {x.n && <div className="sn">{x.n}</div>}<div className="dealbtns"><Copy text={t} />{lang === 'kz' && !x.kz && <span className="small muted">только на русском</span>}</div></div> })}
+      const f = ctx ? fillScript(t, ctx, x.c) : { text: t, parts: [{ t }], gaps: 0 }
+      return <div key={x.c} className="scr"><div><span className="code">{x.c}</span><b>{x.s}</b></div>
+        <div className="st">{f.parts.map((p, i) => p.ok ? <b key={i} className="fill">{p.t}</b> : p.gap ? <mark key={i} className="gap">{p.t}</mark> : <React.Fragment key={i}>{p.t}</React.Fragment>)}</div>
+        {x.n && <div className="sn">{x.n}</div>}<div className="dealbtns"><Copy text={f.text} />{f.gaps > 0 && <span className="small muted">дописать: {f.gaps}</span>}{lang === 'kz' && !x.kz && <span className="small muted">только на русском</span>}</div></div> })}
   </Sheet>
 }
 
@@ -491,7 +524,7 @@ export function DealCard({ id, back, place }) {
       <div className="dealbtns wrapbtns">
         <button className="ghost" onClick={() => setSheet({ kind: 'call' })}>Итог звонка</button>
         <button className="ghost" onClick={() => setSheet({ kind: 'wait' })}>Жду ответа</button>
-        <button className="ghost" onClick={say}>Сообщение</button>
+        <button className="ghost" onClick={say}>Ответить клиенту</button>
         <button className={'ghost morebtn' + (moreActs ? ' on' : '')} aria-expanded={moreActs} onClick={() => setMoreActs(!moreActs)}>Ещё действия {moreActs ? '▴' : '▾'}</button>
       </div>
       {moreActs && <div className="dealbtns wrapbtns moreacts">
@@ -585,7 +618,7 @@ export function DealCard({ id, back, place }) {
     {sheet?.kind === 'prod' && <ProductionSheet dealId={d.id} onClose={() => setSheet(null)} onDone={said} onFill={() => setSheet({ kind: 'fill' })} />}
     {sheet?.kind === 'note' && <NoteSheet d={d} initial={sheet.text} onClose={() => setSheet(null)} onDone={said} />}
     {sheet?.kind === 'pay' && <PaySheet d={d} slot={sheet.slot} onClose={() => setSheet(null)} onDone={said} />}
-    {sheet?.kind === 'say' && <Scripts codes={codes} algoStep={algo[0]} title={`Скрипты: ${name(cur)}`} onClose={() => setSheet(null)} />}
+    {sheet?.kind === 'say' && <Scripts codes={codes} algoStep={algo[0]} title={`Ответить клиенту: ${name(cur)}`} ctx={scriptCtx(d, calc)} link={portal ? bxLink(portal, 'deal', d.id) : ''} onClose={() => setSheet(null)} />}
   </>
 }
 
