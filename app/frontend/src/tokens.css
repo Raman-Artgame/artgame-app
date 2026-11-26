@@ -1601,6 +1601,8 @@ button.dttile.on { border-color: var(--text); }
 .dealside .srow { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .dealside .srow:last-child { border-bottom: 0; }
 .dealside .srow span { min-width: 0; }
+.dealside .srow:not(.n) span { flex: none; }
+.dealside .srow:not(.n) b { min-width: 0; }
 .dealside .srow b { font-variant-numeric: tabular-nums; text-align: right; }
 .dealside .srow.n b { white-space: nowrap; flex: none; }
 .dealside .srow em { font-style: normal; color: var(--muted); font-weight: 400; margin-right: 2px; }
