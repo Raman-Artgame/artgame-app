@@ -38,8 +38,12 @@ PROJECT = {"UF_CRM_ARTGAME_PROJECT_MODEL": ("model", "enum"), "UF_CRM_ARTGAME_PR
 PROJECT_KEY = {v[0]: k for k, v in PROJECT.items()}
 LIST_SELECT = ["ID", "TITLE", "STAGE_ID", "CATEGORY_ID", "OPPORTUNITY", "ASSIGNED_BY_ID", "CONTACT_ID", "COMPANY_ID", "LEAD_ID", OBJECT,
                "DATE_MODIFY", "DATE_CREATE", "LAST_ACTIVITY_TIME", CITY, AREA,
-               "UF_CRM_ARTGAME_PROJECT_CATEGORY", "UF_CRM_ARTGAME_PROJECT_SUBCATEGORY"]   # категория в списке сделок (25.11)
+               "UF_CRM_ARTGAME_PROJECT_CATEGORY", "UF_CRM_ARTGAME_PROJECT_SUBCATEGORY",   # категория в списке сделок (25.11)
+               # доска «В работе» (HEAD 26.11): оплачено, долг, куратор ГИП, старт и сдача
+               *[f"UF_CRM_ARTGAME_FIN03_PAY{n}_AMOUNT" for n in (1, 2, 3, 4)], "UF_CRM_ARTGAME_PROJECT_CURATOR",
+               "UF_CRM_ARTGAME_PROJECT_START_ACTUAL", "UF_CRM_ARTGAME_PROJECT_END_PLAN"]
 FUNNELS = {0: "Продажи", 13: "Дизайн"}
+WORK_STAGES = ("FINAL_INVOICE", "UC_AV00QK", "UC_BMKDS4")   # доска «В работе» в «Сделках»
 TTL, TTL_DICT, MAX_PAGES = 120, 3600, 10
 
 _cache: dict = {}
@@ -299,6 +303,17 @@ def my_deals(p: dict, fresh: bool = False, manager: int | None = None) -> dict:
             return enum_map(PROJECT_KEY[key]).get(str(d.get(PROJECT_KEY[key]) or ""), "")
         except Exception:  # noqa: BLE001
             return ""
+    ppl: dict = {}
+
+    def person(v) -> str:   # куратор ГИП по id пользователя Битрикса; справочник недоступен — пусто
+        if not v:
+            return ""
+        if not ppl:
+            try:
+                ppl.update({u["id"]: u["name"] for u in users()} or {0: ""})
+            except Exception:  # noqa: BLE001
+                ppl[0] = ""
+        return ppl.get(int(v) if str(v).isdigit() else 0, "")
     deals = [{"id": int(d["ID"]), "title": d.get("TITLE") or "", "stage": d["STAGE_ID"],
               "stage_name": (st.get(d["STAGE_ID"]) or {}).get("name", d["STAGE_ID"]),
               "stage_sort": (st.get(d["STAGE_ID"]) or {}).get("sort", 0),
@@ -307,7 +322,23 @@ def my_deals(p: dict, fresh: bool = False, manager: int | None = None) -> dict:
               "created": d.get("DATE_CREATE"), "active": d.get("LAST_ACTIVITY_TIME") or d.get("DATE_MODIFY"),
               "manager_id": int(d.get("ASSIGNED_BY_ID") or 0), "lead_id": int(d.get("LEAD_ID") or 0), "object": d.get(OBJECT) or "",
               "kind": kind(d, "category"), "subkind": kind(d, "subcategory"),
+              "paid": 0.0, "debt": 0.0,
+              "gip": person(d.get(PROJECT_KEY["curator"])), "start": (d.get("UF_CRM_ARTGAME_PROJECT_START_ACTUAL") or "")[:10],
+              "end": (d.get("UF_CRM_ARTGAME_PROJECT_END_PLAN") or "")[:10],
               "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), "") if uid is None else ""} for d in rows]
+    work = [d["id"] for d in deals if d["stage"] in WORK_STAGES]
+    if work:   # доска «В работе»: деньги — по журналу оплат, как в карточке; куратор ГИП — из «В производство» (объект)
+        from . import deal_money
+        raw = {int(r["ID"]): r for r in rows}
+        with db.pool.connection() as conn:
+            led = deal_money.ledger(conn, work)
+            gips = {r["id"]: r["full_name"] for r in conn.execute(
+                """SELECT o.id, pe.full_name FROM objects o JOIN people pe ON pe.id = o.gip_person_id
+                   WHERE o.id = ANY(%s)""", (work,)).fetchall()}
+        for d in deals:
+            if d["id"] in raw and d["stage"] in WORK_STAGES:
+                t = deal_money.target(raw[d["id"]], led.get(d["id"]), 0)
+                d.update(paid=t["received"], debt=t["debt"], gip=gips.get(d["id"]) or d["gip"])
     return {"deals": deals, "all": uid is None, "updated": time.time(), "funnels": FUNNELS,
             "managers": sorted({(d["manager_id"], d["manager"]) for d in deals if d["manager"]}, key=lambda x: x[1]) if uid is None else []}
 

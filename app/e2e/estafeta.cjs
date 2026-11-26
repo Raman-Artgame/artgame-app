@@ -106,6 +106,23 @@ async function deal(p, id) {
   assert.strictEqual(upd.params.fields.STAGE_ID, 'UC_AV00QK', 'стадия «Выполнение проекта»')
   assert.ok(w.some(x => x.method === 'crm.timeline.comment.add' && /куратор ГИП Айдана.*Холл вариант 3/.test(JSON.stringify(x))), 'заметка в ленту сделки')
 
+  // 3б. МОП: «Сделки» → доска «В работе» (HEAD 26.11): на карточке оплачено/долг, куратор ГИП, срок сдачи
+  await m.reload()
+  await tab(m, 'Сделки')
+  await m.getByRole('button', { name: 'Обновить' }).click()
+  await m.locator('.segf button', { hasText: 'В работе' }).click()
+  const wc = m.locator('.kcol', { hasText: 'Выполнение проекта' }).locator('.kc', { hasText: '№ 1601' })
+  await wc.waitFor()
+  console.log('work card:', await wc.textContent())
+  assert.match(await wc.locator('.kmeta').textContent(), /ГИП Айдана.*сдача \d\d\.\d\d/)
+  await wc.locator('.kpay').waitFor()
+  assert.strictEqual(await wc.getAttribute('draggable'), 'false', 'на доске «В работе» стадии не тянут')
+  await fits(m, 'доска «В работе»')
+  await m.screenshot({ path: `${shots}/est-2b-mop-v-rabote.png` })
+  await m.setViewportSize({ width: 1440, height: 900 }); await m.waitForTimeout(400)
+  await m.screenshot({ path: `${shots}/est-2b-mop-v-rabote-wide.png` })
+  await m.setViewportSize({ width: 390, height: 844 })
+
   // 4. ГИП: «Проекты» → проект с полоской пути и утверждённым эскизом первым; ГИП может ставить людей
   const g = await open(b, 6100)
   await tab(g, 'Проекты')

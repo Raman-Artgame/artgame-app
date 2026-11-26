@@ -47,7 +47,7 @@ async function tab(p, name) {
 }
 async function dealsOpen(p) {
   await tab(p, 'Сделки')
-  await p.locator('.kb .kcol').first().waitFor()
+  await p.locator('.kb .kcol').first().waitFor({ state: 'attached' })
 }
 async function card(p, id) {
   await dealsOpen(p)

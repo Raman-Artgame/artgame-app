@@ -1354,6 +1354,9 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
 .kcol { flex: 0 0 min(84vw, 320px); scroll-snap-align: start; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px; min-height: 140px; }
 .kcol.over { border-color: var(--accent); background: #1d1419; }
 .kcol.dim { opacity: .75; }
+.kbtotal { white-space: nowrap; }
+.kbnone { display: none; margin: 4px 0 14px; } @media (max-width: 1099px) { .kbnone { display: block; } }
+@media (max-width: 1099px) { .kcol.empty { display: none; } }   /* на телефоне не перетаскивают — пустые стадии не занимают экран */
 .khead { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; font-size: 14px; padding: 2px 4px 0; } .khead b { color: var(--muted); font-weight: 600; }
 .ksum { font-size: 20px; font-weight: 800; padding: 0 4px 10px; }
 .kc { background: var(--alt); border: 1px solid var(--line); border-radius: var(--r2); padding: 10px 11px; margin-bottom: 8px; cursor: pointer; }
@@ -1365,6 +1368,12 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
 .kr.hot { background: var(--hotbg); color: var(--hot); } .kr.wait { background: var(--warnbg); color: var(--warn); }
 .kr.idle { background: var(--dark); color: var(--muted); } .kr.go { background: var(--okbg); color: var(--ok); }
 .kw { font-size: 12px; color: var(--muted); margin-top: 5px; }
+.ksum small { display: block; font-size: 12px; font-weight: 600; color: var(--warn); margin-top: 1px; }
+.kwork { margin-top: 8px; font-size: 12px; }
+.kpay { height: 5px; border-radius: 3px; background: var(--dark); overflow: hidden; } .kpay i { display: block; height: 100%; background: var(--ok); border-radius: 3px; }
+.kpayt, .kmeta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; margin-top: 5px; color: var(--muted); }
+.kpayt b { color: var(--text); font-weight: 700; } .kpayt .warn { color: var(--warn); } .kpayt .ok { color: var(--ok); }
+.kmeta em { font-style: normal; color: var(--warn); } .kmeta .soon { color: var(--warn); } .kmeta .late { color: var(--hot); font-weight: 700; }
 .kempty { border: 2px dashed var(--line); border-radius: var(--r2); padding: 18px 8px; text-align: center; color: var(--muted); font-size: 12px; }
 .kbhint { margin: 0 0 12px; }
 

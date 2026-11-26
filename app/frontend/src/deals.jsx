@@ -18,6 +18,20 @@ const POSTPONED = 'UC_VCP4VO'
 const TONES = [['hot', 'Ответить сейчас', 'за вами'], ['go', 'Пора в производство', 'эскиз утверждён'], ['wait', 'Ждём клиента', 'напомнить, если молчит'], ['idle', 'Стоят', 'без движения']]
 const RANK = { hot: 4, go: 3, wait: 2, idle: 1 }
 const cap = t => t ? t[0].toUpperCase() + t.slice(1) : ''
+const ddmm = s => s ? s.slice(8, 10) + '.' + s.slice(5, 7) : ''
+const daysTo = s => s ? Math.round((new Date(s + 'T00:00:00') - new Date(new Date().toDateString())) / 864e5) : null
+// доска «В работе» (HEAD 26.11): сколько оплачено и сколько осталось, кто куратор ГИП, когда сдача
+function WorkLine({ d }) {
+  const pct = d.sum ? Math.min(100, Math.round(100 * (d.paid || 0) / d.sum)) : 0, left = daysTo(d.end)
+  return <div className="kwork">
+    <div className="kpay"><i style={{ width: pct + '%' }} /></div>
+    <div className="kpayt">{d.paid ? <span>Оплачено <b>{money(d.paid)}</b></span> : <span className="warn">Оплат ещё нет</span>}
+      {d.debt > 0 ? <span>долг <b>{money(d.debt)}</b></span> : d.paid ? <span className="ok">оплачено полностью</span> : null}</div>
+    <div className="kmeta"><span>{d.gip ? 'ГИП ' + d.gip.split(' ')[0] : <em>ГИП не назначен</em>}</span>
+      {d.end ? <span className={left < 0 ? 'late' : left <= 3 ? 'soon' : ''}>сдача {ddmm(d.end)}{left < 0 ? ` · просрочено ${-left} дн.` : left <= 3 ? ` · через ${left} дн.` : ''}</span>
+        : <em>срок сдачи не указан</em>}</div>
+  </div>
+}
 const mln = n => n >= 1e6 ? (Math.round(n / 1e5) / 10).toLocaleString('ru-RU') + ' млн ₸' : money(n)
 export function reminders(t) {
   const m = {}
@@ -80,7 +94,7 @@ export function Deals({ initial, place }) {
   const counts = Object.fromEntries(TONES.map(([k]) => [k, onBoard.filter(d => rem[d.id]?.tone === k).length]))
   const shown = tone ? onBoard.filter(d => rem[d.id]?.tone === tone) : onBoard
   const cols = ids.map(id => { const items = shown.filter(d => stageOf(d) === id)
-    return { id, name: name(id), items: items.sort((a, b) => (RANK[rem[b.id]?.tone] || 0) - (RANK[rem[a.id]?.tone] || 0)), sum: items.reduce((a, d) => a + (d.sum || 0), 0) } })
+    return { id, name: name(id), items: items.sort((a, b) => (RANK[rem[b.id]?.tone] || 0) - (RANK[rem[a.id]?.tone] || 0)), sum: items.reduce((a, d) => a + (d.sum || 0), 0), debt: items.reduce((a, d) => a + (d.debt || 0), 0) } })
   const say = (text, id) => { setMsg({ text, id }); setTimeout(() => setMsg(m => (m && m.text === text ? null : m)), 9000) }
   const drop = to => {
     const d = list.find(x => x.id === drag.current); drag.current = null; setOver('')
@@ -101,6 +115,7 @@ export function Deals({ initial, place }) {
       <div className="kt">{cleanTitle(d.title, d.id)}</div>
       <div className={'ks' + (d.sum ? '' : ' nosum')}>{d.sum ? money(d.sum) : 'сумма не указана'}</div>
       {r ? <span className={'kr ' + r.tone}>{r.text}</span> : age >= IDLE ? <span className="kr idle">Без движения {age} дн.</span> : null}
+      {WORK.includes(stageOf(d)) ? <WorkLine d={d} /> : null}
       <div className="kw">{[d.kind, data.all ? d.manager.split(' ')[0] : ''].filter(Boolean).join(' · ') || (d.area ? d.area + ' м²' : '')}</div>
     </div> }
   return <>
@@ -108,14 +123,15 @@ export function Deals({ initial, place }) {
     <div className="kbnow">{TONES.filter(([k]) => counts[k] || k !== 'go').map(([k, t, sub]) => <button key={k} className={'kbcount ' + k + (tone === k ? ' on' : '')}
       onClick={() => setTone(tone === k ? '' : k)}><span>{t}</span><b>{counts[k]}</b><i>{tone === k ? 'показаны только они · снять' : sub}</i></button>)}</div>
     {msg && <div className="toast kbmsg">{msg.text}{msg.id ? <button className="ghost mini" onClick={() => setCard(msg.id)}>Открыть сделку</button> : null}</div>}
-    <div className="kb">{cols.map(c => <div key={c.id} className={'kcol' + (over === c.id ? ' over' : '') + (c.id === POSTPONED ? ' dim' : '')}
+    <div className="kb">{cols.map(c => <div key={c.id} className={'kcol' + (over === c.id ? ' over' : '') + (c.id === POSTPONED ? ' dim' : '') + (c.items.length ? '' : ' empty')}
       onDragOver={e => { if (canDrag) { e.preventDefault(); if (over !== c.id) setOver(c.id) } }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOver('') }}
       onDrop={e => { e.preventDefault(); drop(c.id) }}>
       <div className="khead"><span>{c.name}</span><b>{c.items.length}</b></div>
-      <div className="ksum">{c.sum ? mln(c.sum) : '—'}</div>
+      <div className="ksum">{c.sum ? mln(c.sum) : '—'}{WORK.includes(c.id) && c.debt ? <small>долг {mln(c.debt)}</small> : null}</div>
       {c.items.map(kcard)}
       {!c.items.length && <div className="kempty">{canDrag ? 'Перетащите сюда сделку' : 'Пусто'}</div>}
     </div>)}</div>
+    {!shown.length && <p className="muted kbnone">{tone ? 'Таких сделок нет — снимите фильтр.' : s ? 'Ничего не найдено.' : 'На этой доске сделок нет.'}</p>}
     {canDrag && <p className="small muted kbhint">Карточку тяните мышью в другую стадию. Если для стадии чего-то не хватает, сделка останется на месте и покажет, что заполнить. На телефоне колонки листаются пальцем, стадия меняется в карточке сделки.</p>}
     {!canDrag && <p className="small muted kbhint">Дальше по работе сделку ведут кнопки в карточке: «В производство», «Работы сданы», «На закрытие».</p>}
   </>
