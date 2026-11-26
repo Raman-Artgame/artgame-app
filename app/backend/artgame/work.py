@@ -56,7 +56,12 @@ def active(p: dict = Depends(current_person)) -> dict:
 CLOSED = "Сделка закрыта HEAD: смены и расходы на этот объект больше не вносятся"
 
 
+ONBOARD = "Сначала знакомство: правила роли, ТБ и соглашение — в приложении на главном экране"
+
+
 def check_zone(conn, p: dict, zone: str, object_id: int, past: bool = False):
+    if p.get("onboard"):   # HEAD 26.11: новый сотрудник — сначала со всем ознакомился, потом смены и расходы
+        raise HTTPException(403, ONBOARD)
     if zone not in p["zones"]:
         raise HTTPException(400, "zone not assigned")
     o = conn.execute("SELECT status, closed_at FROM objects WHERE id=%s", (object_id,)).fetchone()

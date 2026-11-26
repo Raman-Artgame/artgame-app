@@ -110,6 +110,39 @@ def test_candidate_path(client, monkeypatch):
     p = client.get("/api/head/pulse", headers=hdr(1000)).json()
     assert p["hr"] == {"new": 0, "waiting": 0}
 
+    # знакомство (HEAD 26.11): принятый сначала читает правила роли и ТБ и принимает соглашение — до этого смены закрыты
+    assert me["onboard"] == ["duties", "safety", "nda"]
+    import pytest
+    from fastapi import HTTPException
+    from artgame import onboard, work
+    with db.pool.connection() as c, pytest.raises(HTTPException) as ex:
+        work.check_zone(c, me, "mural", 1)
+    assert ex.value.status_code == 403 and "знакомство" in ex.value.detail
+    ob = client.get("/api/onboard", headers=hdr(7777)).json()
+    assert ob["required"] and [s["doc"] for s in ob["steps"]] == ["duties", "safety", "nda"] and ob["nda"]["draft"]
+    assert client.post("/api/onboard/ack", json={"doc": "duties", "version": "app", "sha256": "abcd1234ef"}, headers=hdr(7777)).json()["pending"] == ["safety", "nda"]
+    client.post("/api/onboard/ack", json={"doc": "safety", "version": "app", "sha256": "abcd1234ef"}, headers=hdr(7777))
+    nda = {"doc": "nda", "version": ob["nda"]["version"], "sha256": ob["nda"]["sha256"], "full_name": "Садыкова Айгерим Маратовна", "agree": True}
+    assert client.post("/api/onboard/ack", json={**nda, "sha256": "old-version-sha"}, headers=hdr(7777)).status_code == 409
+    assert client.post("/api/onboard/ack", json={**nda, "agree": False}, headers=hdr(7777)).status_code == 400
+    assert client.post("/api/onboard/ack", json=nda, headers=hdr(7777)).json()["pending"] == []
+    assert client.get("/api/me", headers=hdr(7777)).json()["onboard"] == []
+    with db.pool.connection() as c:
+        row = c.execute("SELECT * FROM onboard_acks WHERE person_id=%s AND doc='nda'", (me["id"],)).fetchone()
+    assert row["full_name"] == "Садыкова Айгерим Маратовна" and row["sha256"] == onboard.NDA_SHA and row["phone"]
+    cd = client.get(f"/api/hr/candidates/{cid}", headers=hdr(1000)).json()["onboard"]
+    assert cd["done"] and all(s["done"] for s in cd["steps"])
+    # новая версия соглашения — принять заново; старые сотрудники без «отправить на ознакомление» не трогаем
+    monkeypatch.setattr(onboard, "NDA_SHA", "v2sha")
+    assert client.get("/api/me", headers=hdr(7777)).json()["onboard"] == ["nda"]
+    with db.pool.connection() as c:
+        c.execute("UPDATE people SET status='active', role_code='artist' WHERE tg_id=7778")
+    assert client.get("/api/me", headers=hdr(7778)).json()["onboard"] == []
+    pid = client.get("/api/me", headers=hdr(7778)).json()["id"]
+    assert client.post(f"/api/onboard/send/{pid}", headers=hdr(7777)).status_code == 403
+    assert client.post(f"/api/onboard/send/{pid}", headers=hdr(1000)).json()["ok"]
+    assert client.get("/api/me", headers=hdr(7778)).json()["onboard"] == ["duties", "safety", "nda"]
+
 
 def test_rejected_status_and_latin():
     assert hr.latin("Шынәсіл Әділет") == "shynasil-adilet"

@@ -302,12 +302,16 @@ def card(cid: int, p: dict = Depends(require_head)):
         fl = conn.execute("SELECT * FROM candidate_files WHERE cand_id=%s ORDER BY id", (cid,)).fetchall()
         f = hr_forms.FORMS.get(c["dir"])
         titles = _role_titles(conn)
+        ob = None
+        if c["person_id"]:
+            from . import onboard
+            ob = onboard.card(conn, conn.execute("SELECT * FROM people WHERE id=%s", (c["person_id"],)).fetchone())
     h = hr_forms.level_hint(c["dir"], c["answers"] or {}, sum(1 for x in fl if x["kind"] == "photo"))
     return {**_out(c), "answers": c["answers"], "lang": c["lang"], "hint": h and {**h, "title": titles.get(h["code"], h["code"])},
             "folder": c["drive_folder"] and drive.FOLDER_URL + c["drive_folder"],
             "files": [{"id": x["id"], "kind": x["kind"], "name": x["name"], "thumb": x["mime"].startswith("image/") and _thumb_url(x["id"]),
                        "url": f"https://drive.google.com/file/d/{x['drive_id']}/view"} for x in fl],
-            "steps": f and f["steps"], "roles": [[k, titles[k]] for k, _ in (f["levels"] if f else []) if k in titles]}
+            "steps": f and f["steps"], "roles": [[k, titles[k]] for k, _ in (f["levels"] if f else []) if k in titles], "onboard": ob}
 
 
 class StepIn(BaseModel):
@@ -377,6 +381,8 @@ def _give_role(conn, person: dict, c: dict) -> None:
         if z:
             conn.execute("INSERT INTO person_zones (person_id, zone_code) VALUES (%s,%s) ON CONFLICT DO NOTHING", (person["id"], z))
     conn.execute("UPDATE candidates SET person_id=%s WHERE id=%s", (person["id"], c["id"]))
+    from .onboard import require
+    require(conn, person["id"])   # HEAD 26.11: до первой смены — правила роли, ТБ, соглашение о неразглашении и ИС
     db.audit(conn, None, "hr_hired_login", "people", person["id"], {"candidate": c["id"], "role": c["hired_role"]})
     pay_trial(conn, c["id"])
 

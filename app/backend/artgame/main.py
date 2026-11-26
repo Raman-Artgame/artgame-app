@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from . import constants as consts
 from . import ads, adrules, meta, mktlib, mktstats, mediasync, appeals, chatfiles, brand, closing, marketing, dm, projchat, feedback, gip, grow, head, items, tgbot, viewas, weekly, trips, recurring, advances
-from . import bx, bxw, mophints, db, relay, mopcrm, deal_money, design, designobj, designtasks, designbrief, files, hr, kpagree, projcard, shiftmove, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
+from . import bx, bxw, mophints, db, relay, mopcrm, deal_money, design, designobj, designtasks, designbrief, files, hr, onboard, kpagree, projcard, shiftmove, fill, fin_export, finance, kit, leads, media, places, price, projects, sales_exp, stock, weblogin, work
 from .config import settings
 from .deps import current_person, load_person, require_head, tg_user
 
@@ -86,6 +86,7 @@ app.include_router(designobj.router)   # дизайн в карточке про
 app.include_router(kpagree.router)   # «Клиент согласовал КП» закрепляет сумму и нормы (HEAD 26.11)
 app.include_router(designtasks.router)   # задачи на дизайн при сделке — доска дизайнера (HEAD 25.11)
 app.include_router(hr.router)   # кандидаты: анкета по ссылке, «Команда → Кандидаты» (HEAD 26.11)
+app.include_router(onboard.router)   # знакомство нового сотрудника: правила, ТБ, соглашение (HEAD 26.11)
 app.include_router(designbrief.router)   # вопрос дизайнера к МОП, бриф клиента по ссылке (HEAD 26.11)
 app.include_router(shiftmove.router)   # перенос смены на другой объект, HEAD (14.11)
 app.include_router(projcard.router)   # карточка проекта: контакт на объекте, деньги проекта (HEAD 14.11)
