@@ -126,7 +126,8 @@
   if (qp.get('dark') === '1') {
     var st3 = document.createElement('style')
     // текст светлый (--ink), а «чернильные» блоки (герои, карточки, таблицы), что красились тем же --ink, — графитовые
-    var INKBG = '.hero,.mhero,.btn.dark,.mcard,th,.call .bx,.chip,.kinds button.on,.card,.dots i.c,.steps a,.qs button,.alert,.calc .out,.uhero,.ucim'
+    var INKBG = '.hero,.mhero,.btn.dark,.mcard,th,.call .bx,.chip,.kinds button.on,.card,.dots i.c,.steps a,.qs button,.alert,.calc .out,.uhero,.ucim,' +
+      '.rcpt,.seg button[aria-pressed="true"]'   // 26.11: итог расчёта и выбранные кнопки калькулятора были белыми с белым текстом
     st3.textContent = ':root{--paper:#0B0B0D!important;--card:#151418!important;--alt:#1C1A20!important;--ink:#F1F0EC!important;' +
       '--ink2:#2A2530!important;--mut:#A9A3AE!important;--line:#2C2832!important;--on-ink:#F1F0EC!important;--on-ink-mut:#A9A3AE!important;' +
       '--ok:#3DDC97!important;--okbg:#12301F!important;--nobg:#3A1020!important;color-scheme:dark!important}' +

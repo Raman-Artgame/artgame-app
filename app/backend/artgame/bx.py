@@ -326,6 +326,26 @@ def my_deals(p: dict, fresh: bool = False, manager: int | None = None) -> dict:
               "gip": person(d.get(PROJECT_KEY["curator"])), "start": (d.get("UF_CRM_ARTGAME_PROJECT_START_ACTUAL") or "")[:10],
               "end": (d.get("UF_CRM_ARTGAME_PROJECT_END_PLAN") or "")[:10],
               "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), "") if uid is None else ""} for d in rows]
+    if deals:   # цена: ✓ факт — клиент согласовал КП, ≈ по расчёту, ≈ ориентир МОП (HEAD 26.11)
+        ids = [d["id"] for d in deals]
+        with db.pool.connection() as conn:
+            agreed = {int(r["deal_id"]): float(r["total"]) for r in conn.execute(
+                "SELECT deal_id, total FROM kp_agreed WHERE undone_at IS NULL AND deal_id = ANY(%s)", (ids,)).fetchall()}
+            calcd = {int(r["deal_id"]) for r in conn.execute(
+                "SELECT deal_id FROM deal_calc WHERE deal_id = ANY(%s) AND (data->'out'->>'total') IS NOT NULL", (ids,)).fetchall()}
+        for d in deals:
+            d["price"] = "fact" if d["id"] in agreed else "calc" if d["id"] in calcd else "est" if d["sum"] else ""
+            if d["id"] in agreed:
+                d["sum"] = agreed[d["id"]]
+    later = [d["id"] for d in deals if d["stage"] == "UC_VCP4VO"]
+    if later:   # «Отложено» — отдельным списком: когда вернуться (bx_reminders из «Отложить до…»)
+        with db.pool.connection() as conn:
+            due = {int(r["deal_id"]): r for r in conn.execute(
+                """SELECT DISTINCT ON (deal_id) deal_id, due, note FROM bx_reminders WHERE entity = 'deal' AND deal_id = ANY(%s)
+                   ORDER BY deal_id, id DESC""", (later,)).fetchall()}
+        for d in deals:
+            if d["id"] in due:
+                d["until"], d["note"] = due[d["id"]]["due"].isoformat(), due[d["id"]]["note"] or ""
     work = [d["id"] for d in deals if d["stage"] in WORK_STAGES]
     if work:   # доска «В работе»: деньги — по журналу оплат, как в карточке; куратор ГИП — из «В производство» (объект)
         from . import deal_money

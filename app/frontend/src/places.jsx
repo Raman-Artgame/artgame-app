@@ -39,17 +39,36 @@ export function Places({ list, mode, opts = {}, extra: ex }) {
 }
 
 // Панель рабочего места внутри карточки сделки: один раздел (#kp или #docs), без шапки; сделка и расчёт подставлены (place_bx.js).
-export function Embed({ place, view, dealId, kp, ds, onDoc }) {
+// view="calc" (HEAD 26.11): полный калькулятор блока; calc — что подставить из сделки, onCalc(msg, reply) — «Записать в сделку».
+export function Embed({ place, view, dealId, kp, ds, calc, onDoc, onCalc }) {
   const [n, setN] = useState(0)
   useEffect(() => {
-    const on = e => { if (e.origin === location.origin && e.data?.type === 'artgame:doc' && onDoc) onDoc(e.data) }
+    const on = e => {
+      if (e.origin !== location.origin) return
+      if (e.data?.type === 'artgame:doc' && onDoc) onDoc(e.data)
+      if (e.data?.type === 'artgame:calc' && onCalc && e.data.deal === dealId)
+        onCalc(e.data, (ok, text) => e.source?.postMessage({ type: 'artgame:calc-done', ok, text }, location.origin))
+    }
     window.addEventListener('message', on)
     return () => window.removeEventListener('message', on)
-  }, [onDoc])
+  }, [onDoc, onCalc, dealId])
+  // высота фрейма — по содержимому (HEAD 26.11 «чтобы ничего не застревало»): одна прокрутка страницы, без второй внутри
+  const fr = useRef(null)
+  useEffect(() => {
+    const t = setInterval(() => {
+      try {
+        const doc = fr.current?.contentDocument, app = doc?.getElementById('app') || doc?.body
+        if (!app) return
+        const h = Math.min(8000, Math.max(480, Math.ceil(app.getBoundingClientRect().bottom + (doc.defaultView.scrollY || 0)) + 24))
+        if (Math.abs(fr.current.offsetHeight - h) > 8) fr.current.style.height = h + 'px'
+      } catch { /* другой адрес — оставляем как есть */ }
+    }, 400)
+    return () => clearInterval(t)
+  }, [view, dealId, n])
   if (!place) return <p className="small muted">Рабочее место МОП недоступно для вашей роли.</p>
-  try { localStorage.setItem('artgame.bx.open', JSON.stringify({ id: dealId, view, kp, ds, t: Date.now() })) } catch { /* без памяти */ }
+  try { localStorage.setItem('artgame.bx.open', JSON.stringify({ id: dealId, view, kp, ds, calc, t: Date.now() })) } catch { /* без памяти */ }
   return <div className="embed">
-    <iframe key={view + dealId + n} title={view} src={`${place.url}?mode=embed&dark=1#${view}`} />
+    <iframe ref={fr} key={view + dealId + n} title={view} src={`${place.url}?mode=embed&dark=1#${view}`} />
     <button className="ghost mini" style={{ position: 'absolute', top: 8, right: 8 }} onClick={() => setN(n + 1)}>Заново</button>
   </div>
 }

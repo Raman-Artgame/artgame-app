@@ -360,6 +360,45 @@ def api_reasons(p: dict = Depends(active)):
     return [{"code": c, "name": n} for c, n in REASONS]
 
 
+NO_BACK = ("spam", "profile")   # дубль/спам и «не наш профиль» — вернуть нельзя
+
+
+@router.get("/bx/lost")
+def api_lost(days: int = 60, manager: int | None = None, p: dict = Depends(active)):
+    """«Отложено и отказы» (HEAD 26.11): проигранные сделки за N дней — сумма, причина, можно ли вернуть.
+    МОП видит свои (в приложении — только «можно вернуть»), HEAD — все или одного менеджера."""
+    from datetime import timedelta
+    uid = bx.need_bx(p)
+    days = min(max(days, 7), 365)
+    flt = {"CATEGORY_ID": [0], "STAGE_SEMANTIC_ID": "F", ">=MOVED_TIME": (date.today() - timedelta(days=days)).isoformat()}
+    if uid is not None:
+        flt["ASSIGNED_BY_ID"] = uid
+    elif manager:
+        flt["ASSIGNED_BY_ID"] = manager
+    rows = bx.read_all("crm.deal.list", {"filter": flt, "order": {"MOVED_TIME": "DESC"},
+                                         "select": ["ID", "TITLE", "STAGE_ID", "MOVED_TIME", "OPPORTUNITY", "ASSIGNED_BY_ID", F_REASON,
+                                                    "UF_CRM_ARTGAME_FIN03_LOST"]})
+    names = {u["id"]: u["name"] for u in bx.users()} if uid is None else {}
+    items, by = [], {}
+    for d in rows:
+        if bx.is_test(d):
+            continue
+        reason = (d.get(F_REASON) or "").strip()
+        code = next((c for c, n in REASONS if reason.startswith(n)), "other")
+        amt = bx._money(d.get("UF_CRM_ARTGAME_FIN03_LOST")) or bx._money(d.get("OPPORTUNITY"))
+        x = {"id": int(d["ID"]), "title": d.get("TITLE") or "", "amount": round(amt), "reason": reason or None, "code": code,
+             "back": code not in NO_BACK, "day": str(d.get("MOVED_TIME") or "")[:10],
+             "manager": names.get(int(d.get("ASSIGNED_BY_ID") or 0), "")}
+        items.append(x)
+        r = by.setdefault(code, {"code": code, "name": REASON.get(code, "Причина не из списка"), "count": 0, "sum": 0, "back": code not in NO_BACK})
+        r["count"] += 1
+        r["sum"] += x["amount"]
+    back = [x for x in items if x["back"]]
+    return {"days": days, "count": len(items), "sum": sum(x["amount"] for x in items), "items": items,
+            "back": {"count": len(back), "sum": sum(x["amount"] for x in back)},
+            "reasons": sorted(by.values(), key=lambda r: (-r["sum"], -r["count"]))}
+
+
 class FieldsIn(BaseModel):
     area: float | None = None
     service: str | None = None    # ID пункта списка «Услуга»
@@ -372,6 +411,7 @@ class FieldsIn(BaseModel):
     end: date | None = None       # окончание план
     object: str | None = None     # «Объект» — из него и города собирается название сделки
     project: dict | None = None   # поля проекта: {model, category, …} (bx.PROJECT)
+    estimate: float | None = None  # ориентировочная стоимость (HEAD 26.11), пока нет расчёта; факт — «Клиент согласовал КП»
 
 
 def _project_fields(vals: dict) -> tuple[dict, list]:
@@ -432,6 +472,16 @@ def api_fields(deal_id: int, body: FieldsIn, p: dict = Depends(active)):
         if val:
             fields[key] = val.isoformat() if isinstance(val, date) else (str(val) if key == F_DAYS else val)
             parts.append(txt.format(val.strftime("%d.%m.%Y") if isinstance(val, date) else val))
+    if body.estimate:
+        from . import kpagree
+        from .fill import saved_calc
+        if body.estimate < 0:
+            raise HTTPException(400, "ориентир — сумма больше нуля")
+        kpagree.guard(deal_id, body.estimate)
+        if (((saved_calc(deal_id) or {}).get("out") or {}).get("total")):
+            raise HTTPException(409, "Сумма уже из расчёта: поменять её можно в шаге «Расчёт» → «Записать в сделку».")
+        fields["OPPORTUNITY"] = int(round(body.estimate))
+        parts.append(f"ориентир {_fmt(body.estimate)}")
     if body.project:
         pf, pp = _project_fields(body.project)
         fields.update(pf)

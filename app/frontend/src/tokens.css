@@ -107,6 +107,9 @@ nav .cnt { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 16px;
 .place .chips { display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto; background: var(--surface); border-bottom: 1px solid var(--line); margin: 0; }
 .placeframe { flex: 1; width: 100%; border: 0; background: #fff; }
 .embed { position: relative; margin: 0 -18px -18px; border-top: 1px solid var(--line2); }
+.calcblock .embed { margin: 8px -18px 10px; border-bottom: 1px solid var(--line2); } .calcblock .embed iframe { border-radius: 0; }
+.calcteam { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 10px; }
+.calcsaved { border-top: 1px solid var(--line2); padding-top: 10px; } .calcsaved h4 { margin: 0 0 6px; }
 .embed iframe { display: block; width: 100%; height: 72dvh; min-height: 480px; border: 0; border-radius: 0 0 var(--r) var(--r); background: #fff; }
 
 /* ---- блок МОП: списки, чипы, плитки ---- */
@@ -177,6 +180,7 @@ nav .cnt { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 16px;
 .segf button { flex: 1; width: auto; padding: 9px 4px; font-size: 13px; background: transparent; color: var(--muted); border-radius: 9px; white-space: nowrap; }
 .segf button:hover { background: transparent; color: var(--text); }
 .segf button.on { background: var(--dark); color: #fff; }
+@media (max-width: 700px) { .segf.kbseg { display: grid; grid-template-columns: 1fr 1fr; } }   /* «Сделки»: 4 доски — на телефоне 2×2 */
 .segf button span { opacity: .65; margin-left: 3px; font-weight: 500; }
 .qrow .ic { flex: none; width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font: 700 14px Onest, Inter, system-ui; background: var(--alt); color: var(--text); }
 .qrow .ic.lead { border-radius: 50%; background: var(--okbg); color: var(--ok); }
@@ -1356,7 +1360,19 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
 .kcol.dim { opacity: .75; }
 .kbtotal { white-space: nowrap; }
 .kbnone { display: none; margin: 4px 0 14px; } @media (max-width: 1099px) { .kbnone { display: block; } }
-@media (max-width: 1099px) { .kcol.empty { display: none; } }   /* на телефоне не перетаскивают — пустые стадии не занимают экран */
+@media (max-width: 1099px) and (pointer: coarse) { .kcol.empty { display: none; } }   /* на телефоне не перетаскивают — пустые стадии не занимают экран */
+/* мышь (компьютер, в том числе узкое окно — HEAD 26.11 «чтобы не застревало»): без прокрутки вбок, колонки делят ширину,
+   не помещаются — переходят на следующий ряд */
+@media (pointer: fine) {
+  .kb { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); overflow: visible; scroll-snap-type: none; margin: 0 0 8px; padding: 0; }
+  .kcol { min-width: 0; }
+  .wrap[data-tab=deals] .kb .kcol { flex: none; }
+}
+.kc, .kt, .kn, .kw { min-width: 0; overflow-wrap: anywhere; }
+.kbackr { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 6px; font-size: 12px; color: var(--muted); } .kbackr b { color: var(--text); }
+.parked h3 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; } .parked.back { border-color: color-mix(in srgb, var(--ok) 30%, var(--line)); }
+.parked .warn { color: var(--warn); } .parked .ok { color: var(--ok); }
+.prow { cursor: pointer; } .prow > div { min-width: 0; } .prow.due b { color: var(--warn); } .prow > span { white-space: nowrap; }
 .khead { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; font-size: 14px; padding: 2px 4px 0; } .khead b { color: var(--muted); font-weight: 600; }
 .ksum { font-size: 20px; font-weight: 800; padding: 0 4px 10px; }
 .kc { background: var(--alt); border: 1px solid var(--line); border-radius: var(--r2); padding: 10px 11px; margin-bottom: 8px; cursor: pointer; }
@@ -1368,6 +1384,12 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
 .kr.hot { background: var(--hotbg); color: var(--hot); } .kr.wait { background: var(--warnbg); color: var(--warn); }
 .kr.idle { background: var(--dark); color: var(--muted); } .kr.go { background: var(--okbg); color: var(--ok); }
 .kw { font-size: 12px; color: var(--muted); margin-top: 5px; }
+.ks em { font-style: normal; color: var(--muted); font-weight: 700; margin-right: 4px; } .ks.fact em { color: var(--ok); }
+.ks small { display: block; font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: 0; } .ks.fact small { color: var(--ok); }
+.kest { margin-top: 4px; background: var(--hotbg); color: var(--hot); border: 1px dashed var(--hot); font-size: 13px; padding: 6px 10px; }
+.kestf { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 4px; } .kestf p { grid-column: 1 / -1; margin: 0; }
+.kestf input { min-width: 0; } .kerr { color: var(--hot); }
+.kbsplit { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: -4px 0 10px; color: var(--muted); } .kbsplit .ok { color: var(--ok); } .kbsplit .warn { color: var(--warn); }
 .ksum small { display: block; font-size: 12px; font-weight: 600; color: var(--warn); margin-top: 1px; }
 .kwork { margin-top: 8px; font-size: 12px; }
 .kpay { height: 5px; border-radius: 3px; background: var(--dark); overflow: hidden; } .kpay i { display: block; height: 100%; background: var(--ok); border-radius: 3px; }

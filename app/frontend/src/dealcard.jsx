@@ -157,73 +157,66 @@ function KpAgree({ d, onDone }) {
   </div>
 }
 
-function Calc({ d, saved, onSaved }) {
-  const svc0 = /печат/i.test(d.service || '') ? 'print' : 'mural'
-  const [f, setF] = useState(() => saved?.in || { service: svc0, area: d.area || '', level: d.level || 'medium', design: null, extras: [], outdoor: false, place: 'base', cash: 0, qty: 1 })
-  const [r, setR] = useState(saved?.out || null)
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState('')
-  const [err, setErr] = useState('')
-  const t = useRef(null)
-  useEffect(() => {
-    if (!(+f.area > 0) && f.service !== 'fix') { setR(null); return undefined }
-    clearTimeout(t.current)
-    t.current = setTimeout(() => api(`/bx/deals/${d.id}/price`, { method: 'POST', body: { ...f, area: +f.area || 0, cash: +f.cash || 0 } }).then(x => { setR(x); setErr('') }, e => setErr(e.message)), 250)
-    return () => clearTimeout(t.current)
-  }, [f])
-  const set = p => setF({ ...f, ...p })
-  const tog = k => set({ extras: f.extras.includes(k) ? f.extras.filter(x => x !== k) : [...f.extras, k] })
-  const save = () => { setBusy(true); setMsg(''); api(`/bx/deals/${d.id}/price/save`, { method: 'POST', body: { ...f, area: +f.area || 0, cash: +f.cash || 0 } })
-    .then(x => onSaved(x.bx === 'off' ? 'Расчёт сохранён, в Битрикс не записан (ключ записи не задан).' : 'Записано в сделку: сумма, площадь' + (x.norm_fields ? ', смены и срок.' : '. Полей для смен и срока в Битриксе ещё нет — задание Кодексу.')), e => setMsg('Не записалось: ' + e.message)).finally(() => setBusy(false)) }
-  const n = r?.norm || {}
-  const isArea = f.service !== 'fix'
-  return <div className="card">
+// Расчёт (HEAD 26.11 «у нас есть полноценный блок — какого он в учебнике»): в шаге — тот же калькулятор, что в блоке
+// «Расчёт · КП · Документы · Скрипты», данные сделки подставлены. «Записать в сделку» под итогом → сервер пересчитывает
+// по «Значениям» и пишет сумму, площадь, нормы в Битрикс; ниже — что записано и что увидит команда.
+const TAB_SVC = { paint: 'mural', print: 'print', fix: 'fix', bulk: 'bulk' }
+const SVC_TAB = { mural: 'paint', print: 'print', fix: 'fix', bulk: 'bulk' }
+const byVal = (m, v) => Object.keys(m).find(k => m[k] === v)
+function calcState(d, saved) {
+  const i = saved?.in || {}, svc = i.service || (/печат/i.test(d.service || '') ? 'print' : 'mural'), m2 = +(i.area || d.area || 0)
+  const ex = i.extras || [], st = { tab: SVC_TAB[svc] || 'paint', place: i.place || 'base', cash: +i.cash || 0,
+    ex: { urgent: ex.includes('urgent'), height: ex.includes('height'), night: ex.includes('night'), lac: ex.includes('lacquer') },
+    dx: { urgent: !!i.design_urgent, concept: !!i.design_concept, extra: +i.design_extra || 0 } }
+  const design = i.design || (m2 ? autoDesign(m2) : undefined)
+  if (m2) { st.paint = { m2, level: LEVELS[svc === 'mural' && i.level ? i.level : d.level || 'medium'] || 'Средний', ...(design ? { design } : {}) }
+    st.print = { m2, ...(design ? { design } : {}) }; st.bulk = { m2 } }
+  if (svc === 'fix') st.fix = { level: FIX[i.level] || 'Лёгкий', qty: +i.qty || 1 }
+  return st
+}
+function priceIn(S, team) {
+  const t = S.tab, area = +((t === 'paint' ? S.paint : t === 'print' ? S.print : t === 'bulk' ? S.bulk : null)?.m2 || 0)
+  return { service: TAB_SVC[t], area, level: t === 'fix' ? byVal(FIX, S.fix?.level) || 'lite' : byVal(LEVELS, S.paint?.level) || 'medium',
+    design: t === 'paint' ? S.paint?.design || null : t === 'print' ? S.print?.design || null : null,
+    extras: ['urgent', 'height', 'night'].filter(k => S.ex?.[k]).concat(S.ex?.lac ? ['lacquer'] : []),
+    place: S.place || 'base', cash: +S.cash || 0, qty: +S.fix?.qty || 1, design_urgent: !!S.dx?.urgent, design_concept: !!S.dx?.concept,
+    design_extra: +S.dx?.extra || 0, outdoor: team.outdoor, surface: team.surface }
+}
+function Calc({ d, saved, place, onSaved }) {
+  const [team, setTeam] = useState({ outdoor: !!saved?.in?.outdoor, surface: !!saved?.in?.surface })
+  const [state] = useState(() => calcState(d, saved))
+  const onCalc = (m, reply) => {
+    if (d.kp_agreed) return reply(false, `КП согласовано клиентом на ${money(d.kp_agreed.total)}. Новую цену — после «Снять согласование» в шаге «КП».`)
+    if (!TAB_SVC[m.state.tab]) return reply(false, 'Картины пока считаются здесь только для клиента: в сделку их запишем после обновления калькулятора картин.')
+    api(`/bx/deals/${d.id}/price/save`, { method: 'POST', body: priceIn(m.state, team) }).then(x => {
+      const got = x.calc?.total || 0, diff = Math.round(got) !== Math.round(m.total)
+      const text = (x.bx === 'off' ? 'Расчёт сохранён, в Битрикс не записан (ключ записи не задан).' : `Записано в сделку: ${money(got)}, площадь, смены и срок.`)
+        + (diff ? ` Внимание: блок показал ${money(m.total)}, по «Значениям» на сервере — ${money(got)}; записано ${money(got)}. Скажите HEAD.` : '')
+      reply(true, text); onSaved(text)
+    }, e => reply(false, 'Не записалось: ' + e.message))
+  }
+  const r = saved?.out, n = r?.norm || {}
+  return <div className="card calcblock">
     <div className="panelhead"><h3>Расчёт</h3><span className="small muted">{saved ? `записан ${dt(saved.at)}` : 'по «Значениям» сейчас'}</span></div>
-    <div className="segf">{SERVICES.map(([k, name]) => <button key={k} className={f.service === k ? 'on' : ''} onClick={() => set({ service: k, design: null })}>{name}</button>)}</div>
-    {isArea && <label>Площадь, м²<input type="number" min="1" inputMode="decimal" value={f.area} onChange={e => set({ area: e.target.value, design: null })} placeholder="60" /></label>}
-    {f.service === 'mural' && <><label>Сложность</label><div className="chips">{Object.entries(LEVELS).map(([k, v]) => <button key={k} className={f.level === k ? 'on' : ''} onClick={() => set({ level: k })}>{v}</button>)}</div></>}
-    {f.service === 'fix' && <><label>Рисунок</label><div className="chips">{Object.entries(FIX).map(([k, v]) => <button key={k} className={f.level === k ? 'on' : ''} onClick={() => set({ level: k })}>{v}</button>)}</div>
-      <label>Количество работ<input type="number" min="1" value={f.qty} onChange={e => set({ qty: +e.target.value || 1 })} /></label></>}
-    {(f.service === 'mural' || f.service === 'print') && <>
-      <label>Дизайн <span className="muted">· по площади {autoDesign(+f.area || 0)}, другую — только по решению HEAD</span></label>
-      <div className="chips">{DESIGNS.map(k => <button key={k} className={(f.design || autoDesign(+f.area || 0)) === k ? 'on' : ''} onClick={() => set({ design: k })}>{k}</button>)}</div>
-      <label>Надбавки и условия</label>
-      <div className="chips">{EXTRAS.map(([k, v]) => <button key={k} className={f.extras.includes(k) ? 'on' : ''} onClick={() => tog(k)}>{v} +10%</button>)}
-        <button className={f.outdoor ? 'on' : ''} onClick={() => set({ outdoor: !f.outdoor })}>Улица</button>
-        <button className={f.surface ? 'on' : ''} onClick={() => set({ surface: !f.surface })}>Сложная поверхность</button></div>
-      <p className="small muted">Сложность, высоту, улицу и поверхность команда видит в смене без выбора — заполняй как есть на объекте.</p>
-      <Trip id={d.id} /></>}
-    {isArea && <><label>Где объект</label><div className="chips">{PLACES.map(([k, v]) => <button key={k} className={f.place === k ? 'on' : ''} onClick={() => set({ place: k })}>{v}</button>)}</div></>}
-    <label>Скидка за наличные, % (до 15)<input type="number" min="0" max="15" value={f.cash} onChange={e => set({ cash: e.target.value })} /></label>
-    {err && <p className="small" style={{ color: 'var(--hot)' }}>{err}</p>}
-    {r && <>
-      <div className="lines">{r.lines.map(([c, s, v], i) => <div key={i} className={c.replace('ln', '').trim()}><span>{s}</span><span>{typeof v === 'number' ? (v < 0 ? '−' + money(-v) : money(v)) : v}</span></div>)}</div>
-      <div className="total"><span>{r.no_vat ? 'Итого по акции, без НДС' : 'Итого с НДС'}</span><b>{money(r.total)}</b></div>
-      <div className="two">
-        <div><h4>Клиенту</h4><div className="kv">
-          <div><span className="muted small">Аванс {r.pay.prepay_pct}%</span><b>{money(r.pay.prepay)}</b></div>
-          <div><span className="muted small">Остаток</span><b>{money(r.pay.rest)}</b></div>
-          {r.dprice ? <div><span className="muted small">Дизайн {r.design}, 100% вперёд</span><b>{money(r.dprice)}</b></div> : null}
-          <div><span className="muted small">{r.pay.vat_included ? 'В том числе НДС' : 'Если нужен счёт с НДС'}</span><b>{money(r.pay.vat)}</b></div>
-          {r.rate ? <div><span className="muted small">За м²</span><b>{money(r.rate)}</b></div> : null}
-        </div></div>
-        <div><h4>Команде</h4>{n.shifts ? <div className="kv">
-          <div><span className="muted small">Смен по норме</span><b>{n.shifts}</b></div>
+    <p className="small muted">Полный калькулятор блока «Расчёт · КП · Документы»: услуга и площадь из сделки уже стоят. Посчитайте и нажмите «Записать в сделку» под итогом — сумма, площадь и нормы уйдут в Битрикс, КП и договор возьмут их сами.</p>
+    {d.kp_agreed && <p className="small why">КП согласовано клиентом на {money(d.kp_agreed.total)} — сумма и нормы закреплены. Новую цену — после «Снять согласование» в шаге «КП».</p>}
+    <Embed place={place} view="calc" dealId={d.id} calc={state} onCalc={onCalc} />
+    <div className="calcteam"><span className="small muted">Для нормы смен:</span>
+      <button className={'mini' + (team.outdoor ? '' : ' ghost')} onClick={() => setTeam({ ...team, outdoor: !team.outdoor })}>Улица</button>
+      <button className={'mini' + (team.surface ? '' : ' ghost')} onClick={() => setTeam({ ...team, surface: !team.surface })}>Сложная поверхность</button></div>
+    {r ? <div className="calcsaved">
+      <h4>В сделке сейчас</h4>
+      <div className="kv">
+        <div><span className="muted small">{r.no_vat ? 'Итого по акции, без НДС' : 'Итого с НДС'}</span><b>{money(r.total)}</b></div>
+        <div><span className="muted small">Аванс {r.pay.prepay_pct}%</span><b>{money(r.pay.prepay)}</b></div>
+        {r.dprice ? <div><span className="muted small">Дизайн {r.design}, 100% вперёд</span><b>{money(r.dprice)}</b></div> : null}
+        {n.shifts ? <><div><span className="muted small">Смен по норме</span><b>{n.shifts}</b></div>
           <div><span className="muted small">Художников</span><b>{n.crew}</b></div>
-          <div><span className="muted small">Срок клиенту</span><b>{n.client} раб. дн.</b></div>
-          <div><span className="muted small">Подготовка + работа</span><b>{n.prep} + {n.work} дн.</b></div>
-          {n.ink ? <div><span className="muted small">Чернила</span><b>{n.ink} мл</b></div> : null}
-        </div> : <p className="small muted">Срок и состав считаются для росписи и печати по площади.</p>}</div>
+          <div><span className="muted small">Срок клиенту</span><b>{n.client} раб. дн.</b></div></> : null}
       </div>
-      {r.flags.map(([c, t], i) => <div key={i} className={'flag ' + c}>{t}</div>)}
-      <div className="copybox">{r.ladder}</div>
-      <div className="dealbtns wrapbtns"><Copy text={r.ladder} label="Скопировать лестницу цены" /><Copy text={r.client_text} label="Скопировать текст клиенту" /></div>
-      {d.kp_agreed ? <p className="small why">КП согласовано клиентом на {money(d.kp_agreed.total)} — сумма и нормы закреплены. Чтобы записать новую цену, сначала «Снять согласование» в шаге «КП».</p>
-        : <button disabled={busy || !r.total} onClick={save}>{saved ? 'Записать заново в сделку' : 'Записать в сделку'}</button>}
-      {msg && <p className="small muted">{msg}</p>}
-      <p className="small muted">В сделку уходят сумма, площадь, сложность, смены, состав и срок; в ленту — короткий расчёт. КП и договор возьмут эти цифры сами.</p>
-    </>}
-    {!r && !err && <p className="small muted">Укажите площадь — цена, аванс, смены и срок появятся сразу.</p>}
+      <div className="dealbtns wrapbtns"><Copy text={r.client_text} label="Скопировать текст клиенту" /></div>
+    </div> : <p className="small muted">В сделке расчёта ещё нет.</p>}
+    <Trip id={d.id} />
   </div>
 }
 
@@ -473,7 +466,7 @@ export function DealCard({ id, back, place }) {
       <Qualify key={d.modified} d={d} onDone={() => load(true)} />
       <button className="ghost clientbtn" onClick={() => setSheet({ kind: 'client' })}>Клиент и реквизиты: {c.type || 'Физлицо'}{c.name ? ' · ' + c.name : ''}</button>
     </div>}
-    {cur === 'calc' && <Calc key={calc?.at || 'new'} d={d} saved={calc} onSaved={t => { loadCalc(); said(t) }} />}
+    {cur === 'calc' && <Calc key={d.id} d={d} saved={calc} place={place} onSaved={t => { loadCalc(); said(t) }} />}
     {cur === 'kp' && <>
       <div className="card">
         <div className="panelhead"><h3>Коммерческое предложение</h3><button className="ghost mini" onClick={say}>Скрипты шага</button></div>

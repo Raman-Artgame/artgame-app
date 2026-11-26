@@ -20,7 +20,8 @@
     '.agbx-st{font-size:.9em;opacity:.85;flex-basis:100%}' +
     (MODE === 'study' ? '#tabs .tab[data-v=calc],#tabs .tab[data-v=kp],#tabs .tab[data-v=docs],#tabs .tab[data-v=scripts],#tabs .tab[data-v=a],#tabs .tab[data-v=mat]{display:none!important}' +
       '.btns a[href="#calc"],.btns a[href="#kp"],.btns a[href="#docs"],.btns a[href="#scripts"],.btns a[href="#algo"],.btns a[href="#mat"]{display:none!important}' : '') +
-    (MODE === 'embed' ? 'header.top,#vals-foot,#tabs{display:none!important}body{padding-top:0!important}.agbx{display:none!important}' : '')
+    (MODE === 'embed' ? 'header.top,#vals-foot,#tabs{display:none!important}body{padding-top:0!important}.agbx{display:none!important}' +
+      '#tokp{display:none!important}#agsave{font-weight:700}#agsavest{margin-top:8px}#agsavest.ok{color:#3DDC97}#agsavest.err{color:#FF5C72}' : '')
   document.head.appendChild(css)
 
   // «Учёба»: рабочие разделы живут в карточке сделки — любой переход к ним ведёт в учебник
@@ -127,6 +128,45 @@
     row.parentNode.insertBefore(picker(docsFill), row)
   }
 
+  /* ---- расчёт в карточке сделки (HEAD 26.11: «есть полноценный блок — его и в сделку»): данные сделки → калькулятор,
+     «Записать в сделку» → приложение (сервер пересчитывает по «Значениям» и пишет в Битрикс) ---- */
+  var CALC_DEAL = 0
+  function calcPrefill(o) {   // true — подставлено и форма перерисована
+    if (typeof S === 'undefined' || typeof renderCForm !== 'function' || !document.getElementById('cform')) return false
+    var c = o.calc || {}
+    try {
+      if (c.tab) S.tab = c.tab
+      ;['paint', 'print', 'bulk', 'fix', 'canvas', 'ex', 'dx'].forEach(function (k) { if (c[k]) S[k] = Object.assign({}, S[k] || {}, c[k]) })
+      if (c.place) S.place = c.place
+      if (c.cash != null) S.cash = c.cash
+      if (typeof saveS === 'function') saveS()
+      Array.prototype.forEach.call(document.querySelectorAll('#ctabs button'), function (x) { x.classList.toggle('on', x.dataset.t === S.tab) })
+      renderCForm()
+    } catch (e) { /* калькулятор другой версии */ }
+    return true
+  }
+  function mountCalc() {
+    if (MODE !== 'embed' || !CALC_DEAL) return
+    var tokp = document.getElementById('tokp')
+    if (!tokp || document.getElementById('agsave')) return
+    var b = document.createElement('button'); b.type = 'button'; b.id = 'agsave'; b.className = 'btn'; b.textContent = 'Записать в сделку № ' + CALC_DEAL
+    tokp.parentNode.insertBefore(b, tokp)
+    var st = document.createElement('div'); st.id = 'agsavest'; st.className = 'small'
+    tokp.parentNode.parentNode.insertBefore(st, tokp.parentNode.nextSibling)
+    b.onclick = function () {
+      var r = compute(S)
+      if (r.none || !r.total) { st.className = 'small err'; st.textContent = r.none ? 'Такой расчёт делает HEAD.' : 'Нечего записывать: укажите площадь, размер или количество.'; return }
+      b.disabled = true; st.className = 'small'; st.textContent = 'Записываю в сделку…'
+      window.parent.postMessage({ type: 'artgame:calc', deal: CALC_DEAL, state: JSON.parse(JSON.stringify(S)), total: r.total, tab: r.tab }, location.origin)
+    }
+  }
+  window.addEventListener('message', function (e) {
+    if (e.origin !== location.origin || !e.data || e.data.type !== 'artgame:calc-done') return
+    var b = document.getElementById('agsave'), st = document.getElementById('agsavest')
+    if (b) b.disabled = false
+    if (st) { st.className = 'small ' + (e.data.ok ? 'ok' : 'err'); st.textContent = e.data.text || '' }
+  })
+
   /* ---- открыть сделку из карточки приложения ---- */
   function pending() {
     var o = null
@@ -137,6 +177,13 @@
       if (location.hash !== o.hash) location.hash = o.hash
     } else if (o.view === 'calc') {
       if (location.hash !== '#calc') location.hash = '#calc'
+      // скрипт моста может загрузиться раньше калькулятора: подставляем, как только появится его состояние S
+      var filled = false
+      var t3 = setInterval(function () {
+        if (!filled && (filled = calcPrefill(o))) CALC_DEAL = o.id   // «Записать в сделку» — только после подстановки
+        if (filled) mountCalc()
+        if ((filled && document.getElementById('agsave')) || ++tries > 80) clearInterval(t3)
+      }, 150)
     } else if (o.view === 'kp') {
       if (location.hash !== '#kp') location.hash = '#kp'
       var t = setInterval(function () { if (kpPick(o.id) || ++tries > 40) { clearInterval(t); if (o.kp) kpAdd(o.kp) } }, 250)
@@ -188,6 +235,6 @@
     }, function (e) { if (st) st.textContent = (st.textContent || '') + ' В Битрикс не записалось: ' + e.message })
   }
 
-  new MutationObserver(function () { mountKp(); mountDocs() }).observe(document.documentElement, { childList: true, subtree: true })
+  new MutationObserver(function () { mountKp(); mountDocs(); mountCalc() }).observe(document.documentElement, { childList: true, subtree: true })
   mountKp(); mountDocs(); pending()
 })()

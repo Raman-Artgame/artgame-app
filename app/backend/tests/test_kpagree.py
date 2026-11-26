@@ -31,6 +31,10 @@ def test_kp_agreed_locks_price(bxc, monkeypatch):
         assert "клиент согласовал КП на 1 310 000 ₸" in calls[-1][1]["fields"]["COMMENT"]
         assert c.post("/api/bx/deals/1601/kp-agreed", headers=hdr(6000)).status_code == 400   # второй раз — нет
         assert c.get("/api/bx/deals/1601/full", headers=hdr(6000)).json()["kp_agreed"]["total"] == 1310000
+        # канбан: ✓ факт; ориентир поверх расчёта и согласованной цены не ставится
+        row = next(x for x in c.get("/api/bx/deals?fresh=1", headers=hdr(6000)).json()["deals"] if x["id"] == 1601)
+        assert row["price"] == "fact" and row["sum"] == 1310000
+        assert c.post("/api/bx/deals/1601/fields", json={"estimate": 900000}, headers=hdr(6000)).status_code == 409
         # другая цена не записывается; та же — можно
         r = c.post("/api/bx/deals/1601/price/save", json={**body, "area": 80}, headers=hdr(6000))
         assert r.status_code == 409 and "Снять согласование" in r.json()["detail"]
@@ -45,6 +49,10 @@ def test_kp_agreed_locks_price(bxc, monkeypatch):
             rows = conn.execute("SELECT undo_reason FROM kp_agreed WHERE deal_id=1601").fetchall()
         assert [x["undo_reason"] for x in rows] == ["клиент добавил стену"]
         assert c.get("/api/bx/deals/1601/full", headers=hdr(6000)).json()["kp_agreed"] is None
+        row = next(x for x in c.get("/api/bx/deals?fresh=1", headers=hdr(6000)).json()["deals"] if x["id"] == 1601)
+        assert row["price"] == "calc"
+        r = c.post("/api/bx/deals/1601/fields", json={"estimate": 900000}, headers=hdr(6000))
+        assert r.status_code == 409 and "из расчёта" in r.json()["detail"]
     finally:
         DEALS["1601"].clear()
         DEALS["1601"].update(old)

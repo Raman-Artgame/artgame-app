@@ -268,6 +268,22 @@ def test_write_off_and_on(bxc, monkeypatch, tmp_path):
     assert calls[2][0] == "tasks.task.add" and tk["RESPONSIBLE_ID"] == 4565 and tk["UF_CRM_TASK"] == ["D_1601"] and tk["DEADLINE"].startswith("2027-01-15")
     with db.pool.connection() as conn:
         assert conn.execute("SELECT due::text, note FROM bx_reminders WHERE deal_id=1601").fetchone() == {"due": "2027-01-15", "note": "ждут бюджет"}
+    # «Отложено и отказы» (HEAD 26.11): в списке сделок — когда вернуться
+    bx._cache.clear()
+    row = next(x for x in c.get("/api/bx/deals?fresh=1", headers=hdr(6000)).json()["deals"] if x["id"] == 1601)
+    assert row["until"] == "2027-01-15" and row["note"] == "ждут бюджет"
+    # проиграна: в «Отказах» с причиной и суммой; дубль/спам вернуть нельзя
+    DEALS["1601"].update({"STAGE_ID": "LOSE", "UF_CRM_1753381316974": "Дорого: бюджет клиента ниже. Хотят 400"})
+    DEALS["1651"].update({"STAGE_ID": "LOSE", "UF_CRM_1753381316974": "Дубль, спам, ошибочная заявка"})
+    bx._cache.clear()
+    lost = c.get("/api/bx/lost", headers=hdr(6000)).json()
+    assert [(x["id"], x["code"], x["back"], x["amount"]) for x in lost["items"]] == [(1601, "price", True, 589250)], "МОП — только свои"
+    head = c.get("/api/bx/lost", headers=hdr(1000)).json()
+    assert head["count"] == 2 and head["back"] == {"count": 1, "sum": 589250}
+    assert [(r["code"], r["count"]) for r in head["reasons"]] == [("price", 1), ("spam", 1)]
+    DEALS["1651"].update({"STAGE_ID": "NEW"})
+    DEALS["1651"].pop("UF_CRM_1753381316974", None)
+    DEALS["1601"].pop("UF_CRM_1753381316974", None)
     DEALS["1601"]["STAGE_ID"] = "NEW"
     # документ скачан на странице: КП → сумма, площадь, файл, стадия NEW → PREPARATION (расчёт сохранён — замок открыт)
     with db.pool.connection() as conn:
