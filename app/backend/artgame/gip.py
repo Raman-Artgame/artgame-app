@@ -70,6 +70,29 @@ def set_gip(oid: int, b: GipIn, p: dict = Depends(active)):
     return {"ok": True, "gip_id": pe["id"] if pe else None, "gip_name": pe["full_name"] if pe else None}
 
 
+@router.get("/bx/deals/{deal_id}/gip")
+def deal_gip(deal_id: int, p: dict = Depends(active)):
+    """«Куратор ГИП» в карточке сделки (HEAD 26.11): кто сейчас и из кого выбрать. Права ГИП даёт только objects.gip_person_id."""
+    from . import bx
+    bx._deal(p, deal_id)   # чужая сделка — 403
+    with db.pool.connection() as conn:
+        o = conn.execute("SELECT gip_person_id FROM objects WHERE id=%s", (deal_id,)).fetchone()
+    return {"gip_id": o["gip_person_id"] if o else None, "candidates": candidates(p)}
+
+
+@router.post("/bx/deals/{deal_id}/gip")
+def deal_set_gip(deal_id: int, b: GipIn, p: dict = Depends(active)):
+    """Назначить ГИП из карточки сделки: строки объекта до стадии работы ещё нет — заводим её (status early), затем как в проекте."""
+    from . import bx
+    from .designtasks import ensure_object
+    if p["role_code"] not in ASSIGN or p.get("_view_as"):
+        raise HTTPException(403, "назначают HEAD и МОП")
+    bx._deal(p, deal_id)
+    with db.pool.connection() as conn, conn.transaction():
+        ensure_object(conn, deal_id)
+    return set_gip(deal_id, b, p)
+
+
 @router.get("/objects/{oid}/history")
 def history(oid: int, p: dict = Depends(active)):
     """Всё по проекту для ГИП: смены по людям (часы, м², что сделал, фото до/после, статус), расходы с чеками, итоги по людям."""
