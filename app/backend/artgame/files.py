@@ -27,7 +27,7 @@ from .work import active
 router = APIRouter(prefix="/api")
 
 DOC_ROLES = {"head", "mop", "mop_vip", "artist_pro", "lead_artist", "print_master", "lead_designer"}   # Про — выше Главного (HEAD 09.11)
-KINDS = ("photo", "design", "doc", "media")
+KINDS = ("photo", "design", "doc", "media", "brief")   # brief — материалы к ТЗ дизайнеру (HEAD 26.11)
 PROD = {"lead_artist", "artist_pro", "print_master", "lead_designer", "head"}   # «Продакшн» (HEAD 08.11; Главный дизайнер — 10.11)
 TTL = 12 * 3600
 MAX_PHOTO = 8_000_000
@@ -35,7 +35,7 @@ MAX_BIG = 2_000_000_000  # 2 ГБ на файл дизайна
 
 
 def can_see(p: dict, kind: str) -> bool:
-    if kind in ("photo", "design", "media"):
+    if kind in ("photo", "design", "media", "brief"):
         return True
     if kind == "doc":
         return p["role_code"] in DOC_ROLES
@@ -52,6 +52,8 @@ def can_upload(p: dict, kind: str) -> bool:
         return True
     if kind == "design":
         return p["role_code"] == "head" or "design" in p["zones"]
+    if kind == "brief":   # фото стен, развёртки, примеры: МОП из «Нужен дизайн», дизайнер из задачи
+        return p["role_code"] in ("head", "mop", "mop_vip") or "design" in p["zones"]
     if kind == "media":
         return can_prod(p) or p["role_code"] == "marketer"   # маркетинг кладёт снятое в папку сделки (HEAD 14.11)
     return p["role_code"] in DOC_ROLES

@@ -11,6 +11,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
+from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
 from . import bx, bxw, db
@@ -25,7 +26,13 @@ STAGES = [("new", "Свежие заказы"), ("urgent", "СРОЧНО"), ("in
 NAME = dict(STAGES)
 ASK = {"mop", "mop_vip", "head"}    # кто может попросить дизайн из карточки сделки
 
-SQL = """SELECT t.*, d.full_name AS designer, c.full_name AS by_name, f.name AS file_name
+SQL = """SELECT t.*, d.full_name AS designer, c.full_name AS by_name, f.name AS file_name,
+                (SELECT full_name FROM people WHERE id=t.tz_by) AS tz_name,
+                (SELECT count(*) FROM files x WHERE x.object_id=t.deal_id AND x.kind='design' AND x.status='ready') AS n_sketch,
+                (SELECT count(*) FROM files x WHERE x.object_id=t.deal_id AND x.kind='design' AND x.status='ready' AND x.approved_at IS NOT NULL) AS n_ok,
+                (SELECT count(*) FROM files x WHERE x.object_id=t.deal_id AND x.kind='brief' AND x.status='ready') AS n_brief,
+                (SELECT coalesce(json_agg(json_build_object('id', m.id, 'kind', m.kind, 'text', m.text, 'by', pe.full_name, 'at', m.created_at) ORDER BY m.id), '[]')
+                   FROM design_task_msgs m JOIN people pe ON pe.id=m.person_id WHERE m.task_id=t.id) AS msgs
            FROM design_tasks t LEFT JOIN people d ON d.id=t.designer_id JOIN people c ON c.id=t.created_by
            LEFT JOIN files f ON f.id=t.file_id AND f.status='ready'"""
 
@@ -37,7 +44,24 @@ def _out(r: dict) -> dict:
             "deadline": r["deadline"].isoformat() if r["deadline"] else "", "link": r["link"] or "",
             "file_id": r["file_id"], "file_name": r["file_name"] or "", "by": r["by_name"],
             "created": r["created_at"].isoformat(), "updated": r["updated_at"].isoformat(),
-            "approved": r["approved_at"].isoformat() if r["approved_at"] else ""}
+            "approved": r["approved_at"].isoformat() if r["approved_at"] else "",
+            # ТЗ дизайнеру (HEAD 26.11): срок, старт работ, лёгкий бриф, бриф клиента, вопросы к МОП, круги правок
+            "start_on": r["start_on"].isoformat() if r.get("start_on") else "", "brief": r.get("brief") or {},
+            "tz_by": r.get("tz_name") or "", "rounds": r.get("rounds") or 0,
+            "client_brief": r.get("client_brief"), "client_brief_at": r["client_brief_at"].isoformat() if r.get("client_brief_at") else "",
+            "brief_sent": bool(r.get("brief_token")), "msgs": r.get("msgs") or [],
+            "ask_open": bool(r.get("msgs")) and r["msgs"][-1]["kind"] == "ask",
+            "sketches": r.get("n_sketch") or 0, "sketches_ok": r.get("n_ok") or 0, "materials": r.get("n_brief") or 0}
+
+
+BRIEF = {"who": ("Дети", "Взрослые", "Сотрудники", "Гости"),
+         "style": ("Графика", "Реализм", "Минимализм", "Абстракция", "Граффити", "Каллиграфия"),
+         "mood": ("Энергия", "Уют", "Премиум", "Детское", "Спокойное")}
+
+
+def clean_brief(b: dict | None) -> dict:
+    """Лёгкий бриф: только известные вопросы и варианты — лишнее отбрасывается."""
+    return {k: [x for x in (b or {}).get(k) or [] if x in opts] for k, opts in BRIEF.items() if (b or {}).get(k)}
 
 
 def _bitrix(deal_id: int) -> str:
@@ -68,16 +92,23 @@ def ensure_object(conn, deal_id: int) -> int:
 
 @router.post("/design/deal/{deal_id}/object")
 def deal_object(deal_id: int, p: dict = Depends(active)):
-    """Перед загрузкой эскиза: у сделки должна быть строка в objects (папка ДИЗАЙН создаётся при самой загрузке)."""
-    need(p)
+    """Перед загрузкой эскиза или материалов к ТЗ: у сделки должна быть строка в objects (папка создаётся при самой загрузке).
+    Дизайнеры — любой сделки, МОП — своей (фото стен и развёртки в окне «Нужен дизайн»)."""
+    if p["role_code"] in ASK:
+        bx._deal(p, deal_id)
+    else:
+        need(p)
     with db.pool.connection() as conn, conn.transaction():
         return {"id": ensure_object(conn, deal_id)}
 
 
 class TaskIn(BaseModel):
     title: str = Field(min_length=2, max_length=120)
-    note: str | None = Field(default=None, max_length=1000)
+    note: str | None = Field(default=None, max_length=2000)
     urgent: bool = False
+    deadline: date | None = None      # к какому дню нужен эскиз
+    start_on: date | None = None      # когда клиент хочет начать работы
+    brief: dict | None = None         # лёгкий бриф кнопками: who, style, mood
 
 
 @router.get("/bx/deals/{deal_id}/design-tasks")
@@ -98,10 +129,11 @@ def add_task(deal_id: int, b: TaskIn, p: dict = Depends(active)):
         raise HTTPException(403, "Дизайн просят МОП и HEAD из карточки сделки")
     d = bx._deal(p, deal_id)
     with db.pool.connection() as conn, conn.transaction():
-        r = conn.execute("""INSERT INTO design_tasks (deal_id, deal_title, city, title, note, stage, created_by)
-                            VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        r = conn.execute("""INSERT INTO design_tasks (deal_id, deal_title, city, title, note, stage, created_by, deadline, start_on, brief)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                          (deal_id, d.get("TITLE") or "", bx.city_name(d.get(bx.CITY)) or None, b.title.strip(),
-                          (b.note or "").strip() or None, "urgent" if b.urgent else "new", p["id"])).fetchone()
+                          (b.note or "").strip() or None, "urgent" if b.urgent else "new", p["id"], b.deadline, b.start_on,
+                          Jsonb(clean_brief(b.brief)))).fetchone()
         db.audit(conn, p["id"], "design_task_add", "design_tasks", r["id"], {"deal": deal_id, "title": b.title.strip()})
         row = conn.execute(SQL + " WHERE t.id=%s", (r["id"],)).fetchone()
     return _out(row)
@@ -127,6 +159,9 @@ class TaskEdit(BaseModel):
     deadline: date | None = None
     link: str | None = Field(default=None, max_length=500)
     file_id: int | None = None
+    start_on: date | None = None
+    note: str | None = Field(default=None, max_length=2000)   # «Дополнить ТЗ»: дизайнер дописывает из переписки
+    brief: dict | None = None
 
 
 @router.post("/design/tasks/{tid}")
@@ -161,6 +196,16 @@ def edit(tid: int, b: TaskEdit, p: dict = Depends(active)):
             upd["size"] = b.size or None
         if "deadline" in sent:
             upd["deadline"] = b.deadline
+        if "start_on" in sent:
+            upd["start_on"] = b.start_on
+        if "note" in sent or "brief" in sent:
+            if "note" in sent:
+                upd["note"] = (b.note or "").strip() or None
+            if "brief" in sent:
+                upd["brief"] = Jsonb(clean_brief(b.brief))
+            upd["tz_by"], upd["tz_at"] = p["id"], "now"
+        if upd.get("stage") == "fix":
+            upd["rounds"] = (t.get("rounds") or 0) + 1      # круг правок — каждый переход в «Правки»
         if "link" in sent:
             upd["link"] = (b.link or "").strip() or None
         if "file_id" in sent and b.file_id:
@@ -181,7 +226,7 @@ def edit(tid: int, b: TaskEdit, p: dict = Depends(active)):
             conn.execute(f"UPDATE design_tasks SET {sets}, updated_at=now() WHERE id=%s",
                          [v for v in upd.values() if v != "now"] + [tid])
             db.audit(conn, p["id"], "design_task_edit", "design_tasks", tid,
-                     {k: (v.isoformat() if isinstance(v, date) else v) for k, v in upd.items()})
+                     {k: (v.isoformat() if isinstance(v, date) else v.obj if isinstance(v, Jsonb) else v) for k, v in upd.items()})
             if upd.get("stage") == "done":   # эстафета (HEAD 26.11): утверждённый файл получает метку «В работу»
                 from .relay import mark
                 mark(conn, t["deal_id"], upd.get("file_id") or t["file_id"], p["id"])

@@ -198,8 +198,9 @@ export function Gallery({ obj, me, start = 'design', only, skip = [], bare = fal
     {kind === 'photo' && <div className="seg snapbtns"><CamLabel multi className="btnlike" onFiles={addPhotos}>📷 Снять фото с объекта</CamLabel>
       <label className="btnlike ghost">🖼 Из галереи
       <input type="file" accept="image/*" multiple hidden onChange={e => { const f = [...e.target.files]; e.target.value = ''; f.length && addPhotos(f) }} /></label></div>}
-    {canBig && <label className="photo"><span>⬆ Загрузить {kind === 'design' ? 'эскиз или файл в печать' : 'файл'}</span>
-      <input type="file" hidden onChange={e => e.target.files[0] && addBig(e.target.files[0])} /></label>}
+    {canBig && <label className="photo"><span>⬆ Загрузить {kind === 'design' ? 'эскизы или файлы в печать' : 'файл'}</span>
+      {/* HEAD 26.11: эскизы пачкой — на крупном объекте стен много */}
+      <input type="file" hidden multiple={kind === 'design'} onChange={async e => { const fs = [...e.target.files]; e.target.value = ''; for (const f of fs) await addBig(f) }} /></label>}
     {canVideo && <label className="photo"><span>🎥 Загрузить видео с объекта</span>
       <input type="file" accept="video/*" hidden onChange={e => e.target.files[0] && addBig(e.target.files[0], 'media', { media_type: 'video' })} /></label>}
     {busy && <p className="muted small">{busy}</p>}

@@ -1,0 +1,47 @@
+/* Бриф клиента по ссылке: светлая страница для клиента, свои цвета — тёмная тема приложения сюда не идёт */
+body.cbpage { background: #F4F1EA; color: #17151A; color-scheme: light; }
+.cb { max-width: 480px; margin: 0 auto; padding: 16px 16px 32px; font: 16px/1.45 Onest, Inter, system-ui, sans-serif; }
+.cb h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -.01em; }
+.cb h2 { font-size: 21px; margin: 0 0 4px; }
+.cb h2.cbh2 { margin-top: 22px; }
+.cbmuted { color: #77717C; font-size: 14px; margin: 0; }
+.cbtop { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.cblogo { font-weight: 800; letter-spacing: .14em; font-size: 15px; }
+.cblang { display: flex; background: #E7E2D8; border-radius: 99px; padding: 3px; }
+.cb .cblang button { width: auto; padding: 6px 12px; border-radius: 99px; background: transparent; color: #77717C; font-size: 13px; font-weight: 700; border: 0; }
+.cb .cblang button.on { background: #17151A; color: #fff; }
+.cbbar { display: flex; gap: 5px; margin: 14px 0 16px; }
+.cbbar i { flex: 1; height: 5px; border-radius: 99px; background: #DDD7CB; }
+.cbbar i.on { background: #E60041; }
+.cbcard { background: #fff; border-radius: 22px; padding: 22px 18px; box-shadow: 0 12px 30px -22px rgba(23, 21, 26, .5); }
+.cbopts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.cb .cbopts button { width: auto; flex: 1 1 calc(50% - 8px); min-height: 52px; padding: 12px 10px; border-radius: 14px; background: #F4F1EA; color: #17151A; border: 2px solid transparent; font-size: 15px; font-weight: 600; }
+.cb .cbopts button, .cb .cbopts button:hover, .cb .cbopts button:active { transition: none; transform: none; }
+.cb .cbopts button:hover { background: #F4F1EA; }
+.cb .cbopts button.on, .cb .cbopts button.on:hover { background: #17151A; color: #fff; border-color: #17151A; }
+.cbfield { display: block; margin-top: 16px; }
+.cbfield span { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; color: #17151A; }
+.cb .cbfield input { width: 100%; padding: 14px; border-radius: 14px; border: 2px solid #E7E2D8; background: #fff; color: #17151A; font: inherit; }
+.cb .cbfield input:focus { outline: 0; border-color: #17151A; }
+.cbskip { margin-top: 16px; }
+.cbnav { display: flex; gap: 10px; margin-top: 16px; }
+.cb button.cbgo { flex: 2; padding: 16px; border-radius: 16px; background: #E60041; color: #fff; font-size: 17px; font-weight: 700; border: 0; }
+.cb button.cbgo:hover { background: #E60041; }
+.cb button.cbghost:hover { background: transparent; }
+.cb .cblang button:hover { background: transparent; }
+.cb .cblang button.on:hover { background: #17151A; }
+.cb button.cbgo:disabled { opacity: .5; }
+.cb button.cbghost { flex: 1; padding: 16px; border-radius: 16px; background: transparent; color: #17151A; border: 2px solid #DDD7CB; font-size: 16px; font-weight: 600; }
+.cbpics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.cbpic { position: relative; aspect-ratio: 1; border-radius: 14px; overflow: hidden; background: #F4F1EA; display: block; }
+.cbpic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cbpic.up img { opacity: .4; }
+.cbpic.bad { outline: 3px solid #E60041; }
+.cbpic.ok::after { content: '✓'; position: absolute; right: 6px; bottom: 6px; width: 22px; height: 22px; border-radius: 50%; background: #17151A; color: #fff; font-size: 13px; display: grid; place-items: center; }
+.cbpic.add { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px dashed #CFC8BA; cursor: pointer; color: #77717C; }
+.cbpic.add span { font-size: 26px; line-height: 1; color: #17151A; }
+.cbpic.add em { font-style: normal; font-size: 12px; margin-top: 4px; text-align: center; }
+.cbdone { text-align: center; padding: 36px 20px; }
+.cbdone p { color: #77717C; margin: 8px 0 20px; }
+.cbok { width: 64px; height: 64px; border-radius: 50%; background: #E60041; color: #fff; font-size: 32px; display: grid; place-items: center; margin: 0 auto 16px; }
+.cbfail { color: #C4002F; font-size: 14px; margin: 12px 0 0; }

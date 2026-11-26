@@ -687,6 +687,21 @@ def _today(p: dict, fresh: bool = False) -> dict:
                 for b in (q["today"], q["later"]):
                     b[:] = [x for x in b if (x["entity"], x["id"]) != ("deal", d["id"])]
                 q["today"].insert(0, item("deal", d, "эскиз утверждён — передай в производство", action="production"))
+    # ТЗ дизайнеру (HEAD 26.11): дизайнер задал вопрос по задаче — строка МОП «ответь дизайнеру». «Горит» не перебиваем.
+    if deals:
+        with db.pool.connection() as conn:
+            asks = conn.execute(
+                """SELECT t.deal_id, t.title, m.text, pe.full_name FROM design_tasks t
+                   JOIN LATERAL (SELECT * FROM design_task_msgs x WHERE x.task_id=t.id ORDER BY x.id DESC LIMIT 1) m ON m.kind='ask'
+                   JOIN people pe ON pe.id=m.person_id
+                   WHERE t.status='active' AND t.stage<>'done' AND t.deal_id = ANY(%s) ORDER BY m.id""",
+                ([d["id"] for d in deals],)).fetchall()
+        by_id = {d["id"]: d for d in deals}
+        for a in asks:
+            d = by_id[a["deal_id"]]
+            if any((x["entity"], x["id"], x.get("action")) == ("deal", d["id"], "design_q") for x in q["today"]):
+                continue
+            q["today"].insert(0, item("deal", d, f"дизайнер {a['full_name'].split()[0]} спрашивает: {a['text'][:80]}", action="design_q"))
     try:
         lst = got(f_leads, "лиды не загрузились", {"leads": []})["leads"]
     except HTTPException:

@@ -26,6 +26,7 @@ import './tokens.css'
 import { MyData, ProfileForm } from './profile.jsx'
 import { FileLinks } from './objects.jsx'
 import { Closing } from './closing.jsx'
+import { ClientBriefPage } from './brief.jsx'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
   print_operator: 'Оператор настенного принтера', print_master: 'Мастер настенной печати', mop: 'МОП', mop_vip: 'VIP МОП',
@@ -440,4 +441,6 @@ function Nav({ tabs, tab, setTab, counts = {}, scroll }) {
   </>
 }
 
-createRoot(document.getElementById('root')).render(<App />)
+// Бриф клиента по ссылке (HEAD 26.11): /?brief=ТОКЕН открывается без входа — клиент не сотрудник, приложение ему не показываем
+const briefToken = new URLSearchParams(location.search).get('brief')
+createRoot(document.getElementById('root')).render(briefToken ? <ClientBriefPage token={briefToken} /> : <App />)

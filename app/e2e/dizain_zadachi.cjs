@@ -53,6 +53,7 @@ async function tab(p, name) {
     await m.locator('.dtdeal').getByRole('button', { name: '+ Нужен дизайн' }).click()
     await m.locator('.sheetbox input').first().fill(title)
     await m.locator('.sheetbox textarea').fill(note)
+    await m.locator('.sheetbox input[type=date]').first().fill('2027-01-20')   // HEAD 26.11: срок эскиза обязателен
     await m.locator('.sheetbox').getByRole('button', { name: 'Отправить дизайнеру' }).click()
     await m.locator('.dtdeal .dtrow', { hasText: title }).waitFor()
   }

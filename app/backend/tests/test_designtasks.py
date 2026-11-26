@@ -39,7 +39,8 @@ def test_design_tasks(client, dz):  # noqa: F811
     assert client.post(f"/api/design/tasks/{a['id']}", json={"stage": "done"}, headers=hdr(7100)).status_code == 400
     assert client.post(f"/api/design/tasks/{a['id']}", json={"file_id": 999999}, headers=hdr(7100)).status_code == 400
     # папку сделки заводит сервер сам: строка objects со статусом early, в списках объектов её нет
-    assert client.post("/api/design/deal/1601/object", headers=hdr(6000)).status_code == 403
+    # HEAD 26.11: МОП своей сделки тоже открывает папку — кладёт фото стен и развёртки в «Нужен дизайн»
+    assert client.post("/api/design/deal/1601/object", headers=hdr(6000)).json() == {"id": 1601}
     assert client.post("/api/design/deal/1601/object", headers=hdr(7100)).json() == {"id": 1601}
     assert client.post("/api/design/deal/1601/object", headers=hdr(7100)).json() == {"id": 1601}
     assert client.post("/api/design/deal/999/object", headers=hdr(7100)).status_code == 404

@@ -1513,3 +1513,48 @@ button.gfold { display: flex !important; flex-direction: column; align-items: st
   .wrap[data-tab=deals] .kb { margin: 0 0 8px; padding: 0 0 12px; scroll-snap-type: none; }
   .wrap[data-tab=deals] .kcol { flex: 0 0 290px; }
 }
+
+/* ТЗ дизайнеру и место дизайнера (HEAD 26.11): окно «Нужен дизайн», материалы пачкой, вопрос МОП, «Сегодня» дизайнера */
+.dtq { margin-top: 8px; }
+.dtq .chips { margin: 4px 0 0; }
+.dtmat .snapbtns { margin: 8px 0; }
+.dtstrip { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.dtstrip button.dtthumb { flex: 0 0 56px; width: 56px; max-width: 56px; height: 56px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); overflow: hidden; color: var(--muted); font-size: 11px; font-weight: 700; }
+.dtstrip .dtthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.dtstrip .dtthumb.more { color: var(--text); font-size: 14px; }
+.dtbox { background: var(--alt); border: 1px solid var(--line2); border-radius: var(--r2); padding: 12px; margin: 10px 0; }
+.dtbox .dtcap { margin-bottom: 8px; }
+.dtbox label:first-child { margin-top: 0; }
+.dtnote { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dtkv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 5px 0; border-top: 1px solid var(--line2); font-size: 14px; }
+.dtkv:first-of-type { border-top: 0; }
+.dtkv b { font-weight: 600; overflow-wrap: anywhere; }
+.dtmeta { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.dtmeta .tag { margin: 0; }
+.dtbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+.dtbtns button { width: 100%; }
+.dtmsgs { margin: 10px 0; display: grid; gap: 6px; }
+.dtmsg { padding: 8px 12px; border-radius: 12px; background: var(--alt); max-width: 90%; }
+.dtmsg.answer { justify-self: end; background: var(--okbg); }
+.dtmsg p { margin: 2px 0 0; overflow-wrap: anywhere; }
+.dttask { border-top: 1px solid var(--line2); padding-bottom: 8px; }
+.dtdeal .head + .dttask { border-top: 0; }
+.dttask > .dtrow { border-top: 0; }
+.dttask .dtrow .due { flex: none; }
+.dtsub { margin: -6px 0 6px; }
+.dtask { background: var(--warnbg); border-radius: var(--r2); padding: 12px; margin: 4px 0 8px; }
+.dtask .dtcap { color: var(--warn); }
+.dtask p { margin: 0 0 8px; }
+.dtask textarea { margin-bottom: 8px; }
+button.dtbl { width: auto; }
+.dtlink { background: var(--alt); border: 1px dashed var(--line); border-radius: var(--r2); padding: 12px; font-size: 14px; overflow-wrap: anywhere; margin: 8px 0; user-select: all; }
+.dttoday .head { display: flex; justify-content: space-between; align-items: center; }
+.dttoday .head h2 { margin: 0; }
+button.dttile { display: block; width: 100%; padding: 12px 6px; background: var(--alt); border: 1px solid var(--line); border-radius: var(--r2); color: var(--text); text-align: center; }
+button.dttile b { display: block; font-size: 26px; line-height: 1; font-weight: 800; }
+button.dttile span { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
+button.dttile.hot b { color: var(--hot); }
+button.dttile.on { border-color: var(--text); }
+.dtunits { margin: 4px 0 0; }
+.dtunits b { color: var(--text); }
+.dtback .dtcap { color: var(--ok); }
