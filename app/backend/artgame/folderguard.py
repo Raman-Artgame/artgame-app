@@ -23,7 +23,7 @@ def open_deals(rd) -> list[dict]:
     out, start = [], 0
     while start is not None:
         j = rd("crm.deal.list", {"filter": {"CATEGORY_ID": list(CATEGORIES), "CLOSED": "N"}, "select": SELECT,
-                                 "order": {"ID": "ASC"}, "start": start})
+                                 "order": {"ID": "DESC"}, "start": start})   # свежие сделки первыми: по ним работают сегодня
         if isinstance(j, list):
             out += j
             break
