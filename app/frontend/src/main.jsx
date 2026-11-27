@@ -124,6 +124,7 @@ function Main({ me, onMe, web, logout }) {
   useEffect(() => { if (tab !== 'design') setDesignView(null) }, [tab])
   const go = t => { if (t === 'deals') setDealId(null); if (t === 'leads') setLeadId(null)
     if (t.startsWith('design:')) { setDesignView(t.slice(7)); setTab('design'); return }
+    if (t === 'mkt:adrep') { try { sessionStorage.setItem('artgame.mkt.v', 'adrep') } catch { /* */ } setTab('mkt'); return }
     if (t === 'people:hr') { try { sessionStorage.setItem('artgame.team.v', 'hr') } catch { /* */ } setTab('people'); return }
     if (t === 'fin:cash') { setFinView('cash'); setTab('fin'); return } if (t === 'fin') setFinView(null); if (t === 'design') setDesignView(null); setTab(t) }
   const [toast, setToast] = useState('')

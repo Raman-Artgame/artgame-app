@@ -268,7 +268,7 @@ const noScroll = async p => assert.ok(await p.evaluate(() => document.documentEl
   ids[2950] = (await call(2950, '/register', { full_name: 'Евгения Таргет' })).id
   await call(1000, `/people/${ids[2950]}`, { role_code: 'marketer', zones: ['marketing'], mkt_job: 'target' })
   const t = await open(b, 2950)
-  assert.deepStrictEqual(await t.locator('.mktnav button').allTextContents(), ['Реклама', 'План', 'Бренд'])
+  assert.deepStrictEqual(await t.locator('.mktnav button').allTextContents(), ['Реклама', 'Отчёты таргета', 'План', 'Бренд'])
   // «Реклама»: таргетолог вносит расход по площадке и номер WhatsApp — появляется ссылка для объявления
   await t.locator('.mktad', { hasText: 'OLX' }).waitFor()
   await t.getByText('Указать').click()

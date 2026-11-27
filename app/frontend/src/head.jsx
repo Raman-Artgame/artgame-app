@@ -66,6 +66,7 @@ export function Pulse({ me, pulse, go }) {
     p.design_wait && { k: 'design:units', t: `Дизайн с объектов на утверждение: ${p.design_wait}`, s: 'правки и докидки → единицы дизайнеру' },
     p.dm?.unread && { k: 'chat', t: `Чат: новых ${p.dm.unread}`, s: `от ${p.dm.people} чел. · ответить`, hot: true },
     p.media && { k: 'prod', t: `Материал с объектов на утверждение: ${p.media}`, s: 'в «Продакшн» и рилс к оплате' },
+    p.adrep && { k: 'mkt:adrep', t: `Отчёты таргетолога: ${p.adrep}`, s: 'сверка с Meta и Битриксом — «Принято» или «Вернуть с вопросом»' },
     p.posts && { k: 'mkt', t: `Публикации на утверждение: ${p.posts}`, s: 'контент-план маркетинга — «Утверждаю» или «Вернуть»' },
   ].filter(Boolean)
   const curating = r.curating ? `Ещё ${r.curating} ждут оценки куратора (до 24 ч), потом придут сюда` : ''

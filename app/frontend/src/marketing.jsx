@@ -4,6 +4,7 @@ import { Viewer, download, uploadBig, sendToGoogle } from './objects.jsx'
 import { Sheet } from './ui.jsx'
 import { Kit, StoryHome } from './mktkit.jsx'
 import { Stats } from './mktstats.jsx'
+import { AdReports } from './adreports.jsx'
 
 // Рабочее место маркетинга (HEAD 14.11): «План» — контент-план месяца, «Медиа» — материал с объектов,
 // HEAD — «На утверждение». Каждую публикацию утверждает HEAD: черновик → «Отправить HEAD» → «Утверждаю» / «Вернуть»
@@ -17,7 +18,7 @@ const day = s => s ? new Date(s + 'T00:00').toLocaleDateString('ru-RU', { weekda
 
 // Задача в отделе (HEAD 14.11): руководитель видит всё и проверяет первой; остальные — свои вкладки и свои действия.
 const JOB = { lead: 'Руководитель отдела', smm: 'Контент и публикации', stories: 'Сторис и баннеры', target: 'Таргет', video: 'Съёмка' }
-const TABS = { stories: ['plan', 'story', 'media', 'brand'], target: ['ads', 'plan', 'brand'], video: ['shoots', 'ideas', 'media', 'plan', 'brand'] }
+const TABS = { stories: ['plan', 'story', 'media', 'brand'], target: ['ads', 'adrep', 'plan', 'brand'], video: ['shoots', 'ideas', 'media', 'plan', 'brand'] }
 const ABOUT = { lead: 'Ты видишь всё. Публикации коллег сначала приходят тебе в «Проверку», после твоего «Проверено» уходят HEAD.',
   smm: 'Поставь публикацию в план: где, когда, текст и материал. Отправь на утверждение, после «Утверждаю» выкладывай и отметь «Вышло» со ссылкой.',
   stories: 'Собери сторис во вкладке «Сторис» из рамок и элементов бренда или загрузи готовую, поставь в публикацию и отправь на утверждение. Выкладывать можно только утверждённое.',
@@ -29,16 +30,18 @@ export function Marketing({ me, pending }) {
   const job = head ? 'head' : (me.mkt_job || null)
   const can = { post: head || [null, 'lead', 'smm', 'stories', 'target'].includes(job), onlyAd: job === 'target', all: head || [null, 'lead', 'smm'].includes(job),
     idea: job !== 'target', shoot: head || [null, 'lead', 'smm', 'video'].includes(job), result: head || [null, 'lead', 'smm', 'target'].includes(job) }
-  const tabs = [['plan', 'План'], ...(can.post && !can.onlyAd ? [['story', 'Сторис']] : []), ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа'], ['ads', 'Реклама'], ...(head || job === 'lead' ? [['stats', 'Итоги']] : []), ['brand', 'Бренд']].filter(([k]) => !TABS[job] || TABS[job].includes(k))
+  const tabs = [['plan', 'План'], ...(can.post && !can.onlyAd ? [['story', 'Сторис']] : []), ['shoots', 'Съёмки'], ['ideas', 'Идеи'], ['media', 'Медиа'], ['ads', 'Реклама'], ...(head || job === 'lead' || job === 'target' ? [['adrep', 'Отчёты таргета']] : []), ...(head || job === 'lead' ? [['stats', 'Итоги']] : []), ['brand', 'Бренд']].filter(([k]) => !TABS[job] || TABS[job].includes(k))
     .sort((a, b) => TABS[job] ? TABS[job].indexOf(a[0]) - TABS[job].indexOf(b[0]) : 0)
   const [toCheck, setToCheck] = useState(0)
-  const [view, setView] = useState(head && pending ? 'review' : tabs[0][0])
+  const [view, setView] = useState(() => { let v = null; try { v = sessionStorage.getItem('artgame.mkt.v'); sessionStorage.removeItem('artgame.mkt.v') } catch { /* */ }
+    return v && tabs.some(([k]) => k === v) ? v : head && pending ? 'review' : tabs[0][0] })
   const [edit, setEdit] = useState(null)   // {} — новая, {…post} — правка
   const [open, setOpen] = useState(null)
   const [tick, setTick] = useState(0)
   const reload = () => setTick(t => t + 1)
   // Сторис из редактора: файл уходит в «Готовые публикации»; дальше — в новую публикацию или просто скачать
   const publishStory = async (file, how) => { const f = await uploadReady(file, () => {}); how === 'post' ? setEdit({ kind: 'stories', files: [f] }) : download(f) }
+  useEffect(() => { try { document.querySelector('.mktnav .on')?.scrollIntoView({ inline: 'center', block: 'nearest' }) } catch { /* */ } }, [view])
   useEffect(() => { if (job === 'lead') api('/mkt/posts?status=check').then(d => setToCheck(d.items.length), () => {}) }, [tick, view])
   return <>
     <div className="card dark prodhead"><span className="kick">Маркетинг{JOB[job] ? ` · ${JOB[job]}` : ''}</span>
@@ -50,7 +53,7 @@ export function Marketing({ me, pending }) {
       {job === 'lead' && <button className={view === 'check' ? 'on' : ''} onClick={() => setView('check')}>Проверка{toCheck ? <span>{toCheck}</span> : null}</button>}
       {tabs.map(([k, t]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{t}</button>)}
     </div>
-    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} head={head} /> : view === 'brand' ? <Brand canPost={can.post && !can.onlyAd} onPublish={publishStory} /> : view === 'ads' ? <Ads /> : view === 'stats' ? <Stats /> : view === 'story' ? <StoryHome canPost onPublish={publishStory} /> :
+    {view === 'review' || view === 'check' ? <Review key={view + tick} lead={view === 'check'} onOpen={setOpen} /> : view === 'media' ? <Media canUp={job !== 'target'} head={head} /> : view === 'brand' ? <Brand canPost={can.post && !can.onlyAd} onPublish={publishStory} /> : view === 'ads' ? <Ads /> : view === 'stats' ? <Stats /> : view === 'adrep' ? <AdReports /> : view === 'story' ? <StoryHome canPost onPublish={publishStory} /> :
       view === 'shoots' ? <Shoots can={can.shoot} /> : view === 'ideas' ? <Ideas can={can.idea} /> : <Plan key={view + tick} can={can.post} onOpen={setOpen} onNew={() => setEdit({})} />}
     {edit && <Editor post={edit} onlyAd={can.onlyAd} onClose={() => setEdit(null)} onSaved={x => { setEdit(null); setOpen(x); reload() }} />}
     {open && !edit && <PostSheet post={open} head={head} mine={can.post && (can.all || open.author_id === me.id)} canResult={can.result} onClose={() => setOpen(null)} onEdit={() => setEdit(open)}
