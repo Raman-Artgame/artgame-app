@@ -12,7 +12,7 @@ export function ProfileForm({ me, onDone, first, onCancel }) {
   const [v, set] = useState({
     last_name: me?.last_name || (first ? tg?.last_name || '' : ''), first_name: me?.first_name || (first ? tg?.first_name || '' : ''),
     middle_name: me?.middle_name || '', birth_date: YMD(me?.birth_date), phone: me?.phone || '', city: me?.city || '',
-    emergency_name: me?.emergency_name || '', emergency_phone: me?.emergency_phone || '', clothes_size: me?.clothes_size || '' })
+    emergency_name: me?.emergency_name || '', emergency_phone: me?.emergency_phone || '', clothes_size: me?.clothes_size || '', nickname: me?.nickname || '' })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const f = k => ({ value: v[k], onChange: e => set({ ...v, [k]: e.target.value }) })
@@ -22,7 +22,7 @@ export function ProfileForm({ me, onDone, first, onCancel }) {
     try {
       if (!me) await api('/register', { method: 'POST', body: { full_name: `${v.first_name.trim()} ${v.last_name.trim()}`, phone: v.phone } })
       await api('/profile', { method: 'POST', body: { ...v, middle_name: v.middle_name || null, emergency_name: v.emergency_name || null,
-        emergency_phone: v.emergency_phone || null, clothes_size: v.clothes_size || null } })
+        emergency_phone: v.emergency_phone || null, clothes_size: v.clothes_size || null, nickname: v.nickname.trim() || null } })
       onDone(await api('/me'))
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
@@ -30,8 +30,9 @@ export function ProfileForm({ me, onDone, first, onCancel }) {
     {first ? <><h1>{me ? 'Мои данные' : 'Добро пожаловать'}</h1>
       <p className="muted">Заполни анкету — так тебя увидят в приложении, в сменах и в оплате. {me ? '' : 'Потом HEAD назначит тебе роль.'}</p></> :
       <h2>Мои данные</h2>}
+    <label className="muted">Имя *</label><input {...f('first_name')} autoComplete="given-name" placeholder="по-русски" />
     <label className="muted">Фамилия *</label><input {...f('last_name')} autoComplete="family-name" placeholder="как в удостоверении" />
-    <label className="muted">Имя *</label><input {...f('first_name')} autoComplete="given-name" />
+    <label className="muted">Никнейм</label><input {...f('nickname')} maxLength={30} placeholder="если есть: как тебя зовут в команде" />
     <label className="muted">Отчество</label><input {...f('middle_name')} autoComplete="additional-name" placeholder="если есть" />
     <label className="muted">Дата рождения *</label><input type="date" {...f('birth_date')} max={new Date(Date.now() - 14 * 365.25 * 864e5).toISOString().slice(0, 10)} />
     <label className="muted">Телефон *</label><input {...f('phone')} inputMode="tel" autoComplete="tel" placeholder="+7 7__ ___ __ __" />
@@ -57,7 +58,7 @@ export function MyData({ me, onMe }) {
   const age = me.birth_date ? Math.floor((Date.now() - new Date(me.birth_date)) / (365.25 * 864e5)) : null
   return <div className="card mydata">
     <div className="head"><h3>Мои данные</h3><button className="ghost mini" onClick={() => setEdit(true)}>Изменить</button></div>
-    <p className="small">{[me.last_name, me.first_name, me.middle_name].filter(Boolean).join(' ') || me.full_name}</p>
+    <p className="small">{me.first_name && me.last_name ? [me.first_name, me.last_name].join(' ') : me.full_name}{me.nickname ? ` · ${me.nickname}` : ''}</p>
     <p className="small muted">{[me.birth_date && new Date(me.birth_date).toLocaleDateString('ru-RU') + (age ? ` (${age})` : ''), me.phone, me.city, me.clothes_size && `размер ${me.clothes_size}`].filter(Boolean).join(' · ')}</p>
     {me.emergency_phone && <p className="small muted">Экстренно: {[me.emergency_name, me.emergency_phone].filter(Boolean).join(', ')}</p>}
   </div>
