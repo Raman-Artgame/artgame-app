@@ -143,7 +143,7 @@ def apply(b: ApplyIn):
 
 
 def _photos(conn, cid: int | None) -> int:
-    return cid and conn.execute("SELECT count(*) AS n FROM candidate_files WHERE cand_id=%s AND kind='photo'", (cid,)).fetchone()["n"] or 0
+    return cid and conn.execute("SELECT count(*) AS n FROM candidate_files WHERE cand_id=%s AND kind='photo' AND drive_id<>''", (cid,)).fetchone()["n"] or 0
 
 
 def _hint_code(conn, d: str, a: dict, cid: int | None) -> str | None:
@@ -192,25 +192,57 @@ def upload(token: str, b: FileIn):
     if b.kind == "resume" and mime not in RESUME_MIME:
         raise HTTPException(400, "Резюме — PDF, Word или фото")
     data, mime = drive.decode_data_url(b.data)
+    d = drive.Drive()
+    # HEAD 27.11 «очень долго»: раньше Диск грузился внутри транзакции под блокировкой анкеты — фото шли строго по одному
+    # и держали соединение с базой. Теперь коротко: проверка, папка, номер, строка-заготовка; загрузка — без базы, параллельно.
     with db.pool.connection() as conn, conn.transaction():
         c = _by_token(conn, token, lock=True)
         if datetime.now(timezone.utc) - c["created_at"] > timedelta(hours=UPLOAD_HOURS):
             raise HTTPException(409, "Ссылка устарела. Пришли файлы менеджеру, который с тобой свяжется.")
-        n = conn.execute("SELECT count(*) AS n FROM candidate_files WHERE cand_id=%s AND kind=%s", (c["id"], b.kind)).fetchone()["n"]
+        rows = conn.execute("SELECT name FROM candidate_files WHERE cand_id=%s AND kind=%s", (c["id"], b.kind)).fetchall()
+        n = len(rows)
         if b.kind == "photo" and n >= MAX_PHOTOS:
             raise HTTPException(400, f"Достаточно {MAX_PHOTOS} фото")
         if b.kind == "resume" and n >= 3:
             raise HTTPException(400, "Резюме уже загружено")
         try:
-            d = drive.Drive()
-            name = (f"foto-{n + 1:02d}." + ("png" if mime == "image/png" else "jpg")) if b.kind == "photo" \
-                else f"rezyume-{latin(c['full_name'])}" + (f"-{n + 1}" if n else "") + "." + RESUME_MIME.get(mime, "bin")
-            fid = d.upload(folder(conn, c, d), name, data, mime)
+            parent = folder(conn, c, d)   # Диск — только при первом файле, потом id из базы
         except Exception as ex:   # noqa: BLE001
             raise drive.fail(ex)
-        conn.execute("INSERT INTO candidate_files (cand_id, kind, name, mime, size, drive_id) VALUES (%s,%s,%s,%s,%s,%s)",
-                     (c["id"], b.kind, name, mime, len(data), fid))
-    return {"ok": True, "n": n + 1}
+        k = max([int(m.group(1)) for r in rows if (m := re.search(r"-(\d+)\.\w+$", r["name"]))] + [n]) + 1   # после удаления номера не повторяются
+        name = (f"foto-{k:02d}." + ("png" if mime == "image/png" else "jpg")) if b.kind == "photo" \
+            else f"rezyume-{latin(c['full_name'])}" + (f"-{k}" if n else "") + "." + RESUME_MIME.get(mime, "bin")
+        fid = conn.execute("INSERT INTO candidate_files (cand_id, kind, name, mime, size, drive_id) VALUES (%s,%s,%s,%s,%s,'') RETURNING id",
+                           (c["id"], b.kind, name, mime, len(data))).fetchone()["id"]
+    try:
+        drive_id = d.upload(parent, name, data, mime)
+    except Exception as ex:   # noqa: BLE001
+        with db.pool.connection() as conn:
+            conn.execute("DELETE FROM candidate_files WHERE id=%s", (fid,))
+        raise drive.fail(ex)
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE candidate_files SET drive_id=%s WHERE id=%s", (drive_id, fid))
+    return {"ok": True, "n": n + 1, "id": fid}
+
+
+@router.delete("/c/{token}/file/{fid}")
+def unupload(token: str, fid: int):
+    """Кандидат убрал фото или резюме (HEAD 27.11). С Диска не стираем — переносим в «udaleno» в его папке."""
+    with db.pool.connection() as conn, conn.transaction():
+        c = _by_token(conn, token, lock=True)
+        if datetime.now(timezone.utc) - c["created_at"] > timedelta(hours=UPLOAD_HOURS):
+            raise HTTPException(409, "Ссылка устарела. Напиши менеджеру, который с тобой свяжется.")
+        f = conn.execute("DELETE FROM candidate_files WHERE id=%s AND cand_id=%s RETURNING drive_id", (fid, c["id"])).fetchone()
+        if not f:
+            raise HTTPException(404, "Файл не найден")
+        parent = c["drive_folder"]
+    if f["drive_id"] and parent:
+        try:
+            d = drive.Drive()
+            d.move(f["drive_id"], d.child(parent, "udaleno"))
+        except Exception as ex:   # noqa: BLE001 — в анкете файла уже нет; на Диске остался в папке кандидата
+            print("hr unupload:", ex)
+    return {"ok": True}
 
 
 @router.post("/c/{token}/done")
@@ -228,8 +260,13 @@ def done(token: str, bg: BackgroundTasks):
 def mine(token: str):
     with db.pool.connection() as conn:
         c = _by_token(conn, token)
-        n = conn.execute("SELECT kind, count(*) AS n FROM candidate_files WHERE cand_id=%s GROUP BY kind", (c["id"],)).fetchall()
-    return {"dir": c["dir"], "done": bool(c["submitted_at"]), "files": {r["kind"]: r["n"] for r in n}}
+        fl = conn.execute("SELECT id, kind, mime FROM candidate_files WHERE cand_id=%s AND drive_id<>'' ORDER BY id", (c["id"],)).fetchall()
+    n = {}
+    for x in fl:
+        n[x["kind"]] = n.get(x["kind"], 0) + 1
+    # свои фото — чтобы после перезагрузки страницы их было видно и можно было убрать (HEAD 27.11)
+    return {"dir": c["dir"], "done": bool(c["submitted_at"]), "files": n,
+            "photos": [{"id": x["id"], "thumb": _thumb_url(x["id"])} for x in fl if x["kind"] == "photo"]}
 
 
 # ---------- таблицы ----------
@@ -286,7 +323,7 @@ def _thumb_url(fid: int) -> str:
 def board(p: dict = Depends(require_head)):
     with db.pool.connection() as conn:
         titles = _role_titles(conn)
-        rows = conn.execute("""SELECT c.*, (SELECT min(f.id) FROM candidate_files f WHERE f.cand_id=c.id AND f.kind='photo') AS th
+        rows = conn.execute("""SELECT c.*, (SELECT min(f.id) FROM candidate_files f WHERE f.cand_id=c.id AND f.kind='photo' AND f.drive_id<>'') AS th
                                FROM candidates c ORDER BY c.stage_at DESC LIMIT 500""").fetchall()
     items = [{**_out(r, r["th"]), "level_title": titles.get(r["level"])} for r in rows]
     return {"items": items, "links": {d: f"/?job={d}" for d in hr_forms.FORMS}, "dirs": hr_forms.DIR_TITLE,
@@ -299,7 +336,7 @@ def card(cid: int, p: dict = Depends(require_head)):
         c = conn.execute("SELECT * FROM candidates WHERE id=%s", (cid,)).fetchone()
         if not c:
             raise HTTPException(404, "Нет такого кандидата")
-        fl = conn.execute("SELECT * FROM candidate_files WHERE cand_id=%s ORDER BY id", (cid,)).fetchall()
+        fl = conn.execute("SELECT * FROM candidate_files WHERE cand_id=%s AND drive_id<>'' ORDER BY id", (cid,)).fetchall()
         f = hr_forms.FORMS.get(c["dir"])
         titles = _role_titles(conn)
         ob = None

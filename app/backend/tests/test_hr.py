@@ -60,7 +60,18 @@ def test_candidate_path(client, monkeypatch):
     assert "sadykova-aygerim-87771234567" in FakeDrive.up[0][0] and FakeDrive.up[0][1] == "foto-01.png"
     assert FakeDrive.up[1][1] == "rezyume-sadykova-aygerim.pdf"
     assert client.post(f"/api/hr/c/{tok}/done").json()["ok"]
-    assert client.get(f"/api/hr/c/{tok}").json() == {"dir": "art", "done": True, "files": {"photo": 1, "resume": 1}}
+    m = client.get(f"/api/hr/c/{tok}").json()
+    assert {k: m[k] for k in ("dir", "done", "files")} == {"dir": "art", "done": True, "files": {"photo": 1, "resume": 1}}
+    assert len(m["photos"]) == 1 and m["photos"][0]["thumb"].startswith("/api/hr/files/")
+    # HEAD 27.11: кандидат убирает лишнее фото — из анкеты пропадает, на Диске переезжает в «udaleno»; номер не повторяется
+    moved = []
+    monkeypatch.setattr(FakeDrive, "move", lambda self, fid, parent, name=None: moved.append((fid, parent)), raising=False)
+    extra = client.post(f"/api/hr/c/{tok}/file", json={"kind": "photo", "data": PNG}).json()
+    assert extra["n"] == 2 and FakeDrive.up[-1][1] == "foto-02.png"
+    assert client.delete(f"/api/hr/c/{tok}/file/{extra['id']}").json()["ok"]
+    assert moved and moved[0][1].endswith("/udaleno") and client.get(f"/api/hr/c/{tok}").json()["files"]["photo"] == 1
+    assert client.delete(f"/api/hr/c/{tok}/file/{extra['id']}").status_code == 404
+    assert client.delete(f"/api/hr/c/{'x' * 20}/file/{extra['id']}").status_code == 404
     assert rows["87771234567"][:3] == ("Художники", "Пригласить", "Художник")
 
     # заполнил второй раз, пока ведём, — та же карточка
