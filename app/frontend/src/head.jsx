@@ -52,7 +52,11 @@ export function Pulse({ me, pulse, go }) {
   if (p === null) return <div className="card muted">Загрузка…</div>
   if (p === false) return <div className="card muted">Пульт не загрузился. Обновите страницу.</div>
   const r = p.review
+  // Сторож папок (HEAD 27.11): папку сделки создать не удалось или «Объект» пуст — видно сразу, не через неделю
+  const noFolder = (p.folders || []).filter(x => x.no_folder), noObj = (p.folders || []).filter(x => !x.no_folder && x.no_object)
   const asks = [...closeAsks(cl),
+    noFolder.length && { k: 'deals', t: `Нет папки на Диске: ${noFolder.length}`, s: noFolder.map(x => '№ ' + x.id).join(', ') + ' · приложение пробует снова каждые 10 минут', hot: true, red: true },
+    noObj.length && { k: 'deals', t: `Сделки без «Объекта»: ${noObj.length}`, s: noObj.map(x => '№ ' + x.id).join(', ') + ' · папка создана, МОП должен вписать объект' },
     r.shifts && { k: 'review', t: `Смены на утверждение: ${r.shifts}`, s: [r.rated_good ? `${r.rated_good} с оценкой 4–5★ — одним нажатием` : '',
       r.shifts_late ? `${r.shifts_late} дольше 2 суток` : ''].filter(Boolean).join(' · ') || 'в срок', hot: r.shifts_late },
     r.appeals && { k: 'review', t: `Обращения на правку: ${r.appeals}`, s: 'не внёс вовремя или ошибся — утвердить или отклонить' },
@@ -61,10 +65,10 @@ export function Pulse({ me, pulse, go }) {
     p.bills?.length && { k: 'fin:cash', t: `Оплатить сегодня: ${p.bills.length}`, s: p.bills.map(b => b.title + (b.amount ? ' ' + money(b.amount) : '')).join(' · '),
       hot: p.bills.some(b => b.status === 'overdue') },
     p.hr?.new && { k: 'people:hr', t: `Новые кандидаты: ${p.hr.new}`, s: p.hr.waiting ? `${p.hr.waiting} ждут ответа дольше 2 дней` : 'Команда → Кандидаты · ответить за 2 дня', hot: !!p.hr.waiting },
-    p.pending.length && { k: 'people', t: `Ждут роли: ${p.pending.length}`, s: p.pending.map(x => x.full_name).join(', '), hot: true },
+    p.pending.length && { k: 'people', t: `Ждут роли: ${p.pending.length}`, s: p.pending.map(x => x.full_name).join(', '), hot: true, red: true },
     p.catalogs && { k: 'design:cat', t: `Каталоги дизайна на утверждение: ${p.catalogs}`, s: 'утвердить или вернуть' },
     p.design_wait && { k: 'design:units', t: `Дизайн с объектов на утверждение: ${p.design_wait}`, s: 'правки и докидки → единицы дизайнеру' },
-    p.dm?.unread && { k: 'chat', t: `Чат: новых ${p.dm.unread}`, s: `от ${p.dm.people} чел. · ответить`, hot: true },
+    p.dm?.unread && { k: 'chat', t: `Чат: новых ${p.dm.unread}`, s: `от ${p.dm.people} чел. · ответить`, hot: true, red: true },
     p.media && { k: 'prod', t: `Материал с объектов на утверждение: ${p.media}`, s: 'в «Продакшн» и рилс к оплате' },
     p.adrep && { k: 'mkt:adrep', t: `Отчёты таргетолога: ${p.adrep}`, s: 'сверка с Meta и Битриксом — «Принято» или «Вернуть с вопросом»' },
     p.posts && { k: 'mkt', t: `Публикации на утверждение: ${p.posts}`, s: 'контент-план маркетинга — «Утверждаю» или «Вернуть»' },
