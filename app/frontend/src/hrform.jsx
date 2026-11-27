@@ -11,7 +11,7 @@ import './hrform.css'
 const T = {
   next: ['Дальше', 'Әрі қарай'], back: ['Назад', 'Артқа'], send: ['Отправить анкету', 'Сауалнаманы жіберу'], of: ['из', '/'],
   time: ['5–7 минут', '5–7 минут'], hello: ['ARTGAME · набор в команду', 'ARTGAME · командаға қабылдау'],
-  other: ['Свой вариант', 'Өз нұсқаң'], upTo: ['до', 'дейін'], photos: ['Фото работ (до 10)', 'Жұмыс суреттері (10-ға дейін)'],
+  other: ['Свой вариант', 'Өз нұсқаң'], upTo: ['до', 'дейін'], photos: ['Фото работ (до 10)', 'Жұмыс суреттері (10-ға дейін)'], del: ['Убрать фото', 'Суретті алып тастау'],
   add: ['Добавить фото', 'Сурет қосу'], file: ['Файл PDF или Word', 'PDF немесе Word файлы'], write: ['Написать', 'Жазу'],
   resumeOk: ['Резюме загружено', 'Түйіндеме жүктелді'], need: ['Заполни поля со звёздочкой', 'Жұлдызшасы бар өрістерді толтыр'],
   fail: ['Не отправилось. Проверь интернет и нажми ещё раз.', 'Жіберілмеді. Интернетті тексеріп, қайта бас.'],
@@ -41,6 +41,9 @@ export function JobPage({ dir, src }) {
   useEffect(() => { document.body.classList.add('hjpage'); document.title = 'ARTGAME — анкета кандидата'
     fetch(`/api/hr/form/${encodeURIComponent(dir)}`).then(r => r.ok ? r.json() : Promise.reject()).then(setForm, () => setForm(null)) }, [])
   useEffect(() => { mem(KEY, { a, i, token, resume, lang: kk ? 'kk' : 'ru', done: state === 'done' }) }, [a, i, token, resume, kk, state])
+  // вернулся на страницу — свои фото с сервера, чтобы видеть и убирать
+  useEffect(() => { if (token) fetch(`/api/hr/c/${token}`).then(r => r.ok ? r.json() : null).then(j => j?.photos?.length &&
+    setPics(p => p.length ? p : j.photos.map(x => ({ id: 's' + x.id, fid: x.id, url: x.thumb, state: 'ok' })))).catch(() => {}) }, [token])
   const Top = <div className="hjtop"><b className="hjlogo">ARTGAME</b><div className="hjlang">
     <button className={!kk ? 'on' : ''} onClick={() => setKk(false)}>RU</button><button className={kk ? 'on' : ''} onClick={() => setKk(true)}>ҚАЗ</button></div></div>
   if (form === undefined) return <div className="hj"><p className="hjmuted">…</p></div>
@@ -66,14 +69,21 @@ export function JobPage({ dir, src }) {
       else { setState(''); setI(i + 1); window.scrollTo(0, 0) }
     } catch (e) { setState(''); setErr(e.message || L(T.fail)) }
   }
+  // HEAD 27.11 «очень долго»: фото грузим по 3 сразу (было строго по одному), у каждого — ✕ «убрать»
   const addPics = async list => {
-    for (const f of [...list].slice(0, 10 - pics.length)) {
-      const id = Math.random().toString(36).slice(2); const url = URL.createObjectURL(f)
-      setPics(p => [...p, { id, url, state: 'up' }])
-      try { const data = await shrink(f); const r = await post(`/api/hr/c/${token}/file`, { kind: 'photo', data })
-        setPics(p => p.map(x => x.id === id ? { ...x, state: r.ok ? 'ok' : 'bad' } : x))
+    const add = [...list].slice(0, 10 - pics.length).map(f => ({ f, id: Math.random().toString(36).slice(2), url: URL.createObjectURL(f), state: 'up' }))
+    setPics(p => [...p, ...add.map(({ f, ...x }) => x)])
+    const one = async ({ f, id }) => {
+      try { const data = await shrink(f); const r = await post(`/api/hr/c/${token}/file`, { kind: 'photo', data }); const j = await r.json().catch(() => ({}))
+        setPics(p => p.map(x => x.id === id ? { ...x, state: r.ok ? 'ok' : 'bad', fid: j.id, why: !r.ok && typeof j.detail === 'string' ? j.detail : '' } : x))
       } catch { setPics(p => p.map(x => x.id === id ? { ...x, state: 'bad' } : x)) }
     }
+    const queue = [...add]
+    await Promise.all([0, 1, 2].map(async () => { while (queue.length) await one(queue.shift()) }))
+  }
+  const dropPic = async p => {
+    setPics(x => x.filter(y => y.id !== p.id))
+    if (p.fid) fetch(`/api/hr/c/${token}/file/${p.fid}`, { method: 'DELETE' }).catch(() => {})
   }
   const addResume = async f => { setResume('up')
     try { const data = await readFile(f); const r = await post(`/api/hr/c/${token}/file`, { kind: 'resume', data }); setResume(r.ok ? 'ok' : 'bad') } catch { setResume('bad') } }
@@ -101,7 +111,8 @@ export function JobPage({ dir, src }) {
     <div className="hjbar">{steps.map((_, k) => <i key={k} className={k <= i ? 'on' : ''} />)}</div>
     <div className="hjcard"><h2>{L(s.title)}</h2>
       {s.intro && <div className="hjintro">{s.intro.map(([k, v], n) => <div key={n} className="hjiv"><span>{L(k)}</span><b>{L(v)}</b></div>)}</div>}
-      {s.photos && <div className="hjq"><h3>{L(T.photos)}</h3><div className="hjpics">{pics.map(p => <span key={p.id} className={'hjpic ' + p.state}><img src={p.url} alt="" /></span>)}
+      {s.photos && <div className="hjq"><h3>{L(T.photos)}</h3><div className="hjpics">{pics.map(p => <span key={p.id} className={'hjpic ' + p.state} title={p.why || ''}><img src={p.url} alt="" />
+        {p.state !== 'up' && <button type="button" className="hjdel" aria-label={L(T.del)} onClick={() => dropPic(p)}>✕</button>}</span>)}
         {pics.length < 10 && <label className="hjpic add"><span>＋</span><em>{L(T.add)}</em>
           <input type="file" accept="image/*" multiple hidden onChange={e => { const f = e.target.files; f.length && addPics(f); e.target.value = '' }} /></label>}</div></div>}
       {s.items.map(Item)}
