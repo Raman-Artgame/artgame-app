@@ -252,12 +252,22 @@ function Catalogs({ me }) {
   const [c, setC] = useState(null)
   const [form, setForm] = useState(null)
   const [msg, setMsg] = useState('')
+  const [tab, setTab] = useState('')
   const team = useTeam()
   const load = () => api('/design/catalogs').then(setC, ex => setMsg(ex.message))
   useEffect(() => { load() }, [])
   if (!c) return <div className="card muted">{msg || 'Загрузка…'}</div>
   const act = (path, body) => api(path, { method: 'POST', body }).then(() => { setMsg(''); load() }, ex => setMsg(ex.message))
   const mine = r => r.authors.includes(me.id) || r.created_by === me.id
+  // Списки по статусу: HEAD просил не мешать утверждённые и возвращённые в одну ленту.
+  const by = st => c.rows.filter(r => st.includes(r.status))
+  const tabs = (c.is_head
+    ? [['sent', 'На решении', ['sent']], ['returned', 'Вернул', ['returned']], ['approved', 'Утверждено', ['approved']], ['draft', 'Черновики', ['draft']]]
+    : [['returned', 'На переделку', ['returned']], ['draft', 'Черновики', ['draft']], ['sent', 'У HEAD', ['sent']], ['approved', 'Утверждено', ['approved']]])
+    .map(([k, t, st]) => [k, t, by(st)]).filter(([k, , l]) => l.length || k === 'sent' || k === 'approved')
+  const cur = tabs.find(t => t[0] === tab) || tabs.find(t => t[2].length) || tabs[0]
+  const shown = cur ? cur[2] : []
+  const empty = { sent: c.is_head ? 'Новых каталогов на решение нет.' : 'Сейчас у HEAD ничего нет.', approved: 'Утверждённых пока нет.', returned: 'Возвратов нет.', draft: 'Черновиков нет.' }
   return <div className="card">
     <div className="head"><h2>Каталог референсов</h2>{!c.is_head && !form && <button className="mini" onClick={() => setForm({ title: '', style: '', url: '', works: '', authors: [me.id] })}>+ Новый</button>}</div>
     <p className="small muted">Собрал каталог (60+ работ) — отправь HEAD. После «утверждаю» {money(c.amount)} в «Кабинет»; двое исполнителей — пополам.</p>
@@ -274,7 +284,10 @@ function Catalogs({ me }) {
           .then(() => { setForm(null); load() }, ex => setMsg(ex.message))}>Сохранить</button></div>
     </div>}
     {msg && <p className="small why">{msg}</p>}
-    {c.rows.map(r => <div key={r.id} className="row">
+    {c.rows.length > 0 && <div className="segf dztabs">{tabs.map(([k, t, l]) => <button key={k} className={cur[0] === k ? 'on' : ''} onClick={() => setTab(k)}>{t}<b>{l.length}</b></button>)}</div>}
+    {cur && cur[0] === 'returned' && shown.length > 0 && <p className="small muted">{c.is_head ? 'Вы вернули — исполнители переделывают названные страницы и отправляют снова.' : 'HEAD вернул — поправь, что написано, и отправь снова.'}</p>}
+    {c.rows.length > 0 && !shown.length && <p className="small muted">{empty[cur[0]]}</p>}
+    {shown.map(r => <div key={r.id} className="row">
       <div><b>{r.title}</b>
         <div className="small muted">{[r.style, r.works ? works(r.works) : '', (r.author_names || []).join(' + '), r.authors.length > 1 ? 'пополам' : ''].filter(Boolean).join(' · ')}</div>
         <div className={'small ' + (r.status === 'approved' ? 'ok' : r.status === 'returned' ? 'why' : 'muted')}>{c.is_head && r.status === 'sent' ? 'ждёт вашего решения' : CST[r.status]}</div>
