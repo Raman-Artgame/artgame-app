@@ -1591,6 +1591,12 @@ button.dttile.on { border-color: var(--text); }
 .dtunits { margin: 4px 0 0; }
 .dtunits b { color: var(--text); }
 .dtback .dtcap { color: var(--ok); }
+.dtunits .dtmore { width: auto; margin-left: 8px; }
+.dtload { margin: 6px 0 0; } .dtload b { color: var(--text); } .dtload i { font-style: normal; color: var(--hot); }
+button.dtbackb { width: auto; margin: 0 0 10px; }
+.dtkmeta { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin: 6px 0 4px; } .dtkmeta .tag { margin: 0; }
+.dtcol.done .khead span { color: var(--ok); }
+@media (min-width: 1100px) { .wrap[data-tab=design] .dtkb { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0 0 8px; padding: 0; overflow: visible; } .wrap[data-tab=design] .dtkb .kcol { flex: none; min-width: 0; } }
 
 /* сделка на широком компьютере: паспорт | шаг | показатели и подсказки */
 @media (min-width: 1440px) {

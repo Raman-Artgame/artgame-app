@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { api } from './api.js'
 import { Sheet } from './ui.jsx'
 import { cleanTitle, loadToday } from './crm.jsx'
@@ -7,7 +7,7 @@ import { CamLabel } from './camera.jsx'
 
 // Задачи на дизайн при сделке (HEAD 25.11 «в целом норм, давай попробуем»): МОП жмёт «Нужен дизайн» в карточке сделки —
 // сделка остаётся на своей стадии, у дизайнера карточка во вкладке «Дизайн» с его привычными стадиями.
-// Единиц задачи не дают: единица одна за весь проект. Переписка с клиентом — в Битриксе, кнопкой из задачи.
+// Единица одна за весь проект, но видна прямо в задаче (HEAD 28.11). Переписка с клиентом — в Битриксе, кнопкой из задачи.
 const openUrl = u => { const t = window.Telegram?.WebApp; if (t?.openLink && t.initData) t.openLink(u); else window.open(u, '_blank', 'noopener') }
 const dm = s => s ? `${s.slice(8, 10)}.${s.slice(5, 7)}` : ''
 const today = () => new Date().toISOString().slice(0, 10)
@@ -23,6 +23,18 @@ function dueOf(t) {
   if (n == null) return null
   return n < 0 ? { text: n === -1 ? 'срок вчера' : `просрочено ${days(-n)}`, cls: ' late' } : n === 0 ? { text: 'сегодня', cls: ' late' }
     : n === 1 ? { text: 'завтра', cls: ' soon' } : { text: days(n), cls: n <= 2 ? ' soon' : '' }
+}
+const num = n => String(+n).replace('.', ',')
+// Единицы в задаче (HEAD 28.11): сколько даст проект по размеру; засчитывается, когда проект ушёл в производство
+const unitText = t => t.unit_got ? `${num(t.unit)} ед. засчитано` : t.unit ? `${num(t.unit)} ед.` : ''
+// Канбан на компьютере (HEAD 28.11): пять колонок вместо восьми стадий; перенос ставит первую стадию колонки
+const COLS = [['new', 'Новые', ['urgent', 'new']], ['work', 'В работе', ['work', 'info']], ['wait', 'Жду клиента', ['wait', 'mop']], ['fix', 'Правки', ['fix']], ['done', 'Утверждено', ['done']]]
+const SUB = { urgent: 'срочно', info: 'сбор информации', mop: 'у менеджера' }
+function useWide() {
+  const q = '(min-width: 1100px)'
+  const [w, setW] = useState(() => window.matchMedia(q).matches)
+  useEffect(() => { const m = window.matchMedia(q), f = () => setW(m.matches); m.addEventListener('change', f); return () => m.removeEventListener('change', f) }, [])
+  return w
 }
 const burns = t => t.stage !== 'done' && t.stage !== 'wait' && (t.stage === 'urgent' || (left(t.deadline) != null && left(t.deadline) <= 1) || t.rounds >= 2)
 // Лёгкий бриф (HEAD 26.11): МОП отвечает нажатиями. Те же варианты проверяет сервер (designtasks.BRIEF).
@@ -213,14 +225,17 @@ const answered = t => t.stage !== 'done' && ((t.msgs?.length && t.msgs[t.msgs.le
 
 // Место дизайнера (HEAD 26.11): сверху «Сегодня» — что горит, кого ждём, новые, единицы месяца; ниже доска со сроками.
 // Дизайнер видит свои и неразобранные, Главный и HEAD — все.
-export function TaskBoard({ team, me }) {
+export function TaskBoard({ team, me, onUnits }) {
   const [d, setD] = useState(null)
   const [u, setU] = useState(null)
   const [err, setErr] = useState('')
   const [only, setOnly] = useState('')
   const [open, setOpen] = useState(null)
-  const load = () => api('/design/tasks').then(setD, e => setErr(e.message))
-  useEffect(() => { load(); api('/design/units').then(setU, () => setU(null)) }, [])
+  const [over, setOver] = useState('')
+  const [msg, setMsg] = useState('')
+  const drag = useRef(null), wide = useWide()
+  const load = () => { api('/design/units').then(setU, () => setU(null)); return api('/design/tasks').then(setD, e => setErr(e.message)) }
+  useEffect(() => { load() }, [])
   if (err) return <div className="card"><p className="small why">{err}</p></div>
   if (!d) return <div className="card"><p className="muted">Загружаю…</p></div>
   const live = d.items.filter(t => t.stage !== 'done')
@@ -230,11 +245,20 @@ export function TaskBoard({ team, me }) {
   const name = Object.fromEntries(d.stages.map(s => [s.id, s.name]))
   const groups = order.map(k => [k, scope.filter(t => t.stage === k)]).filter(([, rows]) => rows.length)
   const hot = live.filter(burns), back = live.filter(answered)
+  // загрузка по дизайнерам — Главному и HEAD: сколько задач и сколько просрочено
+  const loadBy = Object.entries(live.reduce((a, t) => { const n = t.designer ? t.designer.split(' ')[0] : 'не назначен'; a[n] = a[n] || [0, 0]; a[n][0]++; if (dueOf(t)?.cls === ' late') a[n][1]++; return a }, {}))
+    .map(([n, [c, l]]) => [n, c, l]).sort((a, b) => b[1] - a[1])
+  const canMove = t => d.all || !t.designer_id || t.designer_id === d.me
+  const drop = col => { const t = d.items.find(x => x.id === drag.current); drag.current = null; setOver('')
+    const [id, title, stages] = COLS.find(c => c[0] === col)
+    if (!t || stages.includes(t.stage)) return
+    if (id === 'done' && !window.confirm(`№ ${t.deal_id}: дизайн утверждён клиентом?`)) return
+    api(`/design/tasks/${t.id}`, { method: 'POST', body: { stage: id } }).then(() => { setMsg(`№ ${t.deal_id} → «${title}»`); load() }, e => setMsg(`№ ${t.deal_id} не перенесена: ${e.message}`)) }
   const waitN = live.filter(t => t.stage === 'wait').length, newN = live.filter(t => t.stage === 'new' || t.stage === 'urgent').length
   const Row = ({ t, k, tag }) => { const due = dueOf(t)
     return <div className="dtrow click" onClick={() => setOpen(t)}>
       <div className="dtmain"><b>№ {t.deal_id} {cleanTitle(t.deal_title, t.deal_id)} · {t.title}</b>
-        <span className="small muted">{[t.city, t.size ? t.size.toUpperCase() : '', t.deadline ? 'эскиз к ' + dm(t.deadline) : 'без срока', t.rounds ? `правки, круг ${t.rounds}` : '',
+        <span className="small muted">{[t.city, [t.size ? t.size.toUpperCase() : '', unitText(t)].filter(Boolean).join(' · '), t.deadline ? 'эскиз к ' + dm(t.deadline) : 'без срока', t.rounds ? `правки, круг ${t.rounds}` : '',
           t.sketches ? `эскизы ${t.sketches_ok} из ${t.sketches}` : '', t.client_brief ? 'бриф клиента ✓' : '', t.materials ? `материалы ${t.materials}` : '',
           d.all ? (t.designer || 'не назначен') : (t.designer_id ? '' : 'свободна')].filter(Boolean).join(' · ')}</span></div>
       {tag ? <span className="tag none">{tag}</span> : t.ask_open ? <span className="due wait">ждём МОП</span> : due ? <span className={'due' + due.cls}>{due.text}</span> : k === 'new' ? <span className="tag none">взять</span> : null}
@@ -247,16 +271,39 @@ export function TaskBoard({ team, me }) {
         <button className={'dttile' + (only === 'wait' ? ' on' : '')} onClick={() => setOnly(only === 'wait' ? '' : 'wait')}><b>{waitN}</b><span>жду клиента</span></button>
         <button className={'dttile' + (only === 'new' ? ' on' : '')} onClick={() => setOnly(only === 'new' ? '' : 'new')}><b>{newN}</b><span>{newN === 1 ? 'новая' : 'новые'}</span></button>
       </div>
-      {u && <p className="small muted dtunits">Месяц: <b>{String(u.mine || 0).replace('.', ',')}</b>{u.norm ? ` из ${String(u.norm).replace('.', ',')}` : ''} ед. · единица одна за проект, когда дизайн утверждён.</p>}
+      {u && <p className="small muted dtunits">Мои единицы за месяц: <b>{num(u.mine || 0)}</b>{u.norm ? ` из ${num(u.norm)}` : ''} · в работе ещё <b>{num(mine.filter(t => !t.unit_got).reduce((a, t) => a + (t.unit || 0), 0))}</b>
+        {onUnits && <button className="ghost mini dtmore" onClick={onUnits}>Подробнее</button>}</p>}
+      {d.all && !!loadBy.length && <p className="small muted dtload">Загрузка: {loadBy.map(([n, c, l], i) => <span key={n}>{i ? ' · ' : ''}{n} <b>{c}</b>{l ? <i> просрочено {l}</i> : null}</span>)}</p>}
     </div>
-    {!!hot.length && !only && <div className="card dtstage urgent dthot"><p className="dtcap">Горит · {hot.length}</p>{hot.map(t => <Row key={t.id} t={t} />)}</div>}
+    {!!hot.length && !only && !wide && <div className="card dtstage urgent dthot"><p className="dtcap">Горит · {hot.length}</p>{hot.map(t => <Row key={t.id} t={t} />)}</div>}
     {!!back.length && !only && <div className="card dtstage dtback"><p className="dtcap">Ответили · {back.length}</p>{back.map(t => <Row key={t.id} t={t} tag={fresh(t.client_brief_at) ? 'бриф клиента' : 'ответ МОП'} />)}</div>}
     <div className="chips scroll">
       <button className={!only ? 'on' : ''} onClick={() => setOnly('')}>Все <span>{live.length}</span></button>
       <button className={only === 'mine' ? 'on' : ''} onClick={() => setOnly(only === 'mine' ? '' : 'mine')}>Мои <span>{mine.length}</span></button>
       <button className={only === 'free' ? 'on' : ''} onClick={() => setOnly(only === 'free' ? '' : 'free')}>Свободные <span>{free.length}</span></button>
     </div>
-    {groups.map(([k, rows]) => <div key={k} className={'card dtstage ' + k}>
+    {wide ? <>
+      {msg && <div className="toast kbmsg">{msg}</div>}
+      <div className="kb dtkb">{COLS.map(([id, title, stages]) => { const rows = scope.filter(t => stages.includes(t.stage))
+        return <div key={id} className={'kcol dtcol ' + id + (over === id ? ' over' : '') + (rows.length ? '' : ' empty')}
+          onDragOver={e => { e.preventDefault(); if (over !== id) setOver(id) }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOver('') }}
+          onDrop={e => { e.preventDefault(); drop(id) }}>
+          <div className="khead"><span>{title}</span><b>{rows.length}</b></div>
+          {rows.map(t => { const due = dueOf(t)
+            return <div key={t.id} className={'kc' + (burns(t) ? ' hotc' : '')} draggable={canMove(t)} onClick={() => setOpen(t)}
+              onDragStart={e => { drag.current = t.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(t.id)) }} onDragEnd={() => setOver('')}>
+              <div className="kn">№ {t.deal_id}{t.city ? ` · ${t.city}` : ''}</div>
+              <div className="kt">{cleanTitle(t.deal_title, t.deal_id)} · {t.title}</div>
+              <div className="dtkmeta">{t.size && <span className="tag">{t.size.toUpperCase()}{unitText(t) ? ' · ' + unitText(t) : ''}</span>}
+                {SUB[t.stage] && <span className={'tag' + (t.stage === 'urgent' ? ' hott' : '')}>{SUB[t.stage]}</span>}
+                {t.ask_open ? <span className="due wait">ждём МОП</span> : due ? <span className={'due' + due.cls}>{due.text}</span> : null}</div>
+              <div className="kw">{[t.deadline ? 'эскиз к ' + dm(t.deadline) : '', t.rounds ? `круг ${t.rounds}` : '', t.sketches ? `эскизы ${t.sketches_ok} из ${t.sketches}` : '',
+                d.all ? (t.designer ? t.designer.split(' ')[0] : 'не назначен') : (t.designer_id ? '' : 'свободна')].filter(Boolean).join(' · ')}</div>
+            </div> })}
+          {!rows.length && <div className="kempty">Пусто</div>}
+        </div> })}</div>
+      <p className="small muted kbhint">Карточку тяните мышью в другую колонку. «Утверждено» спросит подтверждение. На телефоне эта доска — списком.</p>
+    </> : groups.map(([k, rows]) => <div key={k} className={'card dtstage ' + k}>
       <p className="dtcap">{name[k]} · {rows.length}</p>
       {rows.map(t => <Row key={t.id} t={t} k={k} />)}
     </div>)}
@@ -279,6 +326,7 @@ function TaskSheet({ t, d, team, me, onClose, onDone }) {
   return <Sheet title={`№ ${t.deal_id} · ${t.title}`} onClose={onClose}>
     <p className="small muted">{cleanTitle(t.deal_title, t.deal_id)}{t.city && !cleanTitle(t.deal_title, t.deal_id).includes(t.city) ? ' — ' + t.city : ''} · задача от {t.by}</p>
     <div className="dtmeta">{t.size && <span className="tag">{t.size.toUpperCase()}</span>}
+      {t.unit_got ? <span className="tag okt">{num(t.unit)} ед. засчитано</span> : t.unit ? <span className="tag">за проект {num(t.unit)} ед.</span> : <span className="tag none">размер не указан — единиц 0</span>}
       <span className={'tag' + (due?.cls === ' late' ? ' hott' : '')}>{t.deadline ? 'эскиз к ' + dm(t.deadline) : 'срок не указан'}{due && t.stage !== 'wait' && left(t.deadline) > 1 ? ` · осталось ${due.text}` : due ? ` · ${due.text}` : ''}</span>
       {t.start_on && <span className="tag">старт {dm(t.start_on)}</span>}
       {t.rounds > 0 && <span className={'tag' + (t.rounds >= 2 ? ' hott' : '')}>правки, круг {t.rounds}</span>}</div>
@@ -315,7 +363,7 @@ function TaskSheet({ t, d, team, me, onClose, onDone }) {
       <select value={t.designer_id || ''} onChange={e => save({ designer_id: +e.target.value || null })}><option value="">не назначен</option>{designers.map(x => <option key={x.id} value={x.id}>{x.full_name}</option>)}</select></>
       : !t.designer_id && <button className="ghost" onClick={() => save({ designer_id: d.me, stage: t.stage === 'new' ? 'work' : t.stage })}>Беру в работу</button>}
     <div className="dttwo"><div><label>Размер</label>
-      <select value={t.size} disabled={!mine} onChange={e => save({ size: e.target.value || null })}><option value="">—</option>{d.sizes.map(s => <option key={s} value={s}>{s.toUpperCase()}</option>)}</select></div>
+      <select value={t.size} disabled={!mine} onChange={e => save({ size: e.target.value || null })}><option value="">—</option>{d.sizes.map(s => <option key={s} value={s}>{s.toUpperCase()}{d.units?.[s] ? ` · ${num(d.units[s])} ед.` : ''}</option>)}</select></div>
       <div><label>Срок</label><input type="date" value={t.deadline} disabled={!mine} onChange={e => save({ deadline: e.target.value || null })} /></div></div>
     {err && <p className="small why">{err}</p>}
     {mine && t.stage !== 'done' && <div className="dttwo dtacts">
@@ -323,7 +371,7 @@ function TaskSheet({ t, d, team, me, onClose, onDone }) {
       {t.stage !== 'fix' ? <button className="ghost" onClick={() => save({ stage: 'fix' })}>Правки</button> : <span />}
     </div>}
     {mine && t.stage !== 'done' && <button className="okbtn" onClick={() => save({ stage: 'done' }, true)}>Утверждено</button>}
-    <p className="small muted">«Жду клиента» ставит срок на паузу. После «Утверждено» МОП видит строку «передай в производство». Единица считается одна за весь проект.</p>
+    <p className="small muted">«Жду клиента» ставит срок на паузу. После «Утверждено» МОП видит строку «передай в производство». Единица одна за проект и засчитывается, когда проект ушёл в производство.</p>
     {link && <BriefLink task={t} onClose={() => { setLink(false); onDone(t) }} />}
   </Sheet>
 }

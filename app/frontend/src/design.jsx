@@ -18,16 +18,16 @@ export function Design({ me, initial }) {
   const [pick, setView] = useState(initial || '')
   const n = useTaskCount(), team = useTeam()
   // HEAD 25.11: доска задач — в этой же вкладке, новых вкладок нет. Есть открытые задачи — открываем сразу её.
+  // HEAD 28.11: вкладки «Единицы» нет — единицы видны в задачах, подробный список по кнопке «Подробнее» и в «Кабинете» дизайнера
   // HEAD 28.11: воронка «Дизайн РК» закрыта, сделки переехали в «Продажи РК» — вкладки «Сделки» больше нет, работа идёт в «Задачах»
   const view = pick === 'deals' ? 'tasks' : pick || 'tasks'
   if (!pick && n === null) return <div className="card"><p className="muted">Загружаю…</p></div>
   return <>
     <div className="card"><div className="segf">
       <button className={view === 'tasks' ? 'on' : ''} onClick={() => setView('tasks')}>Задачи{n ? <span>{n}</span> : null}</button>
-      <button className={view === 'units' ? 'on' : ''} onClick={() => setView('units')}>Единицы</button>
       <button className={view === 'cat' ? 'on' : ''} onClick={() => setView('cat')}>Каталоги</button>
     </div></div>
-    {view === 'tasks' ? <TaskBoard team={team} me={me} /> : view === 'deals' ? <Deals me={me} /> : view === 'units' ? <Units /> : <Catalogs me={me} />}
+    {view === 'tasks' ? <TaskBoard team={team} me={me} onUnits={() => setView('units')} /> : view === 'units' ? <><button className="ghost mini dtbackb" onClick={() => setView('tasks')}>← К задачам</button><Units /></> : <Catalogs me={me} />}
   </>
 }
 
@@ -207,7 +207,7 @@ function DealSheet({ x, d, team, me, onClose, onDone }) {
 }
 
 const unitsOf = (u, size) => (u.sizes || {})[size] ?? ''
-function Units() {
+export function Units() {
   const [m, setM] = useState(new Date().toISOString().slice(0, 7))
   const [u, setU] = useState(null)
   const load = () => api('/design/units?ym=' + m).then(setU, () => setU({ rows: [], mine: 0 }))

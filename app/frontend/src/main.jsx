@@ -15,7 +15,7 @@ import { Finance, MyPay, StockSpend } from './finance.jsx'
 import { Kit } from './kit.jsx'
 import { Production } from './production.jsx'
 import { Marketing } from './marketing.jsx'
-import { Design } from './design.jsx'
+import { Design, Units } from './design.jsx'
 import { DUTIES, GROW, POLICY } from './duties.js'
 import { TeamPath, countOf, markLabel, markOf, useMarks } from './grow.jsx'
 import { Feedback } from './feedback.jsx'
@@ -213,7 +213,7 @@ function Main({ me, onMe, web, logout }) {
         tab === 'fin' ? <Finance key={finView || 'f'} initial={finView} /> : tab === 'closing' && isHead ? <Closing /> : tab === 'pays' ? <PayDesk /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design key={designView || 'd'} me={me} initial={designView} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
         tab === 'mine' && (mop || carp || mkt || !me.zones.length) ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review key={reviewView || 'all'} focus={reviewView} />}
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} />{dz ? <Units /> : null}{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review key={reviewView || 'all'} focus={reviewView} />}
     </div>
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={!isHead} />
   </>

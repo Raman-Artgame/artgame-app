@@ -14,8 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import bx, bxw, db
-from .design import ALL, SIZES, need
+from . import bx, bxw, constants as consts, db
+from .design import ALL, SIZES, need, unit_of
 from .work import active
 
 router = APIRouter(prefix="/api")
@@ -148,8 +148,13 @@ def board(p: dict = Depends(active)):
         rows = conn.execute(SQL + """ WHERE t.status='active' AND (t.stage<>'done' OR t.approved_at > now() - interval '30 days')
                                         AND (%s OR t.designer_id=%s OR t.designer_id IS NULL)
                                       ORDER BY t.deadline NULLS LAST, t.id""", (see_all, p["id"])).fetchall()
-    return {"items": [{**_out(r), "bitrix": _bitrix(r["deal_id"])} for r in rows],
-            "stages": [{"id": k, "name": n} for k, n in STAGES], "all": see_all, "me": p["id"], "sizes": SIZES}
+        # единицы — прямо в задаче (HEAD 28.11): сколько даст проект по размеру и засчитана ли уже единица
+        v = consts.latest(conn)
+        got = {r["deal_id"]: float(r["units"]) for r in conn.execute(
+            "SELECT deal_id, units FROM design_units WHERE status='active' AND deal_id = ANY(%s)", ([r["deal_id"] for r in rows],)).fetchall()}
+    return {"items": [{**_out(r), "bitrix": _bitrix(r["deal_id"]), "unit": unit_of(v, r["size"]), "unit_got": r["deal_id"] in got} for r in rows],
+            "stages": [{"id": k, "name": n} for k, n in STAGES], "all": see_all, "me": p["id"], "sizes": SIZES,
+            "units": {z: unit_of(v, z) for z in SIZES}}
 
 
 class TaskEdit(BaseModel):
