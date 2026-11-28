@@ -162,6 +162,12 @@ def evaluators(conn) -> list[list]:
         "SELECT id, full_name FROM people WHERE status='active' AND role_code = ANY(%s) ORDER BY full_name", (list(EVALUATORS),))]
 
 
+def objects(conn) -> list[dict]:
+    """Проекты в работе для пробного дня (HEAD 28.11: «список проектов в работе не выкатывается»): номер, название, город, ГИП."""
+    return conn.execute("""SELECT o.id, o.title, o.city, pe.full_name AS gip FROM objects o LEFT JOIN people pe ON pe.id=o.gip_person_id
+                           WHERE o.status='active' AND o.closed_at IS NULL ORDER BY o.id DESC""").fetchall()
+
+
 def late_count(conn) -> int:
     """Пульт: пробный день прошёл (вчера и раньше), оценки нет."""
     return conn.execute("""SELECT count(*) AS n FROM candidates WHERE stage='trial' AND trial_on < %s AND trial_reviewed_at IS NULL""",

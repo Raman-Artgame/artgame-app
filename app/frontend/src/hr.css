@@ -69,3 +69,4 @@
 .hrtitems em { font-style: normal; font-weight: 700; white-space: nowrap; color: var(--warn); }
 .hrtitems em.ok { color: var(--ok); }
 .hrtitems em.no { color: var(--hot); }
+.hrform select { width: 100%; margin: 6px 0 10px; padding: 12px; border-radius: 12px; background: var(--alt); color: var(--text); border: 1px solid var(--line); font: inherit; font-size: 15px; }

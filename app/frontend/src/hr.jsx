@@ -130,7 +130,8 @@ function CandCard({ id, back }) {
       {act === 'interview' && <div className="hrform"><label>Когда собеседование</label><input type="date" value={f.meet_on || ''} onChange={e => setF({ ...f, meet_on: e.target.value })} />
         <button disabled={!f.meet_on} onClick={() => save({ stage: 'interview', meet_on: f.meet_on })}>Назначить</button></div>}
       {act === 'trial' && <div className="hrform"><p className="small muted">Пробная оплачивается, только если человека примем: начисление в ФОТ появится само, когда он войдёт в приложение. Не приняли — не оплачивается.</p><label>Дата пробной смены</label><input type="date" value={f.trial_on || ''} onChange={e => setF({ ...f, trial_on: e.target.value })} />
-        <label>Сделка — куратор ГИП сделки оценит пробный день</label><input inputMode="numeric" value={f.trial_object || ''} placeholder="№ сделки" onChange={e => setF({ ...f, trial_object: e.target.value.replace(/\D/g, '') })} />
+        <label>Проект — его куратор ГИП оценит пробный день</label><select value={f.trial_object || ''} onChange={e => setF({ ...f, trial_object: e.target.value })}>
+          <option value="">Выбрать проект в работе…</option>{(c.objects || []).map(o => <option key={o.id} value={o.id}>№{o.id} {o.title}{o.city ? ` · ${o.city}` : ''} · {o.gip ? `ГИП ${o.gip}` : 'без ГИП'}</option>)}</select>
         <label>Кто оценивает</label><select value={f.trial_by || ''} onChange={e => setF({ ...f, trial_by: e.target.value })}>
           <option value="">Куратор ГИП сделки</option>{(c.evaluators || []).map(([pid, n]) => <option key={pid} value={pid}>{n}</option>)}</select>
         <button disabled={!f.trial_on} onClick={() => save({ stage: 'trial', trial_on: f.trial_on, ...(f.trial_object ? { trial_object: +f.trial_object } : {}), ...(f.trial_by ? { trial_by: +f.trial_by } : {}) })}>Назначить пробную</button></div>}
