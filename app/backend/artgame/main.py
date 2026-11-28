@@ -206,8 +206,9 @@ def profile(body: ProfileIn, p: dict = Depends(current_person)):
         raise HTTPException(422, "Телефон — полностью, с кодом")
     data = {"last_name": last, "first_name": first, "middle_name": clean(body.middle_name), "birth_date": body.birth_date,
             "phone": phone, "city": clean(body.city), "emergency_name": clean(body.emergency_name),
-            "emergency_phone": clean(body.emergency_phone), "clothes_size": clean(body.clothes_size), "full_name": f"{first} {last}",
-            "nickname": clean(body.nickname)}
+            "emergency_phone": clean(body.emergency_phone), "clothes_size": clean(body.clothes_size), "full_name": f"{first} {last}"}
+    if "nickname" in body.model_fields_set:   # старая версия страницы поля не шлёт — никнейм, который вписал HEAD, не стираем
+        data["nickname"] = clean(body.nickname)
     with db.pool.connection() as conn, conn.transaction():
         conn.execute(f"UPDATE people SET {', '.join(k + '=%s' for k in data)}, profile_at=%s WHERE id=%s",
                      (*data.values(), datetime.now(timezone.utc), p["id"]))

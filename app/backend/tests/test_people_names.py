@@ -17,6 +17,8 @@ def test_names_format_and_nickname(client):
     body = {"last_name": "салтыкова-щедрина", "first_name": "АННА", "birth_date": "1995-05-05", "phone": "+77011234567", "city": "Астана", "nickname": "Ann"}
     me = client.post("/api/profile", json=body, headers=hdr(2000)).json()
     assert me["full_name"] == "Анна Салтыкова-Щедрина" and me["nickname"] == "Ann"
+    old = {k: v for k, v in body.items() if k != "nickname"}   # старая версия страницы: поля «Никнейм» в запросе нет
+    assert client.post("/api/profile", json=old, headers=hdr(2000)).json()["nickname"] == "Ann"
     client.post("/api/profile", json={**body, "first_name": "Anna", "last_name": "Lee"}, headers=hdr(2000))
     assert row()["name_issue"] == "латиницей"
     assert client.post(f"/api/people/{pid}", json={"nickname": "x"}, headers=hdr(2000)).status_code == 403
