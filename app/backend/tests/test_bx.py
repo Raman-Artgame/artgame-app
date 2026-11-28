@@ -454,6 +454,8 @@ def test_leads(bxc, monkeypatch):
     l = r["leads"][0]
     assert l["new"] and l["name"] == "Дана" and l["phone"] == "+7 701 555 44 33"
     assert l["missing"] == ["город", "услуга"]   # услуги у лида в Битриксе нет — спросим при переводе; площадь — перед КП
+    # канбан (HEAD 28.11): колонки — рабочие статусы по порядку, без «Сделки», отказов и вакансий
+    assert r["stages"] == [{"id": "UC_93GBZP", "name": "Новый лид"}, {"id": "IN_PROCESS", "name": "В работе"}] and r["new_hours"] == 4
     assert c.get("/api/bx/leads/3002", headers=hdr(6000)).status_code == 403
     full = c.get("/api/bx/leads/3001", headers=hdr(6000)).json()
     assert full["has"] == {"service": False, "area": True} and full["fail"] == [{"id": "UC_MARGO5", "name": "Дорого"}]

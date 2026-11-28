@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { api } from './api.js'
 import { CityPicker, WaitSheet, cityBase } from './ui.jsx'
 import { NewLeadSheet } from './mopforms.jsx'
@@ -193,46 +193,116 @@ export function PushToday({ items, open, title = 'Дожать сегодня', 
 // Серые заготовки вместо «Загружаю…»: экран не прыгает, когда придут данные.
 export const Skeleton = ({ n = 3 }) => <div className="card skel">{Array.from({ length: n }, (_, i) => <div key={i} className="skrow"><i /><div><b /><span /></div></div>)}</div>
 
+// Телефон (HEAD 26.11 «на телефоне канбан неудобно»): вместо колонок — стадии кнопками сверху и карточки выбранной стадии во всю ширину.
+// Компьютер и планшет шире 700 px — канбан. Общий для сделок и лидов.
+const NARROW = '(max-width: 700px)'
+export function useNarrow() {
+  const [n, setN] = useState(() => window.matchMedia?.(NARROW).matches || false)
+  useEffect(() => {
+    const m = window.matchMedia?.(NARROW)
+    if (!m) return
+    const upd = () => setN(m.matches)
+    m.addEventListener?.('change', upd)
+    return () => m.removeEventListener?.('change', upd)
+  }, [])
+  return n
+}
+
 // ---------- Лиды ----------
+// HEAD 28.11 «лиды так же нужно сделать канбаном»: на компьютере — колонки по статусам Битрикса (как сделки), карточку тянут
+// мышью в другой статус; на телефоне — статусы кнопками сверху и список во всю ширину. Отказ — только из карточки лида (с причиной).
+
+const leadWait = (l, newH, isNew = l.new) => { const h = Math.max(0, Math.round((Date.now() - new Date(l.created)) / 3600000))
+  if (isNew) return { late: h >= newH, text: h ? `ждёт ${h < 24 ? h + ' ч' : Math.floor(h / 24) + ' дн.'}` : 'только что', key: h }
+  const d = ageDays(l.modified); return { late: d >= 3, text: d ? `без движения ${d} дн.` : 'сегодня', key: d } }
 
 export function Leads({ openLead }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
-  const [seg, setSeg] = useState(null)   // new | work | all
+  const [pst, setPst] = useState(null)    // телефон: открытый статус | 'all'
   const [add, setAdd] = useState(false)   // «+ Заявка» по звонку (HEAD 25.11)
-  const load = fresh => { setBusy(true); setErr(''); return api(`/bx/leads${fresh ? '?fresh=1' : ''}`).then(setD, e => setErr(e.message)).finally(() => setBusy(false)) }
+  const [moved, setMoved] = useState({})  // id → статус, пока Битрикс не подтвердил
+  const [over, setOver] = useState('')
+  const [msg, setMsg] = useState('')
+  const drag = useRef(null)
+  const narrow = useNarrow()
+  const load = fresh => { setBusy(true); setErr(''); return api(`/bx/leads${fresh ? '?fresh=1' : ''}`).then(x => { setD(x); setMoved({}) }, e => setErr(e.message)).finally(() => setBusy(false)) }
   useEffect(() => { load(false) }, [])
+  useEffect(() => { if (narrow) document.querySelector('.kstages button.on')?.scrollIntoView?.({ inline: 'center', block: 'nearest' }) }, [narrow, pst, d])
   if (err) return <div className="card"><h2>Лиды</h2><p className="muted">{err}</p></div>
   if (!d) return <Skeleton n={4} />
-  const hours = l => Math.max(0, Math.round((Date.now() - new Date(l.created)) / 3600000))
-  // новые — кто дольше ждёт, тот выше; в работе — кто дольше без движения
-  const news = d.leads.filter(l => l.new).sort((a, b) => hours(b) - hours(a)), work = d.leads.filter(l => !l.new).sort((a, b) => ageDays(b.modified) - ageDays(a.modified))
-  const cur = seg || (news.length ? 'new' : 'work')
+  const newH = d.new_hours || 4
+  const stOf = l => moved[l.id] || l.status
+  const fresh = l => d.new_ids ? d.new_ids.includes(stOf(l)) : l.new   // перенесли из «Нового» — уже не «ждёт»
+  const wait = l => leadWait(l, newH, fresh(l))
   const s = q.trim().toLowerCase()
-  const base = s ? d.leads : cur === 'new' ? news : cur === 'work' ? work : d.leads
-  const list = base.filter(l => !s || (l.name + ' ' + l.title + ' ' + l.phone + ' ' + (l.manager || '')).toLowerCase().includes(s))
-  return <>
-    <div className="card"><div className="head"><h2>{d.all ? 'Лиды' : 'Мои лиды'}</h2>
+  const list = d.leads.filter(l => !s || (l.name + ' ' + l.title + ' ' + l.phone + ' ' + (l.manager || '') + ' ' + l.id).toLowerCase().includes(s))
+  // колонки: рабочие статусы Битрикса по порядку; статус лида, которого нет в списке, — своей колонкой в конце
+  const stages = [...(d.stages || [])]
+  list.forEach(l => { if (!stages.some(x => x.id === stOf(l))) stages.push({ id: stOf(l), name: l.status_name || stOf(l) }) })
+  const cols = stages.map(st => ({ ...st, items: list.filter(l => stOf(l) === st.id).sort((a, b) => wait(b).key - wait(a).key) }))
+  const news = list.filter(fresh).length, late = list.filter(l => wait(l).late).length
+  const say = t => { setMsg(t); setTimeout(() => setMsg(m => m === t ? '' : m), 8000) }
+  const drop = to => {
+    const l = list.find(x => x.id === drag.current); drag.current = null; setOver('')
+    if (!l || stOf(l) === to) return
+    const was = stOf(l), name = stages.find(x => x.id === to)?.name || to
+    setMoved(m => ({ ...m, [l.id]: to }))
+    api(`/bx/leads/${l.id}/status`, { method: 'POST', body: { status: to } })
+      .then(() => say(`${l.name} → «${name}»`), e => { setMoved(m => ({ ...m, [l.id]: was })); say(`${l.name}: не перенесён — ${e.message}`) })
+  }
+  const canDrag = !narrow && !s
+  const card = l => { const w = wait(l)
+    return <div key={l.id} className={'kc lc' + (fresh(l) ? ' fresh' : '')} draggable={canDrag}
+      onDragStart={e => { drag.current = l.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(l.id)) }}
+      onDragEnd={() => setOver('')} onClick={() => openLead(l.id)}>
+      <div className="kn">{[l.source, l.city].filter(Boolean).join(' · ') || `Лид № ${l.id}`}</div>
+      <div className="kt">{l.name}</div>
+      {l.phone ? <div className="kw">{l.phone}</div> : null}
+      {l.service ? <div className="kw">{l.service}</div> : null}
+      {!!l.missing.length && <div>{l.missing.map(m => <span key={m} className="miss">нет: {m}</span>)}</div>}
+      <span className={'kr ' + (w.late ? 'wait' : 'idle')}>{w.text}</span>
+      {d.all && l.manager ? <div className="kw">{l.manager.split(' ')[0]}</div> : null}
+    </div> }
+  const head = <div className="card lhead"><div className="head"><h2>{d.all ? 'Лиды' : 'Мои лиды'} <span className="muted small">{list.length}</span></h2>
       <div className="dealbtns"><button className="mini" onClick={() => setAdd(true)}>+ Заявка</button>
         <button className="ghost mini" disabled={busy} onClick={() => load(true)}>{busy ? '…' : 'Обновить'}</button></div></div>
-      <div className="segf">
-        <button className={cur === 'new' && !s ? 'on' : ''} onClick={() => setSeg('new')}>Новые <span>{news.length}</span></button>
-        <button className={cur === 'work' && !s ? 'on' : ''} onClick={() => setSeg('work')}>В работе <span>{work.length}</span></button>
-        <button className={cur === 'all' || s ? 'on' : ''} onClick={() => setSeg('all')}>Все <span>{d.leads.length}</span></button>
+    <p className="small kbsplit">{news ? <span>новых: <b>{news}</b></span> : <span className="ok">новых нет</span>}{late ? <span className="warn">ждут ответа дольше нормы: {late}</span> : null}</p>
+    <input value={q} onChange={e => setQ(e.target.value)} placeholder="Имя, телефон или номер лида" />
+  </div>
+  const sheet = add && <NewLeadSheet onClose={() => setAdd(false)} onDone={id => { setAdd(false); load(true); openLead(id) }} />
+  if (narrow) {
+    const cur = s ? 'all' : pst === 'all' || cols.some(c => c.id === pst) ? pst : (cols.find(c => c.items.some(fresh)) || cols.find(c => c.items.length) || { id: 'all' }).id
+    const show = cur === 'all' ? cols.filter(c => c.items.length) : cols.filter(c => c.id === cur)
+    return <>
+      {head}
+      <div className="chips scroll kstages">
+        <button className={cur === 'all' ? 'on' : ''} onClick={() => setPst('all')}>Все <span>{list.length}</span></button>
+        {cols.map(c => <button key={c.id} className={cur === c.id ? 'on' : ''} onClick={() => setPst(c.id)}>{c.name} <span>{c.items.length}</span>
+          {c.items.some(l => wait(l).late) ? <i className="dot" /> : null}</button>)}
       </div>
-      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Имя или телефон" />
-      {!list.length && <p className="muted">{cur === 'new' && !s ? 'Новых лидов нет.' : 'Пусто.'}</p>}
-      {list.map(l => <div key={l.id} className="qrow lead" onClick={() => openLead(l.id)}>
-        <span className="ic lead">{initial(l.name)}</span>
-        <div className="qmain"><div className="qt"><b>{l.name}</b></div>
-          <div className="small muted">{[l.phone, l.city, l.source, l.manager].filter(Boolean).join(' · ')}</div>
-          {!!l.missing.length && <div>{l.missing.map(m => <span key={m} className="miss">нет: {m}</span>)}</div>}</div>
-        <span className={'badge' + ((l.new ? hours(l) >= (d.new_hours || 4) : ageDays(l.modified) >= 3) ? ' hot' : '')}>{l.new ? (hours(l) ? `ждёт ${hours(l) < 24 ? hours(l) + ' ч' : Math.floor(hours(l) / 24) + ' дн.'}` : 'только что') : `${ageDays(l.modified)} дн.`}</span>
-      </div>)}
-    </div>
-    {add && <NewLeadSheet onClose={() => setAdd(false)} onDone={id => { setAdd(false); load(true); openLead(id) }} />}
+      {show.map(c => <div key={c.id} className="kphone"><div className="kphead"><span>{c.name}</span><b>{c.items.length}</b></div>
+        {c.items.map(card)}{!c.items.length && <p className="muted small kempty">В этом статусе лидов нет.</p>}</div>)}
+      {!list.length && <p className="muted">{s ? 'Ничего не найдено.' : 'Лидов нет.'}</p>}
+      <p className="small muted kbhint">Статусы — кнопками сверху. Статус лида меняют в его карточке. На компьютере лиды — канбаном.</p>
+      {sheet}
+    </>
+  }
+  return <>
+    {head}
+    {msg && <div className="toast kbmsg">{msg}</div>}
+    <div className="kb leadsb">{cols.map(c => <div key={c.id} className={'kcol' + (over === c.id ? ' over' : '') + (c.items.length ? '' : ' empty')}
+      onDragOver={e => { if (canDrag) { e.preventDefault(); if (over !== c.id) setOver(c.id) } }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOver('') }}
+      onDrop={e => { e.preventDefault(); drop(c.id) }}>
+      <div className="khead"><span>{c.name}</span><b>{c.items.length}</b></div>
+      {c.items.map(card)}
+      {!c.items.length && <div className="kempty">{canDrag ? 'Перетащите сюда лид' : 'Пусто'}</div>}
+    </div>)}</div>
+    {!list.length && <p className="muted">{s ? 'Ничего не найдено.' : 'Лидов нет.'}</p>}
+    {canDrag && <p className="small muted kbhint">Карточку тяните мышью в другой статус. «В сделку» и отказ с причиной — в карточке лида.</p>}
+    {sheet}
   </>
 }
 

@@ -1659,3 +1659,6 @@ mark.gap { background: var(--warnbg); color: var(--warn); border-radius: 4px; pa
 .asklist { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 12px; }
 .asklist button { display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; margin: 0; padding: 11px 14px; font-size: 14px; font-weight: 500; }
 .asklist button span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Лиды канбаном (HEAD 28.11) */
+.lhead .head { flex-wrap: wrap; } .lhead .kbsplit { margin: 10px 0; }

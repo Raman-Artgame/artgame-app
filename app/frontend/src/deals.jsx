@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { api } from './api.js'
 import { DealCard } from './dealcard.jsx'
-import { Skeleton, ageDays, cleanTitle, loadToday, money, useToday } from './crm.jsx'
+import { Skeleton, ageDays, cleanTitle, loadToday, money, useNarrow, useToday } from './crm.jsx'
 
 export const DEAL_ROLES = new Set(['mop', 'mop_vip', 'head'])
 const IDLE = 3   // дней без движения — красный бейдж (как mop.today.idle_days)
@@ -20,20 +20,6 @@ const RANK = { hot: 4, go: 3, wait: 2, idle: 1 }
 const cap = t => t ? t[0].toUpperCase() + t.slice(1) : ''
 const ddmm = s => s ? s.slice(8, 10) + '.' + s.slice(5, 7) : ''
 const daysTo = s => s ? Math.round((new Date(s + 'T00:00:00') - new Date(new Date().toDateString())) / 864e5) : null
-// Телефон (HEAD 26.11 «на телефоне канбан неудобно»): вместо колонок — стадии кнопками сверху и карточки выбранной стадии во всю ширину.
-// Компьютер и планшет шире 700 px — канбан как был. Стадию на телефоне меняют в карточке сделки.
-const NARROW = '(max-width: 700px)'
-function useNarrow() {
-  const [n, setN] = useState(() => window.matchMedia?.(NARROW).matches || false)
-  useEffect(() => {
-    const m = window.matchMedia?.(NARROW)
-    if (!m) return
-    const upd = () => setN(m.matches)
-    m.addEventListener?.('change', upd)
-    return () => m.removeEventListener?.('change', upd)
-  }, [])
-  return n
-}
 // доска «В работе» (HEAD 26.11): сколько оплачено и сколько осталось, кто куратор ГИП, когда сдача
 function WorkLine({ d }) {
   const pct = d.sum ? Math.min(100, Math.round(100 * (d.paid || 0) / d.sum)) : 0, left = daysTo(d.end)

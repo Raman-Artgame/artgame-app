@@ -112,7 +112,12 @@ def my_leads(p: dict, fresh: bool = False) -> dict:
     vac = vacancy(st)   # «Вакансии Астана» — рабочий статус Битрикса, но это не клиент: в очереди МОП не нужен
     names = {u["id"]: u["name"] for u in bx.users()} if uid is None else {}
     src = source_names()
-    return {"leads": [_row(l, st, have, names, src) for l in rows if l.get("STATUS_ID") not in vac], "all": uid is None}
+    # колонки канбана (HEAD 28.11 «лиды … канбаном»): рабочие статусы по порядку, без «Сделки», отказов и вакансий
+    stages = [{"id": k, "name": v["name"]} for k, v in sorted(st.items(), key=lambda kv: kv[1]["sort"])
+              if v["semantic"] == "process" and k != CONVERTED and k not in vac]
+    new_h = float(bx._vals().get("mop.today.new_hours") or 4)
+    return {"leads": [_row(l, st, have, names, src) for l in rows if l.get("STATUS_ID") not in vac], "all": uid is None,
+            "stages": stages, "new_hours": new_h, "new_ids": sorted(NEW)}
 
 
 def _lead(p: dict, lead_id: int, fresh: bool = False) -> dict:
