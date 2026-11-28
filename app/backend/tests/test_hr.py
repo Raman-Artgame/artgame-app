@@ -205,18 +205,57 @@ def test_trial_day_review(client, monkeypatch):
     cid = client.get("/api/hr/candidates", headers=hdr(1000)).json()["items"][0]["id"]
     objs = client.get(f"/api/hr/candidates/{cid}", headers=hdr(1000)).json()["objects"]
     assert {"id": 881, "title": "Кафе Нур", "city": "Астана", "gip": "Гип Главный"} in objs   # список проектов в работе (HEAD 28.11)
-    yday = (date.today() - timedelta(days=1)).isoformat()
-    client.post(f"/api/hr/candidates/{cid}", json={"stage": "trial", "trial_on": yday, "trial_object": 881}, headers=hdr(1000))
+    from artgame import tgbot, hrbot
+    bot = []
+    monkeypatch.setattr(tgbot, "CALL", lambda m, **kw: bot.append((kw.get("chat_id"), kw.get("text"), kw.get("reply_markup"))))
+    sec = {"X-Telegram-Bot-Api-Secret-Token": tgbot.hook_secret()}
+    # кандидат после анкеты жмёт «Получать ответы в Telegram» → бот привязывает (HEAD 28.11)
+    client.post("/api/tg/hook", json={"message": {"chat": {"id": 7777, "type": "private"}, "from": {"first_name": "Айгерим"},
+                                                  "text": f"/start c_{tok}"}}, headers=sec)
+    assert bot[-1][0] == 7777 and "готово" in bot[-1][1] and client.get(f"/api/hr/c/{tok}").json()["bot"]
+    # HEAD назначает пробную без даты — день выбирает кандидат, бот сам пишет ему
+    client.post(f"/api/hr/candidates/{cid}", json={"stage": "trial", "trial_object": 881}, headers=hdr(1000))
     t = client.get(f"/api/hr/candidates/{cid}", headers=hdr(1000)).json()["trial"]
-    assert t["by"] == gip and t["by_name"] == "Гип Главный" and t["late"] and not t["at"]
+    assert t["by"] == gip and t["invite"]["state"] == "pick" and t["cand_bot"]
+    assert any(c == 7777 and "Выберите удобный день" in x and "?me=" in kb["inline_keyboard"][0][0]["url"] for c, x, kb in bot)
     assert any(tg == 2001 and "Пробный день кандидата: Садыкова Айгерим" in x and "Кафе Нур" in x for tg, x in sent)
+    me = client.get(f"/api/hr/c/{tok}").json()["status"]
+    assert me["step"] == "trial" and me["state"] == "pick" and len(me["days"]) == 14 and "who_phone" not in me
+    assert client.get("/api/hr/trials", headers=hdr(2001)).json()["items"] == []   # день ещё не выбран
+    tmr = (date.today() + timedelta(days=1)).isoformat()
+    assert client.post(f"/api/hr/c/{tok}/trial-day", json={"day": date.today().isoformat()}).status_code == 400
+    assert client.post(f"/api/hr/c/{tok}/trial-day", json={"day": tmr}).json()["ok"]
+    assert any(tg == 2001 and "предложен" in x for tg, x in sent)
+    # куратор ГИП подтверждает с временем и местом — кандидат получает приглашение с телефоном куратора
+    mine = client.get("/api/hr/trials", headers=hdr(2001)).json()["items"]
+    assert [x["state"] for x in mine] == ["wait"] and mine[0]["phone"] == "87771234567"
+    assert client.post(f"/api/hr/trials/{cid}/confirm", json={"day": tmr, "time": "9:30"}, headers=hdr(5555)).status_code in (403, 404)
+    r = client.post(f"/api/hr/trials/{cid}/confirm", json={"day": tmr, "time": "09:30", "place": "ТРЦ Mega, вход 3", "bring": "рабочую одежду"},
+                    headers=hdr(2001)).json()
+    assert r["sent"]
+    inv = [x for c, x, _ in bot if c == 7777 and "ждём вас на пробный день" in x][-1]
+    assert "09:30" in inv and "ТРЦ Mega" in inv and "Гип Главный" in inv and "рабочую одежду" in inv
+    me = client.get(f"/api/hr/c/{tok}").json()["status"]
+    assert me["state"] == "ok" and me["time"] == "09:30" and me["who"] == "Гип Главный"
+    # накануне в 18:00 — напоминание обоим, один раз
+    from datetime import datetime
+    with db.pool.connection() as conn, conn.transaction():
+        assert hrbot.tick(conn, datetime.now(hrbot.ALMATY).replace(hour=17))["remind"] == 0
+        assert hrbot.tick(conn, datetime.now(hrbot.ALMATY).replace(hour=18))["remind"] == 1
+        assert hrbot.tick(conn, datetime.now(hrbot.ALMATY).replace(hour=19))["remind"] == 0
+    assert any(c == 7777 and x.startswith("Напоминаем: завтра") for c, x, _ in bot) and any(tg == 2001 and "Завтра пробный день" in x for tg, x in sent)
+    # день прошёл, оценки нет — Пульт HEAD и одно напоминание куратору
+    with db.pool.connection() as conn:
+        conn.execute("UPDATE candidates SET trial_on=current_date - 1 WHERE id=%s", (cid,))
+    t = client.get(f"/api/hr/candidates/{cid}", headers=hdr(1000)).json()["trial"]
+    assert t["late"] and not t["at"]
     assert client.get("/api/head/pulse", headers=hdr(1000)).json()["hr"]["trial_late"] == 1
-
-    # у оценщика — карточка; без телефона и ожиданий по деньгам
+    with db.pool.connection() as conn, conn.transaction():
+        assert hrbot.tick(conn, datetime.now(hrbot.ALMATY).replace(hour=11))["nag"] == 1
     mine = client.get("/api/hr/trials", headers=hdr(2001)).json()["items"]
     assert [x["id"] for x in mine] == [cid] and mine[0]["object"] == "Кафе Нур"
     card = client.get(f"/api/hr/trials/{cid}", headers=hdr(2001)).json()
-    assert len(card["items"]) == 7 and "87771234567" not in str(card) and "300 000" not in str(card)
+    assert len(card["items"]) == 7 and "300 000" not in str(card)
     assert client.get(f"/api/hr/trials/{cid}", headers=hdr(5555)).status_code in (403, 404)
     items = {k: "yes" for k, _ in card["items"]}
     good = {"stars": 4, "items": items, "verdict": "take", "comment": "Пришла вовремя, сразу включилась в подготовку. " * 4}
@@ -230,3 +269,22 @@ def test_trial_day_review(client, monkeypatch):
     assert t["stars"] == 4 and t["verdict"] == "Брать" and t["reviewer"] == "Гип Главный" and len(t["items"]) == 7 and not t["late"]
     assert client.get("/api/hr/trials", headers=hdr(2001)).json()["items"] == []
     assert client.get("/api/head/pulse", headers=hdr(1000)).json()["hr"]["trial_late"] == 0
+    assert client.post(f"/api/hr/trials/{cid}/noshow", headers=hdr(2001)).status_code == 409
+    # решение HEAD — бот сам пишет кандидату
+    client.post(f"/api/hr/candidates/{cid}", json={"stage": "hired", "hired_role": "support"}, headers=hdr(1000))
+    assert any(c == 7777 and "вы в команде ARTGAME" in x and "web_app" in kb["inline_keyboard"][0][0] for c, x, kb in bot)
+
+    # второй кандидат без Telegram: «Не пришёл» — итог без звёзд, HEAD узнаёт сразу
+    tok2 = client.post("/api/hr/apply", json={"dir": "art", "answers": {**ANS, "phone": "87019998877", "full_name": "Ким Олег"}}).json()["token"]
+    client.post(f"/api/hr/c/{tok2}/done")
+    assert any(tg == 1000 and "Новая анкета: Ким Олег" in x for tg, x in sent)
+    cid2 = [x for x in client.get("/api/hr/candidates", headers=hdr(1000)).json()["items"] if x["full_name"] == "Ким Олег"][0]["id"]
+    client.post(f"/api/hr/candidates/{cid2}", json={"stage": "trial", "trial_on": tmr, "trial_object": 881}, headers=hdr(1000))
+    t = client.get(f"/api/hr/candidates/{cid2}", headers=hdr(1000)).json()["trial"]
+    assert t["invite"]["state"] == "wait" and not t["cand_bot"]
+    client.post(f"/api/hr/trials/{cid2}/confirm", json={"day": tmr, "time": "10:00", "place": "Кафе Нур"}, headers=hdr(2001))
+    assert client.post(f"/api/hr/candidates/{cid2}/invite-sent", headers=hdr(1000)).json()["sent_at"]
+    assert client.post(f"/api/hr/trials/{cid2}/noshow", headers=hdr(2001)).json()["ok"]
+    t = client.get(f"/api/hr/candidates/{cid2}", headers=hdr(1000)).json()["trial"]
+    assert t["noshow"] and t["verdict"] == "Не брать"
+    assert any(tg == 1000 and "Ким Олег: не пришёл" in x for tg, x in sent)

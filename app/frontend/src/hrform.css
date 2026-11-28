@@ -52,3 +52,18 @@ body.hjpage { background: var(--bg); color: var(--text); }
 /* HEAD 27.11: убрать фото — крестик в углу, крупная зона нажатия */
 .hj .hjpic button.hjdel { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; padding: 0; border-radius: 50%; background: rgba(0,0,0,.65); color: #fff; font-size: 14px; line-height: 28px; text-align: center; border: 0; }
 .hjpic.ok::after { right: auto; left: 5px; }
+
+/* личная страница кандидата (HEAD 28.11) */
+.hjme { gap: 12px; }
+.hjme h1 { margin: 0; font-size: 22px; }
+.hjtag { align-self: flex-start; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent2); }
+.hjrows { border-top: 1px solid var(--line); }
+.hjrows div { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.hjrows span { color: var(--muted); }
+.hjrows b { font-weight: 600; }
+.hjrows a { color: var(--accent2); }
+.hjdays { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.hjdays button { padding: 12px 4px; border-radius: 12px; background: var(--alt); color: var(--text); border: 1px solid var(--line); font: inherit; font-size: 14px; }
+.hjdays button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.hjtg { display: block; text-align: center; padding: 14px; border-radius: 14px; background: #229ed9; color: #fff; font-weight: 700; text-decoration: none; }
+.hjerr { color: var(--hot); margin: 0; font-size: 14px; }

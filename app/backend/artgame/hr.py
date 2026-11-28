@@ -253,7 +253,21 @@ def done(token: str, bg: BackgroundTasks):
         conn.execute("UPDATE candidates SET submitted_at=coalesce(submitted_at, now()), level=%s, updated_at=now() WHERE id=%s",
                      (_hint_code(conn, c["dir"], c["answers"] or {}, c["id"]), c["id"]))
     bg.add_task(sync, c["id"], True)
+    if not c["submitted_at"]:   # HEAD 28.11 «дыры»: о новой анкете HEAD узнаёт сразу, а не когда зайдёт в «Кандидаты»
+        bg.add_task(_tell_head_new, c["full_name"], c["dir"], c["city"])
     return {"ok": True}
+
+
+def _tell_head_new(name: str, dir_: str, city: str | None) -> None:
+    from .config import settings
+    if not (settings.head_tg_id and settings.bot_token):
+        return
+    try:
+        from . import notify as nt
+        t = (hr_forms.FORMS.get(dir_) or {}).get("title") or ["", ""]
+        nt.SEND(settings.head_tg_id, f"Новая анкета: {name} — {t[0]}{', ' + city if city else ''}. Команда → Кандидаты.")
+    except Exception as e:  # noqa: BLE001
+        print("hr new notify:", e)
 
 
 @router.get("/c/{token}")
@@ -261,12 +275,47 @@ def mine(token: str):
     with db.pool.connection() as conn:
         c = _by_token(conn, token)
         fl = conn.execute("SELECT id, kind, mime FROM candidate_files WHERE cand_id=%s AND drive_id<>'' ORDER BY id", (c["id"],)).fetchall()
+        from . import hrtrial
+        st = hrtrial.for_candidate(conn, c)   # статус для самого кандидата: собеседование, выбор дня пробной, приглашение (HEAD 28.11)
     n = {}
     for x in fl:
         n[x["kind"]] = n.get(x["kind"], 0) + 1
     # свои фото — чтобы после перезагрузки страницы их было видно и можно было убрать (HEAD 27.11)
-    return {"dir": c["dir"], "done": bool(c["submitted_at"]), "files": n,
+    return {"dir": c["dir"], "done": bool(c["submitted_at"]), "files": n, "name": (c["full_name"] or "").split(" ")[-1], "status": st, "bot": bool(c["tg_id"]),
             "photos": [{"id": x["id"], "thumb": _thumb_url(x["id"])} for x in fl if x["kind"] == "photo"]}
+
+
+class DayIn(BaseModel):
+    day: date
+
+
+@router.post("/c/{token}/trial-day")
+def pick_day(token: str, b: DayIn):
+    """Кандидат сам выбирает день пробной (HEAD 28.11) — куратор ГИП получает «подтверди». Выбрать заново можно до смены."""
+    from . import hrbot, hrtrial
+    if b.day.isoformat() not in hrtrial.pick_days():
+        raise HTTPException(400, "Выбери день из списка")
+    with db.pool.connection() as conn, conn.transaction():
+        c = _by_token(conn, token, lock=True)
+        if c["stage"] != "trial" or c["trial_reviewed_at"]:
+            raise HTTPException(409, "Пробный день сейчас не назначается")
+        conn.execute("""UPDATE candidates SET trial_on=%s, trial_state='wait', trial_sent_at=NULL, trial_remind_at=NULL, updated_at=now()
+                        WHERE id=%s""", (b.day, c["id"]))
+        db.audit(conn, None, "hr_trial_pick", "candidates", c["id"], {"day": str(b.day)})
+        c = conn.execute("SELECT * FROM candidates WHERE id=%s", (c["id"],)).fetchone()
+        hrbot.ask_gip(conn, c)
+    return {"ok": True}
+
+
+@router.post("/candidates/{cid}/invite-sent")
+def invite_sent(cid: int, p: dict = Depends(require_head)):
+    """HEAD нажал «Отправить в WhatsApp» — отмечаем, чтобы в карточке было видно, что кандидат знает (HEAD 28.11)."""
+    with db.pool.connection() as conn, conn.transaction():
+        r = conn.execute("UPDATE candidates SET trial_sent_at=now() WHERE id=%s AND stage='trial' RETURNING trial_sent_at", (cid,)).fetchone()
+        if not r:
+            raise HTTPException(409, "Пробный день не назначен")
+        db.audit(conn, p["id"], "hr_trial_invite", "candidates", cid, {})
+    return {"sent_at": r["trial_sent_at"].isoformat()}
 
 
 # ---------- таблицы ----------
@@ -308,7 +357,8 @@ def _out(c: dict, thumb: int | None = None) -> dict:
             "phone": c["phone"], "city": c["city"], "level": c["level"], "stage": c["stage"], "stars": c["stars"], "note": c["note"],
             "reason": c["reason"], "self_refused": c["self_refused"], "source": c["source"],
             "meet_on": c["meet_on"] and c["meet_on"].isoformat(), "trial_on": c["trial_on"] and c["trial_on"].isoformat(),
-            "trial_object": c["trial_object"], "trial_paid": bool(c["trial_acc"]), "hired_role": c["hired_role"], "person_id": c["person_id"],
+            "token": c["token"], "trial_object": c["trial_object"], "trial_time": c["trial_time"], "trial_place": c["trial_place"], "trial_bring": c["trial_bring"],
+            "trial_paid": bool(c["trial_acc"]), "hired_role": c["hired_role"], "person_id": c["person_id"],
             "prior": c["prior"] or None, "created_at": c["created_at"].isoformat(), "stage_at": c["stage_at"].isoformat(),
             "submitted": bool(c["submitted_at"]),
             "waiting": c["stage"] in ("new", "talk") and now - c["stage_at"] > timedelta(days=WAIT_DAYS),
@@ -366,6 +416,9 @@ class StepIn(BaseModel):
     trial_on: date | None = None
     trial_object: int | None = None
     trial_by: int | None = None          # оценщик пробного дня; не указан — куратор ГИП сделки (HEAD 28.11)
+    trial_time: str | None = Field(default=None, pattern=r"^([01]?\d|2[0-3]):[0-5]\d$|^$")   # во сколько прийти
+    trial_place: str | None = Field(default=None, max_length=200)   # адрес / куда подойти
+    trial_bring: str | None = Field(default=None, max_length=300)   # что взять с собой
     hired_role: str | None = None
 
 
@@ -389,7 +442,7 @@ def step(cid: int, b: StepIn, bg: BackgroundTasks, p: dict = Depends(require_hea
                 raise HTTPException(400, "Коротко: почему")
             if b.stage != c["stage"]:
                 upd |= {"stage": b.stage, "stage_at": datetime.now(timezone.utc)}
-        for k in ("note", "reason", "self_refused", "meet_on", "trial_on", "trial_object"):
+        for k in ("note", "reason", "self_refused", "meet_on", "trial_on", "trial_object", "trial_time", "trial_place", "trial_bring"):
             v = getattr(b, k)
             if v is not None:
                 upd[k] = (v.strip() or None) if isinstance(v, str) else v
@@ -406,14 +459,28 @@ def step(cid: int, b: StepIn, bg: BackgroundTasks, p: dict = Depends(require_hea
                 upd["trial_by"] = new_by
         if not upd:
             raise HTTPException(400, "Нечего менять")
+        # пробный день (HEAD 28.11): без даты — день выбирает кандидат; дату поставил HEAD — её подтверждает куратор ГИП.
+        # Поменялись дата/время/место/куратор — прежнее приглашение уже неверно: снова ждём подтверждения.
+        if upd.get("stage") == "trial" or (c["stage"] == "trial" and "trial_on" in upd and upd["trial_on"] != c["trial_on"]):
+            st = "wait" if upd.get("trial_on", c["trial_on"]) else "pick"
+            if st != c["trial_state"]:
+                upd["trial_state"] = st
+        if c["trial_sent_at"] and any(k in upd and upd[k] != c[k] for k in ("trial_on", "trial_time", "trial_place", "trial_by", "trial_object")):
+            upd |= {"trial_sent_at": None, "trial_remind_at": None}
+            if c["trial_state"] == "ok" and upd.get("trial_state") is None:
+                upd["trial_state"] = "wait"
         conn.execute(f"UPDATE candidates SET {', '.join(k + '=%s' for k in upd)}, updated_at=now() WHERE id=%s", (*upd.values(), cid))
         if upd.get("stage") == "hired":
             link_hired(conn, cid)
         db.audit(conn, p["id"], "hr_step", "candidates", cid, {k: str(v) for k, v in upd.items() if k != "note"})
-        c = conn.execute("SELECT * FROM candidates WHERE id=%s", (cid,)).fetchone()
+        old, c = c, conn.execute("SELECT * FROM candidates WHERE id=%s", (cid,)).fetchone()
         if "trial_by" in upd or (("trial_on" in upd or upd.get("stage") == "trial") and c["trial_by"]):
             if c["stage"] == "trial" and not c["trial_reviewed_at"]:
-                hrtrial.notify(conn, cid)
+                from . import hrbot
+                hrbot.ask_gip(conn, c) if c["trial_state"] == "wait" else hrtrial.notify(conn, cid)
+        from . import hrbot
+        hrbot.on_step(conn, c, old)   # кандидату в бот: собеседование, выбор дня, решение (HEAD 28.11 «автоматически»)
+        c = conn.execute("SELECT * FROM candidates WHERE id=%s", (cid,)).fetchone()
     bg.add_task(SYNC, cid)
     return _out(c)
 
