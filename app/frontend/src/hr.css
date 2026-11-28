@@ -47,3 +47,8 @@
 .hrcheck input { width: auto; margin: 0; }
 .hrerr { color: var(--hot); font-size: 14px; }
 .hrsheet { text-align: center; margin: 4px 0 16px; }
+/* HEAD 28.11: удалить анкету — внизу карточки, красным только после подтверждения */
+.hrdelbtn { margin-top: 6px; color: var(--muted); }
+.hrdel .hrrow { flex-wrap: nowrap; gap: 8px; }
+.hrdel .hrrow button { flex: 1; width: auto; }
+.hrdel button.hot { background: var(--hot); }

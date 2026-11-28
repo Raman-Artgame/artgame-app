@@ -160,3 +160,24 @@ def test_rejected_status_and_latin():
     assert hr_sheets.phone("+7 (777) 123-45-67") == hr_sheets.phone("7771234567") == "87771234567"
     assert hr_sheets.status_of({"stage": "rejected", "self_refused": True}) == "Не актуален"
     assert hr_sheets.status_of({"stage": "rejected", "self_refused": False}) == "Не приглашать"
+
+
+def test_delete_test_candidate(client, monkeypatch):
+    """HEAD 28.11 «просто удали»: тестовая анкета — из приложения, строка базы очищается, папка — в корзину."""
+    monkeypatch.setattr(drive, "Drive", FakeDrive)
+    trashed, cleared = [], []
+    monkeypatch.setattr(FakeDrive, "trash", lambda self, fid: trashed.append(fid), raising=False)
+    monkeypatch.setattr(hr_sheets, "find_prior", lambda ph: None)
+    monkeypatch.setattr(hr_sheets, "base_upsert", lambda sheet, c, lvl, url: 7)
+    monkeypatch.setattr(hr_sheets, "base_clear", lambda sheet, ph: cleared.append((sheet, ph)) or 7)
+    client.post("/api/register", json={"full_name": "HEAD"}, headers=hdr(1000))
+    tok = client.post("/api/hr/apply", json={"dir": "art", "answers": {**ANS, "full_name": "Данила", "phone": "89774100011"}}).json()["token"]
+    client.post(f"/api/hr/c/{tok}/file", json={"kind": "photo", "data": PNG})
+    client.post(f"/api/hr/c/{tok}/done")
+    cid = client.get("/api/hr/candidates", headers=hdr(1000)).json()["items"][0]["id"]
+    assert client.delete(f"/api/hr/candidates/{cid}", headers=hdr(5555)).status_code == 403
+    assert client.delete(f"/api/hr/candidates/{cid}", headers=hdr(1000)).json() == {"ok": True, "left": []}
+    assert client.get("/api/hr/candidates", headers=hdr(1000)).json()["items"] == []
+    assert cleared == [("Художники", "89774100011")] and trashed and client.get(f"/api/hr/c/{tok}").status_code == 404
+    with db.pool.connection() as c:
+        assert c.execute("SELECT count(*) AS n FROM candidate_files").fetchone()["n"] == 0
