@@ -42,7 +42,7 @@ async function tab(p, name) {
   // первый вход — анкета «Мои данные» (HEAD 09.11)
   const an = a.locator('.card.profile')
   await an.getByRole('button', { name: 'Сохранить' }).waitFor()
-  await an.locator('input').nth(0).fill('Ахметова'); await an.locator('input').nth(1).fill('Дана')
+  await an.locator('input').nth(0).fill('Дана'); await an.locator('input').nth(1).fill('Ахметова')   // 28.11: сначала Имя
   await an.locator('input[type=date]').fill('2000-05-01')
   await an.locator('input[inputmode=tel]').first().fill('+7 701 000 00 01')
   await an.getByRole('button', { name: 'Астана' }).click()

@@ -29,7 +29,7 @@ async function page(b, id, first) {
   const card = p.locator('.card.profile')
   assert.strictEqual(await card.getByRole('button', { name: 'Сохранить' }).isDisabled(), true)
   const inp = card.locator('input')
-  await inp.nth(0).fill('Жұмаділдина'); await inp.nth(1).fill('Малика')
+  await inp.nth(0).fill('Малика'); await inp.nth(1).fill('Жұмаділдина')   // 28.11: сначала Имя, потом Фамилия
   await card.locator('input[type=date]').fill('1999-12-16')
   await card.locator('input[inputmode=tel]').first().fill('+7 777 987 70 99')
   await card.getByRole('button', { name: 'Астана' }).click()
