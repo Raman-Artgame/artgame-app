@@ -625,8 +625,17 @@ def _tasks(p: dict, fresh: bool):
     uid = bx_id(p)
     if not uid:
         return []
-    j = read("tasks.task.list", {"filter": {"RESPONSIBLE_ID": uid, "<REAL_STATUS": 5}, "order": {"DEADLINE": "asc"},
-                                 "select": ["ID", "TITLE", "DEADLINE", "UF_CRM_TASK"]}, fresh=fresh)
+    try:
+        j = read("tasks.task.list", {"filter": {"RESPONSIBLE_ID": uid, "<REAL_STATUS": 5}, "order": {"DEADLINE": "asc"},
+                                     "select": ["ID", "TITLE", "DEADLINE", "UF_CRM_TASK"]}, fresh=fresh)
+    except HTTPException as e:
+        # HEAD 28.11: у вебхука нет права «Задачи» (task) — «Сегодня» без задач Битрикса и без красной ошибки:
+        # напоминания «Отложено»/«Перезвонить» всё равно идут из приложения (bx_reminders). Право добавляет HEAD
+        # в том же вебхуке (адрес не меняется), тогда задачи появятся сами.
+        if "higher privileges" in str(e.detail) or "insufficient_scope" in str(e.detail):
+            print("bx tasks: у вебхука нет права «Задачи» — задачи Битрикса не показываем")
+            return []
+        raise
     res = j.get("result", j) if isinstance(j, dict) else {}
     return (res.get("tasks") if isinstance(res, dict) else res) or []
 

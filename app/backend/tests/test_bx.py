@@ -634,6 +634,22 @@ def test_today_survives_broken_source(bxc, monkeypatch):
     assert "звонки не загрузились" in t["warn"] and (t["queue"]["hot"] or t["queue"]["today"] or t["queue"]["later"])
 
 
+
+def test_today_without_task_scope(bxc, monkeypatch):
+    """HEAD 28.11: у вебхука нет права «Задачи» — «Сегодня» без задач и без красной ошибки «задачи не загрузились»."""
+    from fastapi import HTTPException
+    c, ids = bxc
+    c.post(f"/api/people/{ids[6000]}", json={"bitrix_user_id": 4565}, headers=hdr(1000))
+    real = bx.READ
+
+    def no_tasks(method, params):
+        if method == "tasks.task.list":
+            raise HTTPException(502, "Битрикс: The request requires higher privileges than provided by the webhook token")
+        return real(method, params)
+    monkeypatch.setattr(bx, "READ", no_tasks)
+    t = c.get("/api/bx/today?fresh=1", headers=hdr(6000)).json()
+    assert "задачи" not in (t.get("warn") or "") and t["tasks"] == [] and (t["queue"]["hot"] or t["queue"]["today"] or t["queue"]["later"])
+
 def test_anna_fixes(bxc, monkeypatch):
     """Замечания Анны 06.11: «Жду ответа», вакансии, название, контакт сделки, поля проекта, города сделки."""
     from datetime import date, timedelta
