@@ -141,6 +141,7 @@ async function deal(p, id) {
   await tab(h, 'Проекты')
   await h.locator('.pcard', { hasText: '1601' }).click()
   await h.locator('.gippick select.gip2').scrollIntoViewIfNeeded()
+  await h.locator('.gippick select.gip2:not([disabled])').waitFor()
   assert.strictEqual(await h.locator('.gippick select.gip2').evaluate(e => e.selectedOptions[0].textContent), 'Тимур · Мастер настенной печати')
   await fits(h, 'два куратора в проекте')
   await h.screenshot({ path: `${shots}/gip2-proekt.png` })
