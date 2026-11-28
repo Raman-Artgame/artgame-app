@@ -111,6 +111,25 @@ def health():
     return {"ok": True, "env": settings.env_name, "places": places.key_ok()}
 
 
+def tidy_name(x: str | None) -> str | None:
+    """«глеб  ФОКИН» → «Глеб Фокин»: лишние пробелы убрать, каждое слово (и часть после дефиса) — с заглавной (HEAD 27.11)."""
+    import re
+    x = re.sub(r"\s+", " ", (x or "").strip())
+    return " ".join("-".join(w[:1].upper() + w[1:].lower() for w in part.split("-")) for part in x.split(" ")) or None
+
+
+def name_issue(p: dict) -> str:
+    """Что не так с именем человека — для «Команды» HEAD: пустая строка, если «Имя Фамилия» по форме."""
+    import re
+    if not (p.get("first_name") and p.get("last_name")):
+        return "нет имени или фамилии отдельно"
+    if re.search(r"[A-Za-z]", f"{p['first_name']}{p['last_name']}"):
+        return "латиницей"
+    if p.get("full_name") != f"{p['first_name']} {p['last_name']}":
+        return "показывается не как «Имя Фамилия»"
+    return ""
+
+
 class RegisterIn(BaseModel):
     full_name: str
     phone: str | None = None
@@ -168,6 +187,7 @@ class ProfileIn(BaseModel):
     emergency_name: str | None = Field(default=None, max_length=80)
     emergency_phone: str | None = Field(default=None, max_length=20)
     clothes_size: str | None = Field(default=None, max_length=10)
+    nickname: str | None = Field(default=None, max_length=30)
 
 
 @app.post("/api/profile")
@@ -175,7 +195,7 @@ def profile(body: ProfileIn, p: dict = Depends(current_person)):
     import re
     from datetime import datetime, timezone
     clean = lambda x: re.sub(r"\s+", " ", (x or "").strip()) or None   # noqa: E731
-    first, last = clean(body.first_name), clean(body.last_name)
+    first, last = tidy_name(body.first_name), tidy_name(body.last_name)
     if not re.fullmatch(r"[^\d@/:]{2,60}", first or "") or not re.fullmatch(r"[^\d@/:]{2,60}", last or ""):
         raise HTTPException(422, "Имя и фамилия — буквами, как в документах")
     today = date.today()
@@ -186,7 +206,8 @@ def profile(body: ProfileIn, p: dict = Depends(current_person)):
         raise HTTPException(422, "Телефон — полностью, с кодом")
     data = {"last_name": last, "first_name": first, "middle_name": clean(body.middle_name), "birth_date": body.birth_date,
             "phone": phone, "city": clean(body.city), "emergency_name": clean(body.emergency_name),
-            "emergency_phone": clean(body.emergency_phone), "clothes_size": clean(body.clothes_size), "full_name": f"{first} {last}"}
+            "emergency_phone": clean(body.emergency_phone), "clothes_size": clean(body.clothes_size), "full_name": f"{first} {last}",
+            "nickname": clean(body.nickname)}
     with db.pool.connection() as conn, conn.transaction():
         conn.execute(f"UPDATE people SET {', '.join(k + '=%s' for k in data)}, profile_at=%s WHERE id=%s",
                      (*data.values(), datetime.now(timezone.utc), p["id"]))
@@ -197,11 +218,14 @@ def profile(body: ProfileIn, p: dict = Depends(current_person)):
 @app.get("/api/people")
 def people(_: dict = Depends(require_head)):
     with db.pool.connection() as conn:
-        return conn.execute(
-            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city, p.phone, p.birth_date, p.last_name, p.first_name, p.middle_name, p.emergency_name, p.emergency_phone, p.clothes_size, p.profile_at, p.extra_roles, p.reels, p.pays, p.mkt_job, p.acting_role, p.acting_since, p.acting_promo, p.acting_note, p.print_exam_on, p.hour_rate,
+        rows = conn.execute(
+            """SELECT p.id, p.full_name, p.tg_username, p.role_code, p.status, p.bitrix_user_id, p.city, p.phone, p.birth_date, p.last_name, p.first_name, p.middle_name, p.emergency_name, p.emergency_phone, p.clothes_size, p.profile_at, p.nickname, p.extra_roles, p.reels, p.pays, p.mkt_job, p.acting_role, p.acting_since, p.acting_promo, p.acting_note, p.print_exam_on, p.hour_rate,
                       coalesce(array_agg(z.zone_code ORDER BY z.zone_code) FILTER (WHERE z.zone_code IS NOT NULL), '{}') AS zones
                FROM people p LEFT JOIN person_zones z ON z.person_id = p.id
                GROUP BY p.id ORDER BY p.created_at""").fetchall()
+    for r in rows:
+        r["name_issue"] = name_issue(r)
+    return rows
 
 
 class AssignIn(BaseModel):
@@ -219,6 +243,9 @@ class AssignIn(BaseModel):
     print_exam_on: date | None = None   # оператор печати сдал экзамен — с этого дня ставка pay.print.operator_exam (HEAD 13.11)
     no_print_exam: bool | None = None   # снять отметку экзамена
     hour_rate: float | None = None      # личная ставка в час (HEAD 15.11), 0 — снять: смены снова по ставкам роли из «Значений»
+    first_name: str | None = Field(default=None, max_length=60)   # HEAD правит имя сам (27.11): показываем «Имя Фамилия»
+    last_name: str | None = Field(default=None, max_length=60)
+    nickname: str | None = Field(default=None, max_length=30)      # "" — убрать никнейм
     extra_roles: list[str] | None = None  # вторая роль (HEAD 08.11): напр. оператор печати + саппорт; ставки — по роли смены
 
 
@@ -235,6 +262,15 @@ def assign(person_id: int, body: AssignIn, head: dict = Depends(require_head)):
             # повышение: роль стала той, что исполнял, — «и.о.» снимается само (запись остаётся в журнале)
             conn.execute("""UPDATE people SET acting_role=NULL, acting_since=NULL, acting_promo=NULL, acting_note=NULL
                             WHERE id=%s AND acting_role=%s""", (person_id, body.role_code))
+        if body.first_name is not None or body.last_name is not None:
+            import re
+            first, last = tidy_name(body.first_name), tidy_name(body.last_name)
+            if not re.fullmatch(r"[^\d@/:]{2,60}", first or "") or not re.fullmatch(r"[^\d@/:]{2,60}", last or ""):
+                raise HTTPException(422, "Имя и фамилия — буквами, оба поля")
+            conn.execute("UPDATE people SET first_name=%s, last_name=%s, full_name=%s, updated_at=now() WHERE id=%s",
+                         (first, last, f"{first} {last}", person_id))
+        if body.nickname is not None:
+            conn.execute("UPDATE people SET nickname=%s, updated_at=now() WHERE id=%s", (" ".join(body.nickname.split()) or None, person_id))
         if body.status is not None:
             if body.status not in ("active", "blocked"):
                 raise HTTPException(400, "bad status")
@@ -284,7 +320,7 @@ def assign(person_id: int, body: AssignIn, head: dict = Depends(require_head)):
             for z in body.zones:
                 conn.execute("INSERT INTO person_zones (person_id, zone_code) VALUES (%s,%s)", (person_id, z))
         db.audit(conn, head["id"], "assign", "people", person_id, body.model_dump(mode="json", exclude_none=True))
-        return conn.execute("SELECT id, role_code, status, extra_roles, reels, pays, mkt_job, acting_role, acting_since, acting_promo, acting_note, print_exam_on, hour_rate FROM people WHERE id=%s", (person_id,)).fetchone()
+        return conn.execute("SELECT id, role_code, status, extra_roles, reels, pays, mkt_job, acting_role, acting_since, acting_promo, acting_note, print_exam_on, hour_rate, full_name, first_name, last_name, nickname FROM people WHERE id=%s", (person_id,)).fetchone()
 
 
 @app.get("/api/constants")

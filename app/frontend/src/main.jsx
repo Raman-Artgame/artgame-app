@@ -116,6 +116,7 @@ function Main({ me, onMe, web, logout }) {
   const [tab, setTab] = useState(isHead ? 'home' : DEAL_ROLES.has(role) ? 'today' : role === 'carpenter' ? 'stock' : dz ? 'design' : mkt ? 'mkt' : 'shift')
   const [dealId, setDealId] = useState(null)
   const [leadId, setLeadId] = useState(null)
+  const [reviewView, setReviewView] = useState(null)   // HEAD 28.11: строка Пульта открывает свой раздел «Проверки»
   const openDeal = id => { setDealId(id); setTab('deals') }
   const openLead = id => { setLeadId(id); setTab('leads') }
   const openMonth = () => setTab('month')
@@ -123,6 +124,8 @@ function Main({ me, onMe, web, logout }) {
   const [designView, setDesignView] = useState(null)   // «Каталоги на утверждение» с Пульта — сразу во вкладку «Каталоги» (HEAD 11.11)
   useEffect(() => { if (tab !== 'design') setDesignView(null) }, [tab])
   const go = t => { if (t === 'deals') setDealId(null); if (t === 'leads') setLeadId(null)
+    if (t.startsWith('deal:')) { openDeal(+t.slice(5)); return }
+    if (t.startsWith('review')) { setReviewView(t.slice(7) || null); setTab('review'); return }
     if (t.startsWith('design:')) { setDesignView(t.slice(7)); setTab('design'); return }
     if (t === 'mkt:adrep') { try { sessionStorage.setItem('artgame.mkt.v', 'adrep') } catch { /* */ } setTab('mkt'); return }
     if (t === 'people:hr') { try { sessionStorage.setItem('artgame.team.v', 'hr') } catch { /* */ } setTab('people'); return }
@@ -197,7 +200,7 @@ function Main({ me, onMe, web, logout }) {
     <div className="wrap" data-tab={tab}>
       {web && <div className="webbar"><b>ARTGAME</b><span className="muted small">{me.full_name}</span><button className="ghost mini" onClick={logout}>Выйти</button></div>}
       <RoleSwitch me={me} />
-      {!PLAIN.has(tab) && tab !== 'home' && tab !== 'chat' && !isHead && <div className="card"><h1>{me.full_name}</h1><span className="tag">{me.acting ? `${ROLE[me.role_main]} · и.о. ${gen(me.role_code)}` : ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
+      {!PLAIN.has(tab) && tab !== 'home' && tab !== 'chat' && !isHead && <div className="card"><h1>{me.full_name}{me.nickname && <span className="nick"> · {me.nickname}</span>}</h1><span className="tag">{me.acting ? `${ROLE[me.role_main]} · и.о. ${gen(me.role_code)}` : ROLE[me.role_code]}</span>{me.zones.map(z => <span key={z} className="tag">{ZONE[z]}</span>)}</div>}
       {toast && <div className="toast">{toast}</div>}
       {unread > 0 && tab !== 'chat' && !isHead && <button className="dmbar" onClick={() => go('chat')}>✉️ Новое сообщение в чате<span>Открыть ›</span></button>}
       {tab === 'home' ? <Pulse me={me} pulse={pulse} go={go} /> : tab === 'chat' ? <Chat head={isHead} /> : tab === 'viewas' ? <ViewAsCard /> :
@@ -208,7 +211,7 @@ function Main({ me, onMe, web, logout }) {
         tab === 'fin' ? <Finance key={finView || 'f'} initial={finView} /> : tab === 'closing' && isHead ? <Closing /> : tab === 'pays' ? <PayDesk /> : tab === 'stock' ? <StockSpend /> : tab === 'kit' ? <Kit /> : tab === 'design' ? <Design key={designView || 'd'} me={me} initial={designView} /> :
         tab === 'expense' && STOCK.has(role) && me.zones.length ? <ExpenseTab done={done} /> :
         tab === 'mine' && (mop || carp || mkt || !me.zones.length) ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}</> : !me.zones.length && tab !== 'review' ? <div className="card muted">HEAD ещё не назначил зону.</div> :
-        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review />}
+        tab === 'shift' ? <ShiftForm done={done} /> : tab === 'expense' ? <ExpenseForm done={done} /> : tab === 'mine' ? <><Acting me={me} />{path}{team}<MyData me={me} onMe={onMe} /><MyPay /><MyIssued /><Feedback />{folds}<Mine /></> : <Review key={reviewView || 'all'} focus={reviewView} />}
     </div>
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={!isHead} />
   </>

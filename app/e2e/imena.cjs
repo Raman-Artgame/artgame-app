@@ -1,0 +1,55 @@
+// Сквозной тест «Имена сотрудников» (HEAD 27.11: «ИМЯ ФАМИЛИЯ и НИКНЕЙМ»): человек вошёл с именем из Telegram латиницей —
+// в «Команде» HEAD видит пометку, вписывает имя, фамилию и никнейм; дальше везде «Имя Фамилия», никнейм рядом.
+const { chromium } = require('playwright')
+const { execSync } = require('child_process')
+const assert = require('assert')
+const BE = __dirname + '/../backend'
+const PY = process.env.PY || `${BE}/.venv/bin/python`
+const sign = id => execSync(`cd ${BE} && ${PY} -c "import sys;sys.path+=['tests'];from conftest import make_init_data;print(make_init_data({'id':${id},'first_name':'Тест'}))"`).toString().trim()
+const API = 'http://127.0.0.1:8100/api'
+const call = async (id, path, body) => (await fetch(API + path, { method: body ? 'POST' : 'GET',
+  headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': sign(id) }, body: body && JSON.stringify(body) })).json()
+const shots = process.env.SHOTS || '/var/tmp'
+
+;(async () => {
+  const b = await chromium.launch()
+  await call(1000, '/register', { full_name: 'Раман HEAD' })
+  const a = await call(2000, '/register', { full_name: 'Gleb Fokin' })
+  const m = await call(3000, '/register', { full_name: 'малика' })
+  await call(1000, `/people/${a.id}`, { role_code: 'lead_designer' })
+  await call(1000, `/people/${m.id}`, { role_code: 'designer_asst' })
+  await call(1000, `/people/${m.id}`, { first_name: 'Малика', last_name: 'Сейтова', nickname: 'Mali' })
+
+  const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
+  const p = await ctx.newPage()
+  const d = sign(1000)
+  await p.addInitScript(d => { window.Telegram = { WebApp: { initData: d, initDataUnsafe: { user: { first_name: 'Т' } }, ready() {} } } }, d)
+  await p.route('https://telegram.org/**', r => r.fulfill({ body: '' }))
+  await p.route('https://fonts.googleapis.com/**', r => r.fulfill({ body: '', contentType: 'text/css' }))
+  await p.goto('http://127.0.0.1:4173/')
+  const nav = p.locator('nav')
+  await nav.locator('button').first().waitFor()
+  await nav.locator('button').last().click()
+  await p.locator('.sheetbox').getByRole('button', { name: 'Команда', exact: true }).click()
+  await p.locator('.dept').first().waitFor()
+  for (const h of await p.locator('.dept .head').all()) if (!(await h.locator('xpath=..').locator('.prow').count())) await h.click()
+  const gleb = p.locator('.person', { hasText: 'Gleb Fokin' })
+  await gleb.getByText(/имя: нет имени или фамилии отдельно/).waitFor()
+  await p.locator('.person', { hasText: 'Малика Сейтова' }).locator('.nick', { hasText: 'Mali' }).waitFor()
+  await gleb.locator('.prow').click()
+  await gleb.getByLabel('Имя', { exact: true }).fill('глеб')
+  await gleb.getByLabel('Фамилия').fill('ФОКИН')
+  await gleb.getByLabel('Никнейм').fill('Foks')
+  await gleb.scrollIntoViewIfNeeded()
+  await p.screenshot({ path: `${shots}/imena-1-pravka.png` })
+  await gleb.getByRole('button', { name: 'Сохранить имя' }).click()
+  const ok = p.locator('.person', { hasText: 'Глеб Фокин' })
+  await ok.locator('.nick', { hasText: 'Foks' }).waitFor()
+  assert.strictEqual(await ok.getByText(/имя:/).count(), 0, 'пометки больше нет')
+  assert.strictEqual((await call(2000, '/me')).full_name, 'Глеб Фокин')
+  assert.ok(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'страница шире экрана')
+  await ok.scrollIntoViewIfNeeded()
+  await p.screenshot({ path: `${shots}/imena-2-komanda.png` })
+  await b.close()
+  console.log('OK imena')
+})().catch(e => { console.error(e); process.exit(1) })

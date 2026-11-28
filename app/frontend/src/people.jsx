@@ -54,13 +54,29 @@ function Dept({ title, list, open, flip, warn, closed, children }) {
   </div>
 }
 
+// HEAD 27.11: имена — «Имя Фамилия» и никнейм. HEAD правит сам, не дожидаясь, пока человек перезаполнит анкету.
+function NameEdit({ p, save }) {
+  const init = { first_name: p.first_name || '', last_name: p.last_name || '', nickname: p.nickname || '' }
+  const [v, set] = useState(init)
+  const f = k => ({ value: v[k], onChange: e => set({ ...v, [k]: e.target.value }) })
+  const changed = Object.keys(init).some(k => v[k].trim() !== init[k])
+  const ok = v.first_name.trim().length >= 2 && v.last_name.trim().length >= 2
+  return <div className="nameedit">
+    <div className="pair"><input {...f('first_name')} placeholder="Имя" aria-label="Имя" /><input {...f('last_name')} placeholder="Фамилия" aria-label="Фамилия" /></div>
+    <div className="pair"><input {...f('nickname')} placeholder="Никнейм (если есть)" aria-label="Никнейм" maxLength={30} />
+      <button className="mini" disabled={!changed || !ok} onClick={() => save(p.id, { first_name: v.first_name, last_name: v.last_name, nickname: v.nickname })}>Сохранить имя</button></div>
+    {p.name_issue && <p className="small why">Сейчас показывается «{p.full_name}»: {p.name_issue}. Впишите имя и фамилию по-русски.</p>}
+  </div>
+}
+
 function PersonRow({ p, open, flip, ROLE, ZONE, bx, save, setRole }) {
   return <div className="person">
-    <div className="prow" onClick={flip}><div><b>{p.full_name}</b> {p.status === 'pending' && <span className="tag st-rejected">ждёт роли</span>}
+    <div className="prow" onClick={flip}><div><b>{p.full_name}</b>{p.nickname && <span className="nick"> · {p.nickname}</span>} {p.status === 'pending' && <span className="tag st-rejected">ждёт роли</span>}
       <div className="small muted">{[p.acting_role ? `${ROLE[p.role_code] || '—'} · и.о. ${ROLE[p.acting_role]}` : (ROLE[p.role_code] || 'роль не назначена') + (p.role_code === 'marketer' && MKT_JOB[p.mkt_job] ? ` · ${MKT_JOB[p.mkt_job]}` : ''),
-        (p.extra_roles || [])[0] && `+ ${ROLE[p.extra_roles[0]]}`, p.city].filter(Boolean).join(' · ')}{!p.profile_at && <span className="why"> · анкета не заполнена</span>}</div></div>
+        (p.extra_roles || [])[0] && `+ ${ROLE[p.extra_roles[0]]}`, p.city].filter(Boolean).join(' · ')}{!p.profile_at && <span className="why"> · анкета не заполнена</span>}{p.name_issue && <span className="why"> · имя: {p.name_issue}</span>}</div></div>
       <span className="muted">{open ? '▴' : '›'}</span></div>
     {open && <div className="pedit">
+      <NameEdit key={`${p.full_name}|${p.nickname || ""}`} p={p} save={save} />
 
       <div>{p.tg_username && <span className="muted small">@{p.tg_username} </span>}
         {p.profile_at ? <div className="small muted">{[[p.last_name, p.first_name, p.middle_name].filter(Boolean).join(' '),
