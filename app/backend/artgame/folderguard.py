@@ -51,8 +51,41 @@ def subfolders(dv, folder: str) -> None:
             parent = dv.child(parent, part)
 
 
+def pull_design(conn, dv, d: dict, fid: str) -> int:
+    """Файлы, которые положили в «ДИЗАЙН» сделки на Диске руками, — в приложение (HEAD 28.11 «чтобы они на диск не лазили»):
+    эскизы → files(kind=design), «ДИЗАЙН / Фото объекта» → материалы к ТЗ (kind=brief). До стадии работы у сделки нет строки
+    в objects — заводим early, как при загрузке из приложения. На Диске ничего не меняется."""
+    import uuid
+    from .promo import DESIGN_ROOT, IMG, SITE_PHOTOS, _system_person, sync_designs
+    did = int(d["ID"])
+    name, city = name_of(d)
+    conn.execute("""INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at)
+                    VALUES (%s,%s,%s,%s,%s,'early',%s,now()) ON CONFLICT (id) DO NOTHING""",
+                 (did, name, city, d.get("STAGE_ID"), int(d.get("CATEGORY_ID") or 0), fid))
+    conn.execute("UPDATE objects SET drive_folder=%s WHERE id=%s AND drive_folder IS NULL", (fid, did))
+    obj = conn.execute("SELECT * FROM objects WHERE id=%s", (did,)).fetchone()
+    added = sync_designs(conn, obj, dv)
+    who = _system_person(conn)
+    known = {r["drive_id"] for r in conn.execute("SELECT drive_id FROM files WHERE object_id=%s AND drive_id IS NOT NULL", (did,))}
+    for top in dv.ls(obj["drive_folder"]):
+        if top.get("mimeType") != drive.FOLDER or top["name"].casefold() != DESIGN_ROOT:
+            continue
+        for sub in dv.ls(top["id"]):
+            if sub.get("mimeType") != drive.FOLDER or sub["name"].casefold() != SITE_PHOTOS:
+                continue
+            for f in dv.ls(sub["id"]):
+                if f["id"] in known or not (f.get("mimeType") or "").startswith(IMG) or not who:
+                    continue
+                conn.execute("""INSERT INTO files (client_uid, object_id, kind, name, mime, size, drive_id, note, status, uploaded_by)
+                                VALUES (%s, %s, 'brief', %s, %s, %s, %s, 'Диск: ДИЗАЙН/Фото объекта', 'ready', %s) ON CONFLICT (client_uid) DO NOTHING""",
+                             (uuid.uuid5(uuid.NAMESPACE_URL, "drive:" + f["id"]), did, f["name"], f.get("mimeType"),
+                              int(f["size"]) if f.get("size") else None, f["id"], who))
+                added += 1
+    return added
+
+
 def run(conn, deals: list[dict], dv=None) -> dict:
-    made = errors = subs = 0
+    made = errors = subs = pulled = 0
     fresh = {r["deal_id"] for r in conn.execute(
         f"SELECT deal_id FROM deal_folders WHERE subs_at > now() - interval '{SUB_RECHECK}'").fetchall()}
     # сделки с заданием на дизайн — первыми и сверх лимита: туда дизайнер пойдёт сегодня
@@ -94,12 +127,19 @@ def run(conn, deals: list[dict], dv=None) -> dict:
                 conn.execute("UPDATE deal_folders SET subs_at=now(), subs_error=NULL WHERE deal_id=%s", (did,))
             except Exception as ex:  # noqa: BLE001 — повторим в следующий проход, HEAD видит на Пульте
                 conn.execute("UPDATE deal_folders SET subs_error=%s WHERE deal_id=%s", (f"{type(ex).__name__}: {str(ex)[:200]}", did))
+        if fid and state == "ok" and did in prio:
+            try:
+                dv = dv or drive.Drive()
+                with conn.transaction():     # сбой Диска на одной сделке не откатывает остальное
+                    pulled += pull_design(conn, dv, d, fid)
+            except Exception as ex:  # noqa: BLE001
+                print(f"эскизы с Диска, сделка {did}: {type(ex).__name__}: {str(ex)[:200]}")
         if state == "error" and not (was and was["state"] == "error"):
             db.audit(conn, None, "deal_folder_error", "deal", did, {"error": err})
         elif by_app and not (was and was["made_by_app"]):
             db.audit(conn, None, "deal_folder_made", "deal", did, {"folder": fid, "no_object": no_obj})
     conn.execute("DELETE FROM deal_folders WHERE NOT (deal_id = ANY(%s))", (seen,))   # сделка закрыта — строка больше не нужна
-    return {"open": len(seen), "made": made, "errors": errors, "subs": subs}
+    return {"open": len(seen), "made": made, "errors": errors, "subs": subs, "pulled": pulled}
 
 
 def problems(conn, mop_bx_id: int | None = None, ids: list[int] | None = None) -> list[dict]:
