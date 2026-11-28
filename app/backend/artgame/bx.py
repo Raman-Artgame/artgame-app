@@ -717,6 +717,8 @@ def _today(p: dict, fresh: bool = False) -> dict:
             bad = folderguard.problems(conn, ids=[d["id"] for d in deals])
         by = {d["id"]: d for d in deals}
         for x in bad:
+            if not (x["no_folder"] or x["no_object"]):
+                continue        # нет подпапок — это чинит приложение само, МОП тут ни при чём
             why = "нет папки на Диске — загрузка файлов не работает, сообщи HEAD" if x["no_folder"] else "не заполнен «Объект» — впиши название объекта в карточке"
             q["today"].insert(0, item("deal", by[x["id"]], why, action="folder"))
     # ТЗ дизайнеру (HEAD 26.11): дизайнер задал вопрос по задаче — строка МОП «ответь дизайнеру». «Горит» не перебиваем.

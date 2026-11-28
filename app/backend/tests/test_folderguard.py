@@ -8,7 +8,13 @@ from test_cabinets import dz  # noqa: F401
 
 class Disk:
     def __init__(self, down=()):
-        self.made, self.down = [], set(down)
+        self.made, self.down, self.subs, self.nosub = [], set(down), set(), set()
+
+    def child(self, parent, name):
+        if parent in self.nosub:
+            raise RuntimeError("Диск 500")
+        self.subs.add((parent, name))
+        return f"{parent}/{name}"
 
     def project_folder(self, obj):
         if obj["id"] in self.down:
@@ -34,11 +40,14 @@ def test_guard(client, dz, monkeypatch):  # noqa: F811
     disk = Disk(down={1750})
     with db.pool.connection() as c:
         r = folderguard.run(c, deals, disk)
-        assert r == {"open": 4, "made": 2, "errors": 1}
+        assert r == {"open": 4, "made": 2, "errors": 1, "subs": 3}
+        # HEAD 28.11: в каждой папке сторож досоздаёт подпапки — и в той, что уже была (1749)
+        assert {("F1601", "ДИЗАЙН"), ("F1745", "МЕДИА"), ("HAVE", "ДИЗАЙН"), ("HAVE/ДИЗАЙН", "Фото объекта"), ("HAVE", "ПРИХОДЫ ЧЕКИ")} <= disk.subs
+        assert not any(p.startswith("F1750") for p, _ in disk.subs)
         assert disk.made == [(1601, "DoctorDizel", None), (1745, "ZHANAT КАРТИНА КОПИЯ", "АСТАНА")]
         assert bound == [(1601, "F1601"), (1745, "F1745")]
         bad = folderguard.problems(c)
-        assert [(x["id"], x["no_folder"], x["no_object"]) for x in bad] == [(1750, True, False), (1745, False, True)]
+        assert [(x["id"], x["no_folder"], x["no_object"], x["no_subs"]) for x in bad] == [(1750, True, False, False), (1745, False, True, False)]
         assert "Диск 503" in bad[0]["error"]
         c.commit()
         # HEAD видит в Пульте
@@ -47,9 +56,17 @@ def test_guard(client, dz, monkeypatch):  # noqa: F811
         # Диск ожил, МОП вписал объект, 1749 закрыли — всё чисто, второй папки никто не сделал
         deals[1][F_OBJECT], deals[1][FOLDER_FIELD], deals[0][FOLDER_FIELD] = "Картина", "F1745", "F1601"
         disk.down.clear()
-        assert folderguard.run(c, [deals[0], deals[1], deals[3]], disk) == {"open": 3, "made": 1, "errors": 0}
+        assert folderguard.run(c, [deals[0], deals[1], deals[3]], disk) == {"open": 3, "made": 1, "errors": 0, "subs": 1}
         assert folderguard.problems(c) == [] and len(disk.made) == 3
         assert c.execute("SELECT count(*) AS n FROM deal_folders").fetchone()["n"] == 3
+        # подпапки создать не вышло — видно HEAD; сделка с заданием на дизайн идёт вне лимита
+        c.execute("UPDATE deal_folders SET subs_at=NULL")
+        disk.nosub = {"F1601"}
+        folderguard.run(c, [deals[0], deals[1]], disk)
+        assert [(x["id"], x["no_subs"]) for x in folderguard.problems(c)] == [(1601, True)]
+        disk.nosub.clear()
+        folderguard.run(c, [deals[0], deals[1]], disk)
+        assert folderguard.problems(c) == []
 
 
 def test_mop_sees_in_today(client, dz):  # noqa: F811
