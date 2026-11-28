@@ -108,7 +108,9 @@ function CandCard({ id, back }) {
       {c.waiting && <p className="hrhot small">Ждёт ответа {days(c.stage_at)} дн. — мы обещали за 2 дня.</p>}
       {c.prior?.status && <p className="small hrprior">Уже был в базе: лист «{c.prior.sheet}», статус «{c.prior.status}»{c.prior.contact ? `, ${c.prior.contact}` : ''}{c.prior.comment ? ` — ${c.prior.comment}` : ''}</p>}
       <div className="hrrow hrcontact"><b>{c.phone.replace(/(\d)(\d{3})(\d{3})(\d{2})(\d{2})/, '$1 $2 $3 $4 $5')}</b>
-        <a className="btn ghost mini" href={wa(c, hello(c))} target="_blank" rel="noreferrer">WhatsApp</a><Copy text={c.phone} label="Номер" /></div>
+        <a className="btn ghost mini" href={wa(c, hello(c))} target="_blank" rel="noreferrer">WhatsApp</a><Copy text={c.phone} label="Номер" />
+        {/* HEAD 28.11 «только Telegram»: кто оставил анкету до кнопки бота — одна ссылка, дальше бот пишет сам */}
+        {c.bot ? <span className="small ok">✓ в Telegram</span> : <Copy text={`https://t.me/artgame_team_bot?start=c_${c.token}`} label="Ссылка на бот" />}</div>
     </div>
     {h && <div className="card hrhint"><div className="hrrow"><h3>Уровень по ответам</h3><b className="ok">≈ {h.title} · {h.score} из {h.max}</b></div>
       <p className="small muted">{h.why.length ? h.why.join(' · ') : 'опыта в ответах нет'}</p>

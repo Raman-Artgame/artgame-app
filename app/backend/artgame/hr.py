@@ -357,7 +357,7 @@ def _out(c: dict, thumb: int | None = None) -> dict:
             "phone": c["phone"], "city": c["city"], "level": c["level"], "stage": c["stage"], "stars": c["stars"], "note": c["note"],
             "reason": c["reason"], "self_refused": c["self_refused"], "source": c["source"],
             "meet_on": c["meet_on"] and c["meet_on"].isoformat(), "trial_on": c["trial_on"] and c["trial_on"].isoformat(),
-            "token": c["token"], "trial_object": c["trial_object"], "trial_time": c["trial_time"], "trial_place": c["trial_place"], "trial_bring": c["trial_bring"],
+            "token": c["token"], "bot": bool(c["tg_id"]), "trial_object": c["trial_object"], "trial_time": c["trial_time"], "trial_place": c["trial_place"], "trial_bring": c["trial_bring"],
             "trial_paid": bool(c["trial_acc"]), "hired_role": c["hired_role"], "person_id": c["person_id"],
             "prior": c["prior"] or None, "created_at": c["created_at"].isoformat(), "stage_at": c["stage_at"].isoformat(),
             "submitted": bool(c["submitted_at"]),
