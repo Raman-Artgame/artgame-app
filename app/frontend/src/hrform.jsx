@@ -17,8 +17,12 @@ const T = {
   fail: ['Не отправилось. Проверь интернет и нажми ещё раз.', 'Жіберілмеді. Интернетті тексеріп, қайта бас.'],
   sending: ['Отправляю…', 'Жіберілуде…'], bad: ['Такой вакансии нет. Попроси новую ссылку.', 'Мұндай вакансия жоқ. Жаңа сілтеме сұра.'],
   done: ['Спасибо! Анкета у нас', 'Рақмет! Сауалнама бізде'],
-  doneText: ['Посмотрим работы и ответим в течение двух дней — в WhatsApp или Telegram.', 'Жұмыстарыңды қарап, екі күн ішінде WhatsApp немесе Telegram арқылы жауап береміз.'],
+  doneText: ['Посмотрим работы и ответим в течение двух дней — в Telegram.', 'Жұмыстарыңды қарап, екі күн ішінде Telegram арқылы жауап береміз.'],
   again: ['Изменить ответы', 'Жауаптарды өзгерту'],
+  tgTitle: ['Последний шаг — подключи Telegram', 'Соңғы қадам — Telegram-ды қос'],
+  tgText: ['Ответ по анкете, приглашение на пробный день и напоминания придут от бота ARTGAME. Нажми кнопку и «Старт» — займёт 10 секунд.',
+    'Сауалнама бойынша жауап, сынақ күніне шақыру және еске салулар ARTGAME ботынан келеді. Батырманы басып, «Старт» бас — 10 секунд.'],
+  tgBtn: ['Подключить Telegram', 'Telegram-ды қосу'], tgOk: ['Telegram подключён — ответ придёт туда', 'Telegram қосылды — жауап сонда келеді'],
   skip: ['Не знаешь — пропусти, это нормально.', 'Білмесең — өткізіп жібер, бұл қалыпты.'],
 }
 const mem = (k, v) => { try { if (v === undefined) return JSON.parse(localStorage.getItem(k) || 'null'); localStorage.setItem(k, JSON.stringify(v)) } catch { return null } }
@@ -48,7 +52,7 @@ export function JobPage({ dir, src }) {
     <button className={!kk ? 'on' : ''} onClick={() => setKk(false)}>RU</button><button className={kk ? 'on' : ''} onClick={() => setKk(true)}>ҚАЗ</button></div></div>
   if (form === undefined) return <div className="hj"><p className="hjmuted">…</p></div>
   if (form === null) return <div className="hj">{Top}<div className="hjcard"><h2>{L(T.bad)}</h2></div></div>
-  if (state === 'done') return <div className="hj">{Top}<div className="hjcard hjdone"><div className="hjok">✓</div><h1>{L(T.done)}</h1><p>{L(T.doneText)}</p>
+  if (state === 'done') return <div className="hj">{Top}{token && <TgStep token={token} L={L} />}<div className="hjcard hjdone"><div className="hjok">✓</div><h1>{L(T.done)}</h1><p>{L(T.doneText)}</p>
     <button className="hjghost" onClick={() => { setState(''); setI(0) }}>{L(T.again)}</button></div>
     {token && <CandStatus token={token} inline />}</div>
 
@@ -127,6 +131,23 @@ export function JobPage({ dir, src }) {
 }
 
 
+// HEAD 28.11 «не с личного WhatsApp… автоматизированно»: Telegram — последний шаг анкеты, сверху «Спасибо».
+// Пока не подключил — проверяем раз в 3 секунды (человек вернулся из Telegram — видит ✓).
+function TgStep({ token, L }) {
+  const [on, setOn] = useState(null)
+  useEffect(() => {
+    let stop = false
+    const check = () => fetch(`/api/hr/c/${token}`).then(r => r.ok ? r.json() : null).then(j => { if (!stop && j) setOn(!!j.bot) }).catch(() => {})
+    check()
+    const t = setInterval(() => { if (on !== true) check() }, 3000)
+    return () => { stop = true; clearInterval(t) }
+  }, [token, on])
+  if (on === null) return null
+  if (on) return <div className="hjcard hjtgok">✓ {L(T.tgOk)}</div>
+  return <div className="hjcard hjtgstep"><span className="hjtag">{L(T.tgTitle)}</span><p>{L(T.tgText)}</p>
+    <a className="hjtg" href={tgLink(token)} target="_blank" rel="noreferrer">{L(T.tgBtn)}</a></div>
+}
+
 // Личная страница кандидата (HEAD 28.11 «как кандидат получит информацию?»): /?me=ТОКЕН, без входа.
 // Ссылка уходит в WhatsApp вместе с приглашением; та же карточка — под «Спасибо» в анкете. Оценок и причин здесь нет.
 const BOT = 'artgame_team_bot'
@@ -146,7 +167,7 @@ export function CandStatus({ token, inline }) {
   }
   // кнопка бота: без неё бот не может написать первым (правило Telegram)
   const tg = j && !j.bot && <a className="hjtg" href={tgLink(token)} target="_blank" rel="noreferrer">Получать ответы в Telegram</a>
-  if (inline && (!s || s.step === 'got')) return j && !j.bot ? <div className="hjcard hjme"><p className="hjmuted">Ответ по анкете, приглашение и напоминания пришлёт бот ARTGAME — нажми и «Старт».</p>{tg}</div> : null
+  if (inline && (!s || s.step === 'got')) return null   // на «Спасибо» Telegram — отдельным шагом сверху (TgStep)
   const box = body => inline ? <div className="hjcard hjme">{body}</div> :
     <div className="hj"><div className="hjtop"><b className="hjlogo">ARTGAME</b></div><div className="hjcard hjme">{body}</div></div>
   if (j === undefined) return inline ? null : <div className="hj"><p className="hjmuted">…</p></div>
