@@ -57,6 +57,7 @@ export function Pulse({ me, pulse, go }) {
   const noFolder = (p.folders || []).filter(x => x.no_folder), noObj = (p.folders || []).filter(x => !x.no_folder && x.no_object)
   const asks = [...closeAsks(cl),
     noFolder.length && { list: noFolder, t: `Нет папки на Диске: ${noFolder.length}`, s: 'приложение пробует снова каждые 10 минут · нажмите — список сделок', hot: true, red: true },
+    p.design_late?.length && { list: p.design_late, t: `Дизайн просрочен: ${p.design_late.length}`, s: 'срок эскиза прошёл · дизайнеру бот напоминает каждое утро · нажмите — список', hot: true, red: true },
     noObj.length && { list: noObj, t: `Сделки без «Объекта»: ${noObj.length}`, s: 'папка создана, МОП должен вписать объект · нажмите — список сделок' },
     r.shifts && { k: 'review:shifts', t: `Смены на утверждение: ${r.shifts}`, s: [r.rated_good ? `${r.rated_good} с оценкой 4–5★ — одним нажатием` : '',
       r.shifts_late ? `${r.shifts_late} дольше 2 суток` : ''].filter(Boolean).join(' · ') || 'в срок', hot: r.shifts_late },

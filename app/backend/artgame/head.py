@@ -49,6 +49,8 @@ def pulse(p: dict = Depends(require_head)):
         # кандидаты (HEAD 26.11): новые анкеты и те, кто ждёт ответа дольше 2 дней («ответим за 2 дня»)
         from .folderguard import problems as folder_problems   # сторож папок сделок (HEAD 27.11)
         folders = folder_problems(conn)
+        from .designtasks import late as design_late_tasks   # сроки дизайна (HEAD 28.11)
+        design_late = design_late_tasks(conn)
         hr = one("""SELECT count(*) FILTER (WHERE stage='new' AND submitted_at IS NOT NULL) AS new,
                            count(*) FILTER (WHERE stage IN ('new','talk') AND stage_at < now() - interval '2 days') AS waiting
                     FROM candidates""")
@@ -74,6 +76,6 @@ def pulse(p: dict = Depends(require_head)):
         week = one("""SELECT count(*) FILTER (WHERE status='approved') AS approved, count(*) FILTER (WHERE status='rejected') AS rejected,
                              count(DISTINCT person_id) AS people
                       FROM shifts WHERE started_at > now() - interval '7 days' AND status<>'cancelled'""")
-    return {"folders": folders, "pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"]), "payments_sum": float(rv["payments_sum"])},
+    return {"folders": folders, "design_late": design_late, "pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"]), "payments_sum": float(rv["payments_sum"])},
             "catalogs": catalogs, "design_wait": design_wait, "media": media, "posts": posts, "adrep": adrep, "hr": {"new": hr["new"], "waiting": hr["waiting"]}, "feedback": feedback, "dm": dm,
             "bills": bills, "today": today, "team": team, "feed": feed, "week": week}

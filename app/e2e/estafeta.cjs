@@ -58,7 +58,7 @@ async function deal(p, id) {
   assert.ok(pay0.ok || pay0.row, 'аванс внесён: ' + JSON.stringify(pay0).slice(0, 200))
 
   // 1. МОП просит дизайн; дизайнер грузит эскиз в карточке и жмёт «Утверждено»
-  const t = await call(6000, '/bx/deals/1601/design-tasks', { title: 'Холл, стена у входа' })
+  const t = await call(6000, '/bx/deals/1601/design-tasks', { title: 'Холл, стена у входа', deadline: '2027-01-20' })
   assert.ok(t.id, 'задача на дизайн поставлена')
   const d = await open(b, 7100)
   await tab(d, 'Дизайн')
