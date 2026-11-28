@@ -342,6 +342,7 @@ def card(cid: int, p: dict = Depends(require_head)):
         from . import hrtrial
         trial = hrtrial.for_head(conn, c)
         evals = hrtrial.evaluators(conn)
+        objs = hrtrial.objects(conn)
         ob = None
         if c["person_id"]:
             from . import onboard
@@ -352,7 +353,7 @@ def card(cid: int, p: dict = Depends(require_head)):
             "files": [{"id": x["id"], "kind": x["kind"], "name": x["name"], "thumb": x["mime"].startswith("image/") and _thumb_url(x["id"]),
                        "url": f"https://drive.google.com/file/d/{x['drive_id']}/view"} for x in fl],
             "steps": f and f["steps"], "roles": [[k, titles[k]] for k, _ in (f["levels"] if f else []) if k in titles], "onboard": ob,
-            "trial": trial, "evaluators": evals}
+            "trial": trial, "evaluators": evals, "objects": objs}
 
 
 class StepIn(BaseModel):

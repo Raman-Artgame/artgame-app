@@ -203,6 +203,8 @@ def test_trial_day_review(client, monkeypatch):
     tok = client.post("/api/hr/apply", json={"dir": "art", "answers": ANS}).json()["token"]
     client.post(f"/api/hr/c/{tok}/done")
     cid = client.get("/api/hr/candidates", headers=hdr(1000)).json()["items"][0]["id"]
+    objs = client.get(f"/api/hr/candidates/{cid}", headers=hdr(1000)).json()["objects"]
+    assert {"id": 881, "title": "Кафе Нур", "city": "Астана", "gip": "Гип Главный"} in objs   # список проектов в работе (HEAD 28.11)
     yday = (date.today() - timedelta(days=1)).isoformat()
     client.post(f"/api/hr/candidates/{cid}", json={"stage": "trial", "trial_on": yday, "trial_object": 881}, headers=hdr(1000))
     t = client.get(f"/api/hr/candidates/{cid}", headers=hdr(1000)).json()["trial"]
