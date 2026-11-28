@@ -214,6 +214,88 @@ def design_wait_remind(now: datetime | None = None) -> int:
     return sent
 
 
+DESIGN_WAIT_EVERY = 3   # дней: как часто напоминать МОП про задание «ждём клиента»
+
+
+def _dtask(t: dict) -> str:
+    return f"{_title({'id': t['deal_id'], 'title': t['deal_title']})} · {t['title']}"
+
+
+def design_deadlines(now: datetime | None = None) -> int:
+    """Сроки заданий дизайнеров (HEAD 28.11 «чтобы соблюдались и ребятам были постоянные напоминания»).
+    С 9:00 дизайнеру одно сообщение в день: просрочено / срок сегодня / срок завтра — пока задание не сдвинется.
+    Задание без дизайнера — Главному дизайнеру. «Ждём клиента» — МОП (кто ставил задание) раз в 3 дня: дожать клиента."""
+    from .designtasks import LATE_STAGES
+    now = (now or datetime.now(timezone.utc)).astimezone(TZ)
+    if not DIGEST_HOUR <= now.hour < HOURS[1]:
+        return 0
+    today = now.date()
+    sent = 0
+    with db.pool.connection() as conn:
+        rows = conn.execute("""SELECT t.id, t.deal_id, t.deal_title, t.title, t.deadline, t.designer_id FROM design_tasks t
+                               WHERE t.status='active' AND t.stage = ANY(%s) AND t.deadline <= %s ORDER BY t.deadline, t.id""",
+                            (list(LATE_STAGES), today + timedelta(days=1))).fetchall()
+        leads = conn.execute("SELECT id FROM people WHERE status='active' AND role_code='lead_designer' AND tg_id IS NOT NULL ORDER BY id").fetchall()
+        by: dict = {}
+        for t in rows:
+            for pid in ([t["designer_id"]] if t["designer_id"] else [x["id"] for x in leads]):
+                by.setdefault(pid, []).append(t)
+        key = f"design_deadline:{today.isoformat()}"
+        for pid, ts in by.items():
+            pe = conn.execute("SELECT id, tg_id FROM people WHERE id=%s AND status='active' AND tg_id IS NOT NULL", (pid,)).fetchone()
+            if not pe or conn.execute("SELECT 1 FROM notices WHERE person_id=%s AND key=%s", (pid, key)).fetchone():
+                continue
+            late = [t for t in ts if t["deadline"] < today]
+            now_t = [t for t in ts if t["deadline"] == today]
+            tom = [t for t in ts if t["deadline"] > today]
+            lines = ["🎨 <b>Сроки по дизайну</b>"]
+            if late:
+                lines += ["Просрочено:"] + [f"• {_dtask(t)} — {(today - t['deadline']).days} дн." for t in late]
+            if now_t:
+                lines += ["Срок сегодня:"] + [f"• {_dtask(t)}" for t in now_t]
+            if tom:
+                lines += ["Срок завтра:"] + [f"• {_dtask(t)}" for t in tom]
+            lines.append("Сдайте эскиз в задании. Не успеваете или ждёте клиента — смените стадию или срок, чтобы МОП это видел.")
+            try:
+                SEND(pe["tg_id"], "\n".join(lines))
+            except Exception as ex:  # noqa: BLE001
+                print(f"design deadline {pid}: telegram {ex}")
+                continue
+            conn.execute("INSERT INTO notices (person_id, key) VALUES (%s, %s) ON CONFLICT DO NOTHING", (pid, key))
+            db.audit(conn, pid, "notify", data={"keys": [key], "tasks": [t["id"] for t in ts]})
+            conn.commit()
+            sent += 1
+        # «Ждём клиента»: МОП раз в 3 дня, одним сообщением
+        waits = conn.execute("""SELECT t.id, t.deal_id, t.deal_title, t.title, t.created_by,
+                                       %s - (t.updated_at AT TIME ZONE 'Asia/Almaty')::date AS days
+                                FROM design_tasks t WHERE t.status='active' AND t.stage='wait'
+                                  AND %s - (t.updated_at AT TIME ZONE 'Asia/Almaty')::date >= %s ORDER BY t.updated_at""",
+                             (today, today, DESIGN_WAIT_EVERY)).fetchall()
+        by_mop: dict = {}
+        for t in waits:
+            k = f"design_task_wait:{t['id']}:{t['days'] // DESIGN_WAIT_EVERY}"
+            if not conn.execute("SELECT 1 FROM notices WHERE person_id=%s AND key=%s", (t["created_by"], k)).fetchone():
+                by_mop.setdefault(t["created_by"], []).append((k, t))
+        for pid, items in by_mop.items():
+            pe = conn.execute("SELECT id, tg_id FROM people WHERE id=%s AND status='active' AND tg_id IS NOT NULL", (pid,)).fetchone()
+            if not pe:
+                continue
+            text = ("⏸ Дизайн ждёт клиента:\n" + "\n".join(f"• {_dtask(t)} — {t['days']} дн." for _, t in items[:15])
+                    + (f"\n…и ещё {len(items) - 15}" if len(items) > 15 else "")
+                    + "\nНапомните клиенту. Ответил — напишите дизайнеру в задании, он вернёт его в работу.")
+            try:
+                SEND(pe["tg_id"], text)
+            except Exception as ex:  # noqa: BLE001
+                print(f"design task wait {pid}: telegram {ex}")
+                continue
+            for k, _ in items:
+                conn.execute("INSERT INTO notices (person_id, key) VALUES (%s, %s) ON CONFLICT DO NOTHING", (pid, k))
+            db.audit(conn, pid, "notify", data={"keys": [k for k, _ in items]})
+            conn.commit()
+            sent += 1
+    return sent
+
+
 def app_bx_user() -> int | None:
     """Пользователь Битрикса, от которого пишет приложение: его номер — в адресе вебхука (/rest/<id>/<ключ>/)."""
     import re
@@ -311,6 +393,10 @@ def main():
         print(f"design_wait={design_wait_remind()}")
     except Exception as ex:  # noqa: BLE001
         print(f"design_wait: {ex}")
+    try:
+        print(f"design_deadlines={design_deadlines()}")
+    except Exception as ex:  # noqa: BLE001
+        print(f"design_deadlines: {ex}")
     try:
         print(f"stage_outside={stage_outside()}")
     except Exception as ex:  # noqa: BLE001

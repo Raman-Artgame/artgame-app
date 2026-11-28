@@ -9,9 +9,11 @@ def test_design_tasks(client, dz):  # noqa: F811
     mop = client.post("/api/register", json={"full_name": "МОП"}, headers=hdr(6000)).json()["id"]
     client.post(f"/api/people/{mop}", json={"role_code": "mop", "zones": ["sales"], "bitrix_user_id": 4565}, headers=hdr(1000))
     # дизайнер сам задачу не ставит; МОП — на свою сделку, сколько угодно раз
-    assert client.post("/api/bx/deals/1601/design-tasks", json={"title": "Холл"}, headers=hdr(7100)).status_code == 403
-    a = client.post("/api/bx/deals/1601/design-tasks", json={"title": "Столовая", "note": "Стена 6×3"}, headers=hdr(6000)).json()
-    b = client.post("/api/bx/deals/1601/design-tasks", json={"title": "Спортзал", "urgent": True}, headers=hdr(6000)).json()
+    assert client.post("/api/bx/deals/1601/design-tasks", json={"title": "Холл", "deadline": "2026-12-05"}, headers=hdr(7100)).status_code == 403
+    # HEAD 28.11: без срока задание не поставить
+    assert client.post("/api/bx/deals/1601/design-tasks", json={"title": "Без срока"}, headers=hdr(6000)).status_code == 422
+    a = client.post("/api/bx/deals/1601/design-tasks", json={"title": "Столовая", "note": "Стена 6×3", "deadline": "2026-12-04"}, headers=hdr(6000)).json()
+    b = client.post("/api/bx/deals/1601/design-tasks", json={"title": "Спортзал", "urgent": True, "deadline": "2026-12-06"}, headers=hdr(6000)).json()
     assert a["stage"] == "new" and b["stage"] == "urgent" and a["deal_title"] == "Продажа"
     r = client.get("/api/bx/deals/1601/design-tasks", headers=hdr(6000)).json()
     assert [x["title"] for x in r["items"]] == ["Столовая", "Спортзал"] and r["can_add"]
@@ -23,7 +25,7 @@ def test_design_tasks(client, dz):  # noqa: F811
     t = client.post(f"/api/design/tasks/{a['id']}", json={"stage": "work", "size": "l"}, headers=hdr(7100)).json()
     assert t["designer_id"] == ids[7100] and t["stage_name"] == "Взято в работу" and t["size"] == "l"
     # HEAD 26.11: дизайнер, сложность и срок дизайна идут в сделку из задачи (МОП руками не вводит); стадию не трогаем
-    assert calls[-1] == ("crm.deal.update", {"id": 1601, "fields": {"UF_CRM_ARTGAME_DESIGNER": 7001, "UF_CRM_ARTGAME_DESIGN_COMPLEXITY": "83"}})
+    assert calls[-1] == ("crm.deal.update", {"id": 1601, "fields": {"UF_CRM_ARTGAME_DESIGNER": 7001, "UF_CRM_ARTGAME_DESIGN_COMPLEXITY": "83", "UF_CRM_ARTGAME_DESIGN_DEADLINE": "2026-12-04"}})
     client.post(f"/api/design/tasks/{a['id']}", json={"deadline": "2026-12-05"}, headers=hdr(7100))
     assert calls[-1][1]["fields"]["UF_CRM_ARTGAME_DESIGN_DEADLINE"] == "2026-12-05" and "STAGE_ID" not in calls[-1][1]["fields"]
     n = len(calls)

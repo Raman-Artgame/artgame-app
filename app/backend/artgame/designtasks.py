@@ -106,7 +106,7 @@ class TaskIn(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     note: str | None = Field(default=None, max_length=2000)
     urgent: bool = False
-    deadline: date | None = None      # к какому дню нужен эскиз
+    deadline: date                    # к какому дню нужен эскиз — обязателен (HEAD 28.11: сроки должны соблюдаться)
     start_on: date | None = None      # когда клиент хочет начать работы
     brief: dict | None = None         # лёгкий бриф кнопками: who, style, mood
 
@@ -195,6 +195,8 @@ def edit(tid: int, b: TaskEdit, p: dict = Depends(active)):
                 raise HTTPException(400, "Размер: XS, S, M, L или XL")
             upd["size"] = b.size or None
         if "deadline" in sent:
+            if not b.deadline:
+                raise HTTPException(400, "Срок убрать нельзя — поставьте другую дату")
             upd["deadline"] = b.deadline
         if "start_on" in sent:
             upd["start_on"] = b.start_on
@@ -281,3 +283,18 @@ def cancel(tid: int, p: dict = Depends(active)):
         conn.execute("UPDATE design_tasks SET status='cancelled', updated_at=now() WHERE id=%s", (tid,))
         db.audit(conn, p["id"], "design_task_cancel", "design_tasks", tid, {"deal": t["deal_id"]})
     return {"ok": True}
+
+
+LATE_STAGES = ("new", "urgent", "work", "fix")   # срок идёт: «ждём клиента», «сбор информации» и «менеджеры» дизайнеру не горят
+
+
+def late(conn) -> list[dict]:
+    """Просроченные задания дизайнеров для Пульта HEAD (28.11): сделка, что делаем, дизайнер, на сколько дней."""
+    rows = conn.execute("""SELECT t.deal_id, t.deal_title, t.title, t.deadline, pe.full_name,
+                                  (now() AT TIME ZONE 'Asia/Almaty')::date - t.deadline AS days
+                           FROM design_tasks t LEFT JOIN people pe ON pe.id=t.designer_id
+                           WHERE t.status='active' AND t.stage = ANY(%s) AND t.deadline < (now() AT TIME ZONE 'Asia/Almaty')::date
+                           ORDER BY t.deadline, t.id""", (list(LATE_STAGES),)).fetchall()
+    import re
+    return [{"id": r["deal_id"], "title": f"{r['full_name'].split()[0] if r['full_name'] else 'без дизайнера'}, {r['days']} дн. · "
+                                          + re.sub(rf"^№?\s*{r['deal_id']}\s*·?\s*", "", r["deal_title"] or "") + f" · {r['title']}"} for r in rows]

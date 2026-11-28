@@ -29,7 +29,7 @@ def test_relay(client, dz, monkeypatch):  # noqa: F811
     assert p["steps"][0]["state"] == "now" and p["approved"] is None
 
     # задача → два варианта → «Утверждено» со вторым: метка «В работу» только на нём
-    t = client.post("/api/bx/deals/1601/design-tasks", json={"title": "Холл"}, headers=hdr(6000)).json()
+    t = client.post("/api/bx/deals/1601/design-tasks", json={"title": "Холл", "deadline": "2026-12-05"}, headers=hdr(6000)).json()
     client.post("/api/design/deal/1601/object", headers=hdr(7100))
     f1, f2 = _file(ids, "v1.png"), _file(ids, "v2.png")
     assert client.get("/api/deals/1601/path", headers=hdr(6000)).json()["steps"][1]["state"] == "todo"
