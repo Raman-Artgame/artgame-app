@@ -18,12 +18,12 @@ export function Design({ me, initial }) {
   const [pick, setView] = useState(initial || '')
   const n = useTaskCount(), team = useTeam()
   // HEAD 25.11: доска задач — в этой же вкладке, новых вкладок нет. Есть открытые задачи — открываем сразу её.
-  const view = pick || (n ? 'tasks' : 'deals')
+  // HEAD 28.11: воронка «Дизайн РК» закрыта, сделки переехали в «Продажи РК» — вкладки «Сделки» больше нет, работа идёт в «Задачах»
+  const view = pick === 'deals' ? 'tasks' : pick || 'tasks'
   if (!pick && n === null) return <div className="card"><p className="muted">Загружаю…</p></div>
   return <>
     <div className="card"><div className="segf">
       <button className={view === 'tasks' ? 'on' : ''} onClick={() => setView('tasks')}>Задачи{n ? <span>{n}</span> : null}</button>
-      <button className={view === 'deals' ? 'on' : ''} onClick={() => setView('deals')}>Сделки</button>
       <button className={view === 'units' ? 'on' : ''} onClick={() => setView('units')}>Единицы</button>
       <button className={view === 'cat' ? 'on' : ''} onClick={() => setView('cat')}>Каталоги</button>
     </div></div>
