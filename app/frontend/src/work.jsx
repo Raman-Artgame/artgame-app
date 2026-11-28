@@ -748,7 +748,8 @@ export function Appeals({ reload }) {
 }
 
 const STAGE = { rated: 'Оценил куратор', direct: 'Смены кураторов и без куратора', late: 'Без оценки: куратор не успел за 24 ч', wait: 'Ждут оценки куратора' }
-export function Review() {
+export function Review({ focus }) {
+  const [sec, setSec] = useState(focus || 'all')   // HEAD 28.11: с Пульта открывается сразу свой раздел
   const [r, setR] = useState(null)
   const [pays, setPays] = useState(null)   // оплаты клиентов, которые внесли МОП (HEAD 10.11) — только у HEAD
   const load = () => api('/review').then(setR, () => setR({ shifts: [], expenses: [], appeals: [] }))
@@ -822,13 +823,18 @@ export function Review() {
     <div className="card"><h2>Проверить расходы</h2>
       {r.expenses.length ? r.expenses.map(x => <Item key={x.id} k="expense" x={x}>{expLine(x)}</Item>) : <p className="muted">Всё проверено</p>}</div>
   </>
+  const secs = [['all', 'Всё', r.shifts.length + apps.length + (pays?.length || 0) + r.expenses.length], ['shifts', 'Смены', r.shifts.length],
+    ...(apps.length ? [['appeals', 'Правки', apps.length]] : []), ...(pays ? [['pays', 'Оплаты', pays.length]] : []), ['expenses', 'Расходы', r.expenses.length]]
+  const on = k => sec === 'all' || sec === k
   return <>
-    <div className="card"><h2>Смены на утверждение</h2>
+    <div className="card revsec"><div className="segf">{secs.map(([k, t, n]) =>
+      <button key={k} className={sec === k ? 'on' : ''} onClick={() => setSec(k)}>{t}{n ? <span className="cnt"> {n}</span> : null}</button>)}</div></div>
+    {on('shifts') && <div className="card"><h2>Смены на утверждение</h2>
       {good > 0 && <button className="mini" onClick={bulk}>Утвердить все с оценкой 4–5★ · {good}</button>}
       {r.shifts.length ? groups(r.shifts, 'shift', shiftLine) : <p className="muted">Всё проверено</p>}
-    </div>
-    {apps.length > 0 && <div className="card"><h2>Обращения на правку</h2>{apps.map(a => <Appeal key={a.id} a={a} />)}</div>}
-    {pays && <div className="card"><h2>Оплаты клиентов на сверку</h2>
+    </div>}
+    {on('appeals') && apps.length > 0 && <div className="card"><h2>Обращения на правку</h2>{apps.map(a => <Appeal key={a.id} a={a} />)}</div>}
+    {on('pays') && pays && <div className="card"><h2>Оплаты клиентов на сверку</h2>
       {pays.length ? pays.map(x => <div key={x.id} className="row">
         <div><b>{money(x.amount)}</b> · сделка № {x.deal_id}<br /><span className="muted small">{[new Date(x.op_date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }),
           x.account_title, (x.note || '').replace(`${x.deal_id} · `, '')].filter(Boolean).join(' · ')}{x.receipt_url ? <> · <a href={x.receipt_url} target="_blank" rel="noreferrer">чек</a></> : ' · без чека'}</span></div>
@@ -836,8 +842,8 @@ export function Review() {
       </div>) : <p className="muted">Всё сверено</p>}
       <p className="small muted">✓ — деньги пришли, сумма и чек совпадают с выпиской. ✕ — ошибка: оплата отменяется, итог сделки в Битриксе пересчитается.</p>
     </div>}
-    <div className="card"><h2>Расходы на утверждение</h2>
+    {on('expenses') && <div className="card"><h2>Расходы на утверждение</h2>
       {r.expenses.length ? groups(r.expenses, 'expense', expLine) : <p className="muted">Всё проверено</p>}
-    </div>
+    </div>}
   </>
 }

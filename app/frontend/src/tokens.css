@@ -1653,3 +1653,9 @@ mark.gap { background: var(--warnbg); color: var(--warn); border-radius: 4px; pa
 .nameedit { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .nameedit .pair { display: flex; gap: 6px; } .nameedit .pair > * { flex: 1 1 0; min-width: 0; margin: 0; }
 .nameedit .pair button { flex: 0 0 auto; }
+
+/* Проверка: разделы сверху; Пульт: список сделок в строке (HEAD 28.11) */
+.revsec { padding: 10px; } .revsec .segf { flex-wrap: wrap; } .revsec .segf button { flex: 1 1 auto; } .revsec .cnt { color: var(--accent2); font-weight: 700; }
+.asklist { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 12px; }
+.asklist button { display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; margin: 0; padding: 11px 14px; font-size: 14px; font-weight: 500; }
+.asklist button span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

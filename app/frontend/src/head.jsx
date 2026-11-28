@@ -40,6 +40,7 @@ export function Pulse({ me, pulse, go }) {
   const cl = useClosing(true)   // HEAD 12.11: сделки на закрытие и закрытые мимо паспорта — первыми
   const [spend, setSpend] = useState(null)   // «+ Расход» (HEAD 12.11): форма журнала денег прямо на Пульте
   const [spent, setSpent] = useState('')
+  const [askOpen, setAskOpen] = useState(null)   // раскрытый список сделок в «Ждёт вашего решения»
   const [hints, setHints] = useState(null)   // подсказки ботов-аналитиков по МОП за сегодня (26.11)
   const openSpend = () => { setSpent(''); api('/fin/dict').then(setSpend, e => setSpent(e.message)) }
   const toggle = k => {
@@ -55,13 +56,13 @@ export function Pulse({ me, pulse, go }) {
   // Сторож папок (HEAD 27.11): папку сделки создать не удалось или «Объект» пуст — видно сразу, не через неделю
   const noFolder = (p.folders || []).filter(x => x.no_folder), noObj = (p.folders || []).filter(x => !x.no_folder && x.no_object)
   const asks = [...closeAsks(cl),
-    noFolder.length && { k: 'deals', t: `Нет папки на Диске: ${noFolder.length}`, s: noFolder.map(x => '№ ' + x.id).join(', ') + ' · приложение пробует снова каждые 10 минут', hot: true, red: true },
-    noObj.length && { k: 'deals', t: `Сделки без «Объекта»: ${noObj.length}`, s: noObj.map(x => '№ ' + x.id).join(', ') + ' · папка создана, МОП должен вписать объект' },
-    r.shifts && { k: 'review', t: `Смены на утверждение: ${r.shifts}`, s: [r.rated_good ? `${r.rated_good} с оценкой 4–5★ — одним нажатием` : '',
+    noFolder.length && { list: noFolder, t: `Нет папки на Диске: ${noFolder.length}`, s: 'приложение пробует снова каждые 10 минут · нажмите — список сделок', hot: true, red: true },
+    noObj.length && { list: noObj, t: `Сделки без «Объекта»: ${noObj.length}`, s: 'папка создана, МОП должен вписать объект · нажмите — список сделок' },
+    r.shifts && { k: 'review:shifts', t: `Смены на утверждение: ${r.shifts}`, s: [r.rated_good ? `${r.rated_good} с оценкой 4–5★ — одним нажатием` : '',
       r.shifts_late ? `${r.shifts_late} дольше 2 суток` : ''].filter(Boolean).join(' · ') || 'в срок', hot: r.shifts_late },
-    r.appeals && { k: 'review', t: `Обращения на правку: ${r.appeals}`, s: 'не внёс вовремя или ошибся — утвердить или отклонить' },
-    r.expenses && { k: 'review', t: `Расходы на проверке: ${r.expenses}`, s: `на ${money(r.expenses_sum)}` + (r.over_cap ? ` · ${r.over_cap} выше потолка цены` : ''), hot: r.expenses_late || r.over_cap },
-    r.payments && { k: 'review', t: `Оплаты клиентов на сверку: ${r.payments}`, s: `на ${money(r.payments_sum)} · сверить чек и выписку` },
+    r.appeals && { k: 'review:appeals', t: `Обращения на правку: ${r.appeals}`, s: 'не внёс вовремя или ошибся — утвердить или отклонить' },
+    r.expenses && { k: 'review:expenses', t: `Расходы на проверке: ${r.expenses}`, s: `на ${money(r.expenses_sum)}` + (r.over_cap ? ` · ${r.over_cap} выше потолка цены` : ''), hot: r.expenses_late || r.over_cap },
+    r.payments && { k: 'review:pays', t: `Оплаты клиентов на сверку: ${r.payments}`, s: `на ${money(r.payments_sum)} · сверить чек и выписку` },
     p.bills?.length && { k: 'fin:cash', t: `Оплатить сегодня: ${p.bills.length}`, s: p.bills.map(b => b.title + (b.amount ? ' ' + money(b.amount) : '')).join(' · '),
       hot: p.bills.some(b => b.status === 'overdue') },
     p.hr?.new && { k: 'people:hr', t: `Новые кандидаты: ${p.hr.new}`, s: p.hr.waiting ? `${p.hr.waiting} ждут ответа дольше 2 дней` : 'Команда → Кандидаты · ответить за 2 дня', hot: !!p.hr.waiting },
@@ -96,9 +97,12 @@ export function Pulse({ me, pulse, go }) {
       : <><div className="seg"><button onClick={() => { setSpent(''); setSpend('project') }}>+ На проект</button><button className="ghost" onClick={openSpend}>+ Общий</button></div>
         <p className="small muted">{spent || 'На проект — доставка, такси, докупка: проект поиском, сумма, чек; сразу в затратах проекта. Общий — аренда, коммуналка, своя трата, чек в «06 РАСХОДЫ HEAD».'}</p></>}</div>
   const asksC = asks.length > 0 && <div className="card"><h3>Ждёт вашего решения</h3>
-      {asks.map((a, i) => <div key={i} className={'qrow' + (a.red ? ' hot' : '')} onClick={() => go(a.k)}>
-        <div className="qmain"><b>{a.t}</b><div className={'small ' + (a.hot ? 'why' : 'muted')}>{a.s}</div></div><span className="muted">›</span>
-      </div>)}
+      {asks.map((a, i) => <React.Fragment key={i}><div className={'qrow' + (a.red ? ' hot' : '')} onClick={() => a.list ? setAskOpen(askOpen === a.t ? null : a.t) : go(a.k)}>
+        <div className="qmain"><b>{a.t}</b><div className={'small ' + (a.hot ? 'why' : 'muted')}>{a.s}</div></div><span className="muted">{a.list ? (askOpen === a.t ? '▴' : '▾') : '›'}</span>
+      </div>
+      {/* HEAD 28.11: «при нажатии открывалось то, что нужно» — список этих сделок, каждая открывается своей карточкой */}
+      {a.list && askOpen === a.t && <div className="asklist">{a.list.map(x => <button key={x.id} className="ghost" onClick={() => go('deal:' + x.id)}>
+        <span>№ {x.id}{x.title ? ' · ' + x.title.replace(/^\d+\s*·\s*/, '') : ''}</span><span className="muted">›</span></button>)}</div>}</React.Fragment>)}
       {curating && <p className="small muted">{curating}</p>}
     </div>
   const dmC = <div className="qrow card dmpulse" onClick={() => go('chat')}><div className="qmain"><b>📣 Написать команде</b>
