@@ -22,6 +22,7 @@ import { Feedback } from './feedback.jsx'
 import { Chat, useUnread } from './dm.jsx'
 import { Pulse, ViewAsBar, ViewAsCard, usePulse } from './head.jsx'
 import { useWide } from './ui.jsx'
+import { Study } from './study.jsx'
 import './tokens.css'
 import { MyData, ProfileForm } from './profile.jsx'
 import { FileLinks } from './objects.jsx'
@@ -194,8 +195,10 @@ function Main({ me, onMe, web, logout }) {
     {me.roles?.length > 1 && <div className="wrap"><RoleSwitch me={me} /></div>}
     {cab ? <Places key={tab} list={studyList} mode="study" opts={Object.fromEntries(studyList.map(p => [p.code, studyOpts(p.code)]))}
       extra={[(art || prn) && { code: 'tb', title: 'ТБ', render: () => <Safety print={prn} /> }].filter(Boolean)} /> :
-    <Places key={tab} list={tab === 'study' ? (isHead ? [mopPlace, ...other].filter(Boolean) : [mopPlace]) : other}   // HEAD 09.11: «Место» убрано — места ролей у HEAD в «Учёбе»
-      mode={tab === 'study' && !isHead ? 'study' : ''} opts={tab === 'study' ? { mop: STUDY.mop() } : {}} />}
+    tab === 'study' && !isHead ? <Study place={mopPlace} /> :   // HEAD 28.11: учебник и тесты МОП — раздел приложения (study.jsx)
+    <Places key={tab} list={tab === 'study' ? [mopPlace, ...other].filter(Boolean) : other}   // HEAD 09.11: «Место» убрано — места ролей у HEAD в «Учёбе»
+      mode="" opts={tab === 'study' ? { mop: STUDY.mop() } : {}}
+      extra={tab === 'study' && mopPlace ? [{ code: 'mopbook', title: 'Учебник МОП', render: () => <Study place={mopPlace} isHead /> }] : []} />}
     <Nav tabs={menu} tab={tab} setTab={go} counts={counts} scroll={!isHead} />
   </>
   return <>
