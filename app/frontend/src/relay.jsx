@@ -25,20 +25,21 @@ const dm = s => s ? s.slice(8, 10) + '.' + s.slice(5, 7) : ''
 export function ProductionSheet({ dealId, onClose, onDone, onFill }) {
   const [f, setF] = useState(null)
   const [gip, setGip] = useState(0)
+  const [gip2, setGip2] = useState(0)
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   useEffect(() => {
     api(`/bx/deals/${dealId}/production`).then(r => {
-      setF(r); setGip(r.gip_id || 0)
+      setF(r); setGip(r.gip_id || 0); setGip2(r.gip2_id || 0)
       const s = r.start || plus(iso(new Date()), 1)
       setStart(s); setEnd(r.end || plus(s, 7))
     }, e => setErr(e.message))
   }, [dealId])
   const ok = f && gip && start && end && end >= start && !f.missing.length
   const send = () => { setBusy(true); setErr('')
-    api(`/bx/deals/${dealId}/production`, { method: 'POST', body: { gip_id: gip, start, end } })
+    api(`/bx/deals/${dealId}/production`, { method: 'POST', body: { gip_id: gip, gip2_id: gip2 === gip ? 0 : gip2, start, end } })
       .then(r => onDone(r.bx === 'off' ? 'Передано в производство. В Битрикс не записано: запись выключена.' : 'Передано в производство: ГИП получил сообщение.'),
         e => { setErr(e.message); setBusy(false) }) }
   return <Sheet title="В производство" onClose={onClose}>
@@ -55,11 +56,16 @@ export function ProductionSheet({ dealId, onClose, onDone, onFill }) {
           <option value={0}>Выбрать…</option>
           {f.candidates.map(c => <option key={c.id} value={c.id}>{c.full_name} · {c.role_title}{c.acting ? ' (и.о.)' : ''}</option>)}
         </select></label>
+      {!!gip && <label>Второй куратор ГИП <span className="muted">(если нужен)</span>
+        <select className="gip2" value={gip2 === gip ? 0 : gip2} onChange={e => setGip2(+e.target.value)}>
+          <option value={0}>Нет</option>
+          {f.candidates.filter(c => c.id !== gip).map(c => <option key={c.id} value={c.id}>{c.full_name} · {c.role_title}{c.acting ? ' (и.о.)' : ''}</option>)}
+        </select></label>}
       <div className="two">
         <label>Старт<input type="date" value={start} onChange={e => { setStart(e.target.value); if (end < e.target.value) setEnd(e.target.value) }} /></label>
         <label>Сдача<input type="date" value={end} min={start} onChange={e => setEnd(e.target.value)} /></label>
       </div>
-      <p className="small muted">Людей на объект ставит ГИП (или HEAD). Дату старта клиенту — после подтверждения загрузки.</p>
+      <p className="small muted">Людей на объект ставят кураторы ГИП (или HEAD). Дату старта клиенту — после подтверждения загрузки.</p>
       {!!f.missing.length && <div className="lockbox"><b>🔒 Пока не заполнено:</b>
         <div>{f.missing.map(m => <span key={m} className="miss">{m}</span>)}</div>
         {onFill && <button className="mini" onClick={onFill}>Заполнить карточку</button>}</div>}

@@ -353,7 +353,8 @@ def my_deals(p: dict, fresh: bool = False, manager: int | None = None) -> dict:
         with db.pool.connection() as conn:
             led = deal_money.ledger(conn, work)
             gips = {r["id"]: r["full_name"] for r in conn.execute(
-                """SELECT o.id, pe.full_name FROM objects o JOIN people pe ON pe.id = o.gip_person_id
+                """SELECT o.id, concat_ws(', ', pe.full_name, p2.full_name) AS full_name FROM objects o JOIN people pe ON pe.id = o.gip_person_id
+                   LEFT JOIN people p2 ON p2.id = o.gip2_person_id
                    WHERE o.id = ANY(%s)""", (work,)).fetchall()}
         for d in deals:
             if d["id"] in raw and d["stage"] in WORK_STAGES:

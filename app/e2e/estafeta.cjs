@@ -47,7 +47,7 @@ async function deal(p, id) {
   await call(1000, '/register', { full_name: 'HEAD' })
   const ids = {}
   for (const [tg, name, role, zones, bxu] of [[6000, 'Ануар', 'mop', ['sales'], 4565], [7100, 'Малика', 'designer_asst', ['design'], 4693],
-    [6100, 'Айдана', 'lead_artist', ['mural'], null]]) {
+    [6100, 'Айдана', 'lead_artist', ['mural'], null], [6200, 'Тимур', 'print_master', ['print'], null]]) {
     ids[tg] = (await call(tg, '/register', { full_name: name })).id
     await call(1000, `/people/${ids[tg]}`, { role_code: role, zones, ...(bxu ? { bitrix_user_id: bxu } : {}) })
   }
@@ -84,7 +84,10 @@ async function deal(p, id) {
   assert.strictEqual(await pay.getByRole('button', { name: 'Передать куратору ГИП' }).count(), 0, 'старой кнопки-заметки нет')
   await pay.getByRole('button', { name: 'В производство' }).click()
   await m.locator('.sheetbox .prodsk', { hasText: 'Холл вариант 3' }).waitFor()
-  await m.locator('.sheetbox select').selectOption({ label: 'Айдана · Главный художник' })
+  await m.locator('.sheetbox select').first().selectOption({ label: 'Айдана · Главный художник' })
+  // второй куратор ГИП (HEAD 28.11): появляется после выбора первого, первого в списке нет
+  await m.locator('.sheetbox select.gip2').selectOption({ label: 'Тимур · Мастер настенной печати' })
+  assert.strictEqual(await m.locator('.sheetbox select.gip2 option', { hasText: 'Айдана' }).count(), 0)
   await m.waitForTimeout(400)
   await fits(m, 'окно «В производство»')
   await m.screenshot({ path: `${shots}/est-2-mop-v-proizvodstvo.png` })
@@ -97,7 +100,8 @@ async function deal(p, id) {
   await deal(h, 1601)
   await h.locator('.hero .steps > div', { hasText: 'Оплата' }).click()
   await h.locator('.card', { has: h.locator('h3', { hasText: /^Оплата$/ }) }).getByRole('button', { name: 'В производство' }).click()
-  await h.locator('.sheetbox select').selectOption({ label: 'Айдана · Главный художник' })
+  await h.locator('.sheetbox select').first().selectOption({ label: 'Айдана · Главный художник' })
+  await h.locator('.sheetbox select.gip2').selectOption({ label: 'Тимур · Мастер настенной печати' })
   const before = (await bxCalls()).length
   await h.locator('.sheetbox button', { hasText: /^Передать/ }).click()
   await h.locator('.sheetbox').waitFor({ state: 'detached' })
@@ -114,7 +118,7 @@ async function deal(p, id) {
   const wc = m.locator('.kc', { hasText: '№ 1601' })   // телефон — стадии кнопками, карточки во всю ширину (HEAD 26.11)
   await wc.waitFor()
   console.log('work card:', await wc.textContent())
-  assert.match(await wc.locator('.kmeta').textContent(), /ГИП Айдана.*сдача \d\d\.\d\d/)
+  assert.match(await wc.locator('.kmeta').textContent(), /ГИП Айдана, Тимур.*сдача \d\d\.\d\d/)
   await wc.locator('.kpay').waitFor()
   assert.strictEqual(await wc.getAttribute('draggable'), 'false', 'на доске «В работе» стадии не тянут')
   await fits(m, 'доска «В работе»')
@@ -132,6 +136,14 @@ async function deal(p, id) {
   assert.ok((await call(6100, '/objects/1601/crew')).can_edit, 'ГИП ставит людей на объект')
   await fits(g, 'проект у ГИП')
   await g.screenshot({ path: `${shots}/est-3-gip-proekt.png` })
+  // второй куратор ГИП: те же права — видит проект, ставит людей; HEAD в карточке проекта видит обоих
+  assert.ok((await call(6200, '/objects/1601/crew')).can_edit, 'второй куратор ставит людей на объект')
+  await tab(h, 'Проекты')
+  await h.locator('.pcard', { hasText: '1601' }).click()
+  await h.locator('.gippick select.gip2').scrollIntoViewIfNeeded()
+  assert.strictEqual(await h.locator('.gippick select.gip2').evaluate(e => e.selectedOptions[0].textContent), 'Тимур · Мастер настенной печати')
+  await fits(h, 'два куратора в проекте')
+  await h.screenshot({ path: `${shots}/gip2-proekt.png` })
   await b.close()
   console.log('OK: дизайн утверждён файлом → «Сегодня» МОП → «В производство» (стадия + ГИП + сроки) → ГИП видит проект и эскиз')
 })().catch(e => { console.error('FAIL', e.message); process.exit(1) })

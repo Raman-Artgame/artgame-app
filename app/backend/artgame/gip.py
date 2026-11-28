@@ -17,8 +17,7 @@ SEE_ALL = {"head", "artist_pro"}   # Про проверяет Главных �
 def can_see(conn, p: dict, oid: int) -> bool:
     if p["role_code"] in SEE_ALL:
         return True
-    o = conn.execute("SELECT gip_person_id FROM objects WHERE id=%s", (oid,)).fetchone()
-    return bool(o and o["gip_person_id"] == p["id"])
+    return db.is_gip(conn, oid, p["id"])
 
 
 @router.get("/gip/candidates")
@@ -35,11 +34,13 @@ def candidates(p: dict = Depends(active)):
 
 class GipIn(BaseModel):
     person_id: int = 0   # 0 — снять
+    slot: int = 1        # 1 — куратор ГИП, 2 — второй куратор ГИП (HEAD 28.11)
 
 
-def assign(conn, p: dict, oid: int, person_id: int, extra: str = ""):
-    """Назначить (0 — снять) куратора ГИП. Возвращает функцию, которая шлёт сообщение ГИП, — звать после commit."""
-    o = conn.execute("SELECT id, title FROM objects WHERE id=%s", (oid,)).fetchone()
+def assign(conn, p: dict, oid: int, person_id: int, extra: str = "", slot: int = 1):
+    """Назначить (0 — снять) куратора ГИП: slot 1 — первый, 2 — второй (права одинаковые).
+    Возвращает функцию, которая шлёт сообщение ГИП, — звать после commit."""
+    o = conn.execute("SELECT id, title, gip_person_id, gip2_person_id FROM objects WHERE id=%s", (oid,)).fetchone()
     if not o or not oid:
         raise HTTPException(404, "объекта ещё нет в приложении — он появится после синхронизации со сделкой")
     pe = None
@@ -48,36 +49,60 @@ def assign(conn, p: dict, oid: int, person_id: int, extra: str = ""):
                              AND (role_code = ANY(%s) OR acting_role = ANY(%s))""", (person_id, list(GIP_ROLES), list(GIP_ROLES))).fetchone()
         if not pe:
             raise HTTPException(400, "ГИП — Главный художник, Художник-Про или Мастер печати")
-    conn.execute("UPDATE objects SET gip_person_id=%s WHERE id=%s", (pe["id"] if pe else None, oid))
-    db.audit(conn, p["id"], "gip_set", "objects", oid, {"person": pe["id"] if pe else None})
+    new = pe["id"] if pe else None
+    g1, g2 = o["gip_person_id"], o["gip2_person_id"]
+    was = g2 if slot == 2 else g1
+    if slot == 2:
+        if new and not g1:
+            raise HTTPException(400, "сначала назначьте куратора ГИП, потом второго")
+        if new and new == g1:
+            raise HTTPException(400, "второй куратор ГИП — другой человек")
+        g2 = new
+    else:
+        g1 = new
+        if g2 and g2 == g1:
+            g2 = None          # второго сделали первым
+        if not g1 and g2:
+            g1, g2 = g2, None  # первого сняли — второй остаётся единственным
+    conn.execute("UPDATE objects SET gip_person_id=%s, gip2_person_id=%s WHERE id=%s", (g1, g2, oid))
+    db.audit(conn, p["id"], "gip_set", "objects", oid, {"person": new, "slot": slot})
 
     def send():
-        if pe:
-            _send(pe["tg_id"], f"Ты ГИП проекта № {oid} «{o['title']}». В «Проектах» — вся история объекта, смены по нему принимаешь ты; "
-                               "людей на объект ставишь ты." + extra)
+        if pe and (pe["id"] != was or extra):
+            _send(pe["tg_id"], f"Ты {'второй куратор ГИП' if slot == 2 else 'ГИП'} проекта № {oid} «{o['title']}». В «Проектах» — вся история объекта, "
+                               "смены по нему принимаешь ты; людей на объект ставишь ты." + extra)
     send.person = pe
     return send
+
+
+def _pair(conn, oid: int) -> dict:
+    o = conn.execute("""SELECT o.gip_person_id AS gip_id, a.full_name AS gip_name, o.gip2_person_id AS gip2_id, b.full_name AS gip2_name
+                        FROM objects o LEFT JOIN people a ON a.id=o.gip_person_id LEFT JOIN people b ON b.id=o.gip2_person_id
+                        WHERE o.id=%s""", (oid,)).fetchone()
+    return o or {"gip_id": None, "gip_name": None, "gip2_id": None, "gip2_name": None}
 
 
 @router.post("/objects/{oid}/gip")
 def set_gip(oid: int, b: GipIn, p: dict = Depends(active)):
     if p["role_code"] not in ASSIGN or p.get("_view_as"):
         raise HTTPException(403, "назначают HEAD и МОП")
+    if b.slot not in (1, 2):
+        raise HTTPException(400, "slot: 1 или 2")
     with db.pool.connection() as conn, conn.transaction():
-        send = assign(conn, p, oid, b.person_id)
+        send = assign(conn, p, oid, b.person_id, slot=b.slot)
+        out = _pair(conn, oid)
     send()
-    pe = send.person
-    return {"ok": True, "gip_id": pe["id"] if pe else None, "gip_name": pe["full_name"] if pe else None}
+    return {"ok": True, **out}
 
 
 @router.get("/bx/deals/{deal_id}/gip")
 def deal_gip(deal_id: int, p: dict = Depends(active)):
-    """«Куратор ГИП» в карточке сделки (HEAD 26.11): кто сейчас и из кого выбрать. Права ГИП даёт только objects.gip_person_id."""
+    """«Куратор ГИП» в карточке сделки (HEAD 26.11): кто сейчас и из кого выбрать. Права ГИП дают objects.gip_person_id и gip2_person_id."""
     from . import bx
     bx._deal(p, deal_id)   # чужая сделка — 403
     with db.pool.connection() as conn:
-        o = conn.execute("SELECT gip_person_id FROM objects WHERE id=%s", (deal_id,)).fetchone()
-    return {"gip_id": o["gip_person_id"] if o else None, "candidates": candidates(p)}
+        o = _pair(conn, deal_id)
+    return {"gip_id": o["gip_id"], "gip2_id": o["gip2_id"], "candidates": candidates(p)}
 
 
 @router.post("/bx/deals/{deal_id}/gip")
@@ -121,7 +146,7 @@ def history(oid: int, p: dict = Depends(active)):
             "spent": sum(float(e["amount"]) for e in exps if e["status"] != "rejected")}
 
 
-# Команда объекта: людей на объект ставит только куратор ГИП этого объекта (один человек) и HEAD.
+# Команда объекта: людей на объект ставят только кураторы ГИП этого объекта (с 28.11 их может быть двое) и HEAD.
 # HEAD 14.11: «МОП может поставить только КУРАТОР ГИП», «КУРАТОР ГИП ЭТО ОДИН ЧЕЛОВЕК!» (раньше, 09.11, — ещё МОП, Главный, Про, Мастер).
 CREW_BY = {"head"}
 CREW_ROLES = ("support", "artist", "artist_pro", "lead_artist", "print_operator", "print_master", "carpenter")
@@ -132,8 +157,7 @@ def can_crew(conn, p: dict, oid: int) -> bool:
         return False
     if (p.get("acting_role") or p["role_code"]) in CREW_BY or p["role_code"] in CREW_BY:
         return True
-    o = conn.execute("SELECT gip_person_id FROM objects WHERE id=%s", (oid,)).fetchone()
-    return bool(o and o["gip_person_id"] == p["id"])
+    return db.is_gip(conn, oid, p["id"])
 
 
 def crew_of(conn, oid: int) -> list[dict]:

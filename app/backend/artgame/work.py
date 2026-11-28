@@ -31,7 +31,7 @@ DIRECT_SQL = ("((SELECT coalesce(pp.acting_role, pp.role_code) FROM people pp WH
 _ZONE_PAIRS = ",".join(f"('{z}','{r}')" for r, zs in CHECKS.items() for z in sorted(zs))
 HAS_CUR_SQL = f"""EXISTS (SELECT 1 FROM people c JOIN roles cr ON cr.code = coalesce(c.acting_role, c.role_code)
                      WHERE c.status='active' AND c.id <> x.person_id
-                       AND (c.id = o.gip_person_id OR ((x.zone_code, cr.code) IN ({_ZONE_PAIRS}) AND cr.level > COALESCE({RANK_SQL}, 0))))"""
+                       AND (c.id IN (o.gip_person_id, o.gip2_person_id) OR ((x.zone_code, cr.code) IN ({_ZONE_PAIRS}) AND cr.level > COALESCE({RANK_SQL}, 0))))"""
 # к HEAD: оценено, или автор — куратор, или оценить некому, или куратор не успел
 READY_SQL = (f"(x.cur_at IS NOT NULL OR {DIRECT_SQL} OR NOT {HAS_CUR_SQL} "
              f"OR coalesce(x.submitted_at, x.created_at) < now() - interval '{CURATE_HOURS} hours')")
@@ -840,7 +840,7 @@ def review_filter(p: dict) -> tuple[str, list]:
         return "TRUE", []
     zones = sorted(CHECKS.get(p["role_code"], set()))
     own = f"(SELECT level FROM roles WHERE code=%s)"
-    return (f"((x.zone_code = ANY(%s) AND COALESCE({RANK_SQL}, 0) < {own}) OR o.gip_person_id = %s) AND x.person_id <> %s"
+    return (f"((x.zone_code = ANY(%s) AND COALESCE({RANK_SQL}, 0) < {own}) OR %s IN (o.gip_person_id, o.gip2_person_id)) AND x.person_id <> %s"
             f" AND x.cur_at IS NULL AND NOT {DIRECT_SQL}",
             [zones, p["role_code"], p["id"], p["id"]])
 

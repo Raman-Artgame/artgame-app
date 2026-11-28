@@ -580,10 +580,10 @@ def shoot_hints(p: dict = Depends(active)):
     from .sync_objects import WORK
     with db.pool.connection() as conn:
         rows = conn.execute(
-            """SELECT o.id, o.title, o.city, o.address, o.publish_ok, o.done_on, g.full_name AS gip,
+            """SELECT o.id, o.title, o.city, o.address, o.publish_ok, o.done_on, concat_ws(', ', g.full_name, g2.full_name) AS gip,
                       sh.first_at, sh.last_at, coalesce(sh.n, 0) AS shifts,
                       (SELECT count(*) FROM files f WHERE f.object_id=o.id AND f.kind='media' AND f.status='ready') AS media
-               FROM objects o LEFT JOIN people g ON g.id=o.gip_person_id
+               FROM objects o LEFT JOIN people g ON g.id=o.gip_person_id LEFT JOIN people g2 ON g2.id=o.gip2_person_id
                LEFT JOIN LATERAL (SELECT min(started_at) AS first_at, max(started_at) AS last_at, count(*) AS n
                                   FROM shifts s WHERE s.object_id=o.id AND s.kind='work' AND s.status<>'cancelled') sh ON true
                WHERE o.id<>0 AND o.status='active' AND o.bitrix_stage=%s AND o.closed_at IS NULL AND o.publish_ok IS DISTINCT FROM false

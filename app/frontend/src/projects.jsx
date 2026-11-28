@@ -63,7 +63,7 @@ function PCard({ x, onOpen }) {
       <span className={'left ' + (x.state === 'late' ? 'late' : x.left != null && x.left <= 2 ? 'soon' : '')}>{x.left == null ? '—' : x.left < 0 ? `−${-x.left} дн.` : `${x.left} дн.`}</span>
     </div>
     <div className="pbody">
-      <b>{cleanTitle(x.title, x.id)}</b>{x.gip && <span className="small muted"> · ГИП {x.gip.name.split(' ')[0]}</span>}
+      <b>{cleanTitle(x.title, x.id)}</b>{x.gip && <span className="small muted"> · ГИП {gipNames(x, true)}</span>}
       <div className="meta">{[`№ ${x.id}`, x.city, x.area ? `${x.area} м²` : '', x.level].filter(Boolean).join(' · ')}</div>
       {x.working && <div className={'prog ' + (x.state === 'late' ? 'late' : x.progress >= 100 ? 'ok' : '')}><i style={{ width: pct(x) + '%' }} /></div>}
       <div className="pfoot">
@@ -79,7 +79,7 @@ function ProjectCard({ x, me, back, openDeal }) {
   const [st, cls] = STATE[x.state]
   const mkt = me?.role_code === 'marketer'   // маркетингу — только контент и съёмки (HEAD 14.11)
   const c = x.cond || {}
-  const kv = [['Город', x.city], ...(mkt ? [['ГИП', x.gip?.name || 'не назначен']] : []), ['Площадь', x.area ? `${x.area} м²` : ''], ['Сложность', x.level || 'МОП ещё не указал'],
+  const kv = [['Город', x.city], ...(mkt ? [['ГИП', gipNames(x) || 'не назначен']] : []), ['Площадь', x.area ? `${x.area} м²` : ''], ['Сложность', x.level || 'МОП ещё не указал'],
     ['Старт', x.start ? dmy(x.start) : ''], ['Сдача', x.due ? dmy(x.due) : ''], ['Смены', x.norm.shifts ? `${x.done.shifts} из ${x.norm.shifts}` : x.done.shifts ? String(x.done.shifts) : ''],
     ['Состав по норме', x.norm.crew ? `${x.norm.crew} чел.` : ''], ['МОП', x.manager]].filter(([, v]) => v)
   if (chat) return <ProjChat id={x.id} back={() => { setChat(false); if (x.chat) x.chat.unread = 0 }} backText={'← ' + cleanTitle(x.title, x.id)} />
@@ -103,7 +103,7 @@ function ProjectCard({ x, me, back, openDeal }) {
       {openDeal && <button className="ghost" onClick={() => openDeal(x.id)}>Открыть сделку</button>}
     </div>
     {!mkt && <TeamBox x={x} me={me} />}
-    {me && x.id > 0 && (mkt || me.role_code === 'head' || x.gip?.id === me.id) && <ShootsBox id={x.id} />}
+    {me && x.id > 0 && (mkt || me.role_code === 'head' || isGip(x, me)) && <ShootsBox id={x.id} />}
     {!mkt && <>
     {me && x.id > 0 && <DesignBox id={x.id} me={me} obj={{ id: x.id, title: x.title }} />}
     {me && x.id > 0 && <MaterialsBox id={x.id} head={me.role_code === 'head' && !me._view_as} />}
@@ -111,7 +111,7 @@ function ProjectCard({ x, me, back, openDeal }) {
     {me && x.id > 0 && MONEY.has(me.role_code) && <MoneyBox id={x.id} />}</>}
     <Gallery obj={{ id: x.id, title: x.title }} me={me} start="photo" skip={['design']} top={x.id > 0 && <PromoLine id={x.id} />} />
     {!mkt && me && x.id > 0 && (x.working || x.closing) && <DoneBox id={x.id} />}
-    {!mkt && me && (SEE_ALL.has(me.role_code) || (x.gip && x.gip.id === me.id)) && <History id={x.id} mine={x.gip?.id === me.id} head={me.role_code === 'head'} />}
+    {!mkt && me && (SEE_ALL.has(me.role_code) || isGip(x, me)) && <History id={x.id} mine={isGip(x, me)} head={me.role_code === 'head'} />}
   </>
 }
 
@@ -137,7 +137,7 @@ function TeamBox({ x, me }) {
   const live = x.now || [], was = x.people.filter(n => !live.includes(n))
   return <div className="card team">
     <h3>Команда</h3>
-    {gip ? <GipPick x={x} /> : <p className="small"><span className="muted">ГИП: </span><b>{x.gip?.name || 'не назначен'}</b></p>}
+    {gip ? <GipPick x={x} /> : <p className="small"><span className="muted">ГИП: </span><b>{gipNames(x) || 'не назначен'}</b></p>}
     {me && x.id > 0 && <Crew id={x.id} />}
     {(live.length > 0 || was.length > 0) && <><label className="muted">На смене и были на объекте</label><div className="who">
       {live.map(n => <span key={'n' + n} className="live">● {n}</span>)}
@@ -362,18 +362,30 @@ function DesignBox({ id, me, obj }) {
 // ГИП проекта (HEAD 09.11): назначают HEAD и МОП; ГИП — Главный художник, Про или Мастер печати (и «и.о.» этих ролей).
 const ASSIGN = new Set(['head', 'mop', 'mop_vip'])
 const SEE_ALL = new Set(['head', 'artist_pro'])
+// Кураторов ГИП на объекте может быть двое (HEAD 28.11), права одинаковые.
+const isGip = (x, me) => !!me && (x.gip?.id === me.id || x.gip2?.id === me.id)
+const gipNames = (x, short) => [x.gip, x.gip2].filter(Boolean).map(g => short ? g.name.split(' ')[0] : g.name).join(', ')
 function GipPick({ x }) {
   const [list, setList] = useState(null)
-  const [cur, setCur] = useState(x.gip?.id || 0)
+  const [cur, setCur] = useState([x.gip?.id || 0, x.gip2?.id || 0])
   const [msg, setMsg] = useState('')
   useEffect(() => { api('/gip/candidates').then(setList, () => setList([])) }, [])
-  const save = id => api(`/objects/${x.id}/gip`, { method: 'POST', body: { person_id: id } })
-    .then(r => { setCur(r.gip_id || 0); x.gip = r.gip_id ? { id: r.gip_id, name: r.gip_name } : null; setMsg(r.gip_id ? `ГИП — ${r.gip_name}, ему пришло сообщение.` : 'ГИП снят.') }, e => setMsg(e.message))
+  const save = (slot, id) => api(`/objects/${x.id}/gip`, { method: 'POST', body: { person_id: id, slot } })
+    .then(r => { setCur([r.gip_id || 0, r.gip2_id || 0])
+      x.gip = r.gip_id ? { id: r.gip_id, name: r.gip_name } : null; x.gip2 = r.gip2_id ? { id: r.gip2_id, name: r.gip2_name } : null
+      const nm = slot === 2 ? r.gip2_name : r.gip_name
+      setMsg(id ? `${slot === 2 ? 'Второй куратор ГИП' : 'ГИП'} — ${nm}, ему пришло сообщение.` : slot === 2 ? 'Второй куратор снят.' : 'ГИП снят.') }, e => setMsg(e.message))
+  const opt = p => <option key={p.id} value={p.id}>{p.full_name} · {p.acting ? 'и.о. ' : ''}{p.role_title}</option>
   return <div className="gippick"><label className="muted">ГИП проекта</label>
-    <select value={cur} onChange={e => save(+e.target.value)} disabled={!list}>
+    <select value={cur[0]} onChange={e => save(1, +e.target.value)} disabled={!list}>
       <option value={0}>— не назначен —</option>
-      {(list || []).map(p => <option key={p.id} value={p.id}>{p.full_name} · {p.acting ? 'и.о. ' : ''}{p.role_title}</option>)}
+      {(list || []).map(opt)}
     </select>
+    {!!cur[0] && <><label className="muted">Второй куратор ГИП</label>
+      <select className="gip2" value={cur[1]} onChange={e => save(2, +e.target.value)} disabled={!list}>
+        <option value={0}>— нет —</option>
+        {(list || []).filter(p => p.id !== cur[0]).map(opt)}
+      </select></>}
     {msg && <p className="small muted">{msg}</p>}</div>
 }
 

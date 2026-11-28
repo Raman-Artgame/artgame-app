@@ -16,8 +16,8 @@ from .work import active
 router = APIRouter(prefix="/api")
 
 
-def can_phone(p: dict, gip_id: int | None) -> bool:
-    return p["role_code"] in bx.BX_ROLES or (gip_id is not None and gip_id == p["id"])
+def can_phone(p: dict, *gip_ids: int | None) -> bool:
+    return p["role_code"] in bx.BX_ROLES or p["id"] in gip_ids
 
 
 class ContactIn(BaseModel):
@@ -28,10 +28,10 @@ class ContactIn(BaseModel):
 @router.post("/objects/{oid}/contact")
 def set_contact(oid: int, b: ContactIn, p: dict = Depends(active)):
     with db.pool.connection() as conn:
-        o = conn.execute("SELECT id, gip_person_id FROM objects WHERE id=%s AND id<>0", (oid,)).fetchone()
+        o = conn.execute("SELECT id, gip_person_id, gip2_person_id FROM objects WHERE id=%s AND id<>0", (oid,)).fetchone()
         if not o:
             raise HTTPException(404, "Нет такого проекта")
-        if not can_phone(p, o["gip_person_id"]):
+        if not can_phone(p, o["gip_person_id"], o["gip2_person_id"]):
             raise HTTPException(403, "Контакт на объекте вносят ГИП, МОП и HEAD")
         name, phone = b.name.strip() or None, b.phone.strip() or None
         conn.execute("UPDATE objects SET site_contact=%s, site_phone=%s WHERE id=%s", (name, phone, oid))
@@ -67,10 +67,10 @@ def materials(oid: int, p: dict = Depends(active)):
     from .closing import TRIP
     from .kit import KIT, usage
     with db.pool.connection() as conn:
-        o = conn.execute("SELECT id, gip_person_id FROM objects WHERE id=%s AND id<>0", (oid,)).fetchone()
+        o = conn.execute("SELECT id, gip_person_id, gip2_person_id FROM objects WHERE id=%s AND id<>0", (oid,)).fetchone()
         if not o:
             raise HTTPException(404, "Нет такого проекта")
-        if p["role_code"] not in MAT_ROLES and o["gip_person_id"] != p["id"]:
+        if p["role_code"] not in MAT_ROLES and p["id"] not in (o["gip_person_id"], o["gip2_person_id"]):
             raise HTTPException(403, "Материалы проекта видят ГИП, главные, МОП и HEAD")
         kits = []
         for k in conn.execute("SELECT zone_code, items, status, updated_at FROM kit_lists WHERE object_id=%s ORDER BY zone_code", (oid,)).fetchall():
@@ -161,7 +161,7 @@ def _tell(conn, person_id: int | None, text: str) -> None:
 
 
 def _shoot_obj(conn, oid: int) -> dict:
-    o = conn.execute("SELECT id, title, gip_person_id FROM objects WHERE id=%s AND id<>0", (oid,)).fetchone()
+    o = conn.execute("SELECT id, title, gip_person_id, gip2_person_id FROM objects WHERE id=%s AND id<>0", (oid,)).fetchone()
     if not o:
         raise HTTPException(404, "Нет такого проекта")
     return o
@@ -171,14 +171,14 @@ def _shoot_obj(conn, oid: int) -> dict:
 def obj_shoots(oid: int, p: dict = Depends(active)):
     with db.pool.connection() as conn:
         o = _shoot_obj(conn, oid)
-        confirm = p["role_code"] == "head" or o["gip_person_id"] == p["id"]
+        confirm = p["role_code"] == "head" or p["id"] in (o["gip_person_id"], o["gip2_person_id"])
         if not (confirm or p["role_code"] in MKT):
             raise HTTPException(403, "Съёмки видят маркетинг, ГИП и HEAD")
         rows = conn.execute("""SELECT s.id, s.title, s.shoot_date, s.at_time, s.note, s.status, s.alt_date, s.alt_note, s.confirmed_at,
                                       a.full_name AS author, c.full_name AS confirmed_name
                                FROM mkt_shoots s JOIN people a ON a.id=s.author_id LEFT JOIN people c ON c.id=s.confirmed_by
                                WHERE s.object_id=%s AND s.status<>'cancelled' ORDER BY s.shoot_date DESC, s.id DESC""", (oid,)).fetchall()
-    return {"items": rows, "can_propose": p["role_code"] in MKT, "can_confirm": confirm, "gip": bool(o["gip_person_id"])}
+    return {"items": rows, "can_propose": p["role_code"] in MKT, "can_confirm": confirm, "gip": bool(o["gip_person_id"] or o["gip2_person_id"])}
 
 
 @router.post("/objects/{oid}/shoots")
@@ -194,9 +194,11 @@ def obj_shoot_propose(oid: int, b: ShootPropose, p: dict = Depends(active)):
                           p["id"] if st == "planned" else None, datetime.now(timezone.utc) if st == "planned" else None)).fetchone()
         db.audit(conn, p["id"], "shoot_propose", "mkt_shoots", r["id"], {"object": oid, "date": str(b.shoot_date)})
         if st == "proposed":   # Куратора ГИП нет — подтверждает HEAD, ему и сообщение (раньше не уходило никому)
-            to = o["gip_person_id"] or (conn.execute("SELECT id FROM people WHERE role_code='head' AND status='active' ORDER BY id LIMIT 1").fetchone() or {}).get("id")
-            _tell(conn, to, f"🎥 {p['full_name']} предлагает съёмку на объекте «{o['title']}»: {b.shoot_date:%d.%m}"
-                  f"{' ' + b.at_time if b.at_time else ''} — {b.title}. Подтвердите в «Проектах» → «Съёмки на моих объектах».")
+            tos = [g for g in (o["gip_person_id"], o["gip2_person_id"]) if g] or [
+                (conn.execute("SELECT id FROM people WHERE role_code='head' AND status='active' ORDER BY id LIMIT 1").fetchone() or {}).get("id")]
+            for to in tos:
+                _tell(conn, to, f"🎥 {p['full_name']} предлагает съёмку на объекте «{o['title']}»: {b.shoot_date:%d.%m}"
+                      f"{' ' + b.at_time if b.at_time else ''} — {b.title}. Подтвердите в «Проектах» → «Съёмки на моих объектах».")
     return {"id": r["id"], "status": st}
 
 
@@ -210,14 +212,14 @@ def my_shoots(p: dict = Depends(active)):
                                       o.title AS object_title, o.city AS object_city, a.full_name AS author
                                FROM mkt_shoots s JOIN objects o ON o.id=s.object_id JOIN people a ON a.id=s.author_id
                                WHERE s.status IN ('proposed','planned') AND s.object_id <> 0 AND s.shoot_date >= current_date - 1
-                                 AND """ + ("o.gip_person_id IS NULL" if head else "o.gip_person_id=%s") + """
+                                 AND """ + ("coalesce(o.gip_person_id, o.gip2_person_id) IS NULL" if head else "%s IN (o.gip_person_id, o.gip2_person_id)") + """
                                ORDER BY s.status <> 'proposed', s.shoot_date, s.at_time NULLS LAST, s.id""",
                             () if head else (p["id"],)).fetchall()
     return {"items": rows, "waiting": sum(1 for r in rows if r["status"] == "proposed" and not r["alt_date"])}
 
 
 def _shoot(conn, sid: int) -> dict:
-    s = conn.execute("""SELECT s.*, o.gip_person_id, o.title AS object_title FROM mkt_shoots s JOIN objects o ON o.id=s.object_id
+    s = conn.execute("""SELECT s.*, o.gip_person_id, o.gip2_person_id, o.title AS object_title FROM mkt_shoots s JOIN objects o ON o.id=s.object_id
                         WHERE s.id=%s""", (sid,)).fetchone()
     if not s:
         raise HTTPException(404, "Нет такой съёмки")
@@ -229,7 +231,7 @@ def shoot_answer(sid: int, b: ShootAnswer, p: dict = Depends(active)):
     """ГИП объекта (или HEAD): «Подтверждаю» или «Другая дата» с датой и комментарием."""
     with db.pool.connection() as conn, conn.transaction():
         s = _shoot(conn, sid)
-        if not (p["role_code"] == "head" or s["gip_person_id"] == p["id"]):
+        if not (p["role_code"] == "head" or p["id"] in (s["gip_person_id"], s["gip2_person_id"])):
             raise HTTPException(403, "Съёмку подтверждает Куратор ГИП объекта")
         if s["status"] != "proposed":
             raise HTTPException(409, "Съёмка уже не ждёт ответа")
@@ -260,5 +262,6 @@ def shoot_accept(sid: int, p: dict = Depends(active)):
         conn.execute("""UPDATE mkt_shoots SET status='planned', shoot_date=alt_date, alt_date=NULL, confirmed_by=%s, confirmed_at=now(),
                         updated_at=now() WHERE id=%s""", (s["gip_person_id"] or p["id"], sid))
         db.audit(conn, p["id"], "shoot_accept", "mkt_shoots", sid, {})
-        _tell(conn, s["gip_person_id"], f"✅ Съёмка «{s['title']}» на объекте «{s['object_title']}» — {s['alt_date']:%d.%m}, как вы предложили.")
+        for to in {s["gip_person_id"], s["gip2_person_id"]} - {None}:
+            _tell(conn, to, f"✅ Съёмка «{s['title']}» на объекте «{s['object_title']}» — {s['alt_date']:%d.%m}, как вы предложили.")
     return {"ok": True}

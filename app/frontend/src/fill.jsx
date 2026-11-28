@@ -95,7 +95,7 @@ export function FillSheet({ d, onClose, onDone, onClient, onStep, onDesign, onPr
   const [dt, setDt] = useState(null)        // задачи на дизайн
   useEffect(() => { api('/bx/dict').then(x => { setDict(x); const s = x.services.find(s => s.name === d.service); setF(v => ({ ...v, service: s?.id || '' })) }, () => {}) }, [])
   useEffect(() => {
-    api(`/bx/deals/${d.id}/gip`).then(r => setGip((r.candidates || []).find(o => o.id === r.gip_id)?.full_name || ''), () => setGip(''))
+    api(`/bx/deals/${d.id}/gip`).then(r => setGip([r.gip_id, r.gip2_id].map(id => (r.candidates || []).find(o => o.id === id)?.full_name).filter(Boolean).join(', ')), () => setGip(''))
     api(`/bx/deals/${d.id}/design-tasks`).then(r => setDt(r.items || []), () => setDt([]))
   }, [d.id])
   const have = k => !PROJ.includes(k) || (dict.project?.have || []).includes(k)

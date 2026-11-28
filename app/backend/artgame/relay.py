@@ -79,8 +79,8 @@ def approve_file(fid: int, b: MarkIn, p: dict = Depends(active)):
 
 def path(conn, deal_id: int, stage: str | None = None) -> dict:
     """Пять отрезков: дизайн · утверждён · производство · сдано · закрыто. state: done | now | todo | skip."""
-    o = conn.execute("""SELECT o.bitrix_stage, o.gip_person_id, o.done_on, o.closed_at, g.full_name AS gip
-                        FROM objects o LEFT JOIN people g ON g.id=o.gip_person_id WHERE o.id=%s AND o.id<>0""", (deal_id,)).fetchone() or {}
+    o = conn.execute("""SELECT o.bitrix_stage, o.gip_person_id, o.done_on, o.closed_at, concat_ws(', ', g.full_name, g2.full_name) AS gip
+                        FROM objects o LEFT JOIN people g ON g.id=o.gip_person_id LEFT JOIN people g2 ON g2.id=o.gip2_person_id WHERE o.id=%s AND o.id<>0""", (deal_id,)).fetchone() or {}
     stage = stage or o.get("bitrix_stage") or ""
     code = stage.split(":")[-1]
     t = conn.execute("""SELECT count(*) FILTER (WHERE stage<>'done') AS open, count(*) FILTER (WHERE stage='done') AS done
@@ -141,12 +141,12 @@ def production_form(deal_id: int, p: dict = Depends(active)):
     cur = d.get("STAGE_ID") or ""
     miss = [] if cur in AFTER else fill.gate(p, deal_id, cur, WORK, done=("start", "end"))
     with db.pool.connection() as conn:
-        o = conn.execute("SELECT gip_person_id FROM objects WHERE id=%s", (deal_id,)).fetchone() or {}
+        o = conn.execute("SELECT gip_person_id, gip2_person_id FROM objects WHERE id=%s", (deal_id,)).fetchone() or {}
         ok = approved_file(conn, deal_id)
         open_tasks = conn.execute("SELECT count(*) AS n FROM design_tasks WHERE deal_id=%s AND status='active' AND stage<>'done'",
                                   (deal_id,)).fetchone()["n"]
     from .files import sign
-    return {"stage": cur, "in_work": cur in AFTER, "missing": miss, "gip_id": o.get("gip_person_id"),
+    return {"stage": cur, "in_work": cur in AFTER, "missing": miss, "gip_id": o.get("gip_person_id"), "gip2_id": o.get("gip2_person_id"),
             "candidates": candidates(p),
             "start": str(d.get(bxw.F_START) or "")[:10], "end": str(d.get(bxw.F_END) or "")[:10],
             "sketch": {"id": ok["id"], "name": ok["name"], "thumb": sign(ok["id"], "thumb") if (ok["mime"] or "").startswith("image/") else None} if ok else None,
@@ -155,6 +155,7 @@ def production_form(deal_id: int, p: dict = Depends(active)):
 
 class ProdIn(BaseModel):
     gip_id: int
+    gip2_id: int | None = None   # второй куратор ГИП (HEAD 28.11); None — не трогать, 0 — снять
     start: date
     end: date
 
@@ -181,6 +182,8 @@ def to_production(deal_id: int, b: ProdIn, p: dict = Depends(active)):
         ok = approved_file(conn, deal_id)
     if not gip:
         raise HTTPException(400, "Куратор ГИП — Главный художник, Художник-Про или Мастер печати")
+    if b.gip2_id and b.gip2_id == b.gip_id:
+        raise HTTPException(400, "Второй куратор ГИП — другой человек")
     fields = {bxw.F_START: b.start.isoformat(), bxw.F_END: b.end.isoformat()}
     if cur not in AFTER:
         fields["STAGE_ID"] = WORK
@@ -197,6 +200,9 @@ def to_production(deal_id: int, b: ProdIn, p: dict = Depends(active)):
         out = assign(conn, p, deal_id, b.gip_id,
                      extra=f" Старт {b.start:%d.%m}, сдача {b.end:%d.%m}. "
                            + ("Утверждённый эскиз — первым в карточке проекта." if ok else "Утверждённого эскиза пока нет — спроси МОП."))
+        out2 = assign(conn, p, deal_id, b.gip2_id, slot=2, extra=f" Старт {b.start:%d.%m}, сдача {b.end:%d.%m}.") if b.gip2_id is not None else None
         db.audit(conn, p["id"], "to_production", "objects", deal_id, {"gip": b.gip_id, "start": b.start.isoformat(), "end": b.end.isoformat()})
     out()
+    if out2:
+        out2()
     return {"ok": True, "bx": r["bx"], "stage_moved": "STAGE_ID" in fields}

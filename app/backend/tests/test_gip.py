@@ -26,3 +26,25 @@ def test_gip_assign_and_history(client, team):  # noqa: F811
     assert len(client.get("/api/review", headers=hdr(3000)).json()["shifts"]) == 2
     client.post("/api/objects/731/gip", json={"person_id": 0}, headers=hdr(1000))
     assert client.get("/api/objects/731/history", headers=hdr(3000)).status_code == 403
+
+
+def test_second_gip_same_rights(client, team):  # noqa: F811
+    """Второй куратор ГИП (HEAD 28.11): права те же — история, «Проверка», команда; снять первого — второй становится первым."""
+    lead = team[3000]
+    pm = client.post("/api/register", json={"full_name": "Мастер"}, headers=hdr(6000)).json()["id"]
+    client.post(f"/api/people/{pm}", json={"role_code": "print_master", "zones": ["print"]}, headers=hdr(1000))
+    assert client.post("/api/objects/731/gip", json={"person_id": pm, "slot": 2}, headers=hdr(1000)).status_code == 400   # сначала первый
+    client.post("/api/objects/731/gip", json={"person_id": lead}, headers=hdr(1000))
+    assert client.post("/api/objects/731/gip", json={"person_id": lead, "slot": 2}, headers=hdr(1000)).status_code == 400   # тот же человек
+    r = client.post("/api/objects/731/gip", json={"person_id": pm, "slot": 2}, headers=hdr(1000)).json()
+    assert (r["gip_id"], r["gip2_id"], r["gip2_name"]) == (lead, pm, "Мастер")
+    _shift(client, 5000, "mural", 3)
+    for tg in (3000, 6000):
+        assert client.get("/api/objects/731/history", headers=hdr(tg)).status_code == 200
+        assert len(client.get("/api/review", headers=hdr(tg)).json()["shifts"]) == 1
+        assert client.get("/api/objects/731/crew", headers=hdr(tg)).json()["can_edit"]
+    # сняли первого — второй остаётся единственным куратором
+    r = client.post("/api/objects/731/gip", json={"person_id": 0}, headers=hdr(1000)).json()
+    assert (r["gip_id"], r["gip2_id"]) == (pm, None)
+    assert client.get("/api/objects/731/history", headers=hdr(3000)).status_code == 403
+    assert client.get("/api/objects/731/history", headers=hdr(6000)).status_code == 200

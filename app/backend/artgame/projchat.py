@@ -22,7 +22,7 @@ MAX = 4000
 
 # участник объекта o (o — алиас objects) для человека %(me)s
 MEMBER = """(EXISTS (SELECT 1 FROM object_crew c WHERE c.object_id=o.id AND c.person_id=%(me)s)
-             OR o.gip_person_id=%(me)s
+             OR %(me)s IN (o.gip_person_id, o.gip2_person_id)
              OR o.mop_bx_id IS NOT NULL AND o.mop_bx_id = (SELECT bitrix_user_id FROM people WHERE id=%(me)s))"""
 
 
@@ -72,6 +72,7 @@ def members(conn, oid: int) -> list[dict]:
         """SELECT pe.id, pe.full_name, r.title AS role_title, x.why FROM (
                SELECT c.person_id AS id, 'crew' AS why FROM object_crew c WHERE c.object_id=%(o)s
                UNION SELECT o.gip_person_id, 'gip' FROM objects o WHERE o.id=%(o)s AND o.gip_person_id IS NOT NULL
+               UNION SELECT o.gip2_person_id, 'gip' FROM objects o WHERE o.id=%(o)s AND o.gip2_person_id IS NOT NULL
                UNION SELECT pe.id, 'mop' FROM objects o JOIN people pe ON pe.bitrix_user_id=o.mop_bx_id WHERE o.id=%(o)s
                UNION SELECT id, 'head' FROM people WHERE role_code='head') x
            JOIN people pe ON pe.id=x.id LEFT JOIN roles r ON r.code=pe.role_code

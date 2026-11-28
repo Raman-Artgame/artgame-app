@@ -51,6 +51,12 @@ def _apply(conn, applied: list[str], cur: dict) -> list[str]:
     return applied
 
 
+def is_gip(conn, oid: int, person_id: int) -> bool:
+    """Куратор ГИП объекта — первый или второй (HEAD 28.11: кураторов может быть двое, права одинаковые)."""
+    o = conn.execute("SELECT gip_person_id, gip2_person_id FROM objects WHERE id=%s", (oid,)).fetchone()
+    return bool(o and person_id in (o["gip_person_id"], o["gip2_person_id"]))
+
+
 def audit(conn, person_id, action, entity=None, entity_id=None, data=None):
     from psycopg.types.json import Jsonb
 

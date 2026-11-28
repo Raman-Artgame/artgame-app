@@ -41,7 +41,7 @@ function WorkLine({ d }) {
     <div className="kpay"><i style={{ width: pct + '%' }} /></div>
     <div className="kpayt">{d.paid ? <span>Оплачено <b>{money(d.paid)}</b></span> : <span className="warn">Оплат ещё нет</span>}
       {d.debt > 0 ? <span>долг <b>{money(d.debt)}</b></span> : d.paid ? <span className="ok">оплачено полностью</span> : null}</div>
-    <div className="kmeta"><span>{d.gip ? 'ГИП ' + d.gip.split(' ')[0] : <em>ГИП не назначен</em>}</span>
+    <div className="kmeta"><span>{d.gip ? 'ГИП ' + d.gip.split(', ').map(n => n.split(' ')[0]).join(', ') : <em>ГИП не назначен</em>}</span>
       {d.end ? <span className={left < 0 ? 'late' : left <= 3 ? 'soon' : ''}>сдача {ddmm(d.end)}{left < 0 ? ` · просрочено ${-left} дн.` : left <= 3 ? ` · через ${left} дн.` : ''}</span>
         : <em>срок сдачи не указан</em>}</div>
   </div>

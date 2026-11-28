@@ -66,9 +66,9 @@ def _myco(d: dict) -> str:
 # ---------- 12 пунктов ----------
 
 def _obj(conn, did: int) -> dict:
-    return conn.execute("""SELECT o.id, o.title, o.city, o.drive_folder, o.folders, o.gip_person_id, o.done_on, o.closed_at, o.status,
-                                  o.design_synced_at, g.full_name AS gip, b.full_name AS done_by
-                           FROM objects o LEFT JOIN people g ON g.id=o.gip_person_id LEFT JOIN people b ON b.id=o.done_by
+    return conn.execute("""SELECT o.id, o.title, o.city, o.drive_folder, o.folders, o.gip_person_id, o.gip2_person_id, o.done_on, o.closed_at, o.status,
+                                  o.design_synced_at, concat_ws(', ', g.full_name, g2.full_name) AS gip, b.full_name AS done_by
+                           FROM objects o LEFT JOIN people g ON g.id=o.gip_person_id LEFT JOIN people g2 ON g2.id=o.gip2_person_id LEFT JOIN people b ON b.id=o.done_by
                            WHERE o.id=%s AND o.id<>0""", (did,)).fetchone() or {}
 
 
@@ -410,8 +410,7 @@ def _can_done(conn, p: dict, oid: int) -> bool:
         return False
     if p["role_code"] in EDIT_DONE:
         return True
-    o = conn.execute("SELECT gip_person_id FROM objects WHERE id=%s", (oid,)).fetchone()
-    return bool(o and o["gip_person_id"] == p["id"])
+    return db.is_gip(conn, oid, p["id"])
 
 
 @router.get("/objects/{oid}/done")
@@ -526,10 +525,11 @@ def _people_of(conn, d: dict, o: dict) -> list[int]:
                      (int(d.get("ASSIGNED_BY_ID") or 0),)).fetchone()
     if m:
         ids.append(m["id"])
-    if o.get("gip_person_id") and o["gip_person_id"] not in ids:
-        g = conn.execute("SELECT id FROM people WHERE id=%s AND status='active' AND role_code<>'head'", (o["gip_person_id"],)).fetchone()
-        if g:
-            ids.append(g["id"])
+    for gid in (o.get("gip_person_id"), o.get("gip2_person_id")):
+        if gid and gid not in ids:
+            g = conn.execute("SELECT id FROM people WHERE id=%s AND status='active' AND role_code<>'head'", (gid,)).fetchone()
+            if g:
+                ids.append(g["id"])
     return ids
 
 
