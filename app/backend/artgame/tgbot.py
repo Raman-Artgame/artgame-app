@@ -63,6 +63,13 @@ async def tg_hook(request: Request, x_telegram_bot_api_secret_token: str = Heade
     if chat.get("type") != "private" or not chat.get("id"):
         return {"ok": True}
     try:
+        text = (msg.get("text") or "").strip()
+        if text.startswith("/start c_"):   # кандидат из анкеты: привязка к боту (HEAD 28.11), без кнопки приложения
+            from . import hrbot
+            said = hrbot.link(int(chat["id"]), text.split(" ", 1)[1], (msg.get("from") or {}).get("first_name", ""))
+            if said:
+                CALL("sendMessage", chat_id=chat["id"], text=said)
+                return {"ok": True}
         kb = {"inline_keyboard": [[{"text": "Открыть ARTGAME", "web_app": {"url": app_url()}}]]}
         try:   # «Диалог с HEAD» (09.11): сообщение сотрудника → HEAD, ответ HEAD свайпом → сотруднику
             from . import dm

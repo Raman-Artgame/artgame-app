@@ -34,3 +34,8 @@
 .trfoot .wrap { padding-top: 0; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
 .trfoot button { padding: 16px; font-size: 16px; border-radius: 16px; }
 .trleft { margin: 0 0 6px; text-align: center; }
+.trinbox .trcard.wait { border-color: var(--warn); }
+.trconf label { display: block; margin: 10px 0 6px; font-size: 14px; color: var(--muted); }
+.trconf input { width: 100%; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--alt); color: var(--text); font: inherit; }
+.trform .hrrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.trform .hrrow > * { width: auto; }

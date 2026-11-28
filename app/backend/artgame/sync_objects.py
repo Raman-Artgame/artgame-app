@@ -178,10 +178,18 @@ def upsert(conn, deals: list[dict]) -> list[int]:
 
 
 def main():
+    p = db.open_pool()
+    try:   # пробные дни кандидатов: напоминание накануне в 18:00 и куратору об оценке (HEAD 28.11) — не зависит от Битрикса
+        from . import hrbot
+        with p.connection() as conn, conn.transaction():
+            n = hrbot.tick(conn)
+        if any(n.values()):
+            print("hr:", n)
+    except Exception as ex:   # noqa: BLE001
+        print("hr tick:", ex)
     if not settings.gateway_url and not settings.bitrix_webhook:
         print("нет ни шлюза (ARTGAME_GATEWAY_URL), ни вебхука (ARTGAME_BITRIX_WEBHOOK) — пропуск")
         return
-    p = db.open_pool()
     deals = fetch_deals()
     titled = number_titles(deals)
     with p.connection() as conn:

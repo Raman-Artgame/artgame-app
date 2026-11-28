@@ -27,7 +27,7 @@ import { MyData, ProfileForm } from './profile.jsx'
 import { FileLinks } from './objects.jsx'
 import { Closing } from './closing.jsx'
 import { ClientBriefPage } from './brief.jsx'
-import { JobPage } from './hrform.jsx'
+import { JobPage, CandStatus } from './hrform.jsx'
 import { TeamTabs } from './hr.jsx'
 import { Onboard } from './onboard.jsx'
 import { TrialInbox } from './hrtrial.jsx'
@@ -465,5 +465,5 @@ function Nav({ tabs, tab, setTab, counts = {}, scroll }) {
 // Бриф клиента по ссылке (HEAD 26.11): /?brief=ТОКЕН открывается без входа — клиент не сотрудник, приложение ему не показываем
 // Анкета кандидата (HEAD 26.11 «отдел HR»): /?job=art&src=instagram — тоже без входа, кандидат ещё не сотрудник
 const qs = new URLSearchParams(location.search)
-const briefToken = qs.get('brief'), job = qs.get('job')
-createRoot(document.getElementById('root')).render(briefToken ? <ClientBriefPage token={briefToken} /> : job ? <JobPage dir={job} src={qs.get('src')} /> : <App />)
+const briefToken = qs.get('brief'), job = qs.get('job'), meToken = qs.get('me')   // ?me= — личная страница кандидата (HEAD 28.11)
+createRoot(document.getElementById('root')).render(briefToken ? <ClientBriefPage token={briefToken} /> : job ? <JobPage dir={job} src={qs.get('src')} /> : meToken ? <CandStatus token={meToken} /> : <App />)

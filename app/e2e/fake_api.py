@@ -203,6 +203,8 @@ from artgame import notify  # noqa: E402
 SENT = []
 notify.SEND = lambda tg, text: SENT.append({"tg": tg, "text": text})
 from artgame import dm  # noqa: E402
+from artgame import tgbot  # noqa: E402
+tgbot.CALL = lambda m, **p: SENT.append({"tg": p.get("chat_id"), "text": p.get("text"), "cand": True}) or {}   # бот кандидату (HEAD 28.11)
 dm.SEND = lambda tg, text: SENT.append({"tg": tg, "text": text, "dm": True}) and None   # «Диалог с HEAD»: бот никуда не пишет
 dm.BOT = lambda m, **p: SENT.append({"bot": m, **{k: v for k, v in p.items() if k != "reply_markup"}}) or {"message_id": len(SENT)}   # уведомление «Новое сообщение»
 

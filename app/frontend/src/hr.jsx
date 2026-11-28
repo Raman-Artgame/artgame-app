@@ -14,6 +14,17 @@ const SRC = [['instagram', 'Instagram'], ['threads', 'Threads'], ['olx', 'OLX'],
 const days = iso => Math.floor((Date.now() - new Date(iso)) / 864e5)
 const ago = iso => { const d = days(iso); return d < 1 ? 'сегодня' : d === 1 ? 'вчера' : `${d} дн.` }
 const wa = (c, text) => `https://wa.me/7${c.phone.slice(1)}?text=${encodeURIComponent(text)}`
+const day2 = d => d ? `${d.slice(8, 10)}.${d.slice(5, 7)}` : ''
+const meLink = c => `${location.origin}/?me=${c.token}`
+// Приглашение на пробный день (HEAD 28.11): тот же текст, что на личной странице кандидата, плюс ссылка на неё
+const trialText = (c, v) => v.state !== 'ok' ?
+  `Здравствуйте, ${c.full_name.split(' ').slice(-1)[0]}! Это ARTGAME. Приглашаем вас на пробный день — день работы на объекте с куратором. Выберите удобный день по ссылке, куратор подтвердит и пришлёт время и адрес: ${meLink(c)}` :
+  [`Здравствуйте, ${c.full_name.split(' ').slice(-1)[0]}! Это ARTGAME. Ждём вас на пробный день.`,
+  `Когда: ${day2(v.day)}${v.time ? `, в ${v.time}` : ''}`, v.place && `Куда: ${v.place}`,
+  v.who && `Встретит: ${v.who}${v.who_phone ? `, ${v.who_phone}` : ''}`, v.bring && `Взять с собой: ${v.bring}`,
+  'Пробный день оплачивается, если вас возьмут в команду. Если не получается прийти — сразу сообщите куратору.',
+  `Подробнее: ${meLink(c)}`].filter(Boolean).join('\n')
+const STATE = { pick: 'Кандидат выбирает день', wait: 'Ждёт подтверждения куратора ГИП', ok: 'День подтверждён' }
 const hello = c => `Здравствуйте, ${c.full_name.split(' ').slice(-1)[0]}! Это ARTGAME, вы оставили анкету «${c.dir_title}». Удобно созвониться сегодня или завтра?`
 
 export function TeamTabs({ children }) {
@@ -129,12 +140,14 @@ function CandCard({ id, back }) {
       </div>
       {act === 'interview' && <div className="hrform"><label>Когда собеседование</label><input type="date" value={f.meet_on || ''} onChange={e => setF({ ...f, meet_on: e.target.value })} />
         <button disabled={!f.meet_on} onClick={() => save({ stage: 'interview', meet_on: f.meet_on })}>Назначить</button></div>}
-      {act === 'trial' && <div className="hrform"><p className="small muted">Пробная оплачивается, только если человека примем: начисление в ФОТ появится само, когда он войдёт в приложение. Не приняли — не оплачивается.</p><label>Дата пробной смены</label><input type="date" value={f.trial_on || ''} onChange={e => setF({ ...f, trial_on: e.target.value })} />
+      {act === 'trial' && <div className="hrform"><p className="small muted">Пробная оплачивается, только если человека примем: начисление в ФОТ появится само, когда он войдёт в приложение. Не приняли — не оплачивается.</p><label>Дата пробной смены — пусто: кандидат выберет сам, куратор подтвердит</label><input type="date" value={f.trial_on || ''} onChange={e => setF({ ...f, trial_on: e.target.value })} />
         <label>Проект — его куратор ГИП оценит пробный день</label><select value={f.trial_object || ''} onChange={e => setF({ ...f, trial_object: e.target.value })}>
           <option value="">Выбрать проект в работе…</option>{(c.objects || []).map(o => <option key={o.id} value={o.id}>№{o.id} {o.title}{o.city ? ` · ${o.city}` : ''} · {o.gip ? `ГИП ${o.gip}` : 'без ГИП'}</option>)}</select>
-        <label>Кто оценивает</label><select value={f.trial_by || ''} onChange={e => setF({ ...f, trial_by: e.target.value })}>
+        <label>Кто оценивает и встречает</label><select value={f.trial_by || ''} onChange={e => setF({ ...f, trial_by: e.target.value })}>
           <option value="">Куратор ГИП сделки</option>{(c.evaluators || []).map(([pid, n]) => <option key={pid} value={pid}>{n}</option>)}</select>
-        <button disabled={!f.trial_on} onClick={() => save({ stage: 'trial', trial_on: f.trial_on, ...(f.trial_object ? { trial_object: +f.trial_object } : {}), ...(f.trial_by ? { trial_by: +f.trial_by } : {}) })}>Назначить пробную</button></div>}
+        <p className="small muted">Время, адрес и «что взять» указывает куратор ГИП, когда подтверждает день. Кандидат в Telegram получит всё от бота сам, без Telegram — кнопка WhatsApp в карточке.</p>
+        <button onClick={() => save({ stage: 'trial', ...(f.trial_on ? { trial_on: f.trial_on } : {}),
+          ...(f.trial_object ? { trial_object: +f.trial_object } : {}), ...(f.trial_by ? { trial_by: +f.trial_by } : {}) })}>Назначить пробную</button></div>}
       {act === 'hired' && <div className="hrform"><label>С какой роли начинает</label>
         <div className="segf">{(c.roles || []).map(([k, t]) => <button key={k} className={f.hired_role === k ? 'on' : ''} onClick={() => setF({ ...f, hired_role: k })}>{t}</button>)}</div>
         <p className="small muted">Все начинают с первой ступени. Человек входит в бот ARTGAME → «ARTGAME», вводит имя и этот же телефон — роль «{roleTitle[f.hired_role]}» встанет сама. Строка уйдёт в «Сотрудники и суппорты». До первой смены он прочитает правила роли, ТБ и примет соглашение о неразглашении.</p>
@@ -143,6 +156,8 @@ function CandCard({ id, back }) {
         <input value={f.reason || ''} maxLength={200} placeholder={act === 'reserve' ? 'нет набора в городе, позвать весной…' : 'слабые работы, не пришёл, не профиль…'} onChange={e => setF({ ...f, reason: e.target.value })} />
         {act === 'rejected' && <label className="hrcheck"><input type="checkbox" checked={!!f.self_refused} onChange={e => setF({ ...f, self_refused: e.target.checked })} /> Отказался сам (в базе — «Не актуален»)</label>}
         <button disabled={!(f.reason || '').trim()} onClick={() => save({ stage: act, reason: f.reason, ...(act === 'rejected' ? { self_refused: !!f.self_refused } : {}) })}>{act === 'reserve' ? 'В резерв' : 'Отказать'}</button></div>}
+      {c.stage === 'interview' && c.meet_on && <a className="btn ghost mini" href={wa(c, `Здравствуйте, ${c.full_name.split(' ').slice(-1)[0]}! Это ARTGAME. Приглашаем на собеседование ${day2(c.meet_on)}. Во сколько вам удобно?`)} target="_blank" rel="noreferrer">Пригласить на собеседование в WhatsApp</a>}
+      {['reserve', 'rejected'].includes(c.stage) && <a className="btn ghost mini" href={wa(c, `Здравствуйте, ${c.full_name.split(' ').slice(-1)[0]}! Это ARTGAME. Спасибо за анкету и потраченное время. Сейчас позвать в команду не можем, но анкета осталась у нас: когда появится место, напишем.`)} target="_blank" rel="noreferrer">Вежливо ответить в WhatsApp</a>}
       {c.stage === 'hired' && c.trial_on && <p className="small muted">{c.trial_paid ? `✓ Пробная смена ${c.trial_on.slice(8, 10)}.${c.trial_on.slice(5, 7)} начислена в ФОТ.` : `Пробная смена ${c.trial_on.slice(8, 10)}.${c.trial_on.slice(5, 7)} начислится в ФОТ, когда войдёт в приложение.`}</p>}
       {c.stage === 'hired' && <p className="small muted">{c.person_id ? '✓ Вошёл в приложение, роль стоит.' : `Ждём, когда войдёт в приложение с телефоном ${c.phone}. Можно отправить ему ссылку на бот.`}</p>}
       {c.stage === 'hired' && c.person_id && <OnboardStatus ob={c.onboard} />}
@@ -162,14 +177,28 @@ function CandCard({ id, back }) {
 // Пробный день (HEAD 28.11): кто оценивает и оценка куратора целиком — звёзды, пункты, итог, комментарий.
 function TrialBlock({ c, save }) {
   const t = c.trial
+  const [sent, setSent] = useState(null)
   if (!t) return null
-  const day = c.trial_on ? `${c.trial_on.slice(8, 10)}.${c.trial_on.slice(5, 7)}` : ''
-  if (!t.at) return <div className={'card hrtrial' + (t.late ? ' late' : '')}><h3>Пробный день {day}</h3>
-    {t.by ? <p className="small">Оценивает: <b>{t.by_name}</b>{t.by === t.gip ? ' · куратор ГИП сделки' : ''}. {t.late ? 'День прошёл, оценки ещё нет.' : 'Оценка появится здесь после смены.'}</p> :
+  const day = day2(c.trial_on)
+  const v = t.invite || {}, sentAt = sent || v.sent_at
+  const mark = () => api(`/hr/candidates/${c.id}/invite-sent`, { method: 'POST' }).then(r => setSent(r.sent_at), () => {})
+  if (!t.at) return <div className={'card hrtrial' + (t.late ? ' late' : '')}><h3>Пробный день {day || '— день выбирает кандидат'}{c.trial_time ? `, ${c.trial_time}` : ''}</h3>
+    {t.by ? <p className="small">Оценивает и встречает: <b>{t.by_name}</b>{t.by === t.gip ? ' · куратор ГИП сделки' : ''}. {t.late ? 'День прошёл, оценки ещё нет.' : 'Оценка появится здесь после смены.'}</p> :
       <p className="small hrerr">Оценщик не назначен: у сделки нет куратора ГИП. Выбери, кто оценит.</p>}
+    {t.by && !t.by_bot && <p className="small hrerr">{t.by_name} не вошёл в бот: уведомление ему не придёт. Позвони и скажи, что карточка — вверху приложения.</p>}
+    {c.stage === 'trial' && <div className="hrinvite">
+      <p className="small"><b>{STATE[v.state]}</b>{v.state === 'ok' && v.place ? ` · ${v.place}` : ''}</p>
+      <p className={'small ' + (t.cand_bot ? 'ok' : 'muted')}>{t.cand_bot ? '✓ Кандидат в Telegram: бот сам пишет ему на каждом шаге и напоминает накануне.' :
+        'Кандидат не подключил Telegram — отправь ему это сообщение в WhatsApp. Там же ссылка, где он выбирает день и может подключить бот.'}</p>
+      {(!t.cand_bot || (v.state === 'ok' && !sentAt)) && <><p className="small hrpre">{trialText(c, v)}</p>
+        <a className={'btn mini' + (sentAt ? ' ghost' : '')} href={wa(c, trialText(c, v))} target="_blank" rel="noreferrer" onClick={mark}>{sentAt ? 'Отправить ещё раз в WhatsApp' : 'Отправить кандидату в WhatsApp'}</a>
+        {v.state === 'ok' && <p className={'small ' + (sentAt ? 'ok' : 'hrerr')}>{sentAt ? `✓ Приглашение отправлено ${new Date(sentAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : 'Кандидат ещё не знает время и адрес'}</p>}</>}
+      {t.cand_bot && v.state === 'ok' && <p className={'small ' + (sentAt ? 'ok' : 'hrerr')}>{sentAt ? '✓ Приглашение ушло в Telegram' : 'Приглашение в Telegram не ушло — отправь в WhatsApp'}</p>}</div>}
     {c.stage === 'trial' && <select value={t.by || ''} onChange={e => e.target.value && save({ trial_by: +e.target.value })}>
       <option value="">{t.by ? 'Сменить оценщика…' : 'Выбрать оценщика…'}</option>{(c.evaluators || []).map(([pid, n]) => <option key={pid} value={pid}>{n}</option>)}</select>}
   </div>
+  if (t.noshow) return <div className="card hrtrial no"><h3>Пробный день {day}</h3><p><b>Не пришёл.</b></p>
+    <p className="small muted">Отметил {t.reviewer} · {new Date(t.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p></div>
   return <div className={'card hrtrial ' + t.verdict_code}><h3>Пробный день {day} · оценка</h3>
     <div className="hrtv"><span className="hrtstars">{'★'.repeat(t.stars)}<i>{'★'.repeat(5 - t.stars)}</i></span><b>{t.verdict}</b></div>
     <p className="small muted">{t.reviewer} · {new Date(t.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
