@@ -85,8 +85,15 @@ async function tab(p, name) {
   await fill('Руководил людьми', 'да, бригада из 3')
   await c.getByRole('button', { name: 'Дальше' }).click()
   // 7. работы: 3 фото и резюме файлом
-  await c.locator('.hjpic.add input[type=file]').setInputFiles([1, 2, 3].map(n => ({ name: `w${n}.png`, mimeType: 'image/png', buffer: PNG })))
-  await c.locator('.hjpic.ok').nth(2).waitFor()
+  await c.locator('.hjpic.add input[type=file]').setInputFiles([1, 2, 3, 4].map(n => ({ name: `w${n}.png`, mimeType: 'image/png', buffer: PNG })))
+  await c.locator('.hjpic.ok').nth(3).waitFor()
+  // HEAD 27.11: лишнее фото убирается крестиком; после перезагрузки свои фото видны
+  await c.screenshot({ path: `${shots}/hr-7a-foto.png` })
+  await c.locator('.hjpic .hjdel').nth(3).click()
+  assert.equal(await c.locator('.hjpic:not(.add)').count(), 3)
+  await c.waitForTimeout(500)
+  await c.reload(); await c.locator('.hjpic.ok').nth(2).waitFor()
+  assert.equal(await c.locator('.hjpic:not(.add)').count(), 3, 'после перезагрузки — 3 фото')
   await c.locator('.hjfile input[type=file]').setInputFiles({ name: 'cv.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') })
   await c.getByText('Резюме загружено').waitFor()
   await fill('Instagram', 'instagram.com/aigerim.art')

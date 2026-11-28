@@ -130,7 +130,7 @@ export function Today({ openDeal, openLead, openMonth }) {
   const q = t.queue
   const open = x => x.entity === 'lead' ? openLead(x.id) : x.entity === 'deal' ? openDeal(x.id) : x.deal && openDeal(x.deal)
   const total = q.hot.length + q.today.length
-  const row = x => <div key={x.entity + x.id + (x.action === 'design_q' ? 'q' : '')} className={'qrow ' + x.entity}>
+  const row = x => <div key={x.entity + x.id + (x.action === 'design_q' ? 'q' : x.action === 'folder' ? 'f' : '')} className={'qrow ' + x.entity}>
     <span className={'ic ' + x.entity}>{x.entity === 'lead' ? initial(x.name || x.title) : x.entity === 'deal' ? '№' : '✓'}</span>
     <div className="qmain" onClick={() => open(x)}>
       <div className="qt">{x.entity === 'task' ? x.title : x.entity === 'lead' ? <b>{x.name || x.title}</b> : <><b>№ {x.id}</b> {cleanTitle(x.title, x.id)}</>}</div>

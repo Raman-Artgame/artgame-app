@@ -67,11 +67,15 @@ class Gateway:
         return data
 
 
-def fetch_deals() -> list[dict]:
+def reader():
     if settings.gateway_url:
-        rd = Gateway(settings.gateway_url, settings.gateway_token).open().bitrix_read
-    else:
-        from .bx import _webhook_read as rd   # шлюз не настроен — читаем вебхуком приложения
+        return Gateway(settings.gateway_url, settings.gateway_token).open().bitrix_read
+    from .bx import _webhook_read as rd   # шлюз не настроен — читаем вебхуком приложения
+    return rd
+
+
+def fetch_deals() -> list[dict]:
+    rd = reader()
     out, start = [], 0
     while start is not None:
         j = rd("crm.deal.list", {
@@ -203,7 +207,17 @@ def main():
                 print(f"designs {o['id']}: {ex}")
         if new:
             db.audit(conn, None, "objects_sync", data={"new": new})
-    print(f"deals={len(deals)} new={len(new)} folders={made} designs+={got}")
+    # сторож папок (HEAD 27.11): каждая открытая сделка обеих воронок — с папкой; сбой виден HEAD и МОП.
+    # Своё соединение: ошибка сторожа не откатывает объекты, и наоборот.
+    guard = {}
+    try:
+        from . import folderguard
+        todo = folderguard.open_deals(reader())
+        with p.connection() as conn:
+            guard = folderguard.run(conn, todo)
+    except Exception as ex:  # noqa: BLE001
+        print(f"folderguard: {type(ex).__name__}: {ex}")
+    print(f"deals={len(deals)} new={len(new)} folders={made} designs+={got} guard={guard}")
 
 
 if __name__ == "__main__":

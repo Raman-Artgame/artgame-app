@@ -709,6 +709,15 @@ def _today(p: dict, fresh: bool = False) -> dict:
                 for b in (q["today"], q["later"]):
                     b[:] = [x for x in b if (x["entity"], x["id"]) != ("deal", d["id"])]
                 q["today"].insert(0, item("deal", d, "эскиз утверждён — передай в производство", action="production"))
+    # Сторож папок (HEAD 27.11): у сделки нет папки на Диске или пуст «Объект» — МОП видит сразу
+    if deals:
+        from . import folderguard
+        with db.pool.connection() as conn:
+            bad = folderguard.problems(conn, ids=[d["id"] for d in deals])
+        by = {d["id"]: d for d in deals}
+        for x in bad:
+            why = "нет папки на Диске — загрузка файлов не работает, сообщи HEAD" if x["no_folder"] else "не заполнен «Объект» — впиши название объекта в карточке"
+            q["today"].insert(0, item("deal", by[x["id"]], why, action="folder"))
     # ТЗ дизайнеру (HEAD 26.11): дизайнер задал вопрос по задаче — строка МОП «ответь дизайнеру». «Горит» не перебиваем.
     if deals:
         with db.pool.connection() as conn:
