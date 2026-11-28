@@ -115,6 +115,7 @@ function CandCard({ id, back }) {
       <textarea rows={3} value={f.note} placeholder="Что увидел на разговоре: сильные стороны, сомнения" onChange={e => setF({ ...f, note: e.target.value })} />
       {f.note !== (c.note || '') && <button className="ghost" onClick={() => save({ note: f.note })}>Сохранить заметку</button>}
     </div>
+    <TrialBlock c={c} save={save} />
     <div className="card hracts">
       <h3>Следующий шаг</h3>
       <div className="hrbtns">
@@ -129,8 +130,10 @@ function CandCard({ id, back }) {
       {act === 'interview' && <div className="hrform"><label>Когда собеседование</label><input type="date" value={f.meet_on || ''} onChange={e => setF({ ...f, meet_on: e.target.value })} />
         <button disabled={!f.meet_on} onClick={() => save({ stage: 'interview', meet_on: f.meet_on })}>Назначить</button></div>}
       {act === 'trial' && <div className="hrform"><p className="small muted">Пробная оплачивается, только если человека примем: начисление в ФОТ появится само, когда он войдёт в приложение. Не приняли — не оплачивается.</p><label>Дата пробной смены</label><input type="date" value={f.trial_on || ''} onChange={e => setF({ ...f, trial_on: e.target.value })} />
-        <label>Сделка (необязательно)</label><input inputMode="numeric" value={f.trial_object || ''} placeholder="№ сделки" onChange={e => setF({ ...f, trial_object: e.target.value.replace(/\D/g, '') })} />
-        <button disabled={!f.trial_on} onClick={() => save({ stage: 'trial', trial_on: f.trial_on, ...(f.trial_object ? { trial_object: +f.trial_object } : {}) })}>Назначить пробную</button></div>}
+        <label>Сделка — куратор ГИП сделки оценит пробный день</label><input inputMode="numeric" value={f.trial_object || ''} placeholder="№ сделки" onChange={e => setF({ ...f, trial_object: e.target.value.replace(/\D/g, '') })} />
+        <label>Кто оценивает</label><select value={f.trial_by || ''} onChange={e => setF({ ...f, trial_by: e.target.value })}>
+          <option value="">Куратор ГИП сделки</option>{(c.evaluators || []).map(([pid, n]) => <option key={pid} value={pid}>{n}</option>)}</select>
+        <button disabled={!f.trial_on} onClick={() => save({ stage: 'trial', trial_on: f.trial_on, ...(f.trial_object ? { trial_object: +f.trial_object } : {}), ...(f.trial_by ? { trial_by: +f.trial_by } : {}) })}>Назначить пробную</button></div>}
       {act === 'hired' && <div className="hrform"><label>С какой роли начинает</label>
         <div className="segf">{(c.roles || []).map(([k, t]) => <button key={k} className={f.hired_role === k ? 'on' : ''} onClick={() => setF({ ...f, hired_role: k })}>{t}</button>)}</div>
         <p className="small muted">Все начинают с первой ступени. Человек входит в бот ARTGAME → «ARTGAME», вводит имя и этот же телефон — роль «{roleTitle[f.hired_role]}» встанет сама. Строка уйдёт в «Сотрудники и суппорты». До первой смены он прочитает правила роли, ТБ и примет соглашение о неразглашении.</p>
@@ -152,4 +155,23 @@ function CandCard({ id, back }) {
     </div>
     <p className="small muted hrsheet">{c.in_sheet ? '✓ Строка в «Базе кандидатов» обновлена.' : 'Строка в «Базе кандидатов» появится после отправки анкеты.'}</p>
   </>
+}
+
+
+// Пробный день (HEAD 28.11): кто оценивает и оценка куратора целиком — звёзды, пункты, итог, комментарий.
+function TrialBlock({ c, save }) {
+  const t = c.trial
+  if (!t) return null
+  const day = c.trial_on ? `${c.trial_on.slice(8, 10)}.${c.trial_on.slice(5, 7)}` : ''
+  if (!t.at) return <div className={'card hrtrial' + (t.late ? ' late' : '')}><h3>Пробный день {day}</h3>
+    {t.by ? <p className="small">Оценивает: <b>{t.by_name}</b>{t.by === t.gip ? ' · куратор ГИП сделки' : ''}. {t.late ? 'День прошёл, оценки ещё нет.' : 'Оценка появится здесь после смены.'}</p> :
+      <p className="small hrerr">Оценщик не назначен: у сделки нет куратора ГИП. Выбери, кто оценит.</p>}
+    {c.stage === 'trial' && <select value={t.by || ''} onChange={e => e.target.value && save({ trial_by: +e.target.value })}>
+      <option value="">{t.by ? 'Сменить оценщика…' : 'Выбрать оценщика…'}</option>{(c.evaluators || []).map(([pid, n]) => <option key={pid} value={pid}>{n}</option>)}</select>}
+  </div>
+  return <div className={'card hrtrial ' + t.verdict_code}><h3>Пробный день {day} · оценка</h3>
+    <div className="hrtv"><span className="hrtstars">{'★'.repeat(t.stars)}<i>{'★'.repeat(5 - t.stars)}</i></span><b>{t.verdict}</b></div>
+    <p className="small muted">{t.reviewer} · {new Date(t.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
+    <div className="hrtitems">{t.items.map(([k, v]) => <div key={k}><span>{k}</span><em className={v === 'Да' ? 'ok' : v === 'Нет' ? 'no' : ''}>{v}</em></div>)}</div>
+    <p className="hrpre">{t.comment}</p></div>
 }

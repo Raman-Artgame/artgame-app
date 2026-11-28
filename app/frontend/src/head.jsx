@@ -66,6 +66,7 @@ export function Pulse({ me, pulse, go }) {
     r.payments && { k: 'review:pays', t: `Оплаты клиентов на сверку: ${r.payments}`, s: `на ${money(r.payments_sum)} · сверить чек и выписку` },
     p.bills?.length && { k: 'fin:cash', t: `Оплатить сегодня: ${p.bills.length}`, s: p.bills.map(b => b.title + (b.amount ? ' ' + money(b.amount) : '')).join(' · '),
       hot: p.bills.some(b => b.status === 'overdue') },
+    p.hr?.trial_late && { k: 'people:hr', t: `Пробный день без оценки: ${p.hr.trial_late}`, s: 'Куратор ещё не оценил кандидата — напомни или смени оценщика', hot: true },
     p.hr?.new && { k: 'people:hr', t: `Новые кандидаты: ${p.hr.new}`, s: p.hr.waiting ? `${p.hr.waiting} ждут ответа дольше 2 дней` : 'Команда → Кандидаты · ответить за 2 дня', hot: !!p.hr.waiting },
     p.pending.length && { k: 'people', t: `Ждут роли: ${p.pending.length}`, s: p.pending.map(x => x.full_name).join(', '), hot: true, red: true },
     p.catalogs && { k: 'design:cat', t: `Каталоги дизайна на утверждение: ${p.catalogs}`, s: 'утвердить или вернуть' },

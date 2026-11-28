@@ -339,6 +339,9 @@ def card(cid: int, p: dict = Depends(require_head)):
         fl = conn.execute("SELECT * FROM candidate_files WHERE cand_id=%s AND drive_id<>'' ORDER BY id", (cid,)).fetchall()
         f = hr_forms.FORMS.get(c["dir"])
         titles = _role_titles(conn)
+        from . import hrtrial
+        trial = hrtrial.for_head(conn, c)
+        evals = hrtrial.evaluators(conn)
         ob = None
         if c["person_id"]:
             from . import onboard
@@ -348,7 +351,8 @@ def card(cid: int, p: dict = Depends(require_head)):
             "folder": c["drive_folder"] and drive.FOLDER_URL + c["drive_folder"],
             "files": [{"id": x["id"], "kind": x["kind"], "name": x["name"], "thumb": x["mime"].startswith("image/") and _thumb_url(x["id"]),
                        "url": f"https://drive.google.com/file/d/{x['drive_id']}/view"} for x in fl],
-            "steps": f and f["steps"], "roles": [[k, titles[k]] for k, _ in (f["levels"] if f else []) if k in titles], "onboard": ob}
+            "steps": f and f["steps"], "roles": [[k, titles[k]] for k, _ in (f["levels"] if f else []) if k in titles], "onboard": ob,
+            "trial": trial, "evaluators": evals}
 
 
 class StepIn(BaseModel):
@@ -360,6 +364,7 @@ class StepIn(BaseModel):
     meet_on: date | None = None
     trial_on: date | None = None
     trial_object: int | None = None
+    trial_by: int | None = None          # оценщик пробного дня; не указан — куратор ГИП сделки (HEAD 28.11)
     hired_role: str | None = None
 
 
@@ -389,6 +394,15 @@ def step(cid: int, b: StepIn, bg: BackgroundTasks, p: dict = Depends(require_hea
                 upd[k] = (v.strip() or None) if isinstance(v, str) else v
         if b.stars is not None:
             upd["stars"] = b.stars or None
+        # пробный день (HEAD 28.11): оценивает куратор ГИП сделки или тот, кого выбрал HEAD
+        from . import hrtrial
+        new_by = None
+        if b.trial_by is not None or "trial_object" in upd or (upd.get("stage") == "trial" and not c["trial_by"]):
+            new_by = b.trial_by or hrtrial.evaluator_for(conn, upd.get("trial_object", c["trial_object"])) or c["trial_by"]
+            if b.trial_by and not conn.execute("SELECT 1 FROM people WHERE id=%s AND status='active'", (b.trial_by,)).fetchone():
+                raise HTTPException(400, "Нет такого сотрудника")
+            if new_by and new_by != c["trial_by"]:
+                upd["trial_by"] = new_by
         if not upd:
             raise HTTPException(400, "Нечего менять")
         conn.execute(f"UPDATE candidates SET {', '.join(k + '=%s' for k in upd)}, updated_at=now() WHERE id=%s", (*upd.values(), cid))
@@ -396,6 +410,9 @@ def step(cid: int, b: StepIn, bg: BackgroundTasks, p: dict = Depends(require_hea
             link_hired(conn, cid)
         db.audit(conn, p["id"], "hr_step", "candidates", cid, {k: str(v) for k, v in upd.items() if k != "note"})
         c = conn.execute("SELECT * FROM candidates WHERE id=%s", (cid,)).fetchone()
+        if "trial_by" in upd or (("trial_on" in upd or upd.get("stage") == "trial") and c["trial_by"]):
+            if c["stage"] == "trial" and not c["trial_reviewed_at"]:
+                hrtrial.notify(conn, cid)
     bg.add_task(SYNC, cid)
     return _out(c)
 

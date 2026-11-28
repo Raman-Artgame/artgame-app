@@ -54,6 +54,8 @@ def pulse(p: dict = Depends(require_head)):
         hr = one("""SELECT count(*) FILTER (WHERE stage='new' AND submitted_at IS NOT NULL) AS new,
                            count(*) FILTER (WHERE stage IN ('new','talk') AND stage_at < now() - interval '2 days') AS waiting
                     FROM candidates""")
+        from .hrtrial import late_count
+        hr["trial_late"] = late_count(conn)   # пробный день прошёл, куратор не оценил (HEAD 28.11)
         from .dm import _head_unread   # «Чат» (HEAD 11.11): «Руководство» + мои личные; обращения — всем HEAD
         u = _head_unread(conn, p["id"])
         dm = {"unread": u["group"] + u["mine"], "people": u["people"]}   # «Диалог с HEAD» (09.11): непрочитанные от сотрудников
@@ -77,5 +79,5 @@ def pulse(p: dict = Depends(require_head)):
                              count(DISTINCT person_id) AS people
                       FROM shifts WHERE started_at > now() - interval '7 days' AND status<>'cancelled'""")
     return {"folders": folders, "design_late": design_late, "pending": pending, "review": {**rv, "expenses_sum": float(rv["expenses_sum"]), "payments_sum": float(rv["payments_sum"])},
-            "catalogs": catalogs, "design_wait": design_wait, "media": media, "posts": posts, "adrep": adrep, "hr": {"new": hr["new"], "waiting": hr["waiting"]}, "feedback": feedback, "dm": dm,
+            "catalogs": catalogs, "design_wait": design_wait, "media": media, "posts": posts, "adrep": adrep, "hr": {"new": hr["new"], "waiting": hr["waiting"], "trial_late": hr["trial_late"]}, "feedback": feedback, "dm": dm,
             "bills": bills, "today": today, "team": team, "feed": feed, "week": week}

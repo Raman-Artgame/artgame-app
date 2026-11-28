@@ -1,0 +1,36 @@
+/* Пробный день кандидата (HEAD 28.11): карточка вверху приложения у оценщика и форма оценки. Префикс tr. */
+.trinbox { padding-bottom: 0; display: flex; flex-direction: column; gap: 10px; }
+.trinbox .trcard { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 16px; border-radius: var(--r);
+  background: var(--surface); color: var(--text); border: 1px solid var(--accent); }
+.trinbox .trcard:hover { background: var(--alt); }
+.trcard b { font-size: 18px; margin-top: 4px; }
+.trcard em { font-style: normal; font-size: 14px; color: var(--muted); font-weight: 500; }
+.trcard .trgo { font-size: 14px; color: var(--accent2); margin-top: 6px; }
+.trform { padding-bottom: 130px; }
+.trform > .ghost.mini { width: auto; margin-bottom: 10px; }
+.trform h2 { margin: 8px 0 2px; }
+.trbrief { margin: 10px 0; border-top: 1px solid var(--line2); }
+.trbrief div { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line2); font-size: 14px; }
+.trbrief span { color: var(--muted); }
+.trbrief b { font-weight: 600; }
+.trpics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
+.trpics img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; background: var(--alt); }
+.trstars { display: flex; gap: 6px; }
+.trstars button { width: 52px; height: 52px; padding: 0; font-size: 28px; background: var(--alt); color: var(--line); border: 1px solid var(--line); }
+.trstars button.on { color: var(--warn); }
+.tritem { padding: 10px 0; border-bottom: 1px solid var(--line2); }
+.tritem:last-child { border-bottom: 0; }
+.tritem p { margin: 0 0 8px; font-size: 15px; }
+.trseg { display: flex; gap: 6px; }
+.trseg button { flex: 1; width: auto; padding: 11px 6px; font-size: 14px; background: var(--alt); color: var(--text); border: 1px solid var(--line); }
+.trseg.big button { padding: 14px 6px; font-size: 15px; }
+.trseg button.on.yes, .trseg button.on.take { background: var(--okbg); border-color: var(--ok); color: var(--ok); }
+.trseg button.on.part, .trseg button.on.maybe { background: var(--warnbg); border-color: var(--warn); color: var(--warn); }
+.trseg button.on.no { background: var(--hotbg); border-color: var(--hot); color: var(--hot); }
+.trlbl { display: block; margin: 14px 0 6px; }
+.trform textarea { width: 100%; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--alt); color: var(--text); font: inherit; font-size: 15px; resize: vertical; }
+.trok { color: var(--ok); }
+.trfoot { position: fixed; left: 0; right: 0; bottom: 0; background: linear-gradient(transparent, var(--bg) 25%); padding-top: 18px; z-index: 30; }
+.trfoot .wrap { padding-top: 0; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+.trfoot button { padding: 16px; font-size: 16px; border-radius: 16px; }
+.trleft { margin: 0 0 6px; text-align: center; }
