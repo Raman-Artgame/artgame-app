@@ -108,7 +108,16 @@ async function tab(p, name) {
   await fits(c, 'анкета, ожидания'); await c.screenshot({ path: `${shots}/hr-6-ozhidaniya.png` })
   await c.getByRole('button', { name: 'Отправить анкету' }).click()
   await c.getByRole('heading', { name: 'Спасибо! Анкета у нас' }).waitFor()
-  await c.screenshot({ path: `${shots}/hr-7-spasibo.png` })
+  // Telegram — последний шаг анкеты (HEAD 28.11 «не с личного WhatsApp»): кнопка бота, после «Старт» — галочка
+  await c.locator('.hjtgstep').waitFor()
+  const ctok = await c.evaluate(() => JSON.parse(localStorage.getItem('artgame.job.art')).token)
+  assert.equal(await c.locator('.hjtgstep a').getAttribute('href'), `https://t.me/artgame_team_bot?start=c_${ctok}`)
+  await fits(c, 'спасибо + telegram'); await c.screenshot({ path: `${shots}/hr-7-spasibo.png` })
+  const sec = require('crypto').createHash('sha256').update('artgame-tg-hook:123:test-token').digest('hex')
+  await fetch(API + '/tg/hook', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': sec },
+    body: JSON.stringify({ message: { chat: { id: 9191, type: 'private' }, from: { first_name: 'Айгерим' }, text: `/start c_${ctok}` } }) })
+  await c.locator('.hjtgok').waitFor({ timeout: 8000 })
+  await c.screenshot({ path: `${shots}/hr-7b-telegram-ok.png` })
   // остальные вакансии открываются и показывают свой шаг «Как у нас устроено»
   for (const [d, title] of [['print', 'Настенная печать'], ['mop', 'Менеджер по продажам'], ['design', 'Дизайнер росписи'], ['video', 'Видеограф']]) {
     const v = await open(b, 0, `/?job=${d}`)
