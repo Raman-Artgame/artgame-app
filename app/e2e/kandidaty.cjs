@@ -181,6 +181,16 @@ async function tab(p, name) {
   // HEAD в карточке видит, что прочитал и когда принял
   const it = (await call(1000, '/hr/candidates')).items.find(x => x.full_name === 'Садыкова Айгерим')
   assert.ok((await call(1000, `/hr/candidates/${it.id}`)).onboard.done, 'HEAD видит: знакомство пройдено')
+  // HEAD 28.11 «просто удали»: тестовая анкета — кнопкой внизу карточки, с подтверждением
+  const h2 = await open(b, 1000)
+  await h2.getByText('Новые кандидаты: 1').click()
+  await h2.locator('.hritem', { hasText: 'Кайратов' }).click()
+  await h2.getByRole('button', { name: 'Удалить анкету' }).click()
+  await h2.locator('.hrdel').scrollIntoViewIfNeeded()
+  await fits(h2, 'удалить анкету'); await h2.screenshot({ path: `${shots}/hr-11-udalit.png` })
+  await h2.locator('.hrdel').getByRole('button', { name: 'Удалить' }).click()
+  await h2.locator('.hritem').first().waitFor()
+  assert.equal(await h2.locator('.hritem', { hasText: 'Кайратов' }).count(), 0, 'анкета удалена')
   console.log('kandidaty: ok')
   await b.close()
 })().catch(e => { console.error(e); process.exit(1) })

@@ -143,6 +143,17 @@ def base_upsert(sheet: str, c: dict, level_title: str | None, folder_url: str) -
     return n
 
 
+def base_clear(sheet: str, ph: str) -> int | None:
+    """Удалённая анкета (HEAD 28.11): строку этого телефона на листе очищаем (A:H — формулы правее не трогаем)."""
+    rows = get(BASE_ID, f"{_q(sheet)}!A1:B")
+    for i, r in enumerate(rows[1:], start=2):
+        if len(r) > 1 and phone(r[1]) == ph:
+            r2 = httpx.post(f"{API}/{BASE_ID}/values/{_q(sheet)}!A{i}:H{i}:clear", headers=_h(), timeout=30)
+            r2.raise_for_status()
+            return i
+    return None
+
+
 def staff_append(c: dict, role_title: str, support: bool) -> int:
     """Принят: строка внизу «Сотрудников и суппортов», если такого телефона там ещё нет."""
     rows = get(STAFF_ID, f"{_q(STAFF_SHEET)}!A1:F")

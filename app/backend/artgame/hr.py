@@ -460,6 +460,38 @@ def on_register(conn, person_id: int, phone: str | None) -> bool:
     return True
 
 
+@router.delete("/candidates/{cid}")
+def remove(cid: int, p: dict = Depends(require_head)):
+    """HEAD 28.11 «просто удали» (тестовые анкеты): анкета и её файлы — из приложения, строка — из «Базы кандидатов»,
+    папка — в корзину Диска. Принятого, который уже вошёл в приложение, так не удалить."""
+    with db.pool.connection() as conn, conn.transaction():
+        c = conn.execute("SELECT * FROM candidates WHERE id=%s FOR UPDATE", (cid,)).fetchone()
+        if not c:
+            raise HTTPException(404, "Нет такого кандидата")
+        if c["person_id"] or c["trial_acc"]:
+            raise HTTPException(400, "Уже в команде и вошёл в приложение — так не удалить")
+        conn.execute("DELETE FROM candidate_files WHERE cand_id=%s", (cid,))
+        conn.execute("DELETE FROM candidates WHERE id=%s", (cid,))
+        db.audit(conn, p["id"], "hr_delete", "candidates", cid, {"name": c["full_name"], "phone": c["phone"], "dir": c["dir"]})
+    left = []
+    if c["sheet_name"]:
+        with db.pool.connection() as conn:   # тот же телефон в другой живой анкете — строку не трогаем
+            twin = conn.execute("SELECT 1 FROM candidates WHERE phone=%s AND sheet_name=%s", (c["phone"], c["sheet_name"])).fetchone()
+        if not twin:
+            try:
+                hr_sheets.base_clear(c["sheet_name"], c["phone"])
+            except Exception as ex:   # noqa: BLE001
+                left.append(f"строка в базе «{c['sheet_name']}»"); print("hr remove sheet:", ex)
+    if c["staff_at"]:
+        left.append("строка в «Сотрудниках» — убрать вручную")
+    if c["drive_folder"]:
+        try:
+            drive.Drive().trash(c["drive_folder"])
+        except Exception as ex:   # noqa: BLE001
+            left.append("папка на Диске"); print("hr remove folder:", ex)
+    return {"ok": True, "left": left}
+
+
 @router.get("/files/{fid}/hrthumb")
 def thumb(fid: int, exp: int, sig: str):
     files.check_sig(fid, "hrthumb", exp, sig)

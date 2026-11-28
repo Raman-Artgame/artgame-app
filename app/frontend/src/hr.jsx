@@ -144,6 +144,11 @@ function CandCard({ id, back }) {
       {c.stage === 'hired' && c.person_id && <OnboardStatus ob={c.onboard} />}
       {c.stage === 'hired' && !c.person_id && <a className="btn ghost mini" href={wa(c, `Вы в команде ARTGAME! Откройте бот ARTGAME в Telegram, нажмите «Старт», потом «ARTGAME» внизу и введите имя и этот номер — ${c.phone}.`)} target="_blank" rel="noreferrer">Написать в WhatsApp, как войти</a>}
       {err && <p className="hrerr">{err}</p>}
+      {/* HEAD 28.11 «просто удали»: тестовая или ошибочная анкета — насовсем, с подтверждением */}
+      {!c.person_id && (act === 'delete' ? <div className="hrform hrdel"><p className="small">Удалить анкету {c.full_name} насовсем? Пропадёт из «Кандидатов», строка — из «Базы кандидатов», папка с фото — в корзину Диска.</p>
+        <div className="hrrow"><button className="ghost" onClick={() => setAct('')}>Отмена</button>
+          <button className="hot" onClick={() => api(`/hr/candidates/${id}`, { method: 'DELETE' }).then(back, e => setErr(e.message))}>Удалить</button></div></div> :
+        <button className="ghost mini hrdelbtn" onClick={() => setAct('delete')}>Удалить анкету</button>)}
     </div>
     <p className="small muted hrsheet">{c.in_sheet ? '✓ Строка в «Базе кандидатов» обновлена.' : 'Строка в «Базе кандидатов» появится после отправки анкеты.'}</p>
   </>
