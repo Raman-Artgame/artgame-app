@@ -88,3 +88,16 @@ def test_db_board_values_and_download(placed):
     r = placed.get(u)
     assert r.content == b"%PDF-1" and "attachment" in r.headers["content-disposition"]
     assert pid
+
+
+def test_acting_opens_senior_place(placed):
+    """HEAD 22.11: у и.о. Главного (Ангелина) «Книга главного» была белым экраном — место видно в списке, а ссылка давала 403."""
+    ids = setup_people(placed)
+    placed.post(f"/api/people/{ids[2000]}", json={"acting_role": "print_master"}, headers=hdr(1000))
+    mine = {p["code"]: p["url"] for p in placed.get("/api/places", headers=hdr(2000)).json()}
+    assert set(mine) == {"art", "print"}
+    r = placed.get(mine["print"])
+    assert r.status_code == 200 and "секретный-текст-42" in r.text
+    # нет доступа — не пустой экран, а понятная страница
+    bad = placed.get(mine["art"].replace("/p/art/", "/p/dz/"))
+    assert bad.status_code == 403 and "Раздел не открылся" in bad.text and bad.headers["content-type"].startswith("text/html")

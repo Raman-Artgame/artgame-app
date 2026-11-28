@@ -10,7 +10,7 @@ from google.oauth2 import service_account
 
 def main(path: str):
     creds = service_account.Credentials.from_service_account_file(
-        os.environ["ARTGAME_GOOGLE_SA_FILE"], scopes=["https://www.googleapis.com/auth/drive.file"])
+        os.environ["ARTGAME_GOOGLE_SA_FILE"], scopes=["https://www.googleapis.com/auth/drive"])
     creds.refresh(Request())
     p = Path(path)
     meta = {"name": p.name, "parents": [os.environ["BACKUP_DRIVE_FOLDER"]]}

@@ -1,0 +1,10 @@
+[Unit]
+Description=ARTGAME: Meta каждую ночь в 04:30 по Астане (%i)
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 Asia/Almaty
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

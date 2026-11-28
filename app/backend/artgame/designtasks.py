@@ -1,0 +1,300 @@
+"""Задачи на дизайн при сделке (HEAD 25.11.2026 «в целом норм, давай попробуем»).
+
+- МОП (или HEAD) в карточке сделки жмёт «Нужен дизайн» — на любой стадии, сколько угодно раз. Сделка остаётся на своей стадии.
+- У дизайнера карточка во вкладке «Дизайн» с привычными стадиями воронки «Дизайн РК» (названия те же, хранятся здесь).
+- Дизайнер видит свои и ещё не разобранные задачи; Главный дизайнер и HEAD — все и назначают исполнителя.
+- Эскиз — файлом прямо в карточке: ложится в папку сделки ДИЗАЙН (HEAD 26.11: ссылок руками нет).
+- Единиц задачи не дают: единица одна за весь проект (design_units), считается как раньше.
+- В бот не шлём: новое видно цифрой на доске и в карточке сделки. В Битрикс (HEAD 26.11) — только дизайнер, сложность и
+  срок дизайна в поля сделки (to_deal), стадии сделки не трогаем.
+"""
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException
+from psycopg.types.json import Jsonb
+from pydantic import BaseModel, Field
+
+from . import bx, bxw, db
+from .design import ALL, SIZES, need
+from .work import active
+
+router = APIRouter(prefix="/api")
+
+# Те же стадии и тот же порядок, что у дизайнеров в воронке «Дизайн РК»
+STAGES = [("new", "Свежие заказы"), ("urgent", "СРОЧНО"), ("info", "Сбор информации"), ("work", "Взято в работу"),
+          ("wait", "Жду ответ клиента"), ("fix", "Правки"), ("mop", "Менеджеры"), ("done", "УТВЕРЖДЕНО")]
+NAME = dict(STAGES)
+ASK = {"mop", "mop_vip", "head"}    # кто может попросить дизайн из карточки сделки
+
+SQL = """SELECT t.*, d.full_name AS designer, c.full_name AS by_name, f.name AS file_name,
+                (SELECT full_name FROM people WHERE id=t.tz_by) AS tz_name,
+                (SELECT count(*) FROM files x WHERE x.object_id=t.deal_id AND x.kind='design' AND x.status='ready') AS n_sketch,
+                (SELECT count(*) FROM files x WHERE x.object_id=t.deal_id AND x.kind='design' AND x.status='ready' AND x.approved_at IS NOT NULL) AS n_ok,
+                (SELECT count(*) FROM files x WHERE x.object_id=t.deal_id AND x.kind='brief' AND x.status='ready') AS n_brief,
+                (SELECT coalesce(json_agg(json_build_object('id', m.id, 'kind', m.kind, 'text', m.text, 'by', pe.full_name, 'at', m.created_at) ORDER BY m.id), '[]')
+                   FROM design_task_msgs m JOIN people pe ON pe.id=m.person_id WHERE m.task_id=t.id) AS msgs
+           FROM design_tasks t LEFT JOIN people d ON d.id=t.designer_id JOIN people c ON c.id=t.created_by
+           LEFT JOIN files f ON f.id=t.file_id AND f.status='ready'"""
+
+
+def _out(r: dict) -> dict:
+    return {"id": r["id"], "deal_id": r["deal_id"], "deal_title": r["deal_title"], "city": r["city"] or "", "title": r["title"],
+            "note": r["note"] or "", "stage": r["stage"], "stage_name": NAME.get(r["stage"], r["stage"]),
+            "designer_id": r["designer_id"], "designer": r["designer"] or "", "size": r["size"] or "",
+            "deadline": r["deadline"].isoformat() if r["deadline"] else "", "link": r["link"] or "",
+            "file_id": r["file_id"], "file_name": r["file_name"] or "", "by": r["by_name"],
+            "created": r["created_at"].isoformat(), "updated": r["updated_at"].isoformat(),
+            "approved": r["approved_at"].isoformat() if r["approved_at"] else "",
+            # ТЗ дизайнеру (HEAD 26.11): срок, старт работ, лёгкий бриф, бриф клиента, вопросы к МОП, круги правок
+            "start_on": r["start_on"].isoformat() if r.get("start_on") else "", "brief": r.get("brief") or {},
+            "tz_by": r.get("tz_name") or "", "rounds": r.get("rounds") or 0,
+            "client_brief": r.get("client_brief"), "client_brief_at": r["client_brief_at"].isoformat() if r.get("client_brief_at") else "",
+            "brief_sent": bool(r.get("brief_token")), "msgs": r.get("msgs") or [],
+            "ask_open": bool(r.get("msgs")) and r["msgs"][-1]["kind"] == "ask",
+            "sketches": r.get("n_sketch") or 0, "sketches_ok": r.get("n_ok") or 0, "materials": r.get("n_brief") or 0}
+
+
+BRIEF = {"who": ("Дети", "Взрослые", "Сотрудники", "Гости"),
+         "style": ("Графика", "Реализм", "Минимализм", "Абстракция", "Граффити", "Каллиграфия"),
+         "mood": ("Энергия", "Уют", "Премиум", "Детское", "Спокойное")}
+
+
+def clean_brief(b: dict | None) -> dict:
+    """Лёгкий бриф: только известные вопросы и варианты — лишнее отбрасывается."""
+    return {k: [x for x in (b or {}).get(k) or [] if x in opts] for k, opts in BRIEF.items() if (b or {}).get(k)}
+
+
+def _bitrix(deal_id: int) -> str:
+    try:
+        return (bxw.portal() + f"/crm/deal/details/{deal_id}/") if bxw.portal() else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def ensure_object(conn, deal_id: int) -> int:
+    """Строка сделки в objects — без неё файлу некуда лечь. До стадии работы сделки там нет: заводим со статусом early
+    (в списках объектов её не видно; синхронизация сама сделает active, когда сделка дойдёт до работы)."""
+    if conn.execute("SELECT 1 FROM objects WHERE id=%s", (deal_id,)).fetchone():
+        return deal_id
+    from .sync_objects import FOLDER_FIELD, split_title
+    j = bx.read("crm.deal.get", {"id": deal_id})
+    d = j.get("result", j) if isinstance(j, dict) else None
+    if not d or not d.get("ID"):
+        raise HTTPException(404, "Сделка не найдена")
+    title, city = split_title(str(deal_id), d.get("TITLE") or f"Сделка {deal_id}")
+    conn.execute("""INSERT INTO objects (id, title, city, bitrix_stage, bitrix_category, status, drive_folder, synced_at)
+                    VALUES (%s,%s,%s,%s,%s,'early',%s,now()) ON CONFLICT (id) DO NOTHING""",
+                 (deal_id, title or f"Сделка {deal_id}", city or bx.city_name(d.get(bx.CITY)) or None, d.get("STAGE_ID"),
+                  int(d.get("CATEGORY_ID") or 0), d.get(FOLDER_FIELD) or None))
+    db.audit(conn, None, "object_early", "objects", deal_id, {"stage": d.get("STAGE_ID")})
+    return deal_id
+
+
+@router.post("/design/deal/{deal_id}/object")
+def deal_object(deal_id: int, p: dict = Depends(active)):
+    """Перед загрузкой эскиза или материалов к ТЗ: у сделки должна быть строка в objects (папка создаётся при самой загрузке).
+    Дизайнеры — любой сделки, МОП — своей (фото стен и развёртки в окне «Нужен дизайн»)."""
+    if p["role_code"] in ASK:
+        bx._deal(p, deal_id)
+    else:
+        need(p)
+    with db.pool.connection() as conn, conn.transaction():
+        return {"id": ensure_object(conn, deal_id)}
+
+
+class TaskIn(BaseModel):
+    title: str = Field(min_length=2, max_length=120)
+    note: str | None = Field(default=None, max_length=2000)
+    urgent: bool = False
+    deadline: date                    # к какому дню нужен эскиз — обязателен (HEAD 28.11: сроки должны соблюдаться)
+    start_on: date | None = None      # когда клиент хочет начать работы
+    brief: dict | None = None         # лёгкий бриф кнопками: who, style, mood
+
+
+@router.get("/bx/deals/{deal_id}/design-tasks")
+def deal_tasks(deal_id: int, p: dict = Depends(active)):
+    """Блок «Дизайн» в карточке сделки: МОП — своей сделки, HEAD и дизайнеры — любой."""
+    if p["role_code"] in ASK:
+        bx._deal(p, deal_id)
+    else:
+        need(p)
+    with db.pool.connection() as conn:
+        rows = conn.execute(SQL + " WHERE t.deal_id=%s AND t.status='active' ORDER BY t.id", (deal_id,)).fetchall()
+    return {"items": [_out(r) for r in rows], "can_add": p["role_code"] in ASK}
+
+
+@router.post("/bx/deals/{deal_id}/design-tasks")
+def add_task(deal_id: int, b: TaskIn, p: dict = Depends(active)):
+    if p["role_code"] not in ASK:
+        raise HTTPException(403, "Дизайн просят МОП и HEAD из карточки сделки")
+    d = bx._deal(p, deal_id)
+    with db.pool.connection() as conn, conn.transaction():
+        r = conn.execute("""INSERT INTO design_tasks (deal_id, deal_title, city, title, note, stage, created_by, deadline, start_on, brief)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                         (deal_id, d.get("TITLE") or "", bx.city_name(d.get(bx.CITY)) or None, b.title.strip(),
+                          (b.note or "").strip() or None, "urgent" if b.urgent else "new", p["id"], b.deadline, b.start_on,
+                          Jsonb(clean_brief(b.brief)))).fetchone()
+        db.audit(conn, p["id"], "design_task_add", "design_tasks", r["id"], {"deal": deal_id, "title": b.title.strip()})
+        row = conn.execute(SQL + " WHERE t.id=%s", (r["id"],)).fetchone()
+    return _out(row)
+
+
+@router.get("/design/tasks")
+def board(p: dict = Depends(active)):
+    """Доска дизайнера: открытые задачи и утверждённые за 30 дней."""
+    need(p)
+    see_all = p["role_code"] in ALL
+    with db.pool.connection() as conn:
+        rows = conn.execute(SQL + """ WHERE t.status='active' AND (t.stage<>'done' OR t.approved_at > now() - interval '30 days')
+                                        AND (%s OR t.designer_id=%s OR t.designer_id IS NULL)
+                                      ORDER BY t.deadline NULLS LAST, t.id""", (see_all, p["id"])).fetchall()
+    return {"items": [{**_out(r), "bitrix": _bitrix(r["deal_id"])} for r in rows],
+            "stages": [{"id": k, "name": n} for k, n in STAGES], "all": see_all, "me": p["id"], "sizes": SIZES}
+
+
+class TaskEdit(BaseModel):
+    stage: str | None = None
+    designer_id: int | None = None
+    size: str | None = None
+    deadline: date | None = None
+    link: str | None = Field(default=None, max_length=500)
+    file_id: int | None = None
+    start_on: date | None = None
+    note: str | None = Field(default=None, max_length=2000)   # «Дополнить ТЗ»: дизайнер дописывает из переписки
+    brief: dict | None = None
+
+
+@router.post("/design/tasks/{tid}")
+def edit(tid: int, b: TaskEdit, p: dict = Depends(active)):
+    need(p)
+    see_all = p["role_code"] in ALL
+    sent = b.model_fields_set
+    with db.pool.connection() as conn, conn.transaction():
+        t = conn.execute("SELECT * FROM design_tasks WHERE id=%s AND status='active' FOR UPDATE", (tid,)).fetchone()
+        if not t:
+            raise HTTPException(404, "Нет такой задачи")
+        if not see_all and t["designer_id"] not in (None, p["id"]):
+            raise HTTPException(403, "Это задача другого дизайнера")
+        upd: dict = {}
+        if "designer_id" in sent and b.designer_id != t["designer_id"]:
+            if not see_all and b.designer_id != p["id"]:
+                raise HTTPException(403, "Назначают Главный дизайнер и HEAD; себе задачу можно взять")
+            if b.designer_id and not conn.execute(
+                    "SELECT 1 FROM people WHERE id=%s AND status='active' AND role_code IN ('lead_designer','designer_asst','head')",
+                    (b.designer_id,)).fetchone():
+                raise HTTPException(400, "Исполнитель — действующий дизайнер")
+            upd["designer_id"] = b.designer_id
+        if b.stage and b.stage != t["stage"]:
+            if b.stage not in NAME:
+                raise HTTPException(400, "Нет такой стадии")
+            upd["stage"] = b.stage
+            if not t["designer_id"] and "designer_id" not in upd and not see_all:
+                upd["designer_id"] = p["id"]        # взял в работу — задача его
+        if "size" in sent:
+            if b.size and b.size not in SIZES:
+                raise HTTPException(400, "Размер: XS, S, M, L или XL")
+            upd["size"] = b.size or None
+        if "deadline" in sent:
+            if not b.deadline:
+                raise HTTPException(400, "Срок убрать нельзя — поставьте другую дату")
+            upd["deadline"] = b.deadline
+        if "start_on" in sent:
+            upd["start_on"] = b.start_on
+        if "note" in sent or "brief" in sent:
+            if "note" in sent:
+                upd["note"] = (b.note or "").strip() or None
+            if "brief" in sent:
+                upd["brief"] = Jsonb(clean_brief(b.brief))
+            upd["tz_by"], upd["tz_at"] = p["id"], "now"
+        if upd.get("stage") == "fix":
+            upd["rounds"] = (t.get("rounds") or 0) + 1      # круг правок — каждый переход в «Правки»
+        if "link" in sent:
+            upd["link"] = (b.link or "").strip() or None
+        if "file_id" in sent and b.file_id:
+            if not conn.execute("SELECT 1 FROM files WHERE id=%s AND object_id=%s AND kind='design' AND status='ready'",
+                                (b.file_id, t["deal_id"])).fetchone():
+                raise HTTPException(400, "Файл не из папки ДИЗАЙН этой сделки")
+            upd["file_id"] = b.file_id
+        if upd.get("stage") == "done":
+            has = upd.get("file_id") or t["file_id"] or upd.get("link") or ("link" not in upd and t["link"]) or conn.execute(
+                "SELECT 1 FROM files WHERE object_id=%s AND kind='design' AND status='ready' LIMIT 1", (t["deal_id"],)).fetchone()
+            if not has:
+                raise HTTPException(400, "Сначала загрузите эскиз — кнопка «Загрузить эскиз» в этой карточке")
+            upd["approved_at"] = "now"
+        elif "stage" in upd and t["stage"] == "done":
+            upd["approved_at"] = None
+        if upd:
+            sets = ", ".join(f"{k}=now()" if v == "now" else f"{k}=%s" for k, v in upd.items())
+            conn.execute(f"UPDATE design_tasks SET {sets}, updated_at=now() WHERE id=%s",
+                         [v for v in upd.values() if v != "now"] + [tid])
+            db.audit(conn, p["id"], "design_task_edit", "design_tasks", tid,
+                     {k: (v.isoformat() if isinstance(v, date) else v.obj if isinstance(v, Jsonb) else v) for k, v in upd.items()})
+            if upd.get("stage") == "done":   # эстафета (HEAD 26.11): утверждённый файл получает метку «В работу»
+                from .relay import mark
+                mark(conn, t["deal_id"], upd.get("file_id") or t["file_id"], p["id"])
+        row = conn.execute(SQL + " WHERE t.id=%s", (tid,)).fetchone()
+    if {"designer_id", "size", "deadline"} & upd.keys():
+        to_deal(row, p["id"])
+    return {**_out(row), "bitrix": _bitrix(row["deal_id"])}
+
+
+DESIGNER, LEVEL, DEADLINE = "UF_CRM_ARTGAME_DESIGNER", "UF_CRM_ARTGAME_DESIGN_COMPLEXITY", "UF_CRM_ARTGAME_DESIGN_DEADLINE"
+
+
+def to_deal(t: dict, by: int) -> None:
+    """Схема HEAD 26.11 «кто что заполняет»: дизайнер, сложность (XS–XL) и срок дизайна МОП руками не вводит —
+    они идут в поля сделки из задачи дизайнера. Пустое в задаче поле сделки не стирает. Битрикс не ответил — задача
+    всё равно сохранена, ошибка в журнале."""
+    fields: dict = {}
+    if t["designer_id"]:
+        with db.pool.connection() as conn:
+            u = conn.execute("SELECT bitrix_user_id FROM people WHERE id=%s", (t["designer_id"],)).fetchone()
+        if u and u["bitrix_user_id"]:
+            fields[DESIGNER] = u["bitrix_user_id"]
+    if t["size"]:
+        ids = {v.strip().upper(): k for k, v in bx.enum_map(LEVEL).items()}
+        if t["size"].upper() in ids:
+            fields[LEVEL] = ids[t["size"].upper()]
+    if t["deadline"]:
+        fields[DEADLINE] = t["deadline"].isoformat()
+    if not fields or not bxw.enabled():
+        return
+    log = {"task": t["id"], "fields": {k: str(v) for k, v in fields.items()}}
+    try:
+        bxw.CALL("crm.deal.update", {"id": t["deal_id"], "fields": fields})
+        log["bx"] = "ok"
+    except Exception as ex:  # noqa: BLE001
+        log.update(bx="error", error=f"{type(ex).__name__}: {str(ex)[:160]}")
+    with db.pool.connection() as conn:
+        db.audit(conn, by, "design_task_to_deal", "deal", t["deal_id"], log)
+
+
+@router.post("/design/tasks/{tid}/cancel")
+def cancel(tid: int, p: dict = Depends(active)):
+    """Убрать задачу: тот, кто её поставил, Главный дизайнер или HEAD. Строка остаётся в базе со статусом cancelled."""
+    with db.pool.connection() as conn, conn.transaction():
+        t = conn.execute("SELECT * FROM design_tasks WHERE id=%s AND status='active'", (tid,)).fetchone()
+        if not t:
+            raise HTTPException(404, "Нет такой задачи")
+        if p["role_code"] not in ALL and t["created_by"] != p["id"]:
+            raise HTTPException(403, "Убрать задачу может тот, кто её поставил, Главный дизайнер или HEAD")
+        if t["stage"] == "done":
+            raise HTTPException(400, "Утверждённую задачу не убираем")
+        conn.execute("UPDATE design_tasks SET status='cancelled', updated_at=now() WHERE id=%s", (tid,))
+        db.audit(conn, p["id"], "design_task_cancel", "design_tasks", tid, {"deal": t["deal_id"]})
+    return {"ok": True}
+
+
+LATE_STAGES = ("new", "urgent", "work", "fix")   # срок идёт: «ждём клиента», «сбор информации» и «менеджеры» дизайнеру не горят
+
+
+def late(conn) -> list[dict]:
+    """Просроченные задания дизайнеров для Пульта HEAD (28.11): сделка, что делаем, дизайнер, на сколько дней."""
+    rows = conn.execute("""SELECT t.deal_id, t.deal_title, t.title, t.deadline, pe.full_name,
+                                  (now() AT TIME ZONE 'Asia/Almaty')::date - t.deadline AS days
+                           FROM design_tasks t LEFT JOIN people pe ON pe.id=t.designer_id
+                           WHERE t.status='active' AND t.stage = ANY(%s) AND t.deadline < (now() AT TIME ZONE 'Asia/Almaty')::date
+                           ORDER BY t.deadline, t.id""", (list(LATE_STAGES),)).fetchall()
+    import re
+    return [{"id": r["deal_id"], "title": f"{r['full_name'].split()[0] if r['full_name'] else 'без дизайнера'}, {r['days']} дн. · "
+                                          + re.sub(rf"^№?\s*{r['deal_id']}\s*·?\s*", "", r["deal_title"] or "") + f" · {r['title']}"} for r in rows]

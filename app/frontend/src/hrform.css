@@ -1,0 +1,72 @@
+/* Анкета кандидата по ссылке: тёмная, как приложение (tokens.css), без меню и входа. Префикс hj — чтобы не задеть экраны приложения. */
+body.hjpage { background: var(--bg); color: var(--text); }
+.hj { max-width: 520px; margin: 0 auto; padding: 16px 16px 40px; font: 16px/1.45 Onest, Inter, system-ui, sans-serif; }
+.hj h1 { font-size: 28px; margin: 2px 0 6px; letter-spacing: -.01em; }
+.hj h2 { font-size: 21px; margin: 0 0 4px; }
+.hj h3 { font-size: 16px; margin: 0 0 4px; font-weight: 700; }
+.hjmuted { color: var(--muted); font-size: 14px; margin: 0; }
+.hjlead { color: var(--text); margin: 0 0 10px; }
+.hjtop { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.hjlogo { font-weight: 800; letter-spacing: .14em; font-size: 15px; }
+.hjlang { display: flex; background: var(--alt); border-radius: 99px; padding: 3px; }
+.hj .hjlang button { width: auto; padding: 6px 12px; border-radius: 99px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 700; }
+.hj .hjlang button.on { background: var(--text); color: var(--bg); }
+.hjbar { display: flex; gap: 5px; margin: 12px 0 16px; }
+.hjbar i { flex: 1; height: 5px; border-radius: 99px; background: var(--line); }
+.hjbar i.on { background: var(--accent); }
+.hjcard { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 20px 16px; display: flex; flex-direction: column; gap: 18px; }
+.hjq { display: block; min-width: 0; }
+.hjchips, .hjlevels { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.hj .hjchips button, .hj .hjlevels button { width: auto; padding: 10px 14px; border-radius: 99px; background: var(--alt); color: var(--text); border: 1px solid var(--line); font-size: 14px; font-weight: 600; transition: none; }
+.hj .hjlevels button { flex: 1 1 calc(50% - 8px); border-radius: 14px; min-height: 50px; }
+.hj .hjchips button.on, .hj .hjlevels button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.hj .hjin { width: 100%; margin: 8px 0 0; padding: 13px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--alt); color: var(--text); font: inherit; resize: vertical; }
+.hj .hjin:focus { border-color: var(--text); }
+.hjrow { display: flex; gap: 8px; margin-top: 8px; }
+.hjfile { flex: 1; padding: 13px; border-radius: 14px; border: 1px dashed var(--line); text-align: center; cursor: pointer; color: var(--text); font-weight: 600; font-size: 14px; }
+.hjfile.ok { border-style: solid; border-color: var(--ok); color: var(--ok); }
+.hjfile.bad { border-color: var(--accent); }
+.hjpics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+.hjpic { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: var(--alt); display: block; }
+.hjpic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hjpic.up img { opacity: .4; }
+.hjpic.bad { outline: 3px solid var(--accent); }
+.hjpic.ok::after { content: '✓'; position: absolute; right: 5px; bottom: 5px; width: 20px; height: 20px; border-radius: 50%; background: var(--ok); color: #000; font-size: 12px; display: grid; place-items: center; }
+.hjpic.add { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed var(--line); cursor: pointer; color: var(--muted); }
+.hjpic.add span { font-size: 24px; line-height: 1; color: var(--text); }
+.hjpic.add em { font-style: normal; font-size: 11px; margin-top: 4px; text-align: center; }
+.hjintro { background: var(--alt); border-radius: 16px; padding: 4px 14px; display: flex; flex-direction: column; }
+.hjiv { display: grid; grid-template-columns: 72px 1fr; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.hjiv:last-child { border-bottom: 0; }
+.hjiv span { color: var(--muted); }
+.hjiv b { font-weight: 600; }
+.hjskip { margin-top: -6px; }
+.hjnav { display: flex; gap: 10px; margin-top: 16px; }
+.hj button.hjgo { flex: 2; padding: 16px; border-radius: 16px; background: var(--accent); color: #fff; font-size: 17px; font-weight: 700; }
+.hj button.hjgo:disabled { opacity: .5; }
+.hj button.hjghost { flex: 1; width: auto; padding: 16px; border-radius: 16px; background: transparent; color: var(--text); border: 1px solid var(--line); font-size: 16px; font-weight: 600; }
+.hjdone { text-align: center; padding: 36px 20px; align-items: center; }
+.hjdone p { color: var(--muted); margin: 0 0 8px; }
+.hjok { width: 64px; height: 64px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 32px; display: grid; place-items: center; }
+.hjfail { color: var(--hot); font-size: 14px; margin: 12px 0 0; }
+/* HEAD 27.11: убрать фото — крестик в углу, крупная зона нажатия */
+.hj .hjpic button.hjdel { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; padding: 0; border-radius: 50%; background: rgba(0,0,0,.65); color: #fff; font-size: 14px; line-height: 28px; text-align: center; border: 0; }
+.hjpic.ok::after { right: auto; left: 5px; }
+
+/* личная страница кандидата (HEAD 28.11) */
+.hjme { gap: 12px; }
+.hjme h1 { margin: 0; font-size: 22px; }
+.hjtag { align-self: flex-start; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent2); }
+.hjrows { border-top: 1px solid var(--line); }
+.hjrows div { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.hjrows span { color: var(--muted); }
+.hjrows b { font-weight: 600; }
+.hjrows a { color: var(--accent2); }
+.hjdays { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.hjdays button { padding: 12px 4px; border-radius: 12px; background: var(--alt); color: var(--text); border: 1px solid var(--line); font: inherit; font-size: 14px; }
+.hjdays button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.hjtg { display: block; text-align: center; padding: 14px; border-radius: 14px; background: #229ed9; color: #fff; font-weight: 700; text-decoration: none; }
+.hjerr { color: var(--hot); margin: 0; font-size: 14px; }
+.hjtgstep { border-color: #229ed9; gap: 12px; margin-bottom: 12px; }
+.hjtgstep p { margin: 0; }
+.hjtgok { color: var(--ok); font-weight: 600; margin-bottom: 12px; padding: 14px 16px; }

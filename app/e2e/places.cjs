@@ -4,23 +4,32 @@ const { chromium } = require('playwright')
 const { execSync } = require('child_process')
 const assert = require('assert')
 const BE = __dirname + '/../backend'
-const sign = id => execSync(`cd ${BE} && .venv/bin/python -c "import sys;sys.path+=['tests'];from conftest import make_init_data;print(make_init_data({'id':${id},'first_name':'Тест'}))"`).toString().trim()
+const PY = process.env.PY || `${BE}/.venv/bin/python`
+const sign = id => execSync(`cd ${BE} && ${PY} -c "import sys;sys.path+=['tests'];from conftest import make_init_data;print(make_init_data({'id':${id},'first_name':'Тест'}))"`).toString().trim()
 const API = 'http://127.0.0.1:8100/api'
 const call = async (id, path, body) => (await fetch(API + path, { method: body ? 'POST' : 'GET',
   headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': sign(id) }, body: body && JSON.stringify(body) })).json()
 const shots = process.env.SHOTS || '/var/tmp'
 
-async function open(b, id, vp) {
+async function open(b, id, vp, name = 'Место') {
   const ctx = await b.newContext({ viewport: vp || { width: 390, height: 780 } })
   const p = await ctx.newPage()
   const d = sign(id)
   await p.addInitScript(d => { window.Telegram = { WebApp: { initData: d, initDataUnsafe: { user: { first_name: 'Т' } }, ready() {} } } }, d)
   await p.route('https://telegram.org/**', r => r.fulfill({ body: '' }))
   await p.goto('http://127.0.0.1:4173/')
-  await p.getByRole('button', { name: 'Место' }).click()
+  await tab(p, name)
   return { p, ctx }
 }
 const frame = p => p.frameLocator('iframe.placeframe')
+
+async function tab(p, name) {
+  const nav = p.locator('nav')
+  const btn = nav.getByRole('button', { name, exact: true })
+  if (await btn.waitFor({ timeout: 3000 }).then(() => true, () => false)) return nav.getByRole('button', { name, exact: true }).click()
+  await nav.locator('button').last().click()   // «Ещё»
+  await p.locator('.sheetbox').getByRole('button', { name, exact: true }).click()
+}
 
 ;(async () => {
   const b = await chromium.launch()
@@ -28,12 +37,11 @@ const frame = p => p.frameLocator('iframe.placeframe')
   const a = await call(2100, '/register', { full_name: 'Художник' })
   await call(1000, `/people/${a.id}`, { role_code: 'artist', zones: ['mural'] })
 
-  // HEAD: видит все пять мест
-  const { p } = await open(b, 1000, { width: 1280, height: 860 })
+  // HEAD: места художников, печати и дизайна (рабочее место МОП живёт в карточке сделки и в «Учёбе», калькулятор — один, в МОП)
+  const { p } = await open(b, 1000, { width: 1280, height: 860 }, 'Учёба')   // HEAD 09.11: «Место» убрано, места ролей — в «Учёбе»
   const chips = await p.locator('.place .chips button').allTextContents()
-  assert.deepStrictEqual(chips, ['Художники', 'Печать', 'МОП', 'Калькулятор', 'Дизайн'])
-  for (const [chip, title] of [['Художники', 'Рабочее место художников'], ['Печать', 'Рабочее место печати'],
-    ['МОП', 'Рабочее место МОП'], ['Калькулятор', 'Калькулятор ARTGAME'], ['Дизайн', 'Рабочее место дизайнера']]) {
+  assert.deepStrictEqual(chips.slice(-4), ['Художники', 'Печать', 'Дизайн', 'Книга главного'], chips.join(','))
+  for (const [chip, title] of [['Художники', 'Рабочее место художников'], ['Печать', 'Рабочее место печати'], ['Дизайн', 'Рабочее место дизайнера']]) {
     await p.locator('.place .chips button', { hasText: chip }).click()
     await p.waitForFunction(t => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith(t), title, { timeout: 15000 })
     await p.waitForTimeout(1200)
@@ -56,12 +64,28 @@ const frame = p => p.frameLocator('iframe.placeframe')
   await pf.evaluate(() => { const a = document.createElement('a'); a.href = 'https://claude.ai/artifact/AUsM36vXPoSqk6J4LQUZqj#gip'; a.textContent = 'x'; document.body.appendChild(a); a.click() })
   await p.waitForFunction(() => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith('Рабочее место художников'))
 
-  // Художник: только своё место
-  const { p: pa } = await open(b, 2100)
-  assert.strictEqual(await pa.locator('.place .chips button').count(), 0)
+  // Художник (HEAD 08.11): «Учёба» — База знаний, Тест, Клиентам + ТБ и «Правила игры»; «Выезд», «Оплата», «Рост», «Куратор/ГИП» скрыты
+  const { p: pa } = await open(b, 2100, null, 'Учёба')
+  assert.deepStrictEqual(await pa.locator('.place .chips button').allTextContents(), ['Учебник', 'Клиентам', 'ТБ'])   // «Правила игры» — только в «Кабинете» (HEAD 09.11)
+  await pa.waitForFunction(() => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith('Рабочее место художников'))
+  const af = () => pa.frames().find(f => f.url().includes('/api/p/art/'))
+  await pa.waitForTimeout(800)
+  assert.ok(af().url().includes('hide=trip%2Cgip%2Cchief%2Cgrow%2Cpay%2Ctest'), af().url())
+  const vis = await af().evaluate(() => ['ucheb', 'pay', 'grow', 'gip', 'trip'].map(h => [...document.querySelectorAll(`a[href="#${h}"]`)].some(a => a.offsetParent)))
+  assert.deepStrictEqual(vis, [false, false, false, false, false])   // свои вкладки места спрятаны (notabs=1), разделы — чипами приложения
+  assert.ok(af().url().includes('notabs=1'))
+  assert.strictEqual(await af().evaluate(() => document.body.innerText.includes('₸/м²')), false, 'в учебнике художника нет цен')
+  await af().evaluate(() => { location.hash = '#pay' })
+  await pa.waitForTimeout(300)
+  assert.strictEqual(await af().evaluate(() => location.hash), '#ucheb')
+  await pa.locator('.place .chips button', { hasText: 'Учебник' }).click()
   await pa.waitForFunction(() => document.querySelector('iframe.placeframe')?.contentDocument?.title?.startsWith('Рабочее место художников'))
   await pa.waitForTimeout(1200)
   await pa.screenshot({ path: `${shots}/place-artist-phone.png` })
+  await af().evaluate(() => { location.hash = '#u9' })   // «Холсты и картины» (HEAD 08.11): общая информация
+  await af().locator('h2', { hasText: 'Кто за что' }).waitFor()
+  await pa.waitForTimeout(800)
+  await pa.screenshot({ path: `${shots}/place-artist-kartiny.png`, fullPage: true })
   const urls = await call(2100, '/places')
   assert.deepStrictEqual(urls.map(x => x.code), ['art'])
   const mopUrl = urls[0].url.replace('/p/art/', '/p/mop/')

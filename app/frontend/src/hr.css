@@ -1,0 +1,72 @@
+/* «Команда → Кандидаты» (HEAD 26.11): список по шагам, карточка кандидата. Цвета — токены приложения. */
+.hrtabs button b.hrn { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: 99px; background: var(--accent); color: #fff; font-size: 11px; }
+.hrrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hrrow h2, .hrrow h3 { margin: 0; }
+.hrhead p { margin: 6px 0 0; }
+.hrhot { color: var(--hot); }
+.hrlinks { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.hrlink { display: flex; flex-direction: column; gap: 6px; }
+.hrsrc { display: flex; flex-wrap: wrap; gap: 6px; }
+.hrstages { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin: 0 0 10px; }
+.hrstages button { width: auto; flex: none; padding: 8px 12px; border-radius: 99px; background: var(--surface); color: var(--text); border: 1px solid var(--line); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.hrstages button b { margin-left: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hrstages button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+.hrstages button.on b { color: var(--bg); }
+.hrstages button.none { color: var(--muted); }
+.hrlist { display: flex; flex-direction: column; gap: 8px; }
+@media (min-width: 1100px) { .hrlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); } }
+.hritem { display: flex; gap: 12px; align-items: center; text-align: left; padding: 10px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--r); font-weight: 400; }
+.hritem:hover { background: var(--alt); }
+.hritem img, .hrnoimg { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; flex: none; background: var(--alt); }
+.hrnoimg { display: grid; place-items: center; font-size: 24px; font-weight: 800; color: var(--muted); }
+.hrmain { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hrmain b { font-size: 16px; }
+.hrtags .tag { font-size: 12px; padding: 2px 8px; }
+.tag.hrwarn { background: var(--warnbg); color: var(--warn); border-color: transparent; }
+.hrback { margin: 0 0 10px; }
+.hrprior { background: var(--warnbg); color: var(--warn); border-radius: 10px; padding: 8px 10px; }
+.hrcontact { margin-top: 10px; justify-content: flex-start; }
+.hrhint b.ok { color: var(--ok); }
+.hrhint p { margin: 6px 0 0; }
+.hrpics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 0 0 12px; }
+.hrpics a { aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: var(--alt); display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.hrpics img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hrpre { white-space: pre-wrap; }
+.hrqa { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 10px; padding: 8px 0; border-top: 1px solid var(--line2); font-size: 14px; }
+.hrqa span { color: var(--muted); }
+.hrqa b { font-weight: 600; }
+@media (max-width: 480px) { .hrqa { grid-template-columns: 1fr; gap: 2px; } }
+.hrstars { display: flex; gap: 4px; margin: 4px 0 8px; }
+.hrstars button { width: 44px; height: 44px; padding: 0; font-size: 24px; background: var(--alt); color: var(--line); border: 1px solid var(--line); }
+.hrstars button.on { color: var(--warn); }
+.hrbtns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.hrbtns button { width: auto; flex: 1 1 calc(50% - 8px); }
+.hrform { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line2); }
+.hrform .segf button { white-space: normal; }
+.hrcheck { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 14px; }
+.hrcheck input { width: auto; margin: 0; }
+.hrerr { color: var(--hot); font-size: 14px; }
+.hrsheet { text-align: center; margin: 4px 0 16px; }
+/* HEAD 28.11: удалить анкету — внизу карточки, красным только после подтверждения */
+.hrdelbtn { margin-top: 6px; color: var(--muted); }
+.hrdel .hrrow { flex-wrap: nowrap; gap: 8px; }
+.hrdel .hrrow button { flex: 1; width: auto; }
+.hrdel button.hot { background: var(--hot); }
+/* Пробный день (HEAD 28.11): оценка куратора в карточке кандидата */
+.hrtrial select { width: 100%; margin-top: 8px; padding: 12px; border-radius: 12px; background: var(--alt); color: var(--text); border: 1px solid var(--line); font: inherit; }
+.hrtrial.late { border-color: var(--hot); }
+.hrtrial.take { border-color: var(--ok); }
+.hrtrial.no { border-color: var(--hot); }
+.hrtv { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0; }
+.hrtv b { font-size: 17px; }
+.hrtrial.take .hrtv b { color: var(--ok); }
+.hrtrial.no .hrtv b { color: var(--hot); }
+.hrtrial.maybe .hrtv b { color: var(--warn); }
+.hrtstars { color: var(--warn); font-size: 20px; letter-spacing: 2px; }
+.hrtstars i { font-style: normal; color: var(--line); }
+.hrtitems { display: flex; flex-direction: column; margin: 10px 0; border-top: 1px solid var(--line2); }
+.hrtitems div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line2); font-size: 14px; }
+.hrtitems em { font-style: normal; font-weight: 700; white-space: nowrap; color: var(--warn); }
+.hrtitems em.ok { color: var(--ok); }
+.hrtitems em.no { color: var(--hot); }
+.hrform select { width: 100%; margin: 6px 0 10px; padding: 12px; border-radius: 12px; background: var(--alt); color: var(--text); border: 1px solid var(--line); font: inherit; font-size: 15px; }
