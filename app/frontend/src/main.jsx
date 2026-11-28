@@ -30,6 +30,7 @@ import { ClientBriefPage } from './brief.jsx'
 import { JobPage } from './hrform.jsx'
 import { TeamTabs } from './hr.jsx'
 import { Onboard } from './onboard.jsx'
+import { TrialInbox } from './hrtrial.jsx'
 
 const ROLE = { support: 'Саппорт', artist: 'Художник', artist_pro: 'Художник Про', lead_artist: 'Главный художник',
   print_operator: 'Оператор настенного принтера', print_master: 'Мастер настенной печати', mop: 'МОП', mop_vip: 'VIP МОП',
@@ -65,7 +66,8 @@ function App() {
       docText={doc => JSON.stringify(doc === 'duties' ? [DUTIES[r], POLICY] : ['safety', PRINT.has(r)])}
       renderDoc={doc => doc === 'duties' ? <Duty d={DUTIES[r]} code={r} me={me} /> : <Safety print={PRINT.has(r)} />} /> }
   return <><ViewAsBar me={me} ROLE={ROLE} /><FileLinks />
-    <Main me={me} onMe={setMe} web={web} logout={() => { api('/logout', { method: 'POST', noView: true }).catch(() => {}); setWebToken(''); setViewAs(''); setLogin(true) }} /></>
+    <TrialInbox me={me}>{/* пробный день кандидата у оценщика (HEAD 28.11) */}
+    <Main me={me} onMe={setMe} web={web} logout={() => { api('/logout', { method: 'POST', noView: true }).catch(() => {}); setWebToken(''); setViewAs(''); setLogin(true) }} /></TrialInbox></>
 }
 
 const CHECKERS = new Set(['head', 'lead_artist', 'artist_pro', 'print_master', 'lead_designer'])

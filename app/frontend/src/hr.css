@@ -52,3 +52,20 @@
 .hrdel .hrrow { flex-wrap: nowrap; gap: 8px; }
 .hrdel .hrrow button { flex: 1; width: auto; }
 .hrdel button.hot { background: var(--hot); }
+/* Пробный день (HEAD 28.11): оценка куратора в карточке кандидата */
+.hrtrial select { width: 100%; margin-top: 8px; padding: 12px; border-radius: 12px; background: var(--alt); color: var(--text); border: 1px solid var(--line); font: inherit; }
+.hrtrial.late { border-color: var(--hot); }
+.hrtrial.take { border-color: var(--ok); }
+.hrtrial.no { border-color: var(--hot); }
+.hrtv { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0; }
+.hrtv b { font-size: 17px; }
+.hrtrial.take .hrtv b { color: var(--ok); }
+.hrtrial.no .hrtv b { color: var(--hot); }
+.hrtrial.maybe .hrtv b { color: var(--warn); }
+.hrtstars { color: var(--warn); font-size: 20px; letter-spacing: 2px; }
+.hrtstars i { font-style: normal; color: var(--line); }
+.hrtitems { display: flex; flex-direction: column; margin: 10px 0; border-top: 1px solid var(--line2); }
+.hrtitems div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line2); font-size: 14px; }
+.hrtitems em { font-style: normal; font-weight: 700; white-space: nowrap; color: var(--warn); }
+.hrtitems em.ok { color: var(--ok); }
+.hrtitems em.no { color: var(--hot); }

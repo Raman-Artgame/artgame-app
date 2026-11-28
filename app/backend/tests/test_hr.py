@@ -119,7 +119,7 @@ def test_candidate_path(client, monkeypatch):
     client.post("/api/register", json={"full_name": "Кто-то", "phone": "87000000000"}, headers=hdr(7778))
     assert client.get("/api/me", headers=hdr(7778)).json()["status"] == "pending"
     p = client.get("/api/head/pulse", headers=hdr(1000)).json()
-    assert p["hr"] == {"new": 0, "waiting": 0}
+    assert p["hr"] == {"new": 0, "waiting": 0, "trial_late": 0}
 
     # знакомство (HEAD 26.11): принятый сначала читает правила роли и ТБ и принимает соглашение — до этого смены закрыты
     assert me["onboard"] == ["duties", "safety", "nda"]
@@ -181,3 +181,50 @@ def test_delete_test_candidate(client, monkeypatch):
     assert cleared == [("Художники", "89774100011")] and trashed and client.get(f"/api/hr/c/{tok}").status_code == 404
     with db.pool.connection() as c:
         assert c.execute("SELECT count(*) AS n FROM candidate_files").fetchone()["n"] == 0
+
+
+def test_trial_day_review(client, monkeypatch):
+    """HEAD 28.11: пробный день — под руководством куратора ГИП сделки; он оценивает звёздами, 7 пунктами, итогом и
+    подробным комментарием; HEAD видит оценку в карточке и строку в Пульте, если не оценено."""
+    from datetime import date, timedelta
+    from artgame import notify
+    monkeypatch.setattr(drive, "Drive", FakeDrive)
+    monkeypatch.setattr(hr_sheets, "find_prior", lambda ph: None)
+    monkeypatch.setattr(hr_sheets, "base_upsert", lambda sheet, c, lvl, url: 7)
+    sent = []
+    monkeypatch.setattr(notify, "SEND", lambda tg, text: sent.append((tg, text)))
+    from artgame.config import settings
+    monkeypatch.setattr(settings, "head_tg_id", 1000)
+    client.post("/api/register", json={"full_name": "HEAD"}, headers=hdr(1000))
+    client.post("/api/register", json={"full_name": "Гип Главный"}, headers=hdr(2001))
+    with db.pool.connection() as c:
+        gip = c.execute("UPDATE people SET status='active', role_code='lead_artist' WHERE tg_id=2001 RETURNING id").fetchone()["id"]
+        c.execute("INSERT INTO objects (id, title, city, bitrix_stage, gip_person_id) VALUES (881, 'Кафе Нур', 'Астана', 'UC_AV00QK', %s)", (gip,))
+    tok = client.post("/api/hr/apply", json={"dir": "art", "answers": ANS}).json()["token"]
+    client.post(f"/api/hr/c/{tok}/done")
+    cid = client.get("/api/hr/candidates", headers=hdr(1000)).json()["items"][0]["id"]
+    yday = (date.today() - timedelta(days=1)).isoformat()
+    client.post(f"/api/hr/candidates/{cid}", json={"stage": "trial", "trial_on": yday, "trial_object": 881}, headers=hdr(1000))
+    t = client.get(f"/api/hr/candidates/{cid}", headers=hdr(1000)).json()["trial"]
+    assert t["by"] == gip and t["by_name"] == "Гип Главный" and t["late"] and not t["at"]
+    assert any(tg == 2001 and "Пробный день кандидата: Садыкова Айгерим" in x and "Кафе Нур" in x for tg, x in sent)
+    assert client.get("/api/head/pulse", headers=hdr(1000)).json()["hr"]["trial_late"] == 1
+
+    # у оценщика — карточка; без телефона и ожиданий по деньгам
+    mine = client.get("/api/hr/trials", headers=hdr(2001)).json()["items"]
+    assert [x["id"] for x in mine] == [cid] and mine[0]["object"] == "Кафе Нур"
+    card = client.get(f"/api/hr/trials/{cid}", headers=hdr(2001)).json()
+    assert len(card["items"]) == 7 and "87771234567" not in str(card) and "300 000" not in str(card)
+    assert client.get(f"/api/hr/trials/{cid}", headers=hdr(5555)).status_code in (403, 404)
+    items = {k: "yes" for k, _ in card["items"]}
+    good = {"stars": 4, "items": items, "verdict": "take", "comment": "Пришла вовремя, сразу включилась в подготовку. " * 4}
+    assert client.post(f"/api/hr/trials/{cid}", json={**good, "items": {**items, "team": ""}}, headers=hdr(2001)).status_code == 400
+    assert client.post(f"/api/hr/trials/{cid}", json={**good, "comment": "норм"}, headers=hdr(2001)).status_code == 400
+    assert client.post(f"/api/hr/trials/{cid}", json={**good, "verdict": "x"}, headers=hdr(2001)).status_code == 400
+    assert client.post(f"/api/hr/trials/{cid}", json=good, headers=hdr(2001)).json()["ok"]
+    assert client.post(f"/api/hr/trials/{cid}", json=good, headers=hdr(2001)).status_code == 409
+    assert any(tg == 1000 and "★★★★" in x and "Брать" in x for tg, x in sent)
+    t = client.get(f"/api/hr/candidates/{cid}", headers=hdr(1000)).json()["trial"]
+    assert t["stars"] == 4 and t["verdict"] == "Брать" and t["reviewer"] == "Гип Главный" and len(t["items"]) == 7 and not t["late"]
+    assert client.get("/api/hr/trials", headers=hdr(2001)).json()["items"] == []
+    assert client.get("/api/head/pulse", headers=hdr(1000)).json()["hr"]["trial_late"] == 0
