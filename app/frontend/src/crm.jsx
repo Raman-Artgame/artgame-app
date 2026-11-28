@@ -226,6 +226,8 @@ export function Leads({ openLead }) {
   const [moved, setMoved] = useState({})  // id → статус, пока Битрикс не подтвердил
   const [over, setOver] = useState('')
   const [msg, setMsg] = useState('')
+  const [src, setSrc] = useState('')       // фильтр «откуда»
+  const [mgr, setMgr] = useState('')       // HEAD: чей лид
   const drag = useRef(null)
   const narrow = useNarrow()
   const load = fresh => { setBusy(true); setErr(''); return api(`/bx/leads${fresh ? '?fresh=1' : ''}`).then(x => { setD(x); setMoved({}) }, e => setErr(e.message)).finally(() => setBusy(false)) }
@@ -238,7 +240,11 @@ export function Leads({ openLead }) {
   const fresh = l => d.new_ids ? d.new_ids.includes(stOf(l)) : l.new   // перенесли из «Нового» — уже не «ждёт»
   const wait = l => leadWait(l, newH, fresh(l))
   const s = q.trim().toLowerCase()
-  const list = d.leads.filter(l => !s || (l.name + ' ' + l.title + ' ' + l.phone + ' ' + (l.manager || '') + ' ' + l.id).toLowerCase().includes(s))
+  const found = d.leads.filter(l => !s || (l.name + ' ' + l.title + ' ' + l.phone + ' ' + (l.manager || '') + ' ' + l.id).toLowerCase().includes(s))
+  const count = (key, arr) => { const m = {}; arr.forEach(l => { const k = l[key] || ''; m[k] = (m[k] || 0) + 1 }); return Object.entries(m).sort((a, b) => b[1] - a[1]) }
+  const byMgr = found.filter(l => !mgr || l.manager === mgr)
+  const list = byMgr.filter(l => !src || (l.source || '') === src)
+  const srcs = count('source', byMgr), mgrs = d.all ? count('manager', found).filter(([k]) => k) : []
   // колонки: рабочие статусы Битрикса по порядку; статус лида, которого нет в списке, — своей колонкой в конце
   const stages = [...(d.stages || [])]
   list.forEach(l => { if (!stages.some(x => x.id === stOf(l))) stages.push({ id: stOf(l), name: l.status_name || stOf(l) }) })
@@ -261,7 +267,7 @@ export function Leads({ openLead }) {
       <div className="kn">{[l.source, l.city].filter(Boolean).join(' · ') || `Лид № ${l.id}`}</div>
       <div className="kt">{l.name}</div>
       {l.phone ? <div className="kw">{l.phone}</div> : null}
-      {l.service ? <div className="kw">{l.service}</div> : null}
+      {l.want || l.service ? <div className="kw kwant">{l.want || l.service}</div> : null}
       {!!l.missing.length && <div>{l.missing.map(m => <span key={m} className="miss">нет: {m}</span>)}</div>}
       <span className={'kr ' + (w.late ? 'wait' : 'idle')}>{w.text}</span>
       {d.all && l.manager ? <div className="kw">{l.manager.split(' ')[0]}</div> : null}
@@ -270,6 +276,10 @@ export function Leads({ openLead }) {
       <div className="dealbtns"><button className="mini" onClick={() => setAdd(true)}>+ Заявка</button>
         <button className="ghost mini" disabled={busy} onClick={() => load(true)}>{busy ? '…' : 'Обновить'}</button></div></div>
     <p className="small kbsplit">{news ? <span>новых: <b>{news}</b></span> : <span className="ok">новых нет</span>}{late ? <span className="warn">ждут ответа дольше нормы: {late}</span> : null}</p>
+    {srcs.length > 1 && <div className="chips scroll lsrc"><button className={!src ? 'on' : ''} onClick={() => setSrc('')}>Все <span>{byMgr.length}</span></button>
+      {srcs.map(([k, n]) => <button key={k || '-'} className={src === k ? 'on' : ''} onClick={() => setSrc(src === k ? '' : k)}>{k || 'Без источника'} <span>{n}</span></button>)}</div>}
+    {mgrs.length > 1 && <div className="chips sub"><button className={!mgr ? 'on' : ''} onClick={() => setMgr('')}>Все</button>
+      {mgrs.map(([k]) => <button key={k} className={mgr === k ? 'on' : ''} onClick={() => setMgr(mgr === k ? '' : k)}>{k.split(' ')[0]}</button>)}</div>}
     <input value={q} onChange={e => setQ(e.target.value)} placeholder="Имя, телефон или номер лида" />
   </div>
   const sheet = add && <NewLeadSheet onClose={() => setAdd(false)} onDone={id => { setAdd(false); load(true); openLead(id) }} />

@@ -4,6 +4,7 @@
 HEAD — все. Поля «Услуга» и «Площадь» лида создаёт Кодекс (BX-MOP-FIELDS-20261105): пока их нет в crm.lead.fields,
 приложение их не спрашивает и не пишет. Ничего не удаляется; каждая запись — в audit_log (bx_write, entity=lead).
 """
+import re
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,7 +20,7 @@ L_SERVICE, L_AREA = "UF_CRM_ARTGAME_LEAD_SERVICE", "UF_CRM_ARTGAME_LEAD_AREA"
 NEW = {"NEW", "UC_93GBZP"}          # «Новый лид»
 CONVERTED = "CONVERTED"
 LIST_SELECT = ["ID", "TITLE", "NAME", "LAST_NAME", "STATUS_ID", "SOURCE_ID", "DATE_CREATE", "DATE_MODIFY", "ASSIGNED_BY_ID",
-               "OPPORTUNITY", "PHONE", "CONTACT_ID", "COMPANY_ID", L_CITY, L_SERVICE, L_AREA]
+               "OPPORTUNITY", "PHONE", "CONTACT_ID", "COMPANY_ID", "COMMENTS", L_CITY, L_SERVICE, L_AREA]
 
 
 # ---------- справочники ----------
@@ -97,7 +98,14 @@ def _row(l: dict, st: dict, have: dict, names: dict, src: dict | None = None) ->
             "service": _items(L_SERVICE, have).get(str(l.get(L_SERVICE) or ""), "") if L_SERVICE in have else "",
             "area": bx._num(l.get(L_AREA)), "missing": [m for m in missing(l, have) if m != "объект"],
             "manager": names.get(int(l.get("ASSIGNED_BY_ID") or 0), ""),
-            "source": (src or {}).get(l.get("SOURCE_ID") or "", "")}
+            "source": (src or {}).get(l.get("SOURCE_ID") or "", ""),
+            "want": _want(l.get("COMMENTS"))}   # «что хочет клиент» одной строкой на карточке канбана (HEAD 28.11)
+
+
+def _want(raw) -> str:
+    t = re.sub(r"\[/?[A-Za-z]+[^\]]*\]|<[^>]+>", " ", raw or "")
+    t = " ".join(t.split())
+    return t if len(t) <= 90 else t[:88].rstrip() + "…"
 
 
 # ---------- чтение ----------

@@ -375,10 +375,10 @@ const step = (p, name) => p.locator('.hero .steps > div', { hasText: name }).cli
 
   // Лиды (07.11): карточка → объект, город кнопкой, услуга → «В сделку» одной кнопкой → карточка новой сделки «9100 · ОБЪЕКТ — ГОРОД»
   await tab(p, 'Лиды')
-  await p.locator('.qrow', { hasText: 'Дана' }).waitFor()
-  assert.match(await p.locator('.qrow', { hasText: 'Дана' }).textContent(), /нет: город.*нет: услугаждёт \d+ (ч|дн\.)/)
+  await p.locator('.kc.lc', { hasText: 'Дана' }).waitFor()   // лиды карточками (HEAD 28.11 «канбаном»)
+  assert.match(await p.locator('.kc.lc', { hasText: 'Дана' }).textContent(), /нет: город.*нет: услугаждёт \d+ (ч|дн\.)/)
   await p.screenshot({ path: `${shots}/mop-leads.png` })
-  await p.locator('.qrow', { hasText: 'Дана' }).click()
+  await p.locator('.kc.lc', { hasText: 'Дана' }).click()
   await p.locator('h3', { hasText: 'В сделку' }).waitFor()
   await p.getByRole('button', { name: 'Отказ' }).click()
   assert.strictEqual(await p.locator('.dealedit .chips button').count(), 8, 'восемь причин отказа')

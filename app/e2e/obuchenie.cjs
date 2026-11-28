@@ -89,9 +89,9 @@ const mopFrame = p => p.frames().find(f => f.url().includes('/api/p/mop/'))
 
   // Лиды
   await tab(p, 'Лиды')
-  await p.locator('.qrow', { hasText: 'Дана' }).waitFor()
+  await p.locator('.kc.lc', { hasText: 'Дана' }).waitFor()
   await cap(p, 'Шаг 3 · Лиды', 'Новые заявки. Красным видно, чего не хватает, чтобы сделать из лида сделку.', 4200)
-  await p.locator('.qrow', { hasText: 'Дана' }).click()
+  await p.locator('.kc.lc', { hasText: 'Дана' }).click()
   await p.locator('h3', { hasText: 'В сделку' }).waitFor()
   await cap(p, 'Шаг 3 · Лиды', 'Звонок и WhatsApp — только через кнопку Битрикса. С личного номера не пишем. После звонка — «Итог звонка». Клиент думает — «Жду ответа» с датой: до неё лид не горит.', 5500)
   await p.locator('h3', { hasText: 'В сделку' }).scrollIntoViewIfNeeded(); await W(p, 800)
